@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Settings, Stethoscope, MapPin, Users, MessageCircle, Plus, Check, Clock, Pill, Lightbulb } from "lucide-react";
+import { Settings, Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock } from "lucide-react";
 import goldenRetriever from "@/assets/pets/golden-retriever.jpg";
 import tabbyCat from "@/assets/pets/tabby-cat.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
@@ -16,13 +16,6 @@ const quickActions = [
   { icon: MapPin, label: "Map", path: "/map", color: "bg-accent" },
   { icon: Users, label: "Social", path: "/social", color: "bg-primary" },
   { icon: MessageCircle, label: "Chat", path: "/chats", color: "bg-accent" },
-];
-
-const timeline = [
-  { time: "8:00 AM", event: "Morning Meal", status: "completed", icon: "🍖" },
-  { time: "12:00 PM", event: "Mid-day Walk", status: "upcoming", icon: "🦮" },
-  { time: "3:00 PM", event: "Play Time", status: "pending", icon: "🎾" },
-  { time: "8:00 PM", event: "Evening Meds", status: "pending", icon: "💊" },
 ];
 
 const Index = () => {
@@ -118,8 +111,30 @@ const Index = () => {
         </motion.div>
       </section>
 
-      {/* Quick Actions */}
+      {/* Huddle Wisdom */}
       <section className="px-5 py-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-5 shadow-card"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-full bg-primary-foreground/20 flex items-center justify-center flex-shrink-0">
+              <Lightbulb className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <div>
+              <h4 className="font-semibold text-primary-foreground mb-1">Huddle Wisdom</h4>
+              <p className="text-sm text-primary-foreground/90">
+                Golden Retrievers need 1-2 hours of exercise daily. Consider adding an extra 
+                evening walk to help Max burn energy and sleep better!
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      </section>
+
+      {/* Quick Actions */}
+      <section className="px-5 py-4 pb-8">
         <div className="flex justify-around">
           {quickActions.map((action, index) => (
             <motion.a
@@ -141,63 +156,6 @@ const Index = () => {
             </motion.a>
           ))}
         </div>
-      </section>
-
-      {/* Daily Timeline */}
-      <section className="px-5 py-4">
-        <h3 className="text-lg font-semibold mb-3">Today's Schedule</h3>
-        <div className="space-y-3">
-          {timeline.map((item, index) => (
-            <motion.div
-              key={item.time}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: index * 0.1 }}
-              className={cn(
-                "flex items-center gap-4 p-4 rounded-xl bg-card shadow-card",
-                item.status === "completed" && "opacity-70"
-              )}
-            >
-              <div className="text-2xl">{item.icon}</div>
-              <div className="flex-1">
-                <p className="font-medium">{item.event}</p>
-                <p className="text-sm text-muted-foreground">{item.time}</p>
-              </div>
-              {item.status === "completed" && (
-                <div className="w-6 h-6 rounded-full bg-accent flex items-center justify-center">
-                  <Check className="w-4 h-4 text-accent-foreground" />
-                </div>
-              )}
-              {item.status === "upcoming" && (
-                <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
-                  <Clock className="w-4 h-4 text-primary-foreground" />
-                </div>
-              )}
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* Huddle Wisdom */}
-      <section className="px-5 py-4 pb-8">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-5 shadow-card"
-        >
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary-foreground/20 flex items-center justify-center flex-shrink-0">
-              <Lightbulb className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h4 className="font-semibold text-primary-foreground mb-1">Huddle Wisdom</h4>
-              <p className="text-sm text-primary-foreground/90">
-                Golden Retrievers need 1-2 hours of exercise daily. Consider adding an extra 
-                evening walk to help Max burn energy and sleep better!
-              </p>
-            </div>
-          </div>
-        </motion.div>
       </section>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
