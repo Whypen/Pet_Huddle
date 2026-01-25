@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, X, Star, Hand } from "lucide-react";
+import { Settings, X, Star, Hand, SlidersHorizontal } from "lucide-react";
 import sarahBella from "@/assets/users/sarah-bella.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { FilterSheet, FilterState, defaultFilters } from "@/components/social/FilterSheet";
+import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { ActiveFilters } from "@/components/social/ActiveFilters";
 import { cn } from "@/lib/utils";
-
-const filterTabs = ["Playdates", "Caregivers", "Animal Lovers"];
 
 const nearbyUsers = [
   { id: 1, name: "Marcus", location: "Central Park" },
@@ -15,7 +16,9 @@ const nearbyUsers = [
 
 const Social = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("Playdates");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [filters, setFilters] = useState<FilterState>(defaultFilters);
   const [cardPosition, setCardPosition] = useState({ x: 0, y: 0, rotate: 0 });
   const [showCard, setShowCard] = useState(true);
 
@@ -31,42 +34,77 @@ const Social = () => {
     }, 200);
   };
 
+  const handleApplyFilters = (newFilters: FilterState) => {
+    setFilters(newFilters);
+  };
+
+  const handleRemoveFilter = (key: keyof FilterState, value?: string) => {
+    if (key === "species" && value) {
+      setFilters(prev => ({
+        ...prev,
+        species: prev.species.filter(s => s !== value)
+      }));
+    } else if (key === "role") {
+      setFilters(prev => ({ ...prev, role: defaultFilters.role }));
+    } else if (key === "distance") {
+      setFilters(prev => ({ ...prev, distance: defaultFilters.distance }));
+    } else if (key === "ageRange") {
+      setFilters(prev => ({ ...prev, ageRange: defaultFilters.ageRange }));
+    } else if (key === "gender") {
+      setFilters(prev => ({ ...prev, gender: "" }));
+    } else if (key === "petHeight") {
+      setFilters(prev => ({ ...prev, petHeight: "" }));
+    }
+  };
+
+  // Get role label for display
+  const getRoleLabel = () => {
+    const labels = { playdates: "Playdates", nannies: "Nannies", "animal-friends": "Animal Friends" };
+    return labels[filters.role];
+  };
+
   return (
     <div className="min-h-screen bg-background pb-nav">
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-6 pb-4">
         <h1 className="text-2xl font-bold">Discovery</h1>
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-        >
-          <Settings className="w-6 h-6 text-muted-foreground" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsFilterOpen(true)}
+            className="p-2 rounded-full hover:bg-muted transition-colors relative"
+          >
+            <SlidersHorizontal className="w-6 h-6 text-muted-foreground" />
+            {/* Filter active indicator */}
+            {(filters.species.length > 0 || filters.distance !== defaultFilters.distance || filters.gender || filters.petHeight) && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent" />
+            )}
+          </button>
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+          >
+            <Settings className="w-6 h-6 text-muted-foreground" />
+          </button>
+        </div>
       </header>
 
-      {/* Filter Tabs */}
+      {/* Active Filters */}
+      <section className="px-5">
+        <ActiveFilters filters={filters} onRemove={handleRemoveFilter} />
+      </section>
+
+      {/* Current Role Display */}
       <section className="px-5 py-2">
-        <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-          {filterTabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
-                activeTab === tab
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              )}
-            >
-              {tab}
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <span className="px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-medium">
+            {getRoleLabel()}
+          </span>
         </div>
       </section>
 
       {/* Main Discovery Card */}
       <section className="px-5 py-4">
-        <div className="relative h-[480px]">
+        <div className="relative h-[420px]">
           <AnimatePresence>
             {showCard && (
               <motion.div
@@ -165,7 +203,19 @@ const Social = () => {
         </div>
       </section>
 
+      {/* Drawers & Modals */}
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <FilterSheet
+        isOpen={isFilterOpen}
+        onClose={() => setIsFilterOpen(false)}
+        filters={filters}
+        onApply={handleApplyFilters}
+        onPremiumClick={() => {
+          setIsFilterOpen(false);
+          setTimeout(() => setIsPremiumOpen(true), 300);
+        }}
+      />
+      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );
 };
