@@ -8,43 +8,49 @@
 
 @layer base {
   :root {
+    /* Warm Community Theme - Soft Creams, Slate Greys, Accent Gold */
+    
     /* Core Palette */
-    --background: 0 0% 100%;
-    --foreground: 0 0% 13%;
+    --background: 40 30% 98%;
+    --foreground: 220 20% 20%;
     
-    /* Primary Blue (#42A5F5) */
-    --primary: 207 90% 61%;
+    /* Primary - Warm Slate Blue */
+    --primary: 207 60% 50%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 207 90% 95%;
+    --primary-soft: 207 40% 95%;
     
-    /* Accent Green (#8BC34A) */
+    /* Accent - Gold/Amber */
     --accent: 88 50% 53%;
     --accent-foreground: 0 0% 100%;
-    --accent-soft: 88 50% 92%;
+    --accent-soft: 88 40% 92%;
     
-    /* Surface Colors */
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 13%;
+    /* Warning/Gold Badge */
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 10%;
+    
+    /* Surface Colors - Soft Cream */
+    --card: 40 25% 99%;
+    --card-foreground: 220 20% 20%;
     --card-elevated: 0 0% 100%;
     
-    /* Muted/Secondary */
-    --secondary: 0 0% 93%;
-    --secondary-foreground: 0 0% 13%;
-    --muted: 0 0% 93%;
-    --muted-foreground: 0 0% 45%;
+    /* Muted/Secondary - Warm Grey */
+    --secondary: 40 10% 94%;
+    --secondary-foreground: 220 20% 25%;
+    --muted: 40 10% 94%;
+    --muted-foreground: 220 10% 50%;
     
     /* Popover */
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 13%;
+    --popover-foreground: 220 20% 20%;
     
     /* Destructive */
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     
     /* Borders & Input */
-    --border: 0 0% 90%;
-    --input: 0 0% 93%;
-    --ring: 207 90% 61%;
+    --border: 40 15% 88%;
+    --input: 40 10% 94%;
+    --ring: 207 60% 50%;
     
     /* Radius */
     --radius: 1rem;
@@ -52,28 +58,27 @@
     --radius-lg: 1.25rem;
     
     /* Shadows */
-    --shadow-card: 0 2px 12px -2px hsl(0 0% 0% / 0.08);
-    --shadow-elevated: 0 8px 30px -4px hsl(0 0% 0% / 0.12);
-    --shadow-soft: 0 4px 20px -4px hsl(207 90% 61% / 0.15);
+    --shadow-card: 0 2px 12px -2px hsl(220 20% 20% / 0.06);
+    --shadow-elevated: 0 8px 30px -4px hsl(220 20% 20% / 0.10);
+    --shadow-soft: 0 4px 20px -4px hsl(207 60% 50% / 0.15);
     
     /* Navigation */
     --nav-height: 5rem;
-    --nav-background: 0 0% 100%;
+    --nav-background: 40 25% 99%;
     
     /* Sidebar */
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 0 0% 13%;
-    --sidebar-primary: 207 90% 61%;
+    --sidebar-background: 40 20% 97%;
+    --sidebar-foreground: 220 20% 20%;
+    --sidebar-primary: 207 60% 50%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 95%;
-    --sidebar-accent-foreground: 0 0% 13%;
-    --sidebar-border: 0 0% 90%;
-    --sidebar-ring: 207 90% 61%;
+    --sidebar-accent: 40 15% 95%;
+    --sidebar-accent-foreground: 220 20% 20%;
+    --sidebar-border: 40 15% 88%;
+    --sidebar-ring: 207 60% 50%;
     
     /* Status Colors */
     --success: 88 50% 53%;
-    --warning: 45 100% 51%;
-    --info: 207 90% 61%;
+    --info: 207 60% 50%;
   }
 
   .dark {

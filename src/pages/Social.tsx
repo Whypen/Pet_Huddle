@@ -6,21 +6,27 @@ import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { FilterSheet, FilterState, defaultFilters } from "@/components/social/FilterSheet";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ActiveFilters } from "@/components/social/ActiveFilters";
+import { NoticeBoard } from "@/components/social/NoticeBoard";
+import { ProfileBadges } from "@/components/ui/ProfileBadges";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 const nearbyUsers = [
-  { id: 1, name: "Marcus", location: "Central Park" },
-  { id: 2, name: "Emma", location: "Dog Run" },
-  { id: 3, name: "James", location: "Pet Cafe" },
+  { id: 1, name: "Marcus", location: "Central Park", isVerified: true, hasCar: false },
+  { id: 2, name: "Emma", location: "Dog Run", isVerified: false, hasCar: true },
+  { id: 3, name: "James", location: "Pet Cafe", isVerified: true, hasCar: true },
 ];
 
 const Social = () => {
+  const { profile } = useAuth();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
   const [cardPosition, setCardPosition] = useState({ x: 0, y: 0, rotate: 0 });
   const [showCard, setShowCard] = useState(true);
+
+  const isPremium = profile?.user_role === 'premium';
 
   const handleSwipe = (direction: "left" | "right") => {
     const xMove = direction === "right" ? 500 : -500;
@@ -135,6 +141,7 @@ const Social = () => {
                     <span className="bg-accent text-accent-foreground text-xs font-semibold px-2 py-1 rounded-full">
                       ✓ Verified
                     </span>
+                    <ProfileBadges isVerified={true} hasCar={true} />
                   </div>
                   <h3 className="text-2xl font-bold text-primary-foreground">Sarah, 31 Years Old</h3>
                   <div className="flex gap-2 mt-2 flex-wrap">
@@ -191,9 +198,14 @@ const Social = () => {
               transition={{ delay: index * 0.1 }}
               className="flex flex-col items-center gap-2 flex-shrink-0"
             >
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent p-0.5">
-                <div className="w-full h-full rounded-full bg-muted flex items-center justify-center text-lg font-semibold">
-                  {user.name.charAt(0)}
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent p-0.5">
+                  <div className="w-full h-full rounded-full bg-muted flex items-center justify-center text-lg font-semibold">
+                    {user.name.charAt(0)}
+                  </div>
+                </div>
+                <div className="absolute -bottom-1 -right-1">
+                  <ProfileBadges isVerified={user.isVerified} hasCar={user.hasCar} size="sm" />
                 </div>
               </div>
               <span className="text-xs font-medium">{user.name}</span>
@@ -201,6 +213,14 @@ const Social = () => {
             </motion.div>
           ))}
         </div>
+      </section>
+
+      {/* Notice Board */}
+      <section className="px-5 py-4 pb-8">
+        <NoticeBoard 
+          isPremium={isPremium} 
+          onPremiumClick={() => setIsPremiumOpen(true)} 
+        />
       </section>
 
       {/* Drawers & Modals */}

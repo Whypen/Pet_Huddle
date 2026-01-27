@@ -1,0 +1,34 @@
+import { motion } from "framer-motion";
+import { PawPrint, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+interface EmptyPetStateProps {
+  onAddPet: () => void;
+}
+
+export const EmptyPetState = ({ onAddPet }: EmptyPetStateProps) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-card rounded-2xl p-8 shadow-card text-center"
+    >
+      <div className="w-20 h-20 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-4">
+        <PawPrint className="w-10 h-10 text-accent" />
+      </div>
+      
+      <h2 className="text-xl font-bold mb-2">Your Huddle is Empty</h2>
+      <p className="text-muted-foreground text-sm mb-6">
+        Add your first pet to unlock full community features and connect with other pet lovers!
+      </p>
+      
+      <Button
+        onClick={onAddPet}
+        className="h-14 px-8 rounded-2xl bg-accent hover:bg-accent/90 text-accent-foreground font-semibold"
+      >
+        <Plus className="w-6 h-6 mr-2" />
+        Add Your First Pet
+      </Button>
+    </motion.div>
+  );
+};

@@ -55,7 +55,10 @@ export default {
           elevated: "hsl(var(--card-elevated))",
         },
         success: "hsl(var(--success))",
-        warning: "hsl(var(--warning))",
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
         info: "hsl(var(--info))",
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
