@@ -14,10 +14,384 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alert_interactions: {
+        Row: {
+          alert_id: string
+          created_at: string | null
+          id: string
+          interaction_type: string
+          user_id: string
+        }
+        Insert: {
+          alert_id: string
+          created_at?: string | null
+          id?: string
+          interaction_type: string
+          user_id: string
+        }
+        Update: {
+          alert_id?: string
+          created_at?: string | null
+          id?: string
+          interaction_type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_interactions_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "map_alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alert_interactions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alert_interactions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      map_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string | null
+          creator_id: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          latitude: number
+          longitude: number
+          photo_url: string | null
+          report_count: number | null
+          support_count: number | null
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string | null
+          creator_id: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          latitude: number
+          longitude: number
+          photo_url?: string | null
+          report_count?: number | null
+          support_count?: number | null
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string | null
+          creator_id?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          latitude?: number
+          longitude?: number
+          photo_url?: string | null
+          report_count?: number | null
+          support_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "map_alerts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "map_alerts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notice_board: {
+        Row: {
+          author_id: string
+          category: string
+          content: string
+          created_at: string | null
+          id: string
+          image_url: string | null
+        }
+        Insert: {
+          author_id: string
+          category: string
+          content: string
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+        }
+        Update: {
+          author_id?: string
+          category?: string
+          content?: string
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notice_board_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notice_board_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pets: {
+        Row: {
+          bio: string | null
+          breed: string | null
+          created_at: string | null
+          dob: string | null
+          gender: string | null
+          id: string
+          is_public: boolean | null
+          medications: Json | null
+          microchip_id: string | null
+          name: string
+          owner_id: string
+          photo_url: string | null
+          routine: string | null
+          species: string
+          temperament: string[] | null
+          updated_at: string | null
+          vaccinations: Json | null
+          vet_contact: string | null
+          weight: number | null
+          weight_unit: string | null
+        }
+        Insert: {
+          bio?: string | null
+          breed?: string | null
+          created_at?: string | null
+          dob?: string | null
+          gender?: string | null
+          id?: string
+          is_public?: boolean | null
+          medications?: Json | null
+          microchip_id?: string | null
+          name: string
+          owner_id: string
+          photo_url?: string | null
+          routine?: string | null
+          species: string
+          temperament?: string[] | null
+          updated_at?: string | null
+          vaccinations?: Json | null
+          vet_contact?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Update: {
+          bio?: string | null
+          breed?: string | null
+          created_at?: string | null
+          dob?: string | null
+          gender?: string | null
+          id?: string
+          is_public?: boolean | null
+          medications?: Json | null
+          microchip_id?: string | null
+          name?: string
+          owner_id?: string
+          photo_url?: string | null
+          routine?: string | null
+          species?: string
+          temperament?: string[] | null
+          updated_at?: string | null
+          vaccinations?: Json | null
+          vet_contact?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pets_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pets_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          affiliation: string | null
+          avatar_url: string | null
+          bio: string | null
+          created_at: string | null
+          degree: string | null
+          display_name: string | null
+          dob: string | null
+          experience_years: number | null
+          gender_genre: string | null
+          has_car: boolean | null
+          height: number | null
+          id: string
+          is_verified: boolean | null
+          languages: string[] | null
+          legal_name: string | null
+          location_name: string | null
+          onboarding_completed: boolean | null
+          pet_experience: string[] | null
+          phone: string | null
+          relationship_status: string | null
+          school: string | null
+          updated_at: string | null
+          user_role: string | null
+          weight: number | null
+          weight_unit: string | null
+        }
+        Insert: {
+          affiliation?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          degree?: string | null
+          display_name?: string | null
+          dob?: string | null
+          experience_years?: number | null
+          gender_genre?: string | null
+          has_car?: boolean | null
+          height?: number | null
+          id: string
+          is_verified?: boolean | null
+          languages?: string[] | null
+          legal_name?: string | null
+          location_name?: string | null
+          onboarding_completed?: boolean | null
+          pet_experience?: string[] | null
+          phone?: string | null
+          relationship_status?: string | null
+          school?: string | null
+          updated_at?: string | null
+          user_role?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Update: {
+          affiliation?: string | null
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          degree?: string | null
+          display_name?: string | null
+          dob?: string | null
+          experience_years?: number | null
+          gender_genre?: string | null
+          has_car?: boolean | null
+          height?: number | null
+          id?: string
+          is_verified?: boolean | null
+          languages?: string[] | null
+          legal_name?: string | null
+          location_name?: string | null
+          onboarding_completed?: boolean | null
+          pet_experience?: string[] | null
+          phone?: string | null
+          relationship_status?: string | null
+          school?: string | null
+          updated_at?: string | null
+          user_role?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      profiles_public: {
+        Row: {
+          avatar_url: string | null
+          bio: string | null
+          created_at: string | null
+          display_name: string | null
+          dob: string | null
+          experience_years: number | null
+          gender_genre: string | null
+          has_car: boolean | null
+          height: number | null
+          id: string | null
+          is_verified: boolean | null
+          languages: string[] | null
+          location_name: string | null
+          pet_experience: string[] | null
+          relationship_status: string | null
+          user_role: string | null
+          weight: number | null
+          weight_unit: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          dob?: string | null
+          experience_years?: number | null
+          gender_genre?: string | null
+          has_car?: boolean | null
+          height?: number | null
+          id?: string | null
+          is_verified?: boolean | null
+          languages?: string[] | null
+          location_name?: string | null
+          pet_experience?: string[] | null
+          relationship_status?: string | null
+          user_role?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          bio?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          dob?: string | null
+          experience_years?: number | null
+          gender_genre?: string | null
+          has_car?: boolean | null
+          height?: number | null
+          id?: string | null
+          is_verified?: boolean | null
+          languages?: string[] | null
+          location_name?: string | null
+          pet_experience?: string[] | null
+          relationship_status?: string | null
+          user_role?: string | null
+          weight?: number | null
+          weight_unit?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
