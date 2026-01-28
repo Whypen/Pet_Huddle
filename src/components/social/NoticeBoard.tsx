@@ -7,21 +7,27 @@ import {
   Lock,
   MessageSquare,
   Heart,
-  Megaphone
+  Megaphone,
+  ChevronDown,
+  ChevronUp,
+  ThumbsUp,
+  Flag,
+  EyeOff,
+  Ban,
+  MoreHorizontal
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const categories = [
   { id: "Social", label: "Social", icon: MessageSquare, color: "bg-primary" },
   { id: "Charity", label: "Charity", icon: Heart, color: "bg-accent" },
-  { id: "Donations", label: "Donations", icon: Heart, color: "bg-warning" },
-  { id: "Help", label: "Help", icon: Megaphone, color: "bg-destructive" },
-  { id: "Neighborhood News", label: "News", icon: Megaphone, color: "bg-secondary" },
+  { id: "News", label: "News", icon: Megaphone, color: "bg-warning" },
 ];
 
 interface Notice {
@@ -30,6 +36,7 @@ interface Notice {
   category: string;
   image_url: string | null;
   created_at: string;
+  author_id: string;
   author: {
     display_name: string | null;
     avatar_url: string | null;
@@ -52,6 +59,9 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [category, setCategory] = useState("Social");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
+  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchNotices();
@@ -67,6 +77,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           category,
           image_url,
           created_at,
+          author_id,
           author:profiles!notice_board_author_id_fkey(
             display_name,
             avatar_url,
@@ -74,7 +85,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           )
         `)
         .order("created_at", { ascending: false })
-        .limit(10);
+        .limit(20);
 
       if (error) throw error;
       setNotices(data || []);
@@ -150,6 +161,24 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     }
   };
 
+  const handleSupport = (noticeId: string) => {
+    toast.success("Thanks for your support!");
+  };
+
+  const handleReport = (noticeId: string) => {
+    toast.success("Notice reported - our team will review it");
+  };
+
+  const handleHide = (noticeId: string) => {
+    setHiddenNotices(prev => new Set([...prev, noticeId]));
+    toast.success("Notice hidden");
+  };
+
+  const handleBlockUser = (authorId: string) => {
+    setBlockedUsers(prev => new Set([...prev, authorId]));
+    toast.success("You won't see posts from this user");
+  };
+
   const getCategoryStyle = (cat: string) => {
     const found = categories.find(c => c.id === cat);
     return found?.color || "bg-muted";
@@ -166,15 +195,28 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     return `${days}d ago`;
   };
 
+  const visibleNotices = notices.filter(notice => 
+    !hiddenNotices.has(notice.id) && !blockedUsers.has(notice.author_id)
+  );
+
   return (
     <div className="space-y-4">
+      {/* Header with Expand/Collapse */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center gap-2 group"
+        >
           <h3 className="text-lg font-semibold">Notice Board</h3>
           <span className="px-2 py-0.5 rounded-full bg-warning/20 text-warning text-xs font-medium">
             Premium
           </span>
-        </div>
+          {isExpanded ? (
+            <ChevronUp className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+          )}
+        </button>
         
         {isPremium ? (
           <Button
@@ -197,72 +239,123 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
         )}
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : notices.length === 0 ? (
-        <div className="bg-muted/50 rounded-xl p-6 text-center">
-          <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">No notices yet</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {notices.map((notice) => (
-            <motion.div
-              key={notice.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-card rounded-xl p-4 border border-border"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden">
-                  {notice.author?.avatar_url ? (
-                    <img 
-                      src={notice.author.avatar_url} 
-                      alt="" 
-                      className="w-full h-full object-cover" 
-                    />
-                  ) : (
-                    <span className="text-sm font-semibold">
-                      {notice.author?.display_name?.charAt(0) || "?"}
-                    </span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium text-sm truncate">
-                      {notice.author?.display_name || "Anonymous"}
-                    </span>
-                    {notice.author?.is_verified && (
-                      <span className="w-4 h-4 rounded-full bg-warning flex items-center justify-center">
-                        <span className="text-[10px]">✓</span>
-                      </span>
-                    )}
-                    <span className={cn(
-                      "px-2 py-0.5 rounded-full text-xs text-white",
-                      getCategoryStyle(notice.category)
-                    )}>
-                      {notice.category}
-                    </span>
-                  </div>
-                  <p className="text-sm text-foreground">{notice.content}</p>
-                  {notice.image_url && (
-                    <img 
-                      src={notice.image_url} 
-                      alt="" 
-                      className="mt-2 rounded-lg max-h-40 object-cover" 
-                    />
-                  )}
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {formatTimeAgo(notice.created_at)}
-                  </p>
-                </div>
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
+            ) : visibleNotices.length === 0 ? (
+              <div className="bg-muted/50 rounded-xl p-6 text-center">
+                <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No notices yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-visible pr-1">
+                {visibleNotices.map((notice) => (
+                  <motion.div
+                    key={notice.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-card rounded-xl p-4 border border-border"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+                        {notice.author?.avatar_url ? (
+                          <img 
+                            src={notice.author.avatar_url} 
+                            alt="" 
+                            className="w-full h-full object-cover" 
+                          />
+                        ) : (
+                          <span className="text-sm font-semibold">
+                            {notice.author?.display_name?.charAt(0) || "?"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-sm truncate">
+                            {notice.author?.display_name || "Anonymous"}
+                          </span>
+                          {notice.author?.is_verified && (
+                            <span className="w-4 h-4 rounded-full bg-warning flex items-center justify-center flex-shrink-0">
+                              <span className="text-[10px]">✓</span>
+                            </span>
+                          )}
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
+                            getCategoryStyle(notice.category)
+                          )}>
+                            {notice.category}
+                          </span>
+                        </div>
+                        <p className="text-sm text-foreground">{notice.content}</p>
+                        {notice.image_url && (
+                          <img 
+                            src={notice.image_url} 
+                            alt="" 
+                            className="mt-2 rounded-lg max-h-40 object-cover" 
+                          />
+                        )}
+                        
+                        {/* Actions Row */}
+                        <div className="flex items-center justify-between mt-3">
+                          <p className="text-xs text-muted-foreground">
+                            {formatTimeAgo(notice.created_at)}
+                          </p>
+                          
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleSupport(notice.id)}
+                              className="p-1.5 rounded-full hover:bg-muted transition-colors"
+                              title="Support"
+                            >
+                              <ThumbsUp className="w-4 h-4 text-muted-foreground" />
+                            </button>
+                            
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button className="p-1.5 rounded-full hover:bg-muted transition-colors">
+                                  <MoreHorizontal className="w-4 h-4 text-muted-foreground" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleReport(notice.id)}>
+                                  <Flag className="w-4 h-4 mr-2" />
+                                  Report
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleHide(notice.id)}>
+                                  <EyeOff className="w-4 h-4 mr-2" />
+                                  Hide
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  onClick={() => handleBlockUser(notice.author_id)}
+                                  className="text-destructive"
+                                >
+                                  <Ban className="w-4 h-4 mr-2" />
+                                  Block User
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Create Notice Modal */}
       <AnimatePresence>

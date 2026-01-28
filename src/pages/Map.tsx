@@ -39,30 +39,45 @@ const alertTypeColors: Record<string, string> = {
   Found: "#22C55E",
 };
 
-const createAlertIcon = (type: string) => {
+const createAlertIcon = (type: string, isPulsing: boolean = false) => {
+  const pulseClass = isPulsing ? 'animate-pulse-alert' : '';
   return L.divIcon({
-    className: 'custom-alert-icon',
+    className: `custom-alert-icon ${pulseClass}`,
     html: `
-      <div style="
-        width: 32px;
-        height: 32px;
+      <div class="${pulseClass}" style="
+        width: 36px;
+        height: 36px;
         background-color: ${alertTypeColors[type] || '#3B82F6'};
         border-radius: 50%;
         border: 3px solid white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 20px ${alertTypeColors[type]}40;
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
       ">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+        ${type === 'Lost' ? `
+          <div style="
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid ${alertTypeColors[type]};
+            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+          "></div>
+        ` : ''}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+          ${type === 'Stray' ? '<path d="M4.5 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm15 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-4.5 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-6 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm3 3c-2.76 0-5 2.24-5 5v3h10v-3c0-2.76-2.24-5-5-5z"/>' : ''}
+          ${type === 'Lost' ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>' : ''}
+          ${type === 'Found' ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>' : ''}
         </svg>
       </div>
     `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
   });
 };
+
+const MAX_ALERT_WORDS = 20;
 
 interface MapAlert {
   id: string;
@@ -411,12 +426,12 @@ const Map = () => {
               />
             )}
             
-            {/* Alert markers */}
+            {/* Alert markers with pulsing for Lost alerts */}
             {filteredAlerts.map((alert) => (
               <Marker
                 key={alert.id}
                 position={[alert.latitude, alert.longitude]}
-                icon={createAlertIcon(alert.alert_type)}
+                icon={createAlertIcon(alert.alert_type, alert.alert_type === 'Lost')}
                 eventHandlers={{
                   click: () => setSelectedAlert(alert),
                 }}
@@ -477,13 +492,28 @@ const Map = () => {
                 ))}
               </div>
               
-              {/* Description */}
-              <Textarea
-                placeholder="Describe what you saw (optional)..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="rounded-xl min-h-[80px]"
-              />
+              {/* Description with word limit */}
+              <div className="space-y-1">
+                <Textarea
+                  placeholder="Brief description (max 20 words)..."
+                  value={description}
+                  onChange={(e) => {
+                    const words = e.target.value.trim().split(/\s+/).filter(Boolean);
+                    if (words.length <= MAX_ALERT_WORDS) {
+                      setDescription(e.target.value);
+                    }
+                  }}
+                  className="rounded-xl min-h-[60px]"
+                />
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>
+                    {description.trim().split(/\s+/).filter(Boolean).length}/{MAX_ALERT_WORDS} words
+                  </span>
+                  <span className="text-primary">
+                    📌 For more details, post on Notice Board
+                  </span>
+                </div>
+              </div>
               
               {/* Image */}
               {imagePreview ? (

@@ -10,6 +10,9 @@ interface Profile {
   has_car: boolean;
   user_role: string;
   onboarding_completed: boolean;
+  owns_pets: boolean;
+  social_availability: boolean;
+  availability_status: string[];
 }
 
 interface AuthContextType {
@@ -42,7 +45,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, avatar_url, is_verified, has_car, user_role, onboarding_completed")
+      .select("id, display_name, avatar_url, is_verified, has_car, user_role, onboarding_completed, owns_pets, social_availability, availability_status")
       .eq("id", userId)
       .maybeSingle();
 

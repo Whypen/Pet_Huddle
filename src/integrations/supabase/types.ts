@@ -167,6 +167,7 @@ export type Database = {
           dob: string | null
           gender: string | null
           id: string
+          is_active: boolean | null
           is_public: boolean | null
           medications: Json | null
           microchip_id: string | null
@@ -189,6 +190,7 @@ export type Database = {
           dob?: string | null
           gender?: string | null
           id?: string
+          is_active?: boolean | null
           is_public?: boolean | null
           medications?: Json | null
           microchip_id?: string | null
@@ -211,6 +213,7 @@ export type Database = {
           dob?: string | null
           gender?: string | null
           id?: string
+          is_active?: boolean | null
           is_public?: boolean | null
           medications?: Json | null
           microchip_id?: string | null
@@ -246,6 +249,7 @@ export type Database = {
       profiles: {
         Row: {
           affiliation: string | null
+          availability_status: string[] | null
           avatar_url: string | null
           bio: string | null
           created_at: string | null
@@ -261,11 +265,21 @@ export type Database = {
           languages: string[] | null
           legal_name: string | null
           location_name: string | null
+          major: string | null
           onboarding_completed: boolean | null
+          owns_pets: boolean | null
           pet_experience: string[] | null
           phone: string | null
           relationship_status: string | null
           school: string | null
+          show_academic: boolean | null
+          show_affiliation: boolean | null
+          show_age: boolean | null
+          show_bio: boolean | null
+          show_gender: boolean | null
+          show_height: boolean | null
+          show_weight: boolean | null
+          social_availability: boolean | null
           updated_at: string | null
           user_role: string | null
           weight: number | null
@@ -273,6 +287,7 @@ export type Database = {
         }
         Insert: {
           affiliation?: string | null
+          availability_status?: string[] | null
           avatar_url?: string | null
           bio?: string | null
           created_at?: string | null
@@ -288,11 +303,21 @@ export type Database = {
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
+          major?: string | null
           onboarding_completed?: boolean | null
+          owns_pets?: boolean | null
           pet_experience?: string[] | null
           phone?: string | null
           relationship_status?: string | null
           school?: string | null
+          show_academic?: boolean | null
+          show_affiliation?: boolean | null
+          show_age?: boolean | null
+          show_bio?: boolean | null
+          show_gender?: boolean | null
+          show_height?: boolean | null
+          show_weight?: boolean | null
+          social_availability?: boolean | null
           updated_at?: string | null
           user_role?: string | null
           weight?: number | null
@@ -300,6 +325,7 @@ export type Database = {
         }
         Update: {
           affiliation?: string | null
+          availability_status?: string[] | null
           avatar_url?: string | null
           bio?: string | null
           created_at?: string | null
@@ -315,11 +341,21 @@ export type Database = {
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
+          major?: string | null
           onboarding_completed?: boolean | null
+          owns_pets?: boolean | null
           pet_experience?: string[] | null
           phone?: string | null
           relationship_status?: string | null
           school?: string | null
+          show_academic?: boolean | null
+          show_affiliation?: boolean | null
+          show_age?: boolean | null
+          show_bio?: boolean | null
+          show_gender?: boolean | null
+          show_height?: boolean | null
+          show_weight?: boolean | null
+          social_availability?: boolean | null
           updated_at?: string | null
           user_role?: string | null
           weight?: number | null
@@ -331,9 +367,12 @@ export type Database = {
     Views: {
       profiles_public: {
         Row: {
+          affiliation: string | null
+          availability_status: string[] | null
           avatar_url: string | null
           bio: string | null
           created_at: string | null
+          degree: string | null
           display_name: string | null
           dob: string | null
           experience_years: number | null
@@ -344,50 +383,68 @@ export type Database = {
           is_verified: boolean | null
           languages: string[] | null
           location_name: string | null
+          major: string | null
+          owns_pets: boolean | null
           pet_experience: string[] | null
           relationship_status: string | null
+          school: string | null
+          social_availability: boolean | null
           user_role: string | null
           weight: number | null
           weight_unit: string | null
         }
         Insert: {
+          affiliation?: never
+          availability_status?: string[] | null
           avatar_url?: string | null
-          bio?: string | null
+          bio?: never
           created_at?: string | null
+          degree?: never
           display_name?: string | null
-          dob?: string | null
+          dob?: never
           experience_years?: number | null
-          gender_genre?: string | null
+          gender_genre?: never
           has_car?: boolean | null
-          height?: number | null
+          height?: never
           id?: string | null
           is_verified?: boolean | null
           languages?: string[] | null
           location_name?: string | null
+          major?: never
+          owns_pets?: boolean | null
           pet_experience?: string[] | null
           relationship_status?: string | null
+          school?: never
+          social_availability?: boolean | null
           user_role?: string | null
-          weight?: number | null
+          weight?: never
           weight_unit?: string | null
         }
         Update: {
+          affiliation?: never
+          availability_status?: string[] | null
           avatar_url?: string | null
-          bio?: string | null
+          bio?: never
           created_at?: string | null
+          degree?: never
           display_name?: string | null
-          dob?: string | null
+          dob?: never
           experience_years?: number | null
-          gender_genre?: string | null
+          gender_genre?: never
           has_car?: boolean | null
-          height?: number | null
+          height?: never
           id?: string | null
           is_verified?: boolean | null
           languages?: string[] | null
           location_name?: string | null
+          major?: never
+          owns_pets?: boolean | null
           pet_experience?: string[] | null
           relationship_status?: string | null
+          school?: never
+          social_availability?: boolean | null
           user_role?: string | null
-          weight?: number | null
+          weight?: never
           weight_unit?: string | null
         }
         Relationships: []
