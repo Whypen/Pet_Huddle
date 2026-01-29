@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Settings, Check } from "lucide-react";
+import { Settings, Check, Plus, Users } from "lucide-react";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
-const filterTabs = ["Friends", "Nannies", "Groups"];
+const filterTabs = ["Nannies", "Playdates", "Animal Lovers"];
 
 const newHuddles = [
   { id: 1, name: "Emma", isNew: true },
@@ -20,7 +24,7 @@ const chats = [
     lastMessage: "Sure! Let's meet at Central Park around 3pm?", 
     time: "2m ago",
     unread: 2,
-    type: "friend"
+    type: "playdates"
   },
   { 
     id: 2, 
@@ -29,7 +33,7 @@ const chats = [
     lastMessage: "I can take care of Max this weekend!", 
     time: "1h ago",
     unread: 0,
-    type: "nanny"
+    type: "nannies"
   },
   { 
     id: 3, 
@@ -38,7 +42,7 @@ const chats = [
     lastMessage: "Thanks for the playdate! Bella had so much fun 🐕", 
     time: "3h ago",
     unread: 0,
-    type: "friend"
+    type: "playdates"
   },
   { 
     id: 4, 
@@ -49,30 +53,70 @@ const chats = [
     unread: 5,
     type: "group"
   },
+  {
+    id: 5,
+    name: "Cat Cafe Crew",
+    verified: true,
+    lastMessage: "New kittens just arrived! 🐱",
+    time: "2d ago",
+    unread: 3,
+    type: "animal-lovers"
+  }
 ];
 
 const Chats = () => {
+  const { profile } = useAuth();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("Friends");
+  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("Nannies");
+  
+  const isVerified = profile?.is_verified;
 
   const filteredChats = chats.filter(chat => {
-    if (activeTab === "Friends") return chat.type === "friend";
-    if (activeTab === "Nannies") return chat.type === "nanny";
-    if (activeTab === "Groups") return chat.type === "group";
+    const tabKey = activeTab.toLowerCase().replace(" ", "-");
+    if (tabKey === "nannies") return chat.type === "nannies";
+    if (tabKey === "playdates") return chat.type === "playdates";
+    if (tabKey === "animal-lovers") return chat.type === "animal-lovers" || chat.type === "group";
     return true;
   });
+  
+  const handleCreateGroup = () => {
+    if (!isVerified) {
+      toast.error("Only verified users can create groups");
+      return;
+    }
+    toast.success("Create group feature coming soon!");
+  };
 
   return (
     <div className="min-h-screen bg-background pb-nav">
+      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      
       {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-6 pb-4">
+      <header className="flex items-center justify-between px-5 pt-4 pb-4">
         <h1 className="text-2xl font-bold">Chats</h1>
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-        >
-          <Settings className="w-6 h-6 text-muted-foreground" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Create Group Button */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={handleCreateGroup}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+              isVerified 
+                ? "bg-accent text-accent-foreground"
+                : "bg-muted text-muted-foreground"
+            )}
+          >
+            <Users className="w-3.5 h-3.5" />
+            Create Group
+          </motion.button>
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+          >
+            <Settings className="w-6 h-6 text-muted-foreground" />
+          </button>
+        </div>
       </header>
 
       {/* Filter Tabs */}
@@ -157,7 +201,7 @@ const Chats = () => {
                     {chat.unread}
                   </span>
                 )}
-                {chat.type === "nanny" && (
+                {chat.type === "nannies" && (
                   <button className="px-3 py-1 bg-accent text-accent-foreground text-xs font-semibold rounded-full">
                     Book Now
                   </button>
@@ -169,6 +213,7 @@ const Chats = () => {
       </section>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );
 };

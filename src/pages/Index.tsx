@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Settings, Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
 import { PetWizard } from "@/components/pets/PetWizard";
+import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,11 +54,13 @@ const wisdomTips: Record<string, string[]> = {
 };
 
 const Index = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPetWizardOpen, setIsPetWizardOpen] = useState(false);
+  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -112,8 +117,10 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background pb-nav">
+      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      
       {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-6 pb-4">
+      <header className="flex items-center justify-between px-5 pt-4 pb-4">
         <div className="flex items-center gap-3">
           <div>
             <motion.h1 
@@ -146,48 +153,50 @@ const Index = () => {
         </section>
       ) : (
         <>
-          {/* Pet Selector */}
+          {/* Pet Selector - Fixed border cropping */}
           <section className="px-5 py-3">
-            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">
+            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 overflow-visible">
               {pets.map((pet) => (
                 <motion.button
                   key={pet.id}
                   onClick={() => setSelectedPet(pet)}
                   whileTap={{ scale: 0.95 }}
-                  className={cn(
-                    "relative flex-shrink-0 w-16 h-16 rounded-full overflow-hidden ring-4 transition-all",
+                  className="relative flex-shrink-0 p-1" // Added padding to prevent border clipping
+                >
+                  <div className={cn(
+                    "w-16 h-16 rounded-full overflow-hidden ring-4 transition-all",
                     selectedPet?.id === pet.id
                       ? "ring-primary shadow-soft"
                       : "ring-transparent hover:ring-muted"
-                  )}
-                >
-                  {pet.photo_url ? (
-                    <img src={pet.photo_url} alt={pet.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full bg-muted flex items-center justify-center">
-                      <span className="text-lg font-bold text-muted-foreground">
-                        {pet.name.charAt(0)}
-                      </span>
-                    </div>
-                  )}
+                  )}>
+                    {pet.photo_url ? (
+                      <img src={pet.photo_url} alt={pet.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-muted flex items-center justify-center">
+                        <span className="text-lg font-bold text-muted-foreground">
+                          {pet.name.charAt(0)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                   {selectedPet?.id === pet.id && (
                     <motion.div 
                       layoutId="petHighlight"
-                      className="absolute inset-0 bg-primary/20"
+                      className="absolute inset-1 rounded-full bg-primary/20 pointer-events-none"
                     />
                   )}
                 </motion.button>
               ))}
               <button 
                 onClick={() => setIsPetWizardOpen(true)}
-                className="flex-shrink-0 w-16 h-16 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+                className="flex-shrink-0 w-16 h-16 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors ml-1"
               >
                 <Plus className="w-6 h-6 text-muted-foreground" />
               </button>
             </div>
           </section>
 
-          {/* Selected Pet Card */}
+          {/* Selected Pet Card - Clickable name */}
           {selectedPet && (
             <section className="px-5 py-3">
               <motion.div 
@@ -212,10 +221,15 @@ const Index = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                   >
-                    <h2 className="text-2xl font-bold text-primary-foreground">
-                      {selectedPet.name}
-                      {selectedPet.dob && `, ${calculateAge(selectedPet.dob)} Years Old`}
-                    </h2>
+                    <button 
+                      onClick={() => navigate(`/edit-pet-profile?id=${selectedPet.id}`)}
+                      className="text-left"
+                    >
+                      <h2 className="text-2xl font-bold text-primary-foreground hover:underline">
+                        {selectedPet.name}
+                        {selectedPet.dob && `, ${calculateAge(selectedPet.dob)} Years Old`}
+                      </h2>
+                    </button>
                     <div className="flex gap-4 mt-2 text-primary-foreground/80 text-sm flex-wrap">
                       {selectedPet.weight && (
                         <>
@@ -299,6 +313,7 @@ const Index = () => {
         onClose={() => setIsPetWizardOpen(false)} 
         onComplete={fetchPets}
       />
+      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );
 };

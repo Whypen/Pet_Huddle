@@ -353,9 +353,9 @@ const Map = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-nav">
+    <div className="h-screen bg-background flex flex-col pb-nav">
       {/* Header */}
-      <header className="px-4 pt-6 pb-3 bg-card z-10">
+      <header className="px-4 pt-6 pb-3 bg-card z-10 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -375,7 +375,7 @@ const Map = () => {
       </header>
 
       {/* Filter Chips */}
-      <div className="px-4 py-3 bg-card border-b border-border z-10">
+      <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
         <div className="flex gap-2 overflow-x-auto scrollbar-hide">
           {filterChips.map((chip) => (
             <button
@@ -394,8 +394,8 @@ const Map = () => {
         </div>
       </div>
 
-      {/* Map Container */}
-      <div className="flex-1 relative">
+      {/* Map Container - Fixed dimensions */}
+      <div className="flex-1 relative min-h-0">
         {loading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-muted">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -404,7 +404,7 @@ const Map = () => {
           <MapContainer
             center={defaultCenter}
             zoom={14}
-            style={{ height: "100%", width: "100%" }}
+            className="h-full w-full"
             zoomControl={false}
           >
             <TileLayer

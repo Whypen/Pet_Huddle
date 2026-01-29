@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Settings, ArrowLeft, Plus, Mic, Send } from "lucide-react";
+import { Settings, ArrowLeft, Plus, Mic, Send, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import aiVetAvatar from "@/assets/ai-vet-avatar.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -17,7 +20,7 @@ const initialMessages: Message[] = [
   {
     id: 1,
     type: "ai",
-    text: "Hello! I'm your AI Vet assistant. I'm here to help you with any questions about Max's health and wellness. What can I help you with today?",
+    text: "Hello there! I'm Dr. Huddle, your friendly neighborhood AI assistant. I'm here to help you with any questions about Max's health and wellness. While I can provide helpful information and guidance, remember that I'm always happy to point you toward your local vet for hands-on care. What can I help you with today? 🐾",
     timestamp: "10:30 AM"
   },
   {
@@ -29,17 +32,21 @@ const initialMessages: Message[] = [
   {
     id: 3,
     type: "ai",
-    text: "Ear scratching can indicate several things - from simple irritation to ear infections. Can you check if there's any redness, discharge, or unusual odor? A photo of the ear would help me give better advice!",
+    text: "I understand your concern - it's wonderful that you're paying such close attention to Max! Ear scratching can happen for several reasons: simple irritation, ear wax buildup, allergies, or sometimes ear infections. Could you take a peek inside Max's ear and let me know if you notice any redness, discharge, or unusual odor? A photo would be really helpful too! In the meantime, make sure he hasn't gotten any water in his ears recently. 🩺",
     timestamp: "10:31 AM"
   },
 ];
 
 const AIVet = () => {
+  const { profile } = useAuth();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  
+  const isPremium = profile?.user_role === 'premium';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -62,12 +69,12 @@ const AIVet = () => {
     setMessages(prev => [...prev, newUserMessage]);
     setInputValue("");
 
-    // Simulate AI response
+    // Simulate AI response with professional yet warm tone
     setTimeout(() => {
       const aiResponse: Message = {
         id: messages.length + 2,
         type: "ai",
-        text: "Thank you for sharing that information! Based on what you've described, I recommend monitoring Max closely. If symptoms persist for more than 48 hours, please schedule a visit with your local vet.",
+        text: "Thanks so much for sharing that with me! Based on what you've described, I'd suggest keeping a close eye on Max over the next day or two. Monitor for any changes in appetite, energy levels, or the symptoms you mentioned. If things don't improve within 48 hours, or if you notice anything concerning, I'd definitely recommend popping into your local vet for a check-up. They'll be able to give Max a proper hands-on examination. In the meantime, I'm here if you have any questions! 🐕",
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setMessages(prev => [...prev, aiResponse]);
@@ -76,8 +83,10 @@ const AIVet = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 py-4 bg-card border-b border-border">
+      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      
+      {/* Chat Header */}
+      <header className="flex items-center justify-between px-4 py-3 bg-card border-b border-border">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
@@ -89,13 +98,13 @@ const AIVet = () => {
             <div className="relative">
               <img 
                 src={aiVetAvatar} 
-                alt="AI Vet" 
+                alt="Dr. Huddle" 
                 className="w-10 h-10 rounded-full object-cover"
               />
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-accent rounded-full border-2 border-card" />
             </div>
             <div>
-              <h1 className="font-semibold">AI Vet</h1>
+              <h1 className="font-semibold">Dr. Huddle</h1>
               <span className="text-xs text-accent">Online</span>
             </div>
           </div>
@@ -117,7 +126,7 @@ const AIVet = () => {
       </div>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 pb-nav space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4" style={{ paddingBottom: '180px' }}>
         {messages.map((message, index) => (
           <motion.div
             key={message.id}
@@ -148,6 +157,14 @@ const AIVet = () => {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Safety Disclaimer */}
+      <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90 backdrop-blur-sm px-4 py-2 border-t border-border">
+        <p className="text-xs text-muted-foreground text-center max-w-md mx-auto">
+          ⚠️ Dr. Huddle is an AI assistant for informational purposes only. Information provided can be wrong. 
+          Always seek professional veterinary opinions. Visit a clinic immediately if you have doubts or an emergency.
+        </p>
+      </div>
+
       {/* Input Area */}
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
@@ -163,8 +180,22 @@ const AIVet = () => {
               placeholder="Type a message..."
               className="w-full bg-muted rounded-full px-4 py-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-primary/50"
             />
-            <button className="absolute right-3 top-1/2 -translate-y-1/2 p-1">
-              <Mic className="w-5 h-5 text-muted-foreground" />
+            {/* Audio button - disabled for free users */}
+            <button 
+              onClick={() => !isPremium && setIsPremiumOpen(true)}
+              className={cn(
+                "absolute right-3 top-1/2 -translate-y-1/2 p-1",
+                !isPremium && "opacity-50"
+              )}
+            >
+              {isPremium ? (
+                <Mic className="w-5 h-5 text-muted-foreground" />
+              ) : (
+                <div className="relative">
+                  <Mic className="w-5 h-5 text-muted-foreground" />
+                  <Lock className="w-3 h-3 text-amber-500 absolute -top-1 -right-1" />
+                </div>
+              )}
             </button>
           </div>
           <motion.button
@@ -178,6 +209,7 @@ const AIVet = () => {
       </div>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );
 };
