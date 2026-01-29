@@ -13,6 +13,8 @@ import AIVet from "./pages/AIVet";
 import Map from "./pages/Map";
 import Auth from "./pages/Auth";
 import Onboarding from "./pages/Onboarding";
+import EditProfile from "./pages/EditProfile";
+import EditPetProfile from "./pages/EditPetProfile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -91,6 +93,24 @@ const App = () => (
                     <Map />
                     <BottomNav />
                   </div>
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* Profile Edit Routes */}
+            <Route
+              path="/edit-profile"
+              element={
+                <ProtectedRoute>
+                  <EditProfile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/edit-pet-profile"
+              element={
+                <ProtectedRoute>
+                  <EditPetProfile />
                 </ProtectedRoute>
               }
             />

@@ -1,5 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, User, Settings, Shield, HelpCircle, LogOut } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 interface SettingsDrawerProps {
@@ -8,13 +10,29 @@ interface SettingsDrawerProps {
 }
 
 const menuItems = [
-  { icon: User, label: "Profile", href: "#" },
+  { icon: User, label: "Profile", href: "/edit-profile" },
   { icon: Settings, label: "Account Settings", href: "#" },
   { icon: Shield, label: "Privacy Policy", href: "#" },
   { icon: HelpCircle, label: "Help & Support", href: "#" },
 ];
 
 export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
+  const navigate = useNavigate();
+  const { signOut } = useAuth();
+
+  const handleMenuClick = (href: string) => {
+    if (href !== "#") {
+      onClose();
+      navigate(href);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    onClose();
+    navigate("/auth");
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -51,25 +69,28 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
               {/* Menu Items */}
               <div className="flex-1 py-4">
                 {menuItems.map((item, index) => (
-                  <motion.a
+                  <motion.button
                     key={item.label}
-                    href={item.href}
+                    onClick={() => handleMenuClick(item.href)}
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05 }}
                     className={cn(
-                      "flex items-center gap-4 px-6 py-4 hover:bg-muted transition-colors"
+                      "flex items-center gap-4 px-6 py-4 w-full hover:bg-muted transition-colors text-left"
                     )}
                   >
                     <item.icon className="w-5 h-5 text-muted-foreground" />
                     <span className="font-medium">{item.label}</span>
-                  </motion.a>
+                  </motion.button>
                 ))}
               </div>
               
               {/* Logout */}
               <div className="p-4 border-t border-border">
-                <button className="flex items-center gap-4 px-6 py-4 w-full rounded-xl text-destructive hover:bg-destructive/10 transition-colors">
+                <button 
+                  onClick={handleLogout}
+                  className="flex items-center gap-4 px-6 py-4 w-full rounded-xl text-destructive hover:bg-destructive/10 transition-colors"
+                >
                   <LogOut className="w-5 h-5" />
                   <span className="font-medium">Logout</span>
                 </button>

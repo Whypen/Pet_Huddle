@@ -49,9 +49,24 @@ interface NoticeBoardProps {
   onPremiumClick: () => void;
 }
 
+// Dummy cat post data
+const dummyCatPost: Notice = {
+  id: "dummy-cat",
+  content: "Just adopted this adorable tabby! 🐱 Looking for other cat parents in the area to share tips and maybe arrange some playdates. She's 2 years old and loves to cuddle!",
+  category: "Social",
+  image_url: null,
+  created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+  author_id: "cat-lover-123",
+  author: {
+    display_name: "Cat Lover",
+    avatar_url: null,
+    is_verified: true,
+  },
+};
+
 export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => {
   const { user } = useAuth();
-  const [notices, setNotices] = useState<Notice[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -88,7 +103,8 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
         .limit(20);
 
       if (error) throw error;
-      setNotices(data || []);
+      // Combine dummy cat post with real notices
+      setNotices([dummyCatPost, ...(data || [])]);
     } catch (error) {
       console.error("Error fetching notices:", error);
     } finally {

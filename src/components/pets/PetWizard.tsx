@@ -31,7 +31,10 @@ const speciesOptions = [
   { id: "dog", label: "Dog", icon: Dog },
   { id: "cat", label: "Cat", icon: Cat },
   { id: "bird", label: "Bird", icon: Bird },
-  { id: "exotic", label: "Exotic", icon: PawPrint },
+  { id: "rabbit", label: "Rabbit", icon: PawPrint },
+  { id: "reptile", label: "Reptile", icon: PawPrint },
+  { id: "hamster", label: "Hamster", icon: PawPrint },
+  { id: "others", label: "Others", icon: PawPrint },
 ];
 
 const dogBreeds = [

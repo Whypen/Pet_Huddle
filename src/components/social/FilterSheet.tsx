@@ -12,7 +12,7 @@ interface FilterSheetProps {
 }
 
 export interface FilterState {
-  role: "playdates" | "nannies" | "animal-friends";
+  role: "playdates" | "nannies" | "animal-lovers";
   species: string[];
   distance: number;
   ageRange: [number, number];
@@ -43,9 +43,9 @@ export const defaultFilters: FilterState = {
 };
 
 const roles = [
-  { id: "playdates", label: "Playdates" },
   { id: "nannies", label: "Nannies" },
-  { id: "animal-friends", label: "Animal Friends" },
+  { id: "playdates", label: "Playdates" },
+  { id: "animal-lovers", label: "Animal Lovers" },
 ] as const;
 
 const speciesOptions = [

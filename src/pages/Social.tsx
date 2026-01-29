@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, X, Star, Hand, SlidersHorizontal } from "lucide-react";
+import { Settings, X, Star, SlidersHorizontal, HandMetal } from "lucide-react";
 import sarahBella from "@/assets/users/sarah-bella.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { FilterSheet, FilterState, defaultFilters } from "@/components/social/FilterSheet";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ActiveFilters } from "@/components/social/ActiveFilters";
@@ -65,14 +66,16 @@ const Social = () => {
 
   // Get role label for display
   const getRoleLabel = () => {
-    const labels = { playdates: "Playdates", nannies: "Nannies", "animal-friends": "Animal Friends" };
-    return labels[filters.role];
+    const labels: Record<string, string> = { playdates: "Playdates", nannies: "Nannies", "animal-lovers": "Animal Lovers" };
+    return labels[filters.role] || "Playdates";
   };
 
   return (
     <div className="min-h-screen bg-background pb-nav">
+      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      
       {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-6 pb-4">
+      <header className="flex items-center justify-between px-5 pt-4 pb-4">
         <h1 className="text-2xl font-bold">Discovery</h1>
         <div className="flex items-center gap-2">
           <button
@@ -175,7 +178,7 @@ const Social = () => {
             onClick={() => handleSwipe("right")}
             className="w-16 h-16 rounded-full bg-accent shadow-card flex items-center justify-center"
           >
-            <Hand className="w-7 h-7 text-accent-foreground" />
+            <HandMetal className="w-7 h-7 text-accent-foreground" />
           </motion.button>
           <motion.button
             whileTap={{ scale: 0.9 }}

@@ -6,6 +6,14 @@ interface Profile {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
+  bio: string | null;
+  gender_genre: string | null;
+  dob: string | null;
+  height: number | null;
+  degree: string | null;
+  school: string | null;
+  major: string | null;
+  affiliation: string | null;
   is_verified: boolean;
   has_car: boolean;
   user_role: string;
@@ -13,6 +21,12 @@ interface Profile {
   owns_pets: boolean;
   social_availability: boolean;
   availability_status: string[];
+  show_gender: boolean;
+  show_age: boolean;
+  show_height: boolean;
+  show_academic: boolean;
+  show_affiliation: boolean;
+  show_bio: boolean;
 }
 
 interface AuthContextType {
@@ -45,7 +59,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, display_name, avatar_url, is_verified, has_car, user_role, onboarding_completed, owns_pets, social_availability, availability_status")
+      .select("id, display_name, avatar_url, bio, gender_genre, dob, height, degree, school, major, affiliation, is_verified, has_car, user_role, onboarding_completed, owns_pets, social_availability, availability_status, show_gender, show_age, show_height, show_academic, show_affiliation, show_bio")
       .eq("id", userId)
       .maybeSingle();
 
