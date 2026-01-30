@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Settings, 
@@ -10,71 +10,28 @@ import {
   EyeOff,
   Ban,
   Loader2,
-  MapPin,
   Camera
 } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from "react-leaflet";
-import L from "leaflet";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import "leaflet/dist/leaflet.css";
+import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 
-// Fix for default marker icons in Leaflet
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+// Set the access token
+mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
 const alertTypeColors: Record<string, string> = {
   Stray: "#3B82F6",
   Lost: "#EF4444",
   Found: "#22C55E",
-};
-
-const createAlertIcon = (type: string, isPulsing: boolean = false) => {
-  const pulseClass = isPulsing ? 'animate-pulse-alert' : '';
-  return L.divIcon({
-    className: `custom-alert-icon ${pulseClass}`,
-    html: `
-      <div class="${pulseClass}" style="
-        width: 36px;
-        height: 36px;
-        background-color: ${alertTypeColors[type] || '#3B82F6'};
-        border-radius: 50%;
-        border: 3px solid white;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 20px ${alertTypeColors[type]}40;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-      ">
-        ${type === 'Lost' ? `
-          <div style="
-            position: absolute;
-            inset: -4px;
-            border-radius: 50%;
-            border: 2px solid ${alertTypeColors[type]};
-            animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
-          "></div>
-        ` : ''}
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-          ${type === 'Stray' ? '<path d="M4.5 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm15 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-4.5 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-6 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm3 3c-2.76 0-5 2.24-5 5v3h10v-3c0-2.76-2.24-5-5-5z"/>' : ''}
-          ${type === 'Lost' ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>' : ''}
-          ${type === 'Found' ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>' : ''}
-        </svg>
-      </div>
-    `,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-  });
 };
 
 const MAX_ALERT_WORDS = 20;
@@ -95,19 +52,6 @@ interface MapAlert {
   } | null;
 }
 
-interface LocationSelectorProps {
-  onLocationSelect: (lat: number, lng: number) => void;
-}
-
-const LocationSelector = ({ onLocationSelect }: LocationSelectorProps) => {
-  useMapEvents({
-    click(e) {
-      onLocationSelect(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-};
-
 const filterChips = [
   { id: "all", label: "All" },
   { id: "Stray", label: "Stray" },
@@ -116,11 +60,17 @@ const filterChips = [
 ];
 
 const Map = () => {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
   const [alerts, setAlerts] = useState<MapAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mapLoaded, setMapLoaded] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [creating, setCreating] = useState(false);
@@ -130,23 +80,84 @@ const Map = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<MapAlert | null>(null);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
-  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
 
   // Default center (Hong Kong)
-  const defaultCenter: [number, number] = [22.2828, 114.1583];
+  const defaultCenter: [number, number] = [114.1583, 22.2828]; // [lng, lat] for Mapbox
 
+  // Initialize map
+  useEffect(() => {
+    if (map.current || !mapContainer.current) return;
+
+    map.current = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: "mapbox://styles/mapbox/streets-v12",
+      center: defaultCenter,
+      zoom: 14,
+    });
+
+    map.current.on("load", () => {
+      setMapLoaded(true);
+      // Force resize after load
+      setTimeout(() => {
+        map.current?.resize();
+      }, 200);
+    });
+
+    map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
+
+    // Handle click for location selection
+    map.current.on("click", (e) => {
+      if (isCreateOpen) {
+        setSelectedLocation({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      }
+    });
+
+    return () => {
+      map.current?.remove();
+      map.current = null;
+    };
+  }, []);
+
+  // Handle resize when component dimensions change
+  useEffect(() => {
+    const handleResize = () => {
+      setTimeout(() => {
+        map.current?.resize();
+      }, 200);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Update click handler for create mode
+  useEffect(() => {
+    if (!map.current) return;
+
+    const handleClick = (e: mapboxgl.MapMouseEvent) => {
+      if (isCreateOpen) {
+        setSelectedLocation({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      }
+    };
+
+    map.current.on("click", handleClick);
+    return () => {
+      map.current?.off("click", handleClick);
+    };
+  }, [isCreateOpen]);
+
+  // Fetch alerts
   useEffect(() => {
     fetchAlerts();
     
-    // Subscribe to realtime updates
     const channel = supabase
-      .channel('map_alerts')
+      .channel("map_alerts")
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'map_alerts',
+          event: "*",
+          schema: "public",
+          table: "map_alerts",
         },
         () => {
           fetchAlerts();
@@ -158,6 +169,84 @@ const Map = () => {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Update markers when alerts or filter changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    // Clear existing markers
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
+
+    const filteredAlerts = alerts.filter((alert) => {
+      if (hiddenAlerts.has(alert.id)) return false;
+      if (activeFilter === "all") return true;
+      return alert.alert_type === activeFilter;
+    });
+
+    filteredAlerts.forEach((alert) => {
+      const el = document.createElement("div");
+      el.className = "custom-marker";
+      el.innerHTML = `
+        <div style="
+          width: 36px;
+          height: 36px;
+          background-color: ${alertTypeColors[alert.alert_type] || "#3B82F6"};
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          ${alert.alert_type === "Lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
+        ">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+            ${alert.alert_type === "Stray" ? '<path d="M4.5 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm15 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-4.5 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm-6 0a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm3 3c-2.76 0-5 2.24-5 5v3h10v-3c0-2.76-2.24-5-5-5z"/>' : ""}
+            ${alert.alert_type === "Lost" ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>' : ""}
+            ${alert.alert_type === "Found" ? '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>' : ""}
+          </svg>
+        </div>
+      `;
+
+      el.addEventListener("click", () => {
+        setSelectedAlert(alert);
+      });
+
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([alert.longitude, alert.latitude])
+        .addTo(map.current!);
+
+      markersRef.current.push(marker);
+    });
+  }, [alerts, activeFilter, hiddenAlerts, mapLoaded]);
+
+  // Add marker for selected location in create mode
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !selectedLocation) return;
+
+    const el = document.createElement("div");
+    el.className = "selected-location-marker";
+    el.innerHTML = `
+      <div style="
+        width: 40px;
+        height: 40px;
+        background-color: ${alertTypeColors[alertType]};
+        border-radius: 50%;
+        border: 4px solid white;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        animation: bounce 0.5s ease-out;
+      "></div>
+    `;
+
+    const marker = new mapboxgl.Marker(el)
+      .setLngLat([selectedLocation.lng, selectedLocation.lat])
+      .addTo(map.current);
+
+    return () => {
+      marker.remove();
+    };
+  }, [selectedLocation, alertType, mapLoaded]);
 
   const fetchAlerts = async () => {
     try {
@@ -214,7 +303,7 @@ const Map = () => {
       let photoUrl = null;
 
       if (imageFile) {
-        const fileExt = imageFile.name.split('.').pop();
+        const fileExt = imageFile.name.split(".").pop();
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
@@ -230,16 +319,14 @@ const Map = () => {
         photoUrl = publicUrl;
       }
 
-      const { error } = await supabase
-        .from("map_alerts")
-        .insert({
-          creator_id: user.id,
-          latitude: selectedLocation.lat,
-          longitude: selectedLocation.lng,
-          alert_type: alertType,
-          description: description.trim() || null,
-          photo_url: photoUrl,
-        });
+      const { error } = await supabase.from("map_alerts").insert({
+        creator_id: user.id,
+        latitude: selectedLocation.lat,
+        longitude: selectedLocation.lng,
+        alert_type: alertType,
+        description: description.trim() || null,
+        photo_url: photoUrl,
+      });
 
       if (error) throw error;
 
@@ -269,17 +356,13 @@ const Map = () => {
     }
 
     try {
-      // Add interaction
-      await supabase
-        .from("alert_interactions")
-        .insert({
-          alert_id: alertId,
-          user_id: user.id,
-          interaction_type: "support",
-        });
+      await supabase.from("alert_interactions").insert({
+        alert_id: alertId,
+        user_id: user.id,
+        interaction_type: "support",
+      });
 
-      // Update count
-      const alert = alerts.find(a => a.id === alertId);
+      const alert = alerts.find((a) => a.id === alertId);
       if (alert) {
         await supabase
           .from("map_alerts")
@@ -290,7 +373,7 @@ const Map = () => {
       toast.success("Thanks for your support!");
       fetchAlerts();
     } catch (error: any) {
-      if (error.code === '23505') {
+      if (error.code === "23505") {
         toast.info("You've already supported this alert");
       } else {
         toast.error("Failed to support alert");
@@ -305,17 +388,15 @@ const Map = () => {
     }
 
     try {
-      await supabase
-        .from("alert_interactions")
-        .insert({
-          alert_id: alertId,
-          user_id: user.id,
-          interaction_type: "report",
-        });
+      await supabase.from("alert_interactions").insert({
+        alert_id: alertId,
+        user_id: user.id,
+        interaction_type: "report",
+      });
 
       toast.success("Alert reported");
     } catch (error: any) {
-      if (error.code === '23505') {
+      if (error.code === "23505") {
         toast.info("You've already reported this alert");
       } else {
         toast.error("Failed to report alert");
@@ -324,22 +405,15 @@ const Map = () => {
   };
 
   const handleHide = (alertId: string) => {
-    setHiddenAlerts(prev => new Set([...prev, alertId]));
+    setHiddenAlerts((prev) => new Set([...prev, alertId]));
     setSelectedAlert(null);
     toast.success("Alert hidden");
   };
 
-  const handleBlockUser = (creatorId: string) => {
-    setBlockedUsers(prev => new Set([...prev, creatorId]));
+  const handleBlockUser = () => {
     setSelectedAlert(null);
     toast.success("You won't see posts from this user");
   };
-
-  const filteredAlerts = alerts.filter(alert => {
-    if (hiddenAlerts.has(alert.id)) return false;
-    if (activeFilter === "all") return true;
-    return alert.alert_type === activeFilter;
-  });
 
   const formatTimeAgo = (date: string) => {
     const now = new Date();
@@ -354,8 +428,10 @@ const Map = () => {
 
   return (
     <div className="h-screen bg-background flex flex-col pb-nav">
+      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      
       {/* Header */}
-      <header className="px-4 pt-6 pb-3 bg-card z-10 flex-shrink-0">
+      <header className="px-4 pt-4 pb-3 bg-card z-10 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -394,51 +470,15 @@ const Map = () => {
         </div>
       </div>
 
-      {/* Map Container - Fixed dimensions */}
+      {/* Map Container */}
       <div className="flex-1 relative min-h-0">
-        {loading ? (
+        {loading && !mapLoaded ? (
           <div className="absolute inset-0 flex items-center justify-center bg-muted">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
-        ) : (
-          <MapContainer
-            center={defaultCenter}
-            zoom={14}
-            className="h-full w-full"
-            zoomControl={false}
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            {isCreateOpen && (
-              <LocationSelector 
-                onLocationSelect={(lat, lng) => setSelectedLocation({ lat, lng })} 
-              />
-            )}
-            
-            {/* Selected location marker */}
-            {selectedLocation && (
-              <Marker 
-                position={[selectedLocation.lat, selectedLocation.lng]}
-                icon={createAlertIcon(alertType)}
-              />
-            )}
-            
-            {/* Alert markers with pulsing for Lost alerts */}
-            {filteredAlerts.map((alert) => (
-              <Marker
-                key={alert.id}
-                position={[alert.latitude, alert.longitude]}
-                icon={createAlertIcon(alert.alert_type, alert.alert_type === 'Lost')}
-                eventHandlers={{
-                  click: () => setSelectedAlert(alert),
-                }}
-              />
-            ))}
-          </MapContainer>
-        )}
+        ) : null}
+        
+        <div ref={mapContainer} className="h-full w-full" />
 
         {/* Create Alert Mode Overlay */}
         {isCreateOpen && (
@@ -484,7 +524,7 @@ const Map = () => {
                         : "bg-muted text-muted-foreground"
                     )}
                     style={{
-                      backgroundColor: alertType === type ? alertTypeColors[type] : undefined
+                      backgroundColor: alertType === type ? alertTypeColors[type] : undefined,
                     }}
                   >
                     {type}
@@ -660,7 +700,7 @@ const Map = () => {
                   Hide
                 </button>
                 <button
-                  onClick={() => selectedAlert.creator && handleBlockUser(selectedAlert.creator.display_name || "")}
+                  onClick={handleBlockUser}
                   className="flex-1 flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground hover:text-destructive"
                 >
                   <Ban className="w-4 h-4" />
@@ -673,6 +713,23 @@ const Map = () => {
       </AnimatePresence>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+
+      {/* Add CSS for marker animations */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        .mapboxgl-ctrl-bottom-left,
+        .mapboxgl-ctrl-bottom-right {
+          bottom: 80px !important;
+        }
+      `}</style>
     </div>
   );
 };

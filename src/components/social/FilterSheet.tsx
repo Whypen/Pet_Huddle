@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart } from "lucide-react";
+import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart, Bird, PawPrint } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SPECIES_LIST } from "@/lib/constants";
 
 interface FilterSheetProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface FilterSheetProps {
 
 export interface FilterState {
   role: "playdates" | "nannies" | "animal-lovers";
+  selectedRoles?: ("playdates" | "nannies" | "animal-lovers")[];
   species: string[];
   distance: number;
   ageRange: [number, number];
@@ -48,9 +50,22 @@ const roles = [
   { id: "animal-lovers", label: "Animal Lovers" },
 ] as const;
 
+// Species options from master list with icons
+const getSpeciesIcon = (species: string) => {
+  switch (species) {
+    case "Dog": return Dog;
+    case "Cat": return Cat;
+    case "Bird": return Bird;
+    default: return PawPrint;
+  }
+};
+
 const speciesOptions = [
-  { id: "dogs", label: "Dogs", icon: Dog },
-  { id: "cats", label: "Cats", icon: Cat },
+  ...SPECIES_LIST.filter(s => s !== "Others").map(s => ({
+    id: s.toLowerCase(),
+    label: s,
+    icon: getSpeciesIcon(s)
+  })),
   { id: "people", label: "People Only", icon: User },
 ];
 
@@ -127,24 +142,51 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   Basic Filters
                 </h3>
 
-                {/* Role Toggle */}
+                {/* Role Multi-Select (Checkboxes) */}
                 <div className="mb-5">
-                  <label className="text-sm font-medium mb-2 block">Looking for</label>
-                  <div className="flex bg-muted rounded-xl p-1">
-                    {roles.map((role) => (
-                      <button
-                        key={role.id}
-                        onClick={() => handleRoleChange(role.id)}
-                        className={cn(
-                          "flex-1 py-2.5 px-3 rounded-lg text-sm font-medium transition-all",
-                          localFilters.role === role.id
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {role.label}
-                      </button>
-                    ))}
+                  <label className="text-sm font-medium mb-3 block">Looking for</label>
+                  <div className="space-y-2">
+                    {roles.map((role) => {
+                      const isSelected = localFilters.selectedRoles?.includes(role.id) || localFilters.role === role.id;
+                      return (
+                        <button
+                          key={role.id}
+                          onClick={() => {
+                            setLocalFilters(prev => {
+                              const currentRoles = prev.selectedRoles || [prev.role];
+                              const newRoles = currentRoles.includes(role.id)
+                                ? currentRoles.filter(r => r !== role.id)
+                                : [...currentRoles, role.id];
+                              return { 
+                                ...prev, 
+                                selectedRoles: newRoles.length > 0 ? newRoles : [role.id],
+                                role: newRoles[0] as FilterState["role"]
+                              };
+                            });
+                          }}
+                          className={cn(
+                            "w-full flex items-center gap-3 p-3 rounded-xl border transition-all",
+                            isSelected
+                              ? "bg-accent/10 border-accent text-foreground"
+                              : "bg-card border-border text-muted-foreground hover:border-primary/30"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all",
+                            isSelected
+                              ? "bg-accent border-accent"
+                              : "border-muted-foreground/40"
+                          )}>
+                            {isSelected && (
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+                                <path d="M20.285 2l-11.285 11.567-5.286-5.011-3.714 3.716 9 8.728 15-15.285z"/>
+                              </svg>
+                            )}
+                          </div>
+                          <span className="font-medium">{role.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
