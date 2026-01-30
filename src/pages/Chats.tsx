@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Settings, Check, Plus, Users } from "lucide-react";
+import { Settings, Check, Users } from "lucide-react";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -68,6 +69,7 @@ const Chats = () => {
   const { profile } = useAuth();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("Nannies");
   
   const isVerified = profile?.is_verified;
@@ -85,7 +87,12 @@ const Chats = () => {
       toast.error("Only verified users can create groups");
       return;
     }
-    toast.success("Create group feature coming soon!");
+    setIsCreateGroupOpen(true);
+  };
+
+  const handleGroupCreated = (groupData: { name: string; members: any[]; allowMemberControl: boolean }) => {
+    console.log("Group created:", groupData);
+    // Here you would save to database
   };
 
   return (
@@ -214,6 +221,11 @@ const Chats = () => {
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <CreateGroupDialog 
+        isOpen={isCreateGroupOpen} 
+        onClose={() => setIsCreateGroupOpen(false)}
+        onCreateGroup={handleGroupCreated}
+      />
     </div>
   );
 };

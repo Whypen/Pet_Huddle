@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { SPECIES_LIST, BREED_OPTIONS, VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
 
 interface PetData {
   photoUrl: string;
@@ -37,40 +38,6 @@ interface PetSetupStepProps {
   onSkip: () => void;
 }
 
-const SPECIES_OPTIONS = ["Dog", "Cat", "Bird", "Exotic", "Others"];
-
-const DOG_BREEDS = [
-  "Labrador Retriever", "German Shepherd", "Golden Retriever", "French Bulldog",
-  "Bulldog", "Poodle", "Beagle", "Rottweiler", "Yorkshire Terrier", "Boxer",
-  "Dachshund", "Siberian Husky", "Corgi", "Shih Tzu", "Mixed Breed", "Other"
-];
-
-const CAT_BREEDS = [
-  "Persian", "Maine Coon", "Ragdoll", "British Shorthair", "Siamese",
-  "Bengal", "Abyssinian", "Scottish Fold", "Sphynx", "Russian Blue",
-  "Norwegian Forest", "Birman", "Mixed Breed", "Other"
-];
-
-const BIRD_BREEDS = [
-  "Parakeet", "Cockatiel", "Lovebird", "Finch", "Canary", "Parrot",
-  "Macaw", "Cockatoo", "Conure", "Other"
-];
-
-const EXOTIC_BREEDS = [
-  "Rabbit", "Hamster", "Guinea Pig", "Ferret", "Chinchilla", 
-  "Hedgehog", "Sugar Glider", "Turtle", "Snake", "Lizard", "Other"
-];
-
-const VACCINATION_OPTIONS = [
-  "Rabies", "Distemper", "Parvovirus", "Hepatitis", "Bordetella",
-  "Lyme Disease", "Feline Leukemia", "FVRCP", "Parainfluenza"
-];
-
-const TEMPERAMENT_OPTIONS = [
-  "Friendly", "Playful", "Calm", "Energetic", "Shy", "Protective",
-  "Curious", "Independent", "Affectionate", "Anxious", "Aggressive"
-];
-
 export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) => {
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -97,13 +64,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
   });
 
   const getBreedOptions = () => {
-    switch (formData.species) {
-      case "Dog": return DOG_BREEDS;
-      case "Cat": return CAT_BREEDS;
-      case "Bird": return BIRD_BREEDS;
-      case "Exotic": return EXOTIC_BREEDS;
-      default: return [];
-    }
+    return BREED_OPTIONS[formData.species] || [];
   };
 
   const calculateAge = (dob: string) => {
@@ -281,7 +242,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
               <SelectValue placeholder="Select species" />
             </SelectTrigger>
             <SelectContent>
-              {SPECIES_OPTIONS.map(option => (
+              {SPECIES_LIST.map(option => (
                 <SelectItem key={option} value={option}>{option}</SelectItem>
               ))}
             </SelectContent>

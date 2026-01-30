@@ -12,29 +12,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { SPECIES_LIST, VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
 
-// Aligned species list with User Setup
-const speciesOptions = [
-  { id: "dog", label: "Dog" },
-  { id: "cat", label: "Cat" },
-  { id: "bird", label: "Bird" },
-  { id: "rabbit", label: "Rabbit" },
-  { id: "reptile", label: "Reptile" },
-  { id: "hamster", label: "Hamster" },
-  { id: "others", label: "Others" },
-];
-
-const temperamentOptions = [
-  "Playful", "Calm", "Energetic", "Shy", "Friendly", "Protective", 
-  "Curious", "Independent", "Affectionate", "Anxious"
-];
+// Species options from master list
+const speciesOptions = SPECIES_LIST.map(s => ({ 
+  id: s.toLowerCase(), 
+  label: s 
+}));
 
 const genderOptions = ["Male", "Female", "Unknown"];
-
-const vaccinationOptions = [
-  "Rabies", "DHPP", "Bordetella", "Leptospirosis", "Lyme Disease",
-  "FVRCP", "FeLV", "Heartworm", "Parvo", "Distemper"
-];
 
 const EditPetProfile = () => {
   const navigate = useNavigate();
@@ -403,7 +389,7 @@ const EditPetProfile = () => {
                   className="flex-1 h-10 rounded-lg bg-card border border-border px-3 text-sm"
                 >
                   <option value="">Select vaccine...</option>
-                  {vaccinationOptions.map(v => (
+                  {VACCINATION_OPTIONS.map(v => (
                     <option key={v} value={v}>{v}</option>
                   ))}
                 </select>
@@ -437,7 +423,7 @@ const EditPetProfile = () => {
             <div>
               <label className="text-xs text-muted-foreground mb-2 block">Temperament</label>
               <div className="flex flex-wrap gap-2">
-                {temperamentOptions.map((temp) => (
+                {TEMPERAMENT_OPTIONS.map((temp) => (
                   <button
                     key={temp}
                     onClick={() => toggleTemperament(temp)}
