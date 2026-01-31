@@ -11,10 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 
 const genderOptions = ["Male", "Female", "Non-binary", "Prefer not to say"];
-const orientationOptions = ["Straight", "Gay", "Bisexual", "Trans", "Non-binary", "Prefer not to say"];
+const genreOptions = ["Straight", "Gay", "Bisexual", "Queer", "Prefer not to say"];
+const degreeOptions = ["High School", "Bachelor's", "Master's", "PhD", "Other"];
 const availabilityOptions = ["Pet Parents", "Pet Carer", "Animal Friend (no pet)"];
 
 const EditProfile = () => {
@@ -238,7 +240,7 @@ const EditProfile = () => {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {[...genderOptions, ...orientationOptions].map((option) => (
+              {[...genderOptions, ...genreOptions].map((option) => (
                 <button
                   key={option}
                   onClick={() => setFormData(prev => ({ ...prev, gender_genre: option }))}
