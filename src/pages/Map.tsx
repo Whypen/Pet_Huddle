@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Settings, 
@@ -10,7 +10,11 @@ import {
   EyeOff,
   Ban,
   Loader2,
-  Camera
+  Camera,
+  Phone,
+  Navigation,
+  Eye,
+  Hospital
 } from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -18,20 +22,27 @@ import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
+import { demoUsers, demoAlerts, DemoUser, DemoAlert } from "@/lib/demoData";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
 const alertTypeColors: Record<string, string> = {
-  Stray: "#3B82F6",
+  Stray: "#FBBF24",
   Lost: "#EF4444",
   Found: "#22C55E",
+  Others: "#6B7280",
+  stray: "#FBBF24",
+  lost: "#EF4444",
+  others: "#6B7280",
 };
 
 const MAX_ALERT_WORDS = 20;
@@ -52,15 +63,19 @@ interface MapAlert {
   } | null;
 }
 
-const filterChips = [
-  { id: "all", label: "All" },
-  { id: "Stray", label: "Stray" },
-  { id: "Lost", label: "Lost" },
-  { id: "Found", label: "Found" },
-];
+interface VetClinic {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  phone?: string;
+  openingHours?: string;
+  is24h: boolean;
+}
 
 const Map = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const { t } = useLanguage();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
@@ -69,6 +84,7 @@ const Map = () => {
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
   const [alerts, setAlerts] = useState<MapAlert[]>([]);
+  const [vetClinics, setVetClinics] = useState<VetClinic[]>([]);
   const [loading, setLoading] = useState(true);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -79,10 +95,66 @@ const Map = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<MapAlert | null>(null);
+  const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
+  const [isOnline, setIsOnline] = useState(true);
+  const [showConfirmRemove, setShowConfirmRemove] = useState<string | null>(null);
+  
+  const isPremium = profile?.user_role === 'premium';
+  const broadcastRange = isPremium ? 5 : 1;
 
   // Default center (Hong Kong)
-  const defaultCenter: [number, number] = [114.1583, 22.2828]; // [lng, lat] for Mapbox
+  const defaultCenter: [number, number] = [114.1583, 22.2828];
+
+  const filterChips = [
+    { id: "all", label: t("map.filter_all") },
+    { id: "Stray", label: t("map.filter_stray") },
+    { id: "Lost", label: t("map.filter_lost") },
+    { id: "Friends", label: t("map.filter_friends") },
+    { id: "Others", label: t("map.filter_others") },
+  ];
+
+  // Fetch HK Vet Clinics from Overpass API
+  const fetchVetClinics = useCallback(async () => {
+    try {
+      const query = `
+        [out:json][timeout:25];
+        (
+          node["amenity"="veterinary"](22.15,113.82,22.56,114.45);
+          way["amenity"="veterinary"](22.15,113.82,22.56,114.45);
+        );
+        out center;
+      `;
+      
+      const response = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        body: query,
+      });
+      
+      const data = await response.json();
+      
+      const clinics: VetClinic[] = data.elements.map((el: any) => ({
+        id: `vet-${el.id}`,
+        name: el.tags?.name || "Veterinary Clinic",
+        lat: el.lat || el.center?.lat,
+        lng: el.lon || el.center?.lon,
+        phone: el.tags?.phone || el.tags?.["contact:phone"],
+        openingHours: el.tags?.opening_hours,
+        is24h: el.tags?.opening_hours?.toLowerCase().includes("24") || false,
+      })).filter((c: VetClinic) => c.lat && c.lng);
+      
+      setVetClinics(clinics);
+    } catch (error) {
+      console.error("Error fetching vet clinics:", error);
+      // Fallback demo data
+      setVetClinics([
+        { id: "vet-1", name: "Hong Kong Veterinary Clinic", lat: 22.2855, lng: 114.1577, is24h: true },
+        { id: "vet-2", name: "Central Pet Hospital", lat: 22.2820, lng: 114.1588, is24h: false },
+        { id: "vet-3", name: "Wan Chai Animal Care", lat: 22.2770, lng: 114.1730, is24h: true },
+        { id: "vet-4", name: "Kowloon Vet Centre", lat: 22.3018, lng: 114.1695, is24h: false },
+      ]);
+    }
+  }, []);
 
   // Initialize map
   useEffect(() => {
@@ -97,7 +169,6 @@ const Map = () => {
 
     map.current.on("load", () => {
       setMapLoaded(true);
-      // Force resize after load
       setTimeout(() => {
         map.current?.resize();
       }, 200);
@@ -105,7 +176,6 @@ const Map = () => {
 
     map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
 
-    // Handle click for location selection
     map.current.on("click", (e) => {
       if (isCreateOpen) {
         setSelectedLocation({ lat: e.lngLat.lat, lng: e.lngLat.lng });
@@ -118,7 +188,7 @@ const Map = () => {
     };
   }, []);
 
-  // Handle resize when component dimensions change
+  // Handle resize
   useEffect(() => {
     const handleResize = () => {
       setTimeout(() => {
@@ -130,21 +200,10 @@ const Map = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Update click handler for create mode
+  // Fetch vet clinics on mount
   useEffect(() => {
-    if (!map.current) return;
-
-    const handleClick = (e: mapboxgl.MapMouseEvent) => {
-      if (isCreateOpen) {
-        setSelectedLocation({ lat: e.lngLat.lat, lng: e.lngLat.lng });
-      }
-    };
-
-    map.current.on("click", handleClick);
-    return () => {
-      map.current?.off("click", handleClick);
-    };
-  }, [isCreateOpen]);
+    fetchVetClinics();
+  }, [fetchVetClinics]);
 
   // Fetch alerts
   useEffect(() => {
@@ -152,17 +211,9 @@ const Map = () => {
     
     const channel = supabase
       .channel("map_alerts")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "map_alerts",
-        },
-        () => {
-          fetchAlerts();
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "map_alerts" }, () => {
+        fetchAlerts();
+      })
       .subscribe();
 
     return () => {
@@ -170,7 +221,7 @@ const Map = () => {
     };
   }, []);
 
-  // Update markers when alerts or filter changes
+  // Update markers
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -178,6 +229,106 @@ const Map = () => {
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
 
+    // Add vet clinic markers
+    if (activeFilter === "all") {
+      vetClinics.forEach((vet) => {
+        const el = document.createElement("div");
+        el.className = "vet-marker";
+        el.innerHTML = `
+          <div style="
+            width: 36px;
+            height: 36px;
+            background-color: #DC2626;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            position: relative;
+          ">
+            <span style="font-size: 18px;">🏥</span>
+            ${vet.is24h ? '<span style="position: absolute; top: -8px; right: -8px; background: #22C55E; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">24h</span>' : ''}
+          </div>
+        `;
+        el.addEventListener("click", () => setSelectedVet(vet));
+        
+        const marker = new mapboxgl.Marker(el)
+          .setLngLat([vet.lng, vet.lat])
+          .addTo(map.current!);
+        markersRef.current.push(marker);
+      });
+    }
+
+    // Add demo user markers (Friends filter)
+    if (activeFilter === "all" || activeFilter === "Friends") {
+      const onlineUsers = isOnline ? demoUsers.filter(u => u.isOnline) : [];
+      onlineUsers.forEach((user) => {
+        const el = document.createElement("div");
+        el.className = "user-marker";
+        el.innerHTML = `
+          <div style="
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            color: white;
+          ">
+            ${user.name.charAt(0)}
+          </div>
+        `;
+        
+        const marker = new mapboxgl.Marker(el)
+          .setLngLat([user.location.lng, user.location.lat])
+          .addTo(map.current!);
+        markersRef.current.push(marker);
+      });
+    }
+
+    // Add demo alert markers
+    const filteredDemoAlerts = demoAlerts.filter((alert) => {
+      if (activeFilter === "all") return true;
+      return alert.type.toLowerCase() === activeFilter.toLowerCase();
+    });
+
+    filteredDemoAlerts.forEach((alert) => {
+      const color = alertTypeColors[alert.type] || "#6B7280";
+      const el = document.createElement("div");
+      el.className = "demo-alert-marker";
+      el.innerHTML = `
+        <div style="
+          width: 36px;
+          height: 36px;
+          background-color: ${color};
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          ${alert.type === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
+        ">
+          <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
+        </div>
+      `;
+      
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([alert.location.lng, alert.location.lat])
+        .addTo(map.current!);
+      markersRef.current.push(marker);
+    });
+
+    // Add real alerts from database
     const filteredAlerts = alerts.filter((alert) => {
       if (hiddenAlerts.has(alert.id)) return false;
       if (activeFilter === "all") return true;
@@ -219,53 +370,16 @@ const Map = () => {
 
       markersRef.current.push(marker);
     });
-  }, [alerts, activeFilter, hiddenAlerts, mapLoaded]);
-
-  // Add marker for selected location in create mode
-  useEffect(() => {
-    if (!map.current || !mapLoaded || !selectedLocation) return;
-
-    const el = document.createElement("div");
-    el.className = "selected-location-marker";
-    el.innerHTML = `
-      <div style="
-        width: 40px;
-        height: 40px;
-        background-color: ${alertTypeColors[alertType]};
-        border-radius: 50%;
-        border: 4px solid white;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-        animation: bounce 0.5s ease-out;
-      "></div>
-    `;
-
-    const marker = new mapboxgl.Marker(el)
-      .setLngLat([selectedLocation.lng, selectedLocation.lat])
-      .addTo(map.current);
-
-    return () => {
-      marker.remove();
-    };
-  }, [selectedLocation, alertType, mapLoaded]);
+  }, [alerts, activeFilter, hiddenAlerts, mapLoaded, vetClinics, isOnline]);
 
   const fetchAlerts = async () => {
     try {
       const { data, error } = await supabase
         .from("map_alerts")
         .select(`
-          id,
-          latitude,
-          longitude,
-          alert_type,
-          description,
-          photo_url,
-          support_count,
-          report_count,
-          created_at,
-          creator:profiles!map_alerts_creator_id_fkey(
-            display_name,
-            avatar_url
-          )
+          id, latitude, longitude, alert_type, description, photo_url,
+          support_count, report_count, created_at,
+          creator:profiles!map_alerts_creator_id_fkey(display_name, avatar_url)
         `)
         .eq("is_active", true)
         .order("created_at", { ascending: false });
@@ -362,14 +476,6 @@ const Map = () => {
         interaction_type: "support",
       });
 
-      const alert = alerts.find((a) => a.id === alertId);
-      if (alert) {
-        await supabase
-          .from("map_alerts")
-          .update({ support_count: alert.support_count + 1 })
-          .eq("id", alertId);
-      }
-
       toast.success("Thanks for your support!");
       fetchAlerts();
     } catch (error: any) {
@@ -437,10 +543,17 @@ const Map = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Find dog parks, vets, or friends..."
+              placeholder={t("map.search")}
               className="w-full bg-muted rounded-full pl-12 pr-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
             />
           </div>
+          
+          {/* Go Online Toggle */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-full">
+            <Eye className={cn("w-4 h-4", isOnline ? "text-accent" : "text-muted-foreground")} />
+            <Switch checked={isOnline} onCheckedChange={setIsOnline} />
+          </div>
+          
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="p-2 rounded-full hover:bg-muted transition-colors"
@@ -501,19 +614,24 @@ const Map = () => {
         {/* Bottom Actions */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
           {!isCreateOpen ? (
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsCreateOpen(true)}
-              className="w-full bg-primary text-primary-foreground rounded-xl px-4 py-3 shadow-elevated flex items-center justify-center gap-2 font-semibold"
-            >
-              <AlertTriangle className="w-5 h-5" />
-              Broadcast Alert
-            </motion.button>
+            <div className="space-y-2">
+              <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5">
+                {t("map.broadcast_remark").replace("{distance}", String(broadcastRange))}
+              </p>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setIsCreateOpen(true)}
+                className="w-full bg-primary text-primary-foreground rounded-xl px-4 py-3 shadow-elevated flex items-center justify-center gap-2 font-semibold"
+              >
+                <AlertTriangle className="w-5 h-5" />
+                {t("map.broadcast")}
+              </motion.button>
+            </div>
           ) : selectedLocation ? (
             <div className="bg-card rounded-xl p-4 shadow-elevated space-y-4">
               {/* Alert Type */}
               <div className="flex gap-2">
-                {["Stray", "Lost", "Found"].map((type) => (
+                {["Stray", "Lost", "Others"].map((type) => (
                   <button
                     key={type}
                     onClick={() => setAlertType(type)}
@@ -532,7 +650,7 @@ const Map = () => {
                 ))}
               </div>
               
-              {/* Description with word limit */}
+              {/* Description */}
               <div className="space-y-1">
                 <Textarea
                   placeholder="Brief description (max 20 words)..."
@@ -549,25 +667,15 @@ const Map = () => {
                   <span>
                     {description.trim().split(/\s+/).filter(Boolean).length}/{MAX_ALERT_WORDS} words
                   </span>
-                  <span className="text-primary">
-                    📌 For more details, post on Notice Board
-                  </span>
                 </div>
               </div>
               
               {/* Image */}
               {imagePreview ? (
                 <div className="relative">
-                  <img 
-                    src={imagePreview} 
-                    alt="" 
-                    className="rounded-xl max-h-32 object-cover w-full" 
-                  />
+                  <img src={imagePreview} alt="" className="rounded-xl max-h-32 object-cover w-full" />
                   <button
-                    onClick={() => {
-                      setImageFile(null);
-                      setImagePreview(null);
-                    }}
+                    onClick={() => { setImageFile(null); setImagePreview(null); }}
                     className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 flex items-center justify-center"
                   >
                     <X className="w-4 h-4 text-white" />
@@ -577,12 +685,7 @@ const Map = () => {
                 <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
                   <Camera className="w-5 h-5" />
                   Add photo
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
+                  <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                 </label>
               )}
               
@@ -593,16 +696,73 @@ const Map = () => {
                 className="w-full h-12 rounded-xl"
                 style={{ backgroundColor: alertTypeColors[alertType] }}
               >
-                {creating ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  `Broadcast ${alertType} Alert`
-                )}
+                {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : `Broadcast ${alertType} Alert`}
               </Button>
             </div>
           ) : null}
         </div>
       </div>
+
+      {/* Vet Clinic Modal */}
+      <AnimatePresence>
+        {selectedVet && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2000] bg-black/50 flex items-end"
+            onClick={() => setSelectedVet(null)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-card rounded-t-3xl p-6"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <Hospital className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">{selectedVet.name}</h3>
+                  {selectedVet.is24h && (
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                      {t("map.24h")}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  onClick={() => {
+                    if (selectedVet.phone) {
+                      window.open(`tel:${selectedVet.phone}`);
+                    } else {
+                      toast.info("Phone number not available");
+                    }
+                  }}
+                  className="h-12 rounded-xl"
+                >
+                  <Phone className="w-5 h-5 mr-2" />
+                  {t("map.call_now")}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedVet.lat},${selectedVet.lng}`);
+                  }}
+                  className="h-12 rounded-xl"
+                >
+                  <Navigation className="w-5 h-5 mr-2" />
+                  {t("map.navigate")}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Alert Detail Modal */}
       <AnimatePresence>
@@ -639,11 +799,7 @@ const Map = () => {
               </div>
 
               {selectedAlert.photo_url && (
-                <img 
-                  src={selectedAlert.photo_url} 
-                  alt="" 
-                  className="w-full rounded-xl mb-4 max-h-48 object-cover" 
-                />
+                <img src={selectedAlert.photo_url} alt="" className="w-full rounded-xl mb-4 max-h-48 object-cover" />
               )}
 
               {selectedAlert.description && (
@@ -653,41 +809,24 @@ const Map = () => {
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
                   {selectedAlert.creator?.avatar_url ? (
-                    <img 
-                      src={selectedAlert.creator.avatar_url} 
-                      alt="" 
-                      className="w-full h-full rounded-full object-cover" 
-                    />
+                    <img src={selectedAlert.creator.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
                   ) : (
-                    <span className="text-xs font-semibold">
-                      {selectedAlert.creator?.display_name?.charAt(0) || "?"}
-                    </span>
+                    <span className="text-xs font-semibold">{selectedAlert.creator?.display_name?.charAt(0) || "?"}</span>
                   )}
                 </div>
-                <span className="text-sm font-medium">
-                  {selectedAlert.creator?.display_name || "Anonymous"}
-                </span>
-                <span className="text-sm text-muted-foreground ml-auto">
-                  {selectedAlert.support_count} supports
-                </span>
+                <span className="text-sm font-medium">{selectedAlert.creator?.display_name || "Anonymous"}</span>
+                <span className="text-sm text-muted-foreground ml-auto">{selectedAlert.support_count} supports</span>
               </div>
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-2 mb-4">
-                <Button
-                  onClick={() => handleSupport(selectedAlert.id)}
-                  className="h-12 rounded-xl bg-accent hover:bg-accent/90"
-                >
+                <Button onClick={() => handleSupport(selectedAlert.id)} className="h-12 rounded-xl bg-accent hover:bg-accent/90">
                   <ThumbsUp className="w-5 h-5 mr-2" />
-                  Support
+                  {t("social.support")}
                 </Button>
-                <Button
-                  onClick={() => handleReport(selectedAlert.id)}
-                  variant="outline"
-                  className="h-12 rounded-xl"
-                >
+                <Button onClick={() => handleReport(selectedAlert.id)} variant="outline" className="h-12 rounded-xl">
                   <Flag className="w-5 h-5 mr-2" />
-                  Report
+                  {t("social.report")}
                 </Button>
               </div>
 
@@ -697,7 +836,7 @@ const Map = () => {
                   className="flex-1 flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground hover:text-foreground"
                 >
                   <EyeOff className="w-4 h-4" />
-                  Hide
+                  {t("social.hide")}
                 </button>
                 <button
                   onClick={handleBlockUser}
@@ -715,15 +854,10 @@ const Map = () => {
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
 
-      {/* Add CSS for marker animations */}
       <style>{`
         @keyframes pulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.1); opacity: 0.8; }
-        }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
         }
         .mapboxgl-ctrl-bottom-left,
         .mapboxgl-ctrl-bottom-right {

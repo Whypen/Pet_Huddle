@@ -3,6 +3,7 @@ import { User, Crown, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 
 interface GlobalHeaderProps {
@@ -12,6 +13,7 @@ interface GlobalHeaderProps {
 export const GlobalHeader = ({ onUpgradeClick }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { t } = useLanguage();
   
   const isPremium = profile?.user_role === 'premium';
 
@@ -20,7 +22,7 @@ export const GlobalHeader = ({ onUpgradeClick }: GlobalHeaderProps) => {
       <div className="flex items-center justify-between px-4 py-3 max-w-md mx-auto">
         {/* User Icon & Status */}
         <button 
-          onClick={() => navigate('/edit-profile')}
+          onClick={() => navigate('/settings')}
           className="flex items-center gap-2"
         >
           <div className="relative">
@@ -48,29 +50,33 @@ export const GlobalHeader = ({ onUpgradeClick }: GlobalHeaderProps) => {
                 ? "bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800"
                 : "bg-muted text-muted-foreground"
             )}>
-              {isPremium ? "Premium" : "Free"}
+              {isPremium ? t("header.premium") : t("header.free")}
             </span>
           </div>
         </button>
 
-        {/* Centered Logo */}
-        <div className="absolute left-1/2 -translate-x-1/2">
+        {/* Centered Logo with Brand Name */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
           <img 
             src={huddleLogo} 
-            alt="Huddle" 
-            className="h-8 w-auto object-contain"
+            alt="huddle" 
+            className="h-8 w-8 object-contain rounded-lg"
           />
+          <div className="hidden sm:flex flex-col">
+            <span className="text-base font-bold lowercase leading-tight">huddle</span>
+            <span className="text-[10px] text-muted-foreground leading-tight">Pet care & social</span>
+          </div>
         </div>
 
         {/* Upgrade Button (only for free users) */}
         {!isPremium && (
           <motion.button
             whileTap={{ scale: 0.95 }}
-            onClick={onUpgradeClick}
+            onClick={onUpgradeClick || (() => navigate('/subscription'))}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-amber-900 text-xs font-semibold shadow-sm"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            Upgrade
+            {t("header.upgrade")}
           </motion.button>
         )}
 
