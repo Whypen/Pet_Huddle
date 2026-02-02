@@ -77,8 +77,8 @@
     --sidebar-ring: 207 60% 50%;
     
     /* Status Colors */
-    --success: 88 50% 53%;
-    --info: 207 60% 50%;
+    --success: 199 95% 74%; /* Huddle Blue #7DD3FC */
+    --info: 199 95% 74%; /* Huddle Blue #7DD3FC */
   }
 
   .dark {
@@ -110,6 +110,8 @@
     --sidebar-accent: 220 15% 18%;
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 220 15% 25%;
+    --success: 199 95% 74%; /* Huddle Blue #7DD3FC */
+    --info: 199 95% 74%; /* Huddle Blue #7DD3FC */
   }
 }
 

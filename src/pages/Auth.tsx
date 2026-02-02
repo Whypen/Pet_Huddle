@@ -298,16 +298,16 @@ const Auth = () => {
               )}
               {!isLogin && !errors.password && password.length > 0 && (
                 <div className="mt-2 space-y-1 text-xs ml-1">
-                  <p className={password.length >= 8 ? "text-green-600" : "text-muted-foreground"}>
+                  <p className={password.length >= 8 ? "text-[#7DD3FC]" : "text-muted-foreground"}>
                     ✓ At least 8 characters
                   </p>
-                  <p className={/[A-Z]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                  <p className={/[A-Z]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
                     ✓ One uppercase letter
                   </p>
-                  <p className={/[0-9]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                  <p className={/[0-9]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
                     ✓ One number
                   </p>
-                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
                     ✓ One special character
                   </p>
                 </div>
