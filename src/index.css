@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* Huddle Pet App Design System */
+
+@layer base {
+  :root {
+    /* Warm Community Theme - Soft Creams, Slate Greys, Accent Gold */
+    
+    /* Core Palette */
+    --background: 40 30% 98%;
+    --foreground: 220 20% 20%;
+    
+    /* Primary - Warm Slate Blue */
+    --primary: 207 60% 50%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 207 40% 95%;
+    
+    /* Accent - Gold/Amber */
+    --accent: 88 50% 53%;
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 88 40% 92%;
+    
+    /* Warning/Gold Badge */
+    --warning: 45 93% 47%;
+    --warning-foreground: 0 0% 10%;
+    
+    /* Surface Colors - Soft Cream */
+    --card: 40 25% 99%;
+    --card-foreground: 220 20% 20%;
+    --card-elevated: 0 0% 100%;
+    
+    /* Muted/Secondary - Warm Grey */
+    --secondary: 40 10% 94%;
+    --secondary-foreground: 220 20% 25%;
+    --muted: 40 10% 94%;
+    --muted-foreground: 220 10% 50%;
+    
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 20%;
+    
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Borders & Input */
+    --border: 40 15% 88%;
+    --input: 40 10% 94%;
+    --ring: 207 60% 50%;
+    
+    /* Radius */
+    --radius: 1rem;
+    --radius-sm: 0.75rem;
+    --radius-lg: 1.25rem;
+    
+    /* Shadows */
+    --shadow-card: 0 2px 12px -2px hsl(220 20% 20% / 0.06);
+    --shadow-elevated: 0 8px 30px -4px hsl(220 20% 20% / 0.10);
+    --shadow-soft: 0 4px 20px -4px hsl(207 60% 50% / 0.15);
+    
+    /* Navigation */
+    --nav-height: 5rem;
+    --nav-background: 40 25% 99%;
+    
+    /* Sidebar */
+    --sidebar-background: 40 20% 97%;
+    --sidebar-foreground: 220 20% 20%;
+    --sidebar-primary: 207 60% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 40 15% 95%;
+    --sidebar-accent-foreground: 220 20% 20%;
+    --sidebar-border: 40 15% 88%;
+    --sidebar-ring: 207 60% 50%;
+    
+    /* Status Colors */
+    --success: 88 50% 53%;
+    --info: 207 60% 50%;
+  }
+
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 0 0% 95%;
+    --primary: 207 90% 61%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 207 50% 20%;
+    --accent: 88 50% 53%;
+    --accent-foreground: 0 0% 100%;
+    --accent-soft: 88 30% 20%;
+    --card: 220 20% 14%;
+    --card-foreground: 0 0% 95%;
+    --card-elevated: 220 20% 18%;
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 220 15% 20%;
+    --muted-foreground: 0 0% 60%;
+    --popover: 220 20% 14%;
+    --popover-foreground: 0 0% 95%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 25%;
+    --input: 220 15% 20%;
+    --ring: 207 90% 61%;
+    --nav-background: 220 20% 12%;
+    --sidebar-background: 220 20% 12%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-accent: 220 15% 18%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 220 15% 25%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  
+  /* Styled visible scrollbar */
+  .scrollbar-visible {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+  }
+  .scrollbar-visible::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-visible::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.3);
+    border-radius: 3px;
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.5);
+  }
+  
+  .safe-bottom {
+    padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  }
+  
+  .glass {
+    @apply bg-white/80 backdrop-blur-xl;
+  }
+  
+  .card-shadow {
+    box-shadow: var(--shadow-card);
+  }
+  
+  .elevated-shadow {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  /* Pulsing alert animation for map pins */
+  @keyframes pulse-alert {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.2);
+      opacity: 0.7;
+    }
+  }
+  
+  .animate-pulse-alert {
+    animation: pulse-alert 2s ease-in-out infinite;
+  }
+
+  /* Phone Input Styling */
+  .phone-input-auth .PhoneInputInput,
+  .phone-input-onboarding .PhoneInputInput {
+    @apply border-none outline-none h-12 rounded-xl px-3 py-2 bg-transparent;
+  }
+
+  .phone-input-auth,
+  .phone-input-onboarding {
+    @apply border rounded-xl px-3 bg-background;
+  }
+
+  .PhoneInputCountrySelect {
+    @apply mr-2;
+  }
+}
