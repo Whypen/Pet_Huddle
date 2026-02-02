@@ -56,12 +56,15 @@ const EditPetProfile = () => {
     microchip_id: "",
     temperament: [] as string[],
     vaccinations: [] as { name: string; date: string }[],
+    vaccination_dates: [] as string[],
+    next_vaccination_reminder: "",
     medications: [] as { name: string; dosage: string; frequency: string }[],
     is_active: true,
     is_public: true,
   });
 
   const [vaccinationInput, setVaccinationInput] = useState({ name: "", date: "" });
+  const [nextVaccinationReminder, setNextVaccinationReminder] = useState("");
   const [medicationInput, setMedicationInput] = useState({ name: "", dosage: "", frequency: "" });
 
   useEffect(() => {
@@ -100,10 +103,13 @@ const EditPetProfile = () => {
           microchip_id: data.microchip_id || "",
           temperament: data.temperament || [],
           vaccinations: Array.isArray(data.vaccinations) ? data.vaccinations : [],
+          vaccination_dates: data.vaccination_dates || [],
+          next_vaccination_reminder: data.next_vaccination_reminder || "",
           medications: Array.isArray(data.medications) ? data.medications : [],
           is_active: data.is_active ?? true,
           is_public: data.is_public ?? true,
         });
+        setNextVaccinationReminder(data.next_vaccination_reminder || "");
         if (data.photo_url) {
           setPhotoPreview(data.photo_url);
         }
@@ -227,6 +233,8 @@ const EditPetProfile = () => {
         microchip_id: formData.microchip_id || null,
         temperament: formData.temperament.length > 0 ? formData.temperament : null,
         vaccinations: formData.vaccinations.length > 0 ? formData.vaccinations : null,
+        vaccination_dates: formData.vaccination_dates.length > 0 ? formData.vaccination_dates : null,
+        next_vaccination_reminder: formData.next_vaccination_reminder || null,
         medications: formData.medications.length > 0 ? formData.medications : null,
         is_active: formData.is_active,
         is_public: formData.is_public,
@@ -358,37 +366,39 @@ const EditPetProfile = () => {
             />
           </div>
 
-          {/* Gender */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">Gender</label>
-            <div className="flex gap-2">
-              {genderOptions.map((gender) => (
-                <button
-                  key={gender}
-                  onClick={() => setFormData(prev => ({ ...prev, gender }))}
-                  className={cn(
-                    "flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                    formData.gender === gender
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  )}
-                >
-                  {gender}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Neutered/Spayed Toggle */}
-          <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+          {/* Gender & Neutered/Spayed */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="font-medium">Neutered/Spayed</label>
-              <p className="text-sm text-muted-foreground">Has your pet been neutered or spayed?</p>
+              <label className="text-sm font-medium mb-2 block">Gender</label>
+              <div className="flex gap-2">
+                {genderOptions.map((gender) => (
+                  <button
+                    key={gender}
+                    onClick={() => setFormData(prev => ({ ...prev, gender }))}
+                    className={cn(
+                      "flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all",
+                      formData.gender === gender
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    )}
+                  >
+                    {gender}
+                  </button>
+                ))}
+              </div>
             </div>
-            <Switch
-              checked={formData.neutered_spayed}
-              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
-            />
+
+            {/* Neutered/Spayed Toggle - Positioned next to Gender */}
+            <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+              <div>
+                <label className="font-medium text-sm">Neutered/Spayed</label>
+                <p className="text-xs text-muted-foreground">Fixed?</p>
+              </div>
+              <Switch
+                checked={formData.neutered_spayed}
+                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
+              />
+            </div>
           </div>
 
           {/* DOB */}
@@ -424,9 +434,10 @@ const EditPetProfile = () => {
             </div>
           </div>
 
-          {/* Vaccinations */}
+          {/* Vaccinations - MM/YYYY Format */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
             <h3 className="text-sm font-semibold">Vaccinations</h3>
+            <p className="text-xs text-muted-foreground">Enter vaccination dates in MM-YYYY format</p>
             {formData.vaccinations.map((vax, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -450,14 +461,26 @@ const EditPetProfile = () => {
                 ))}
               </select>
               <Input
-                type="date"
+                type="month"
                 value={vaccinationInput.date}
                 onChange={(e) => setVaccinationInput(prev => ({ ...prev, date: e.target.value }))}
-                className="h-10 rounded-lg w-32"
+                placeholder="MM-YYYY"
+                className="h-10 rounded-lg w-36"
               />
               <Button onClick={addVaccination} size="sm" variant="secondary">
                 <Plus className="w-4 h-4" />
               </Button>
+            </div>
+
+            {/* Next Vaccination Reminder */}
+            <div className="pt-3 border-t border-border">
+              <label className="text-xs font-medium mb-2 block">Next Vaccination Reminder</label>
+              <Input
+                type="date"
+                value={formData.next_vaccination_reminder}
+                onChange={(e) => setFormData(prev => ({ ...prev, next_vaccination_reminder: e.target.value }))}
+                className="h-10 rounded-lg"
+              />
             </div>
           </div>
 

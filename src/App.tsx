@@ -13,12 +13,14 @@ import { BottomNav } from "@/components/layout/BottomNav";
 import Index from "./pages/Index";
 import Social from "./pages/Social";
 import Chats from "./pages/Chats";
+import ChatDialogue from "./pages/ChatDialogue";
 import AIVet from "./pages/AIVet";
 import Map from "./pages/Map";
 import Auth from "./pages/Auth";
 import Onboarding from "./pages/Onboarding";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
+import PetDetails from "./pages/PetDetails";
 import Settings from "./pages/Settings";
 import Subscription from "./pages/Subscription";
 import NotFound from "./pages/NotFound";
@@ -93,6 +95,17 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/chat-dialogue"
+                    element={
+                      <ProtectedRoute>
+                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                          <ChatDialogue />
+                          <BottomNav />
+                        </div>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/ai-vet"
                     element={
                       <ProtectedRoute>
@@ -129,6 +142,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <EditPetProfile />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/pet-details"
+                    element={
+                      <ProtectedRoute>
+                        <PetDetails />
                       </ProtectedRoute>
                     }
                   />

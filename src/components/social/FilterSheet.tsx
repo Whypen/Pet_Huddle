@@ -17,9 +17,11 @@ export interface FilterState {
   selectedRoles?: ("playdates" | "nannies" | "animal-lovers")[];
   species: string[];
   distance: number;
+  seeFurther: boolean; // SPRINT 3: See Further toggle for extending max distance
   ageRange: [number, number];
   gender: string;
   petHeight: string;
+  languages: string[]; // SPRINT 3: Language filter
   // Premium filters (stored but not applied for free users)
   verifiedOnly: boolean;
   activeNow: boolean;
@@ -29,13 +31,16 @@ export interface FilterState {
   commonFriends: boolean;
 }
 
+// SPRINT 3: Default filters with 150km max distance, ±3 year age range
 export const defaultFilters: FilterState = {
   role: "playdates",
   species: [],
   distance: 50,
-  ageRange: [18, 65],
+  seeFurther: false, // Default to standard range
+  ageRange: [18, 65], // Will be dynamically set to user's age ±3 in component
   gender: "",
   petHeight: "",
+  languages: [],
   verifiedOnly: false,
   activeNow: false,
   temperamentMatch: false,
@@ -71,6 +76,12 @@ const speciesOptions = [
 
 const genderOptions = ["Any", "Male", "Female", "Non-binary"];
 const petHeightOptions = ["Any", "Small", "Medium", "Large", "Extra Large"];
+
+// SPRINT 3: Language filter options
+const languageOptions = [
+  "English", "Cantonese", "Mandarin", "Spanish", "French",
+  "Japanese", "Korean", "German", "Portuguese", "Italian"
+];
 
 export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick }: FilterSheetProps) => {
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
@@ -212,23 +223,36 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   </div>
                 </div>
 
-                {/* Distance Slider */}
+                {/* Distance Slider - SPRINT 3: 150km max, See Further toggle */}
                 <div className="mb-5">
                   <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-medium">Distance</label>
-                    <span className="text-sm font-semibold text-primary">{localFilters.distance} miles</span>
+                    <span className="text-sm font-semibold text-primary">{localFilters.distance} km</span>
                   </div>
                   <input
                     type="range"
                     min="1"
-                    max="999"
-                    value={localFilters.distance}
+                    max={localFilters.seeFurther ? "500" : "150"}
+                    value={localFilters.distance > 150 && !localFilters.seeFurther ? 150 : localFilters.distance}
                     onChange={(e) => setLocalFilters(prev => ({ ...prev, distance: parseInt(e.target.value) }))}
                     className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
                   />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>1 mi</span>
-                    <span>999 mi</span>
+                    <span>1 km</span>
+                    <span>{localFilters.seeFurther ? "500 km" : "150 km (max)"}</span>
+                  </div>
+                  {/* See Further Toggle */}
+                  <div className="mt-3 flex items-center justify-between p-3 rounded-xl bg-muted/50">
+                    <div>
+                      <label className="text-sm font-medium">See Further</label>
+                      <p className="text-xs text-muted-foreground">Extend search beyond 150km</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={localFilters.seeFurther}
+                      onChange={(e) => setLocalFilters(prev => ({ ...prev, seeFurther: e.target.checked }))}
+                      className="w-5 h-5 rounded accent-primary cursor-pointer"
+                    />
                   </div>
                 </div>
 
@@ -292,6 +316,37 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                           <option key={opt} value={opt === "Any" ? "" : opt}>{opt}</option>
                         ))}
                       </select>
+                    </div>
+
+                    {/* SPRINT 3: Language Filter */}
+                    <div className="col-span-2">
+                      <label className="text-xs text-muted-foreground mb-1 block">Languages</label>
+                      <div className="flex flex-wrap gap-2">
+                        {languageOptions.map((lang) => {
+                          const isSelected = localFilters.languages.includes(lang);
+                          return (
+                            <button
+                              key={lang}
+                              onClick={() => {
+                                setLocalFilters(prev => ({
+                                  ...prev,
+                                  languages: isSelected
+                                    ? prev.languages.filter(l => l !== lang)
+                                    : [...prev.languages, lang]
+                                }));
+                              }}
+                              className={cn(
+                                "px-3 py-1.5 rounded-full text-xs font-medium transition-all",
+                                isSelected
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                              )}
+                            >
+                              {lang}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -70,6 +70,11 @@ const Settings = () => {
   const [biometricStep, setBiometricStep] = useState(0);
   const [biometricLoading, setBiometricLoading] = useState(false);
 
+  // FINAL: ID Verification state
+  const [showIDUpload, setShowIDUpload] = useState(false);
+  const [idFile, setIDFile] = useState<File | null>(null);
+  const [idUploading, setIdUploading] = useState(false);
+
   // Toggle states
   const [biometric, setBiometric] = useState(false);
   const [twoFactor, setTwoFactor] = useState(false);
@@ -282,6 +287,31 @@ const Settings = () => {
               <div className="flex items-center gap-3">
                 <Lock className="w-5 h-5 text-muted-foreground" />
                 <span className="font-medium">{t("settings.password")}</span>
+              </div>
+              <ChevronRight className="w-5 h-5 text-muted-foreground" />
+            </button>
+
+            {/* FINAL: ID Verification Upload */}
+            <button
+              onClick={() => setShowIDUpload(true)}
+              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Shield className="w-5 h-5 text-muted-foreground" />
+                <div className="text-left">
+                  <span className="font-medium block">Identity Verification</span>
+                  {profile?.verification_status === 'pending' && (
+                    <span className="text-xs text-warning">Waiting for Approval</span>
+                  )}
+                  {profile?.verification_status === 'approved' && profile?.is_verified && (
+                    <span className="text-xs text-primary flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Verified
+                    </span>
+                  )}
+                  {(!profile?.verification_status || profile?.verification_status === 'not_submitted') && (
+                    <span className="text-xs text-muted-foreground">Upload ID/Passport</span>
+                  )}
+                </div>
               </div>
               <ChevronRight className="w-5 h-5 text-muted-foreground" />
             </button>
@@ -753,6 +783,120 @@ const Settings = () => {
                 <Button className="flex-1" onClick={handleBugSubmit}>
                   Submit
                 </Button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* FINAL: ID Upload Modal */}
+      <AnimatePresence>
+        {showIDUpload && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowIDUpload(false)}
+              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-4 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-card rounded-2xl p-6 z-50 flex flex-col gap-4"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Identity Verification</h3>
+                <button onClick={() => setShowIDUpload(false)} className="p-2 rounded-full hover:bg-muted">
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Upload a government-issued ID or passport to get the Gold Huddler badge. Our team will review and approve within 24-48 hours.
+                </p>
+
+                {profile?.verification_status === 'pending' && (
+                  <div className="p-4 rounded-xl bg-warning/10 border border-warning/20">
+                    <p className="text-sm text-warning font-medium">⏳ Waiting for Approval</p>
+                    <p className="text-xs text-muted-foreground mt-1">Your ID is under review</p>
+                  </div>
+                )}
+
+                {profile?.is_verified && (
+                  <div className="p-4 rounded-xl bg-primary/10 border border-primary/20">
+                    <p className="text-sm text-primary font-medium flex items-center gap-2">
+                      <Check className="w-4 h-4" /> Verified Huddler
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Your identity is verified</p>
+                  </div>
+                )}
+
+                {(!profile?.verification_status || profile?.verification_status === 'not_submitted' || profile?.verification_status === 'rejected') && (
+                  <>
+                    <label className="block cursor-pointer">
+                      <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors">
+                        <Shield className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
+                        <p className="text-sm font-medium mb-1">
+                          {idFile ? idFile.name : "Click to upload ID/Passport"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">PNG, JPG, PDF up to 10MB</p>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*,.pdf"
+                        onChange={(e) => setIDFile(e.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <Button
+                      onClick={async () => {
+                        if (!idFile || !user) return;
+                        setIdUploading(true);
+                        try {
+                          const fileExt = idFile.name.split('.').pop();
+                          const fileName = `${user.id}/id-${Date.now()}.${fileExt}`;
+
+                          const { error: uploadError } = await supabase.storage
+                            .from('verification')
+                            .upload(fileName, idFile);
+
+                          if (uploadError) throw uploadError;
+
+                          const { data: { publicUrl } } = supabase.storage
+                            .from('verification')
+                            .getPublicUrl(fileName);
+
+                          const { error: updateError } = await supabase
+                            .from('profiles')
+                            .update({
+                              verification_document_url: publicUrl,
+                              verification_status: 'pending'
+                            })
+                            .eq('id', user.id);
+
+                          if (updateError) throw updateError;
+
+                          await refreshProfile();
+                          toast.success("ID uploaded! Waiting for approval");
+                          setShowIDUpload(false);
+                          setIDFile(null);
+                        } catch (error: any) {
+                          toast.error(error.message || "Upload failed");
+                        } finally {
+                          setIdUploading(false);
+                        }
+                      }}
+                      disabled={!idFile || idUploading}
+                      className="w-full"
+                    >
+                      {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Upload & Submit"}
+                    </Button>
+                  </>
+                )}
               </div>
             </motion.div>
           </>

@@ -241,6 +241,12 @@ const Map = () => {
     // Add vet clinic markers
     if (activeFilter === "all") {
       vetClinics.forEach((vet) => {
+        // SPRINT 1: Null-check for lng/lat to prevent crash
+        if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) {
+          console.warn("Invalid vet coordinates:", vet);
+          return;
+        }
+
         const el = document.createElement("div");
         el.className = "vet-marker";
         el.innerHTML = `
@@ -262,7 +268,7 @@ const Map = () => {
           </div>
         `;
         el.addEventListener("click", () => setSelectedVet(vet));
-        
+
         const marker = new mapboxgl.Marker(el)
           .setLngLat([vet.lng, vet.lat])
           .addTo(map.current!);
@@ -274,6 +280,13 @@ const Map = () => {
     if (activeFilter === "all" || activeFilter === "Friends") {
       const onlineUsers = isOnline ? demoUsers.filter(u => u.isOnline) : [];
       onlineUsers.forEach((user) => {
+        // SPRINT 1: Null-check for user location coordinates
+        if (!user.location?.lng || !user.location?.lat ||
+            isNaN(user.location.lng) || isNaN(user.location.lat)) {
+          console.warn("Invalid user coordinates:", user);
+          return;
+        }
+
         const el = document.createElement("div");
         el.className = "user-marker";
         el.innerHTML = `
@@ -295,7 +308,7 @@ const Map = () => {
             ${user.name.charAt(0)}
           </div>
         `;
-        
+
         const marker = new mapboxgl.Marker(el)
           .setLngLat([user.location.lng, user.location.lat])
           .addTo(map.current!);
@@ -310,6 +323,13 @@ const Map = () => {
     });
 
     filteredDemoAlerts.forEach((alert) => {
+      // SPRINT 1: Null-check for alert location coordinates
+      if (!alert.location?.lng || !alert.location?.lat ||
+          isNaN(alert.location.lng) || isNaN(alert.location.lat)) {
+        console.warn("Invalid demo alert coordinates:", alert);
+        return;
+      }
+
       const color = alertTypeColors[alert.type] || "#6B7280";
       const el = document.createElement("div");
       el.className = "demo-alert-marker";
@@ -330,7 +350,7 @@ const Map = () => {
           <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
         </div>
       `;
-      
+
       const marker = new mapboxgl.Marker(el)
         .setLngLat([alert.location.lng, alert.location.lat])
         .addTo(map.current!);
@@ -345,6 +365,13 @@ const Map = () => {
     });
 
     filteredAlerts.forEach((alert) => {
+      // SPRINT 1: Critical null-check for database alert coordinates
+      if (!alert.longitude || !alert.latitude ||
+          isNaN(alert.longitude) || isNaN(alert.latitude)) {
+        console.warn("Invalid database alert coordinates:", alert);
+        return;
+      }
+
       const el = document.createElement("div");
       el.className = "custom-marker";
       el.innerHTML = `

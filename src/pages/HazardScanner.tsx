@@ -92,7 +92,9 @@ const HazardScanner = () => {
       if (cachedResult) {
         // CACHE HIT: Use cached result instead of calling GPT-4o-mini
         console.log("Cache hit! Saved API costs.");
-        toast.success("Found in cache - instant result!");
+        toast.success("🎯 Found in community cache - $0 cost!", {
+          description: `This ${cachedResult.object_identified} has been scanned ${cachedResult.hit_count || 1} time(s) before`
+        });
 
         const cachedScanResult: HazardResult = {
           object: cachedResult.object_identified,

@@ -20,7 +20,7 @@ const degreeOptions = ["College", "Associate Degree", "Bachelor", "Master", "Doc
 const relationshipOptions = ["Single", "In a relationship", "Open relationship", "Married", "Divorced", "PNA"];
 const petExperienceOptions = ["Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals", "Others"];
 const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French", "Japanese", "Korean", "German", "Portuguese", "Italian"];
-const availabilityOptions = ["Pet Parents", "Pet Carer", "Animal Friend (no pet)"];
+const availabilityOptions = ["Pet Parents", "Pet Nanny", "Animal Friend (no pet)"];
 
 const EditProfile = () => {
   const navigate = useNavigate();

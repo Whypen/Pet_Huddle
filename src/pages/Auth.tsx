@@ -14,7 +14,12 @@ import huddleLogo from "@/assets/huddle-logo.jpg";
 
 const emailSchema = z.string().email("Please enter a valid email address");
 const phoneSchema = z.string().regex(/^\+?[1-9]\d{7,14}$/, "Please enter a valid phone number");
-const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
+// SPRINT 1: Strict password validation - 8+ chars, 1 upper, 1 number, 1 special
+const passwordSchema = z.string()
+  .min(8, "Password must be at least 8 characters")
+  .regex(/[A-Z]/, "Password must contain at least 1 uppercase letter")
+  .regex(/[0-9]/, "Password must contain at least 1 number")
+  .regex(/[^A-Za-z0-9]/, "Password must contain at least 1 special character");
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -253,7 +258,7 @@ const Auth = () => {
               </div>
               <button
                 type="button"
-                onClick={() => setIdentifier(isEmail(identifier) ? '' : '@')}
+                onClick={() => setIdentifier('')}
                 className="text-xs text-primary mt-1 ml-1 hover:underline"
               >
                 {isEmail(identifier) ? 'Use phone number instead' : 'Use email instead'}
@@ -291,6 +296,22 @@ const Auth = () => {
               {errors.password && (
                 <p className="text-destructive text-xs mt-1 ml-1">{errors.password}</p>
               )}
+              {!isLogin && !errors.password && password.length > 0 && (
+                <div className="mt-2 space-y-1 text-xs ml-1">
+                  <p className={password.length >= 8 ? "text-green-600" : "text-muted-foreground"}>
+                    ✓ At least 8 characters
+                  </p>
+                  <p className={/[A-Z]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                    ✓ One uppercase letter
+                  </p>
+                  <p className={/[0-9]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                    ✓ One number
+                  </p>
+                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-green-600" : "text-muted-foreground"}>
+                    ✓ One special character
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Remember Me Checkbox - Login only */}
@@ -324,6 +345,41 @@ const Auth = () => {
               )}
             </Button>
           </form>
+
+          {/* SSO Placeholders - Sprint 1 */}
+          <div className="mt-6 space-y-3">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border"></div>
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled
+                className="h-12 rounded-xl relative"
+              >
+                <Lock className="w-4 h-4 mr-2" />
+                Apple
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">Soon</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled
+                className="h-12 rounded-xl relative"
+              >
+                <Lock className="w-4 h-4 mr-2" />
+                Google
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">Soon</span>
+              </Button>
+            </div>
+          </div>
 
           {isLogin && (
             <button className="w-full text-center text-sm text-primary mt-4 hover:underline">

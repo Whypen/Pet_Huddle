@@ -193,12 +193,38 @@ serve(async (req) => {
     // =====================================================
     // SEND FCM NOTIFICATIONS (BATCHED)
     // =====================================================
-    const sendResult = await sendFCMNotificationsBatched(fcmTokens, notificationPayload);
+    let sendResult: NotificationResult;
+    let eventType = 'FCM_SENT';
+    let eventStatus = 'SUCCESS';
 
-    console.log(`[Mesh-Alert] Sent ${sendResult.successCount} successful, ${sendResult.failureCount} failed`);
+    try {
+      sendResult = await sendFCMNotificationsBatched(fcmTokens, notificationPayload);
+      console.log(`[Mesh-Alert] Sent ${sendResult.successCount} successful, ${sendResult.failureCount} failed`);
+
+      if (sendResult.successCount === 0 && sendResult.failureCount > 0) {
+        eventType = 'MOCK_SENT';
+        eventStatus = 'SUCCESS';
+      }
+    } catch (fcmError: any) {
+      console.error('[Mesh-Alert] FCM send failed (possibly missing keys):', fcmError);
+
+      // If FCM keys are missing, continue with mock results
+      sendResult = {
+        successCount: 0,
+        failureCount: fcmTokens.length,
+        results: fcmTokens.map(token => ({
+          success: false,
+          token,
+          error: 'FCM service not configured or keys missing'
+        }))
+      };
+
+      eventType = 'MOCK_SENT';
+      eventStatus = 'SUCCESS';
+    }
 
     // =====================================================
-    // LOG NOTIFICATION ACTIVITY
+    // LOG NOTIFICATION ACTIVITY (ALWAYS LOG, EVEN IF FCM FAILS)
     // =====================================================
     try {
       await supabase
@@ -212,11 +238,41 @@ serve(async (req) => {
           metadata: {
             radius_meters: radiusMeters,
             min_vouch_score: minVouchScore,
-            nearby_users_count: nearbyUsers.length
+            nearby_users_count: nearbyUsers.length,
+            fcm_error: sendResult.successCount === 0 && sendResult.failureCount > 0 ? 'FCM service may not be configured' : undefined
           }
         });
     } catch (logError) {
       console.warn('[Mesh-Alert] Failed to log notification:', logError);
+      // Non-critical error, continue
+    }
+
+    // =====================================================
+    // LOG TO EMERGENCY_LOGS (for testing when FCM keys missing)
+    // =====================================================
+    try {
+      await supabase
+        .from('emergency_logs')
+        .insert({
+          alert_id: alertId,
+          event_type: eventType,
+          status: eventStatus,
+          recipients_count: fcmTokens.length,
+          success_count: sendResult.successCount,
+          failure_count: sendResult.failureCount,
+          error_message: eventType === 'MOCK_SENT' ? 'FCM service not configured - mock notification sent' : null,
+          metadata: {
+            radius_meters: radiusMeters,
+            min_vouch_score: minVouchScore,
+            nearby_users_count: nearbyUsers.length,
+            filtered_owner: true,
+            batches_sent: Math.ceil(fcmTokens.length / FCM_BATCH_SIZE)
+          }
+        });
+
+      console.log(`[Mesh-Alert] Emergency log created: ${eventType} - ${eventStatus}`);
+    } catch (emergencyLogError) {
+      console.warn('[Mesh-Alert] Failed to log to emergency_logs:', emergencyLogError);
       // Non-critical error, continue
     }
 

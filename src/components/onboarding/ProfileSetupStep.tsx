@@ -10,30 +10,40 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface ProfileData {
   avatarUrl: string;
   displayName: string;
+  phone: string;
   bio: string;
   genderGenre: string;
+  orientation: string;
   dob: string;
   locationName: string;
   petExperience: string[];
   experienceYears: number;
   height: number | null;
+  weight: number | null;
+  weightUnit: string;
   degree: string;
   school: string;
   major: string;
+  occupation: string;
   affiliation: string;
+  relationshipStatus: string;
   ownsPets: boolean;
   socialAvailability: boolean;
   availabilityStatus: string[];
   hasCar: boolean;
   languages: string[];
   showGender: boolean;
+  showOrientation: boolean;
   showAge: boolean;
   showHeight: boolean;
+  showWeight: boolean;
   showAcademic: boolean;
+  showOccupation: boolean;
   showAffiliation: boolean;
   showBio: boolean;
 }
@@ -45,13 +55,19 @@ interface ProfileSetupStepProps {
 }
 
 const GENDER_OPTIONS = [
-  "Male", "Female", "Non-binary", "Trans Male", "Trans Female", 
-  "Genderqueer", "Genderfluid", "Prefer not to say"
+  "Male", "Female", "Non-binary", "PNA"
 ];
 
-const GENRE_OPTIONS = [
-  "Straight", "Gay", "Lesbian", "Bisexual", "Pansexual", 
-  "Asexual", "Queer", "Prefer not to say"
+const ORIENTATION_OPTIONS = [
+  "Straight", "Gay/Lesbian", "Bisexual", "Queer", "PNA"
+];
+
+const DEGREE_OPTIONS = [
+  "College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD", "PNA"
+];
+
+const RELATIONSHIP_OPTIONS = [
+  "Single", "In a relationship", "Open relationship", "Married", "Divorced", "PNA"
 ];
 
 const PET_EXPERIENCE_OPTIONS = [
@@ -77,27 +93,36 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
   const [formData, setFormData] = useState<ProfileData>({
     avatarUrl: initialData?.avatarUrl || "",
     displayName: initialData?.displayName || "",
+    phone: initialData?.phone || "",
     bio: initialData?.bio || "",
     genderGenre: initialData?.genderGenre || "",
+    orientation: initialData?.orientation || "",
     dob: initialData?.dob || "",
     locationName: initialData?.locationName || "",
     petExperience: initialData?.petExperience || [],
     experienceYears: initialData?.experienceYears || 0,
     height: initialData?.height || null,
+    weight: initialData?.weight || null,
+    weightUnit: initialData?.weightUnit || "kg",
     degree: initialData?.degree || "",
     school: initialData?.school || "",
     major: initialData?.major || "",
+    occupation: initialData?.occupation || "",
     affiliation: initialData?.affiliation || "",
+    relationshipStatus: initialData?.relationshipStatus || "",
     ownsPets: initialData?.ownsPets || false,
     socialAvailability: initialData?.socialAvailability || false,
     availabilityStatus: initialData?.availabilityStatus || [],
     hasCar: initialData?.hasCar || false,
     languages: initialData?.languages || ["English"],
     showGender: initialData?.showGender ?? true,
+    showOrientation: initialData?.showOrientation ?? true,
     showAge: initialData?.showAge ?? true,
-    showHeight: initialData?.showHeight ?? true,
-    showAcademic: initialData?.showAcademic ?? true,
-    showAffiliation: initialData?.showAffiliation ?? true,
+    showHeight: initialData?.showHeight ?? false,
+    showWeight: initialData?.showWeight ?? false,
+    showAcademic: initialData?.showAcademic ?? false,
+    showOccupation: initialData?.showOccupation ?? false,
+    showAffiliation: initialData?.showAffiliation ?? false,
     showBio: initialData?.showBio ?? true,
   });
 
@@ -169,9 +194,40 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     });
   };
 
+  // SPRINT 2: Comprehensive mandatory field validation
+  const isMandatoryFieldsValid = () => {
+    return (
+      formData.displayName.trim().length > 0 &&
+      formData.dob.length > 0 &&
+      formData.locationName.trim().length > 0 &&
+      formData.socialAvailability === true &&
+      formData.availabilityStatus.length > 0
+    );
+  };
+
   const handleSubmit = async () => {
     if (!formData.displayName.trim()) {
       toast.error("Please enter a display name");
+      return;
+    }
+
+    if (!formData.dob) {
+      toast.error("Please enter your date of birth");
+      return;
+    }
+
+    if (!formData.locationName.trim()) {
+      toast.error("Please enter your location");
+      return;
+    }
+
+    if (!formData.socialAvailability) {
+      toast.error("Please enable social availability");
+      return;
+    }
+
+    if (formData.availabilityStatus.length === 0) {
+      toast.error("Please select at least one availability status");
       return;
     }
 
@@ -258,14 +314,25 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         </label>
       </div>
 
-      {/* Display Name & Bio */}
+      {/* Display Name, Phone & Bio */}
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label>Display Name *</Label>
+          <Label><span className="text-destructive">*</span> Display Name</Label>
           <Input
             value={formData.displayName}
             onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
             placeholder="How should others call you?"
+            className="h-12 rounded-xl"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Phone (Optional)</Label>
+          <Input
+            type="tel"
+            value={formData.phone}
+            onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+            placeholder="+1 234 567 8900"
             className="h-12 rounded-xl"
           />
         </div>
@@ -289,63 +356,71 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         </div>
       </div>
 
-      {/* Gender & Genre */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <Label>Gender & Orientation</Label>
-          <PrivacyToggle
-            label="Gender"
-            checked={formData.showGender}
-            onChange={(checked) => setFormData(prev => ({ ...prev, showGender: checked }))}
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Select
-            value={formData.genderGenre.split(" / ")[0] || ""}
-            onValueChange={(value) => {
-              const genre = formData.genderGenre.split(" / ")[1] || "";
-              setFormData(prev => ({ 
-                ...prev, 
-                genderGenre: genre ? `${value} / ${genre}` : value 
-              }));
-            }}
-          >
-            <SelectTrigger className="h-12 rounded-xl">
-              <SelectValue placeholder="Gender" />
-            </SelectTrigger>
-            <SelectContent>
-              {GENDER_OPTIONS.map(option => (
-                <SelectItem key={option} value={option}>{option}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {/* Demographics Section */}
+      <div className="space-y-4 pt-2 border-t border-border">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Demographics</h3>
 
-          <Select
-            value={formData.genderGenre.split(" / ")[1] || ""}
-            onValueChange={(value) => {
-              const gender = formData.genderGenre.split(" / ")[0] || "";
-              setFormData(prev => ({ 
-                ...prev, 
-                genderGenre: gender ? `${gender} / ${value}` : value 
-              }));
-            }}
-          >
-            <SelectTrigger className="h-12 rounded-xl">
-              <SelectValue placeholder="Orientation" />
-            </SelectTrigger>
-            <SelectContent>
-              {GENRE_OPTIONS.map(option => (
-                <SelectItem key={option} value={option}>{option}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Gender */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label>Gender</Label>
+            <PrivacyToggle
+              label="Gender"
+              checked={formData.showGender}
+              onChange={(checked) => setFormData(prev => ({ ...prev, showGender: checked }))}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {GENDER_OPTIONS.map((option) => (
+              <button
+                key={option}
+                onClick={() => setFormData(prev => ({ ...prev, genderGenre: option }))}
+                className={cn(
+                  "px-3 py-2 rounded-full text-sm font-medium transition-all",
+                  formData.genderGenre === option
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Sexual Orientation */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label>Sexual Orientation</Label>
+            <PrivacyToggle
+              label="Orientation"
+              checked={formData.showOrientation}
+              onChange={(checked) => setFormData(prev => ({ ...prev, showOrientation: checked }))}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {ORIENTATION_OPTIONS.map((option) => (
+              <button
+                key={option}
+                onClick={() => setFormData(prev => ({ ...prev, orientation: option }))}
+                className={cn(
+                  "px-3 py-2 rounded-full text-sm font-medium transition-all",
+                  formData.orientation === option
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Date of Birth */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label>Date of Birth</Label>
+          <Label><span className="text-destructive">*</span> Date of Birth</Label>
           <PrivacyToggle
             label="Age"
             checked={formData.showAge}
@@ -364,7 +439,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       <div className="space-y-2">
         <Label className="flex items-center gap-2">
           <MapPin className="w-4 h-4" />
-          Location
+          <span className="text-destructive">*</span> Location
         </Label>
         <div className="relative">
           <Input
@@ -475,6 +550,51 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           />
         </div>
 
+        {/* Weight */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Weight</Label>
+            <PrivacyToggle
+              label="Weight"
+              checked={formData.showWeight}
+              onChange={(checked) => setFormData(prev => ({ ...prev, showWeight: checked }))}
+            />
+          </div>
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              min="0"
+              value={formData.weight || ""}
+              onChange={(e) => setFormData(prev => ({ ...prev, weight: parseInt(e.target.value) || null }))}
+              placeholder="0"
+              className="h-12 rounded-xl flex-1"
+            />
+            <select
+              value={formData.weightUnit}
+              onChange={(e) => setFormData(prev => ({ ...prev, weightUnit: e.target.value }))}
+              className="h-12 rounded-xl bg-muted border border-border px-3"
+            >
+              <option value="kg">kg</option>
+              <option value="lbs">lbs</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Relationship Status */}
+        <div className="space-y-2">
+          <Label>Relationship Status</Label>
+          <select
+            value={formData.relationshipStatus}
+            onChange={(e) => setFormData(prev => ({ ...prev, relationshipStatus: e.target.value }))}
+            className="w-full h-12 rounded-xl bg-muted border border-border px-3"
+          >
+            <option value="">Select...</option>
+            {RELATIONSHIP_OPTIONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+
         {/* Academic */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -485,12 +605,16 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               onChange={(checked) => setFormData(prev => ({ ...prev, showAcademic: checked }))}
             />
           </div>
-          <Input
+          <select
             value={formData.degree}
             onChange={(e) => setFormData(prev => ({ ...prev, degree: e.target.value }))}
-            placeholder="Highest Degree (e.g., Bachelor's, Master's)"
-            className="h-11 rounded-xl"
-          />
+            className="w-full h-11 rounded-xl bg-muted border border-border px-3 text-sm"
+          >
+            <option value="">Select degree...</option>
+            {DEGREE_OPTIONS.map(d => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
           <div className="grid grid-cols-2 gap-2">
             <Input
               value={formData.school}
@@ -505,6 +629,24 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               className="h-11 rounded-xl"
             />
           </div>
+        </div>
+
+        {/* Occupation */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Occupation</Label>
+            <PrivacyToggle
+              label="Occupation"
+              checked={formData.showOccupation}
+              onChange={(checked) => setFormData(prev => ({ ...prev, showOccupation: checked }))}
+            />
+          </div>
+          <Input
+            value={formData.occupation}
+            onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))}
+            placeholder="Job title / Occupation"
+            className="h-11 rounded-xl"
+          />
         </div>
 
         {/* Affiliation */}
@@ -542,7 +684,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <div className="space-y-3 p-4 rounded-xl bg-muted/50">
           <div className="flex items-center justify-between">
             <div>
-              <Label>Social Availability</Label>
+              <Label><span className="text-destructive">*</span> Social Availability</Label>
               <p className="text-xs text-muted-foreground">Are you open to connecting?</p>
             </div>
             <Switch
@@ -550,14 +692,14 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               onCheckedChange={(checked) => setFormData(prev => ({ ...prev, socialAvailability: checked }))}
             />
           </div>
-          
+
           {formData.socialAvailability && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               className="pt-3 space-y-2"
             >
-              <Label className="text-sm">I identify as:</Label>
+              <Label className="text-sm"><span className="text-destructive">*</span> I identify as:</Label>
               <div className="flex flex-wrap gap-2">
                 {AVAILABILITY_STATUS_OPTIONS.map(status => (
                   <Badge
@@ -578,7 +720,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       {/* Continue Button */}
       <Button
         onClick={handleSubmit}
-        disabled={loading || !formData.displayName.trim()}
+        disabled={loading || !isMandatoryFieldsValid()}
         className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90"
       >
         {loading ? (

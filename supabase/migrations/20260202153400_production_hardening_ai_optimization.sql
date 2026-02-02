@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS triage_cache (
 
 -- Indexes for fast lookups
 CREATE INDEX idx_triage_cache_hash ON triage_cache(image_hash);
-CREATE INDEX idx_triage_cache_expiry ON triage_cache(expires_at) WHERE expires_at > NOW();
+CREATE INDEX idx_triage_cache_expiry ON triage_cache(expires_at);
 
 -- Enable RLS
 ALTER TABLE triage_cache ENABLE ROW LEVEL SECURITY;

@@ -30,26 +30,49 @@ const quickActions = [
   { icon: MessageCircle, label: "Chat", path: "/chats", color: "bg-accent" },
 ];
 
+// SPRINT 2: Species-specific huddle Wisdom tips
 const wisdomTips: Record<string, string[]> = {
-  dog: [
+  Dog: [
     "Dogs need 1-2 hours of exercise daily. Consider adding an extra evening walk!",
     "Regular brushing helps reduce shedding and keeps your dog's coat healthy.",
     "Mental stimulation is just as important as physical exercise for dogs.",
+    "Dental health matters! Brush your dog's teeth 2-3 times per week to prevent disease.",
   ],
-  cat: [
+  Cat: [
     "Cats need fresh water daily. Consider a cat fountain to encourage hydration.",
     "Provide scratching posts to keep your cat's claws healthy and save your furniture.",
     "Cats are crepuscular - most active at dawn and dusk. Plan playtime accordingly!",
+    "Regular vet checkups are crucial - cats hide illness well until it's serious.",
   ],
-  bird: [
+  Bird: [
     "Birds need 10-12 hours of sleep. Cover their cage at night for quality rest.",
     "Fresh fruits and vegetables should be part of your bird's daily diet.",
     "Birds are social creatures and need daily interaction and mental stimulation.",
+    "Rotate toys weekly to prevent boredom and encourage natural foraging behaviors.",
   ],
-  exotic: [
-    "Research your exotic pet's specific habitat needs for optimal health.",
-    "Exotic pets often have unique dietary requirements - consult a specialist vet.",
-    "Temperature and humidity control is crucial for most exotic pets.",
+  Rabbit: [
+    "Rabbits need unlimited hay for healthy digestion and dental wear.",
+    "Provide a safe space for your rabbit to run and binky - they need daily exercise!",
+    "Regular grooming prevents hairballs, especially during shedding season.",
+    "Rabbits are social - consider bonding with another rabbit for companionship.",
+  ],
+  Reptile: [
+    "UV lighting and proper temperatures are crucial for reptile health.",
+    "Research your reptile's specific humidity needs - it varies greatly by species.",
+    "Calcium and vitamin D3 supplements prevent metabolic bone disease.",
+    "Regular fecal checks help detect parasites common in captive reptiles.",
+  ],
+  Hamster: [
+    "Hamsters are nocturnal - expect nighttime wheel running and activity!",
+    "Provide a large cage (450+ sq inches) with deep bedding for burrowing.",
+    "Fresh vegetables in small amounts make great healthy treats.",
+    "Syrian hamsters must live alone, but dwarf species can sometimes cohabitate.",
+  ],
+  Others: [
+    "Research your pet's specific care needs - every species is unique!",
+    "Find a veterinarian experienced with your type of pet.",
+    "Join online communities to learn from other owners' experiences.",
+    "Proper diet and habitat setup are the foundation of exotic pet care.",
   ],
 };
 
@@ -99,8 +122,10 @@ const Index = () => {
     return years;
   };
 
+  // SPRINT 2: Case-insensitive species matching for wisdom tips
   const getRandomTip = (species: string) => {
-    const tips = wisdomTips[species] || wisdomTips.dog;
+    const normalizedSpecies = species.charAt(0).toUpperCase() + species.slice(1).toLowerCase();
+    const tips = wisdomTips[normalizedSpecies] || wisdomTips.Others || wisdomTips.Dog;
     return tips[Math.floor(Math.random() * tips.length)];
   };
 
@@ -159,7 +184,10 @@ const Index = () => {
               {pets.map((pet) => (
                 <motion.button
                   key={pet.id}
-                  onClick={() => setSelectedPet(pet)}
+                  onClick={() => {
+                    // SPRINT 3: Clicking pet icon navigates to Edit Pet
+                    navigate(`/edit-pet-profile?id=${pet.id}`);
+                  }}
                   whileTap={{ scale: 0.95 }}
                   className="relative flex-shrink-0 p-1" // Added padding to prevent border clipping
                 >
@@ -196,17 +224,18 @@ const Index = () => {
             </div>
           </section>
 
-          {/* Selected Pet Card - Clickable name */}
+          {/* Selected Pet Card - SPRINT 3: Card navigates to Expanded Info */}
           {selectedPet && (
             <section className="px-5 py-3">
-              <motion.div 
+              <motion.div
                 layout
-                className="relative rounded-2xl overflow-hidden shadow-card"
+                onClick={() => navigate(`/pet-details?id=${selectedPet.id}`)}
+                className="relative rounded-2xl overflow-hidden shadow-card cursor-pointer hover:shadow-lg transition-shadow"
               >
                 <div className="absolute inset-0">
                   {selectedPet.photo_url ? (
-                    <img 
-                      src={selectedPet.photo_url} 
+                    <img
+                      src={selectedPet.photo_url}
                       alt={selectedPet.name}
                       className="w-full h-full object-cover"
                     />
@@ -221,15 +250,12 @@ const Index = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                   >
-                    <button 
-                      onClick={() => navigate(`/edit-pet-profile?id=${selectedPet.id}`)}
-                      className="text-left"
-                    >
-                      <h2 className="text-2xl font-bold text-primary-foreground hover:underline">
+                    <div className="text-left">
+                      <h2 className="text-2xl font-bold text-primary-foreground">
                         {selectedPet.name}
                         {selectedPet.dob && `, ${calculateAge(selectedPet.dob)} Years Old`}
                       </h2>
-                    </button>
+                    </div>
                     <div className="flex gap-4 mt-2 text-primary-foreground/80 text-sm flex-wrap">
                       {selectedPet.weight && (
                         <>
@@ -257,10 +283,10 @@ const Index = () => {
             </section>
           )}
 
-          {/* Huddle Wisdom */}
+          {/* huddle Wisdom */}
           {selectedPet && (
             <section className="px-5 py-4">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-5 shadow-card"
@@ -270,7 +296,7 @@ const Index = () => {
                     <Lightbulb className="w-5 h-5 text-primary-foreground" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-primary-foreground mb-1">Huddle Wisdom</h4>
+                    <h4 className="font-semibold text-primary-foreground mb-1">huddle Wisdom</h4>
                     <p className="text-sm text-primary-foreground/90">
                       {getRandomTip(selectedPet.species)}
                     </p>

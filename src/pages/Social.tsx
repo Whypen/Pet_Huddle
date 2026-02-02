@@ -23,7 +23,25 @@ const Social = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [filters, setFilters] = useState<FilterState>(defaultFilters);
+
+  // SPRINT 3: Initialize age filter to ±3 years from user's age
+  const getUserAge = () => {
+    if (!profile?.dob) return 25; // Default age if not set
+    const birthDate = new Date(profile.dob);
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  const userAge = getUserAge();
+  const [filters, setFilters] = useState<FilterState>({
+    ...defaultFilters,
+    ageRange: [Math.max(18, userAge - 3), Math.min(99, userAge + 3)]
+  });
   const [cardPosition, setCardPosition] = useState({ x: 0, y: 0, rotate: 0 });
   const [showCard, setShowCard] = useState(true);
 

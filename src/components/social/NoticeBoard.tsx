@@ -77,6 +77,8 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [isExpanded, setIsExpanded] = useState(true);
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+  // SPRINT 3: Track liked notices for green (#22c55e) button state
+  const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchNotices();
@@ -177,8 +179,19 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     }
   };
 
+  // SPRINT 3: Toggle like with green (#22c55e) state
   const handleSupport = (noticeId: string) => {
-    toast.success("Thanks for your support!");
+    setLikedNotices(prev => {
+      const newLiked = new Set(prev);
+      if (newLiked.has(noticeId)) {
+        newLiked.delete(noticeId);
+        toast.success("Support removed");
+      } else {
+        newLiked.add(noticeId);
+        toast.success("Thanks for your support!");
+      }
+      return newLiked;
+    });
   };
 
   const handleReport = (noticeId: string) => {
@@ -331,10 +344,20 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleSupport(notice.id)}
-                              className="p-1.5 rounded-full hover:bg-muted transition-colors"
+                              className={cn(
+                                "p-1.5 rounded-full transition-all",
+                                likedNotices.has(notice.id)
+                                  ? "bg-primary/10"
+                                  : "hover:bg-muted"
+                              )}
                               title="Support"
                             >
-                              <ThumbsUp className="w-4 h-4 text-muted-foreground" />
+                              <ThumbsUp className={cn(
+                                "w-4 h-4 transition-colors",
+                                likedNotices.has(notice.id)
+                                  ? "text-primary fill-primary"
+                                  : "text-muted-foreground"
+                              )} />
                             </button>
                             
                             <DropdownMenu>

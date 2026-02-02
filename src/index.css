@@ -14,10 +14,10 @@
     --background: 40 30% 98%;
     --foreground: 220 20% 20%;
     
-    /* Primary - Warm Slate Blue */
-    --primary: 207 60% 50%;
+    /* Primary - huddle Green #22c55e (Brand Color) */
+    --primary: 142 71% 45%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 207 40% 95%;
+    --primary-soft: 142 40% 95%;
     
     /* Accent - Gold/Amber */
     --accent: 88 50% 53%;
@@ -84,9 +84,9 @@
   .dark {
     --background: 220 20% 10%;
     --foreground: 0 0% 95%;
-    --primary: 207 90% 61%;
+    --primary: 142 71% 45%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 207 50% 20%;
+    --primary-soft: 142 50% 20%;
     --accent: 88 50% 53%;
     --accent-foreground: 0 0% 100%;
     --accent-soft: 88 30% 20%;
