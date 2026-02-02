@@ -195,75 +195,7 @@ const Subscription = () => {
           </div>
         )}
 
-        {/* Plan Toggle - Only for non-premium */}
-        {!isPremium && (
-          <>
-            {/* Pricing Cards */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              {/* Monthly Card */}
-              <button
-                onClick={() => setSelectedPlan("monthly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  selectedPlan === "monthly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
-              >
-                <p className="text-sm font-medium text-muted-foreground mb-1">Monthly</p>
-                <p className="text-2xl font-bold">${pricing.monthly.price}</p>
-                <p className="text-xs text-muted-foreground">per month</p>
-              </button>
-
-              {/* Yearly Card */}
-              <button
-                onClick={() => setSelectedPlan("yearly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all relative",
-                  selectedPlan === "yearly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
-              >
-                <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                  {pricing.yearly.savings}
-                </span>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Yearly</p>
-                <p className="text-2xl font-bold">${pricing.yearly.price}</p>
-                <p className="text-xs text-muted-foreground">
-                  ${pricing.yearly.monthlyEquivalent.toFixed(2)}/month
-                </p>
-              </button>
-            </div>
-
-            {/* Payment Method Selector */}
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-muted-foreground mb-3">Payment Method</h3>
-              <div className="space-y-2">
-                {paymentMethods.map((method) => (
-                  <button
-                    key={method.id}
-                    onClick={() => setSelectedPayment(method.id)}
-                    className={cn(
-                      "w-full flex items-center gap-3 p-3 rounded-xl border transition-all",
-                      selectedPayment === method.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    )}
-                  >
-                    <method.icon className="w-5 h-5 text-muted-foreground" />
-                    <span className="font-medium">{method.name}</span>
-                    {selectedPayment === method.id && (
-                      <Check className="w-4 h-4 text-primary ml-auto" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Compare Plans Table */}
+        {/* Compare Plans Table - SPRINT 3: Moved between Banner and Pricing */}
         <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
           <div className="grid grid-cols-3 bg-muted/50">
             <div className="p-3">
@@ -312,6 +244,74 @@ const Subscription = () => {
             </div>
           ))}
         </div>
+
+        {/* Plan Toggle - Only for non-premium */}
+        {!isPremium && (
+          <>
+            {/* Pricing Cards */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {/* Monthly Card */}
+              <button
+                onClick={() => setSelectedPlan("monthly")}
+                className={cn(
+                  "p-4 rounded-xl border-2 text-left transition-all",
+                  selectedPlan === "monthly"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                )}
+              >
+                <p className="text-sm font-medium text-muted-foreground mb-1">Monthly</p>
+                <p className="text-2xl font-bold">${pricing.monthly.price}</p>
+                <p className="text-xs text-muted-foreground">per month</p>
+              </button>
+
+              {/* Yearly Card */}
+              <button
+                onClick={() => setSelectedPlan("yearly")}
+                className={cn(
+                  "p-4 rounded-xl border-2 text-left transition-all relative",
+                  selectedPlan === "yearly"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                )}
+              >
+                <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
+                  {pricing.yearly.savings}
+                </span>
+                <p className="text-sm font-medium text-muted-foreground mb-1">Yearly</p>
+                <p className="text-2xl font-bold">${pricing.yearly.price}</p>
+                <p className="text-xs text-muted-foreground">
+                  ${pricing.yearly.monthlyEquivalent.toFixed(2)}/month
+                </p>
+              </button>
+            </div>
+
+            {/* Payment Method Selector - SPRINT 3: Apple Pay/Credit Card UI */}
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold text-muted-foreground mb-3">Payment Method</h3>
+              <div className="space-y-2">
+                {paymentMethods.map((method) => (
+                  <button
+                    key={method.id}
+                    onClick={() => setSelectedPayment(method.id)}
+                    className={cn(
+                      "w-full flex items-center gap-3 p-3 rounded-xl border transition-all",
+                      selectedPayment === method.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    <method.icon className="w-5 h-5 text-muted-foreground" />
+                    <span className="font-medium">{method.name}</span>
+                    {selectedPayment === method.id && (
+                      <Check className="w-4 h-4 text-primary ml-auto" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Pricing CTA */}
         {!isPremium && (
