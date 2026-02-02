@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import imageCompression from "browser-image-compression";
 
 interface HazardResult {
   object: string;
@@ -24,21 +25,36 @@ const HazardScanner = () => {
   const [ingested, setIngested] = useState<boolean | null>(null);
   const [showIntentGate, setShowIntentGate] = useState(false);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Client-side compression (simplified - in production use a library like browser-image-compression)
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Image too large. Please choose an image under 5MB");
-        return;
-      }
+      try {
+        // COST OPTIMIZATION: Compress images to max 200KB before upload
+        // This reduces storage costs and GPT-4o-mini Vision API token usage
+        const options = {
+          maxSizeMB: 0.2, // 200KB
+          maxWidthOrHeight: 1024,
+          useWebWorker: true,
+          fileType: 'image/jpeg'
+        };
 
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+        const compressedFile = await imageCompression(file, options);
+
+        setImageFile(compressedFile);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setImagePreview(reader.result as string);
+        };
+        reader.readAsDataURL(compressedFile);
+
+        if (compressedFile.size < file.size) {
+          const savedKB = ((file.size - compressedFile.size) / 1024).toFixed(0);
+          toast.success(`Image optimized (saved ${savedKB}KB)`);
+        }
+      } catch (error) {
+        console.error("Compression error:", error);
+        toast.error("Failed to process image");
+      }
     }
   };
 
@@ -48,7 +64,63 @@ const HazardScanner = () => {
     setScanning(true);
 
     try {
-      // Upload image to storage
+      // RATE LIMITING: Check if user can perform scan (3 scans/hour for free tier)
+      const { data: canScan, error: rateLimitError } = await supabase
+        .rpc('check_scan_rate_limit', { user_uuid: user.id });
+
+      if (rateLimitError) {
+        console.error("Rate limit check failed:", rateLimitError);
+      }
+
+      if (canScan === false) {
+        toast.error("Rate limit exceeded. Free tier: 3 scans per hour. Upgrade to Premium for unlimited scans!");
+        setScanning(false);
+        return;
+      }
+
+      // CACHE CHECK: Generate image hash to check for duplicate scans
+      const imageHash = await generateImageHash(imageFile);
+
+      // Check cache first
+      const { data: cachedResult, error: cacheError } = await supabase
+        .from('triage_cache')
+        .select('*')
+        .eq('image_hash', imageHash)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle();
+
+      if (cachedResult) {
+        // CACHE HIT: Use cached result instead of calling GPT-4o-mini
+        console.log("Cache hit! Saved API costs.");
+        toast.success("Found in cache - instant result!");
+
+        const cachedScanResult: HazardResult = {
+          object: cachedResult.object_identified,
+          category: cachedResult.hazard_type,
+          toxicity_level: cachedResult.toxicity_level,
+          immediate_action: cachedResult.immediate_action
+        };
+
+        setResult(cachedScanResult);
+
+        // Update cache hit count
+        await supabase
+          .from('triage_cache')
+          .update({
+            hit_count: (cachedResult.hit_count || 0) + 1,
+            last_accessed_at: new Date().toISOString()
+          })
+          .eq('id', cachedResult.id);
+
+        if (cachedScanResult.category !== 'INERT') {
+          setShowIntentGate(true);
+        }
+
+        setScanning(false);
+        return;
+      }
+
+      // CACHE MISS: Upload image and call AI
       const fileExt = imageFile.name.split(".").pop();
       const filePath = `${user.id}/${Date.now()}.${fileExt}`;
 
@@ -62,9 +134,15 @@ const HazardScanner = () => {
         .from("hazard-scans")
         .getPublicUrl(filePath);
 
+      // Record scan for rate limiting
+      await supabase.from('scan_rate_limits').insert({
+        user_id: user.id,
+        scan_timestamp: new Date().toISOString()
+      });
+
       // In production, this would call GPT-4o-mini Vision API via Supabase Edge Function
       // For MVP/demo, we'll simulate the response
-      await simulateAIResponse(publicUrl);
+      await simulateAIResponse(publicUrl, imageHash);
 
     } catch (error: any) {
       console.error("Scan error:", error);
@@ -74,7 +152,16 @@ const HazardScanner = () => {
     }
   };
 
-  const simulateAIResponse = async (imageUrl: string) => {
+  // Generate SHA-256 hash of image for cache deduplication
+  const generateImageHash = async (file: File): Promise<string> => {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+  };
+
+  const simulateAIResponse = async (imageUrl: string, imageHash: string) => {
     // Simulate API call delay
     await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -87,6 +174,24 @@ const HazardScanner = () => {
     };
 
     setResult(mockResult);
+
+    // CACHE WRITE: Store result for future scans (uses service_role via RLS policy)
+    // In production, the Edge Function would handle this
+    try {
+      await supabase.from('triage_cache').insert({
+        image_hash: imageHash,
+        object_identified: mockResult.object,
+        is_hazard: mockResult.category !== 'INERT',
+        hazard_type: mockResult.category,
+        toxicity_level: mockResult.toxicity_level,
+        immediate_action: mockResult.immediate_action,
+        ai_response: mockResult,
+        hit_count: 1
+      });
+    } catch (cacheWriteError) {
+      // Non-critical error, continue even if cache write fails
+      console.warn("Failed to write to cache:", cacheWriteError);
+    }
 
     // If hazard detected, show intent gate
     if (mockResult.category !== 'INERT') {
