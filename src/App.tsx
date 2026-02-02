@@ -23,6 +23,7 @@ import EditPetProfile from "./pages/EditPetProfile";
 import PetDetails from "./pages/PetDetails";
 import Settings from "./pages/Settings";
 import Subscription from "./pages/Subscription";
+import Premium from "./pages/Premium";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -168,6 +169,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <Subscription />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/premium"
+                    element={
+                      <ProtectedRoute>
+                        <Premium />
                       </ProtectedRoute>
                     }
                   />
