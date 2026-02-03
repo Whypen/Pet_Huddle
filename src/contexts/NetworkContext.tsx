@@ -83,6 +83,15 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
 
   // Retry connection
   const retryConnection = useCallback(async () => {
+    // Skip health checks for relative URLs (development/same-server deployments)
+    const isRelativeUrl = API_URL.startsWith('/');
+    if (isRelativeUrl) {
+      setIsServerReachable(true);
+      setLastOnlineTime(new Date());
+      toast.success("Connection restored!");
+      return;
+    }
+
     const serverOk = await checkServerHealth();
     setIsServerReachable(serverOk);
 
