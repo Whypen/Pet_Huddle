@@ -164,6 +164,21 @@ const translations: Record<Language, Record<string, string>> = {
     "premium.ghost_mode": "Ghost Mode",
     "premium.featured": "Featured Posting",
     
+
+    // Nanny Booking Modal
+    "booking.title": "Book Nanny",
+    "booking.pet_nanny": "Pet Nanny",
+    "booking.service_date": "Service Date",
+    "booking.start_time": "Start Time",
+    "booking.end_time": "End Time",
+    "booking.which_pet": "Which Pet?",
+    "booking.select_pet": "Select a pet…",
+    "booking.location": "Service Location",
+    "booking.location_not_set": "Set location in your profile",
+    "booking.amount": "Booking Amount (USD)",
+    "booking.amount_note": "Minimum $10 · Payment held in escrow until service completed",
+    "booking.cancel": "Cancel",
+    "booking.pay": "Pay via Stripe",
     // Common
     "common.save": "Save",
     "common.cancel": "Cancel",
@@ -330,6 +345,21 @@ const translations: Record<Language, Record<string, string>> = {
     "premium.ghost_mode": "隱身模式",
     "premium.featured": "精選刊登",
     
+
+    // Nanny Booking Modal
+    "booking.title": "預約保姆",
+    "booking.pet_nanny": "寵物保姆",
+    "booking.service_date": "服務日期",
+    "booking.start_time": "開始時間",
+    "booking.end_time": "結束時間",
+    "booking.which_pet": "哪隻寵物？",
+    "booking.select_pet": "請選擇寵物…",
+    "booking.location": "服務地點",
+    "booking.location_not_set": "請在個人資料中設定地點",
+    "booking.amount": "預約金額（美元）",
+    "booking.amount_note": "最低 $10 · 金額將托管至服務完成",
+    "booking.cancel": "取消",
+    "booking.pay": "前往付款",
     // Common
     "common.save": "儲存",
     "common.cancel": "取消",
@@ -496,6 +526,21 @@ const translations: Record<Language, Record<string, string>> = {
     "premium.ghost_mode": "隐身模式",
     "premium.featured": "精选刊登",
     
+
+    // Nanny Booking Modal
+    "booking.title": "预约保姆",
+    "booking.pet_nanny": "宠物保姆",
+    "booking.service_date": "服务日期",
+    "booking.start_time": "开始时间",
+    "booking.end_time": "结束时间",
+    "booking.which_pet": "哪只宠物？",
+    "booking.select_pet": "请选择宠物…",
+    "booking.location": "服务地点",
+    "booking.location_not_set": "请在个人资料中设置地点",
+    "booking.amount": "预约金额（美元）",
+    "booking.amount_note": "最低 $10 · 金额将托管至服务完成",
+    "booking.cancel": "取消",
+    "booking.pay": "前往付款",
     // Common
     "common.save": "保存",
     "common.cancel": "取消",

@@ -185,8 +185,26 @@ const Chats = () => {
   const [selectedNanny, setSelectedNanny] = useState<ChatUser | null>(null);
   const [bookingAmount, setBookingAmount] = useState("50");
   const [bookingProcessing, setBookingProcessing] = useState(false);
+  const [serviceDate, setServiceDate] = useState("");
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("17:00");
+  const [selectedPet, setSelectedPet] = useState("");
+  const [userPets, setUserPets] = useState<{ id: string; name: string; species: string }[]>([]);
 
   const isVerified = profile?.is_verified;
+
+  // Fetch user pets when the nanny booking modal opens
+  useEffect(() => {
+    if (nannyBookingOpen && profile?.id) {
+      supabase.from("pets").select("id, name, species").eq("owner_id", profile.id).then(({ data }) => {
+        if (data) setUserPets(data);
+      });
+      setServiceDate("");
+      setStartTime("09:00");
+      setEndTime("17:00");
+      setSelectedPet("");
+    }
+  }, [nannyBookingOpen]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -311,6 +329,10 @@ const Chats = () => {
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
   const handleBookingCheckout = async () => {
     if (!profile?.id || !selectedNanny) return;
+    if (!serviceDate || !selectedPet) {
+      toast.error("Please select a service date and pet");
+      return;
+    }
     setBookingProcessing(true);
 
     try {
@@ -323,6 +345,11 @@ const Chats = () => {
           metadata: {
             nanny_id: selectedNanny.id,
             nanny_name: selectedNanny.name,
+            service_date: serviceDate,
+            start_time: startTime,
+            end_time: endTime,
+            pet_id: selectedPet,
+            pet_name: userPets.find(p => p.id === selectedPet)?.name || "",
           },
           successUrl: `${window.location.origin}/chats?booking_success=true`,
           cancelUrl: `${window.location.origin}/chats`,
@@ -540,7 +567,7 @@ const Chats = () => {
                         <button
                           onClick={(e) => handleNannyBookClick(e, chat)}
                           className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
-                          style={{ backgroundColor: "#7DD3FC" }}
+                          style={{ backgroundColor: "#2563EB" }}
                           title="Book Nanny"
                         >
                           <DollarSign className="w-4 h-4 text-white" />
@@ -647,7 +674,7 @@ const Chats = () => {
               className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-card rounded-t-3xl p-6 z-[2001] shadow-2xl"
             >
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold">Book Nanny</h3>
+                <h3 className="text-lg font-bold">{t("booking.title")}</h3>
                 <button onClick={() => setNannyBookingOpen(false)}>
                   <X className="w-6 h-6" />
                 </button>
@@ -659,14 +686,75 @@ const Chats = () => {
                 </div>
                 <div>
                   <p className="font-semibold">{selectedNanny.name}</p>
-                  <p className="text-xs text-muted-foreground">Pet Nanny</p>
+                  <p className="text-xs text-muted-foreground">{t("booking.pet_nanny")}</p>
+                </div>
+              </div>
+
+              {/* Service Date */}
+              <div className="mb-3">
+                <label className="text-sm font-medium mb-1.5 block">{t("booking.service_date")}</label>
+                <input
+                  type="date"
+                  value={serviceDate}
+                  onChange={(e) => setServiceDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+
+              {/* Start / End Time */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("booking.start_time")}</label>
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full h-10 rounded-xl bg-muted border border-border px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("booking.end_time")}</label>
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full h-10 rounded-xl bg-muted border border-border px-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+              </div>
+
+              {/* Pet Selection — fetched from user's pets table */}
+              <div className="mb-3">
+                <label className="text-sm font-medium mb-1.5 block">{t("booking.which_pet")}</label>
+                <select
+                  value={selectedPet}
+                  onChange={(e) => setSelectedPet(e.target.value)}
+                  className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
+                >
+                  <option value="">{t("booking.select_pet")}</option>
+                  {userPets.map((pet) => (
+                    <option key={pet.id} value={pet.id}>
+                      {pet.name} ({pet.species})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Location — auto-filled from profile */}
+              <div className="mb-4">
+                <label className="text-sm font-medium mb-1.5 block">{t("booking.location")}</label>
+                <div className="h-10 rounded-xl bg-muted/40 border border-border px-4 flex items-center">
+                  <span className="text-sm text-muted-foreground">
+                    {profile?.location_name || t("booking.location_not_set")}
+                  </span>
                 </div>
               </div>
 
               <div className="mb-4">
-                <label className="text-sm font-medium mb-2 block">Booking Amount (USD)</label>
+                <label className="text-sm font-medium mb-2 block">{t("booking.amount")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold" style={{ color: "#7DD3FC" }}>$</span>
+                  <span className="text-lg font-bold" style={{ color: "#2563EB" }}>$</span>
                   <input
                     type="number"
                     value={bookingAmount}
@@ -676,7 +764,7 @@ const Chats = () => {
                     className="flex-1 h-12 rounded-xl bg-muted border border-border px-4 text-lg font-semibold outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Minimum $10 · Payment held in escrow until service completed</p>
+                <p className="text-xs text-muted-foreground mt-1">{t("booking.amount_note")}</p>
               </div>
 
               <div className="flex gap-3">
@@ -688,9 +776,9 @@ const Chats = () => {
                 </button>
                 <button
                   onClick={handleBookingCheckout}
-                  disabled={bookingProcessing || parseFloat(bookingAmount) < 10}
+                  disabled={bookingProcessing || parseFloat(bookingAmount) < 10 || !serviceDate || !selectedPet}
                   className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
-                  style={{ backgroundColor: "#7DD3FC" }}
+                  style={{ backgroundColor: "#2563EB" }}
                 >
                   {bookingProcessing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

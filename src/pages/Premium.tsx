@@ -481,12 +481,12 @@ const Premium = () => {
                 className={cn(
                   "p-4 rounded-xl border-2 text-left transition-all",
                   selectedTier === "premium"
-                    ? "border-[#7DD3FC] bg-[#7DD3FC]/5"
-                    : "border-border hover:border-[#7DD3FC]/50"
+                    ? "border-[#2563EB] bg-[#2563EB]/5"
+                    : "border-border hover:border-[#2563EB]/50"
                 )}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-[#7DD3FC]" />
+                  <Sparkles className="w-5 h-5 text-[#2563EB]" />
                   <span className="font-bold">Premium</span>
                 </div>
                 <p className="text-xs text-muted-foreground">Best for individuals</p>
@@ -555,13 +555,13 @@ const Premium = () => {
                 "w-full py-6 text-lg gap-2 mb-6",
                 selectedTier === "gold"
                   ? "bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
-                  : "bg-gradient-to-r from-[#7DD3FC] to-blue-400 hover:from-blue-400 hover:to-blue-500 text-blue-900"
+                  : "bg-gradient-to-r from-[#2563EB] to-blue-400 hover:from-blue-400 hover:to-blue-500 text-blue-900"
               )}
               style={{
                 boxShadow:
                   selectedTier === "gold"
                     ? "0 4px 20px rgba(251, 191, 36, 0.4)"
-                    : "0 4px 20px rgba(125, 211, 252, 0.4)",
+                    : "0 4px 20px rgba(37, 99, 235, 0.4)",
               }}
             >
               {isProcessing ? (

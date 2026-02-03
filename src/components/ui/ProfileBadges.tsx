@@ -31,7 +31,7 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
             "rounded-full flex items-center justify-center",
             badgeSize
           )}
-          style={{ backgroundColor: "#7DD3FC" }}
+          style={{ backgroundColor: "#2563EB" }}
           title="Has a Car"
         >
           <Car className={cn(iconSize, "text-white")} />

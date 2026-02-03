@@ -217,7 +217,7 @@ const ChatDialogue = () => {
             onClick={() => setIsPremiumFooterOpen(true)}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
-            <ImageIcon className="w-5 h-5" style={{ color: "#7DD3FC" }} />
+            <ImageIcon className="w-5 h-5" style={{ color: "#2563EB" }} />
           </button>
 
           <input

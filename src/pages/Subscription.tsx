@@ -358,7 +358,20 @@ const Subscription = () => {
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-muted-foreground mb-2">Billing</h3>
 
-          <button className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors">
+          <button
+              className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
+              onClick={async () => {
+                try {
+                  const { data, error } = await supabase.functions.invoke("create-portal-session", {
+                    body: { userId: user?.id, returnUrl: `${window.location.origin}/subscription` },
+                  });
+                  if (error) throw error;
+                  if (data?.url) window.location.href = data.url;
+                } catch (e: any) {
+                  toast.error(e.message || "Failed to open billing portal");
+                }
+              }}
+            >
             <div className="flex items-center gap-3">
               <CreditCard className="w-5 h-5 text-muted-foreground" />
               <span className="font-medium">Payment Methods</span>

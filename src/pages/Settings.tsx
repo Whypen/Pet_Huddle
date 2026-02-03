@@ -371,7 +371,8 @@ const Settings = () => {
               <Switch checked={hideFromMap} onCheckedChange={setHideFromMap} />
             </div>
 
-            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors">
+            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
+              onClick={() => toast.info("Trusted locations feature coming soon")}>
               <div className="flex items-center gap-3">
                 <Shield className="w-5 h-5 text-muted-foreground" />
                 <span className="font-medium">{t("settings.trusted_locations")}</span>
@@ -473,7 +474,8 @@ const Settings = () => {
             {t("settings.help_support")}
           </h3>
           <div className="space-y-1">
-            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors">
+            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
+              onClick={() => toast.info("Contact support@huddle.app for help")}>
               <div className="flex items-center gap-3">
                 <HelpCircle className="w-5 h-5 text-muted-foreground" />
                 <span className="font-medium">{t("settings.help_support")}</span>
@@ -532,7 +534,8 @@ const Settings = () => {
               <span className="font-medium">{t("settings.logout")}</span>
             </button>
 
-            <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-amber-600">
+            <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-amber-600"
+              onClick={() => toast.warning("To deactivate, contact support@huddle.app")}>
               <EyeOff className="w-5 h-5" />
               <span className="font-medium">{t("settings.deactivate")}</span>
             </button>

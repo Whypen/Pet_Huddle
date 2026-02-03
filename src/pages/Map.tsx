@@ -244,10 +244,10 @@ const Map = () => {
       <div style="
         width: 20px;
         height: 20px;
-        background-color: #7DD3FC;
+        background-color: #2563EB;
         border-radius: 50%;
         border: 3px solid white;
-        box-shadow: 0 0 0 4px rgba(125,211,252,0.3), 0 4px 12px rgba(0,0,0,0.3);
+        box-shadow: 0 0 0 4px rgba(37,99,235,0.3), 0 4px 12px rgba(0,0,0,0.3);
         cursor: pointer;
       "></div>
     `;

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -298,16 +299,16 @@ const Auth = () => {
               )}
               {!isLogin && !errors.password && password.length > 0 && (
                 <div className="mt-2 space-y-1 text-xs ml-1">
-                  <p className={password.length >= 8 ? "text-[#7DD3FC]" : "text-muted-foreground"}>
+                  <p className={password.length >= 8 ? "text-[#22C55E]" : "text-muted-foreground"}>
                     ✓ At least 8 characters
                   </p>
-                  <p className={/[A-Z]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
+                  <p className={/[A-Z]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
                     ✓ One uppercase letter
                   </p>
-                  <p className={/[0-9]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
+                  <p className={/[0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
                     ✓ One number
                   </p>
-                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#7DD3FC]" : "text-muted-foreground"}>
+                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
                     ✓ One special character
                   </p>
                 </div>
@@ -382,7 +383,21 @@ const Auth = () => {
           </div>
 
           {isLogin && (
-            <button className="w-full text-center text-sm text-primary mt-4 hover:underline">
+            <button
+              className="w-full text-center text-sm text-primary mt-4 hover:underline"
+              onClick={async () => {
+                if (!identifier || !identifier.includes("@")) {
+                  toast.error("Enter your email address to reset password");
+                  return;
+                }
+                const { error } = await supabase.auth.resetPasswordForEmail(identifier, {
+                  redirectTo: `${window.location.origin}/auth`,
+                });
+                toast[error ? "error" : "success"](
+                  error ? "Failed to send reset email" : "Reset link sent to your email!"
+                );
+              }}
+            >
               Forgot Password?
             </button>
           )}

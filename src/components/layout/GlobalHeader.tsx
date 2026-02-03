@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
@@ -76,6 +77,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
         <button
           className="p-2 rounded-full hover:bg-muted transition-colors relative"
           aria-label="Notifications"
+          onClick={() => toast.info("Notifications coming soon")}
         >
           <Bell className="w-5 h-5 text-muted-foreground" />
           {/* Notification dot */}
