@@ -189,37 +189,6 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [retryConnection, hasShownOfflineToast]);
 
-  // Periodic server health check
-  useEffect(() => {
-    if (!isOnline) return;
-
-    // Skip health checks for relative URLs (development/same-server deployments)
-    const isRelativeUrl = API_URL.startsWith('/');
-    if (isRelativeUrl) {
-      setIsServerReachable(true);
-      return;
-    }
-
-    const checkHealth = async () => {
-      const serverOk = await checkServerHealth();
-      setIsServerReachable(serverOk);
-
-      if (serverOk) {
-        setLastOnlineTime(new Date());
-      } else if (!hasShownOfflineToast) {
-        toast.warning("Unable to reach server. Some features may be limited.");
-        setHasShownOfflineToast(true);
-      }
-    };
-
-    // Initial check
-    checkHealth();
-
-    // Set up interval
-    const intervalId = setInterval(checkHealth, PING_INTERVAL);
-
-    return () => clearInterval(intervalId);
-  }, [isOnline, checkServerHealth, hasShownOfflineToast]);
 
   // Update lastOnlineTime when connected
   useEffect(() => {
