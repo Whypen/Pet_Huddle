@@ -260,7 +260,7 @@ const Auth = () => {
               <button
                 type="button"
                 onClick={() => setIdentifier('')}
-                className="text-xs text-primary mt-1 ml-1 hover:underline"
+                className="text-xs text-muted-foreground mt-1 ml-1 hover:underline"
               >
                 {isEmail(identifier) ? 'Use phone number instead' : 'Use email instead'}
               </button>
