@@ -63,13 +63,19 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const response = await fetch(`${API_URL}/health`, {
-        method: "GET",
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(`${API_URL}/health`, {
+          method: "GET",
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
-      return response.ok;
+        clearTimeout(timeoutId);
+        return response.ok;
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        // Suppress fetch errors in console to avoid noise
+        return false;
+      }
     } catch (error) {
       return false;
     }
