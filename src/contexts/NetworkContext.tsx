@@ -20,7 +20,7 @@ interface OfflineAction {
 
 const NetworkContext = createContext<NetworkContextType | undefined>(undefined);
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api/v1";
+const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
 const PING_INTERVAL = 30000; // 30 seconds
 const MAX_RETRY_COUNT = 3;
 const OFFLINE_ACTIONS_KEY = "huddle_offline_actions";
@@ -57,39 +57,17 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [pendingActions]);
 
-  // Check server reachability
-  const checkServerHealth = useCallback(async (): Promise<boolean> => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${API_URL}/health`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      return response.ok;
-    } catch (error) {
-      return false;
-    }
-  }, []);
-
-  // Retry connection
+  // Retry connection - sync pending actions when coming back online
   const retryConnection = useCallback(async () => {
-    const serverOk = await checkServerHealth();
-    setIsServerReachable(serverOk);
+    setIsServerReachable(true);
+    setLastOnlineTime(new Date());
+    toast.success("Connection restored!");
 
-    if (serverOk && isOnline) {
-      setLastOnlineTime(new Date());
-      toast.success("Connection restored!");
-
-      // Process pending offline actions
-      if (pendingActions.length > 0) {
-        processPendingActions();
-      }
+    // Process pending offline actions
+    if (pendingActions.length > 0) {
+      processPendingActions();
     }
-  }, [checkServerHealth, isOnline, pendingActions]);
+  }, [pendingActions]);
 
   // Process pending offline actions
   const processPendingActions = useCallback(async () => {
@@ -211,30 +189,6 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [retryConnection, hasShownOfflineToast]);
 
-  // Periodic server health check
-  useEffect(() => {
-    if (!isOnline) return;
-
-    const checkHealth = async () => {
-      const serverOk = await checkServerHealth();
-      setIsServerReachable(serverOk);
-
-      if (serverOk) {
-        setLastOnlineTime(new Date());
-      } else if (!hasShownOfflineToast) {
-        toast.warning("Unable to reach server. Some features may be limited.");
-        setHasShownOfflineToast(true);
-      }
-    };
-
-    // Initial check
-    checkHealth();
-
-    // Set up interval
-    const intervalId = setInterval(checkHealth, PING_INTERVAL);
-
-    return () => clearInterval(intervalId);
-  }, [isOnline, checkServerHealth, hasShownOfflineToast]);
 
   // Update lastOnlineTime when connected
   useEffect(() => {
