@@ -38,6 +38,7 @@ serve(async (req: Request) => {
       type,
       mode,
       amount,
+      metadata: extraMetadata,
       successUrl,
       cancelUrl,
     } = await req.json();
@@ -84,6 +85,7 @@ serve(async (req: Request) => {
       metadata: {
         user_id: userId,
         type,
+        ...(extraMetadata || {}), // Merge extra metadata (e.g., nanny_id, nanny_name)
       },
     };
 

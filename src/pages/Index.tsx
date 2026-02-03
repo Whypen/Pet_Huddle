@@ -9,6 +9,7 @@ import { PetWizard } from "@/components/pets/PetWizard";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +80,7 @@ const wisdomTips: Record<string, string[]> = {
 const Index = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -160,7 +162,7 @@ const Index = () => {
                 size="md"
               />
             </motion.h1>
-            <p className="text-muted-foreground text-sm">Let's care for your pets</p>
+            <p className="text-muted-foreground text-sm">{t("home.subtitle")}</p>
           </div>
         </div>
         <button
@@ -274,7 +276,7 @@ const Index = () => {
                     <div className="mt-4 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
                       <div className="flex items-center gap-2 text-primary-foreground">
                         <Clock className="w-4 h-4" />
-                        <span className="text-sm font-medium">Next Event: Mid-day Walk, 12:00 PM</span>
+                        <span className="text-sm font-medium">{t("home.next_event")}: Mid-day Walk, 12:00 PM</span>
                       </div>
                     </div>
                   </motion.div>
@@ -296,7 +298,7 @@ const Index = () => {
                     <Lightbulb className="w-5 h-5 text-primary-foreground" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-primary-foreground mb-1">huddle Wisdom</h4>
+                    <h4 className="font-semibold text-primary-foreground mb-1">{t("home.wisdom")}</h4>
                     <p className="text-sm text-primary-foreground/90">
                       {getRandomTip(selectedPet.species)}
                     </p>

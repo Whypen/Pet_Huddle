@@ -10,6 +10,7 @@ import { ActiveFilters } from "@/components/social/ActiveFilters";
 import { NoticeBoard } from "@/components/social/NoticeBoard";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 
 const nearbyUsers = [
@@ -20,6 +21,7 @@ const nearbyUsers = [
 
 const Social = () => {
   const { profile } = useAuth();
+  const { t } = useLanguage();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -84,8 +86,12 @@ const Social = () => {
 
   // Get role label for display
   const getRoleLabel = () => {
-    const labels: Record<string, string> = { playdates: "Playdates", nannies: "Nannies", "animal-lovers": "Animal Lovers" };
-    return labels[filters.role] || "Playdates";
+    const labels: Record<string, string> = {
+      playdates: t("social.playdates"),
+      nannies: t("social.nannies"),
+      "animal-lovers": t("social.animal_lovers"),
+    };
+    return labels[filters.role] || t("social.playdates");
   };
 
   return (
@@ -209,7 +215,7 @@ const Social = () => {
 
       {/* Huddle Nearby */}
       <section className="px-5 py-4">
-        <h3 className="text-lg font-semibold mb-3">Huddle Nearby</h3>
+        <h3 className="text-lg font-semibold mb-3">{t("social.nearby")}</h3>
         <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
           {nearbyUsers.map((user, index) => (
             <motion.div

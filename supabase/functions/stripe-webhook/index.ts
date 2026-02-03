@@ -94,6 +94,10 @@ serve(async (req: Request): Promise<Response> => {
         result = await handleCheckoutSessionCompleted(event);
         break;
 
+      case "payment_intent.succeeded":
+        result = await handlePaymentIntentSucceeded(event);
+        break;
+
       case "invoice.payment_failed":
         result = await handleInvoicePaymentFailed(event);
         break;
@@ -353,6 +357,80 @@ async function handleSubscriptionUpdated(
   return {
     success: true,
     message: "Subscription updated",
+    eventId: event.id,
+  };
+}
+
+// =====================================================
+// HANDLER: payment_intent.succeeded
+// Updates marketplace_bookings from pending → paid
+// Schedules 48-hour escrow release (pg_cron compatible)
+// =====================================================
+async function handlePaymentIntentSucceeded(
+  event: Stripe.Event
+): Promise<WebhookResponse> {
+  const paymentIntent = event.data.object as Stripe.PaymentIntent;
+
+  // Create idempotency transaction record
+  const { error: txError } = await supabase.from("transactions").insert({
+    user_id: paymentIntent.metadata?.client_id || "system",
+    stripe_event_id: event.id,
+    stripe_session_id: paymentIntent.id,
+    type: paymentIntent.metadata?.type || "payment_intent",
+    amount: paymentIntent.amount,
+    currency: paymentIntent.currency,
+    status: "completed",
+    metadata: paymentIntent.metadata || {},
+  });
+
+  if (txError && txError.code !== "23505") {
+    console.error(`[PAYMENT_INTENT] Transaction record error: ${txError.message}`);
+  }
+
+  const meta = paymentIntent.metadata;
+
+  // Handle marketplace booking (nanny) payment
+  if (meta?.type === "marketplace_booking" || meta?.client_id) {
+    await supabase
+      .from("marketplace_bookings")
+      .update({
+        status: "paid",
+        stripe_payment_intent_id: paymentIntent.id,
+        paid_at: new Date().toISOString(),
+        escrow_status: "pending",
+      })
+      .eq("stripe_payment_intent_id", paymentIntent.id);
+
+    console.log(`[PAYMENT_INTENT] Marketplace booking paid: PI=${paymentIntent.id}`);
+  }
+
+  // Handle simple nanny booking (from Chats $ icon)
+  if (meta?.type === "nanny_booking") {
+    const escrowRelease = new Date();
+    escrowRelease.setHours(escrowRelease.getHours() + 48);
+
+    await supabase
+      .from("marketplace_bookings")
+      .insert({
+        client_id: meta["user_id"] || "unknown",
+        sitter_id: meta.nanny_id,
+        stripe_payment_intent_id: paymentIntent.id,
+        amount: paymentIntent.amount,
+        platform_fee: Math.round(paymentIntent.amount * 0.1),
+        sitter_payout: paymentIntent.amount - Math.round(paymentIntent.amount * 0.1),
+        status: "paid",
+        paid_at: new Date().toISOString(),
+        escrow_release_date: escrowRelease.toISOString(),
+        escrow_status: "pending",
+      })
+      .catch((err: any) => console.warn("[PAYMENT_INTENT] Nanny insert:", err.message));
+
+    console.log(`[PAYMENT_INTENT] Nanny booking recorded: nanny=${meta.nanny_id}`);
+  }
+
+  return {
+    success: true,
+    message: "Payment intent processed",
     eventId: event.id,
   };
 }

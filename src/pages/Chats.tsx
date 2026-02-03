@@ -1,14 +1,17 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, Users, MessageSquare, Search, X } from "lucide-react";
+import { Settings, Users, MessageSquare, Search, X, DollarSign, Loader2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useApi } from "@/hooks/useApi";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -160,7 +163,9 @@ const newHuddles = [
 ];
 
 const Chats = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
+  const { t } = useLanguage();
   const { isConnected, onNewMessage, onOnlineStatus } = useWebSocket();
   const { getConversations } = useApi();
 
@@ -174,6 +179,12 @@ const Chats = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+
+  // Nanny Booking modal state
+  const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
+  const [selectedNanny, setSelectedNanny] = useState<ChatUser | null>(null);
+  const [bookingAmount, setBookingAmount] = useState("50");
+  const [bookingProcessing, setBookingProcessing] = useState(false);
 
   const isVerified = profile?.is_verified;
 
@@ -277,8 +288,8 @@ const Chats = () => {
     setChats(prev => prev.map(c =>
       c.id === chat.id ? { ...c, unread: 0 } : c
     ));
-    // Navigate to chat detail (would implement full chat view)
-    toast.info(`Opening chat with ${chat.name}`);
+    // Navigate to ChatDialogue with id + name params
+    navigate(`/chat-dialogue?id=${chat.id}&name=${encodeURIComponent(chat.name)}`);
   };
 
   const handleGroupClick = (group: Group) => {
@@ -286,8 +297,48 @@ const Chats = () => {
     setGroups(prev => prev.map(g =>
       g.id === group.id ? { ...g, unread: 0 } : g
     ));
-    // Navigate to group detail
-    toast.info(`Opening group: ${group.name}`);
+    // Navigate to ChatDialogue for group
+    navigate(`/chat-dialogue?id=${group.id}&name=${encodeURIComponent(group.name)}`);
+  };
+
+  // Nanny Booking: Open modal
+  const handleNannyBookClick = (e: React.MouseEvent, chat: ChatUser) => {
+    e.stopPropagation(); // Don't navigate to chat
+    setSelectedNanny(chat);
+    setNannyBookingOpen(true);
+  };
+
+  // Nanny Booking: Trigger Stripe Checkout via Edge Function
+  const handleBookingCheckout = async () => {
+    if (!profile?.id || !selectedNanny) return;
+    setBookingProcessing(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+        body: {
+          userId: profile.id,
+          type: "nanny_booking",
+          mode: "payment",
+          amount: Math.round(parseFloat(bookingAmount) * 100), // cents
+          metadata: {
+            nanny_id: selectedNanny.id,
+            nanny_name: selectedNanny.name,
+          },
+          successUrl: `${window.location.origin}/chats?booking_success=true`,
+          cancelUrl: `${window.location.origin}/chats`,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.url) {
+        window.location.href = data.url;
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to initiate booking payment");
+    } finally {
+      setBookingProcessing(false);
+    }
   };
 
   return (
@@ -296,7 +347,7 @@ const Chats = () => {
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2">
-        <h1 className="text-2xl font-bold">Messages</h1>
+        <h1 className="text-2xl font-bold">{t("chats.title")}</h1>
         <div className="flex items-center gap-2">
           {/* Search Button */}
           <button
@@ -483,11 +534,24 @@ const Chats = () => {
                       </div>
                       <p className="text-sm text-muted-foreground truncate mt-1">{chat.lastMessage}</p>
                     </div>
-                    {chat.unread > 0 && (
-                      <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium flex-shrink-0">
-                        {chat.unread}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Blue $ icon for nanny-type chats — opens booking modal */}
+                      {chat.type === "nannies" && (
+                        <button
+                          onClick={(e) => handleNannyBookClick(e, chat)}
+                          className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
+                          style={{ backgroundColor: "#7DD3FC" }}
+                          title="Book Nanny"
+                        >
+                          <DollarSign className="w-4 h-4 text-white" />
+                        </button>
+                      )}
+                      {chat.unread > 0 && (
+                        <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
+                          {chat.unread}
+                        </span>
+                      )}
+                    </div>
                   </motion.div>
                 ))
               )}
@@ -564,6 +628,84 @@ const Chats = () => {
         onClose={() => setIsCreateGroupOpen(false)}
         onCreateGroup={handleGroupCreated}
       />
+
+      {/* Nanny Booking Modal */}
+      <AnimatePresence>
+        {nannyBookingOpen && selectedNanny && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setNannyBookingOpen(false)}
+              className="fixed inset-0 bg-black/50 z-[2000]"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-card rounded-t-3xl p-6 z-[2001] shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">Book Nanny</h3>
+                <button onClick={() => setNannyBookingOpen(false)}>
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 mb-4 p-3 rounded-xl bg-muted/50">
+                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                  <span className="text-sm font-semibold">{selectedNanny.name.charAt(0)}</span>
+                </div>
+                <div>
+                  <p className="font-semibold">{selectedNanny.name}</p>
+                  <p className="text-xs text-muted-foreground">Pet Nanny</p>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-sm font-medium mb-2 block">Booking Amount (USD)</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold" style={{ color: "#7DD3FC" }}>$</span>
+                  <input
+                    type="number"
+                    value={bookingAmount}
+                    onChange={(e) => setBookingAmount(e.target.value)}
+                    min="10"
+                    max="500"
+                    className="flex-1 h-12 rounded-xl bg-muted border border-border px-4 text-lg font-semibold outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">Minimum $10 · Payment held in escrow until service completed</p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setNannyBookingOpen(false)}
+                  className="flex-1 py-3 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBookingCheckout}
+                  disabled={bookingProcessing || parseFloat(bookingAmount) < 10}
+                  className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
+                  style={{ backgroundColor: "#7DD3FC" }}
+                >
+                  {bookingProcessing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <DollarSign className="w-4 h-4" />
+                      Pay ${bookingAmount} via Stripe
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

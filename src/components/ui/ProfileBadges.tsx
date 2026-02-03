@@ -26,14 +26,15 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
         </div>
       )}
       {hasCar && (
-        <div 
+        <div
           className={cn(
-            "rounded-full bg-primary flex items-center justify-center",
+            "rounded-full flex items-center justify-center",
             badgeSize
           )}
+          style={{ backgroundColor: "#7DD3FC" }}
           title="Has a Car"
         >
-          <Car className={cn(iconSize, "text-primary-foreground")} />
+          <Car className={cn(iconSize, "text-white")} />
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bell, Menu, Plus, PawPrint } from "lucide-react";
+import { Bell, Settings, Plus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useAuth } from "@/contexts/AuthContext";
@@ -94,44 +94,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
           />
           <div className="hidden sm:flex flex-col">
             <span className="text-base font-bold lowercase leading-tight">huddle</span>
-            <span className="text-[10px] text-muted-foreground leading-tight">Pet care & social</span>
           </div>
         </button>
 
-        {/* Right: Pet Icon & Menu */}
-        <div className="flex items-center gap-1">
-          {/* Pet Icon */}
-          <button
-            onClick={handlePetClick}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-            aria-label={hasPets ? "Edit pet" : "Add pet"}
-          >
-            {hasPets && firstPet?.photo_url ? (
-              <img
-                src={firstPet.photo_url}
-                alt={firstPet.name}
-                className="w-6 h-6 rounded-full object-cover"
-              />
-            ) : hasPets ? (
-              <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                <PawPrint className="w-3.5 h-3.5 text-primary" />
-              </div>
-            ) : (
-              <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center">
-                <Plus className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-            )}
-          </button>
-
-          {/* Menu Button */}
-          <button
-            onClick={onMenuClick || (() => navigate('/settings'))}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-            aria-label="Menu"
-          >
-            <Menu className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
+        {/* Right: Settings (Gear) Icon Only */}
+        <button
+          onClick={onMenuClick || (() => navigate('/settings'))}
+          className="p-2 rounded-full hover:bg-muted transition-colors"
+          aria-label="Settings"
+        >
+          <Settings className="w-5 h-5 text-muted-foreground" />
+        </button>
       </div>
     </header>
   );

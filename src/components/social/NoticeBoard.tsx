@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  X, 
-  Image, 
-  Loader2, 
+import {
+  X,
+  Image,
+  Loader2,
   Lock,
   MessageSquare,
   Heart,
@@ -21,6 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +70,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Social");
@@ -257,7 +259,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           </Button>
         ) : (
           <Button
-            onClick={onPremiumClick}
+            onClick={() => setIsPremiumFooterOpen(true)}
             size="sm"
             variant="outline"
             className="rounded-full"
@@ -495,6 +497,13 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Premium Footer — triggers on Notice Board 'Create' for free users */}
+      <PremiumFooter
+        isOpen={isPremiumFooterOpen}
+        onClose={() => setIsPremiumFooterOpen(false)}
+        triggerReason="notice_create"
+      />
     </div>
   );
 };

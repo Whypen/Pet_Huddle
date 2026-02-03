@@ -21,6 +21,7 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -100,6 +101,9 @@ const Map = () => {
   const [isOnline, setIsOnline] = useState(true);
   const [showConfirmRemove, setShowConfirmRemove] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
+  const [premiumFooterReason, setPremiumFooterReason] = useState<string>("mesh_alert");
+  const [alertCountToday, setAlertCountToday] = useState(0); // track daily alert count for 3rd-alert trigger
 
   const isPremium = profile?.user_role === 'premium';
   const broadcastRange = isPremium ? 5 : 1;
@@ -229,6 +233,40 @@ const Map = () => {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Place a blue "You are here" pin for the user's own location + persist coords
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !userLocation) return;
+
+    const el = document.createElement("div");
+    el.className = "user-location-marker";
+    el.innerHTML = `
+      <div style="
+        width: 20px;
+        height: 20px;
+        background-color: #7DD3FC;
+        border-radius: 50%;
+        border: 3px solid white;
+        box-shadow: 0 0 0 4px rgba(125,211,252,0.3), 0 4px 12px rgba(0,0,0,0.3);
+        cursor: pointer;
+      "></div>
+    `;
+
+    const marker = new mapboxgl.Marker(el)
+      .setLngLat([userLocation.lng, userLocation.lat])
+      .addTo(map.current);
+
+    // Persist user location to Supabase profiles
+    if (user) {
+      supabase
+        .from("profiles")
+        .update({ last_lat: userLocation.lat, last_lng: userLocation.lng })
+        .eq("id", user.id)
+        .catch((err: any) => console.warn("Could not persist location:", err));
+    }
+
+    return () => marker.remove();
+  }, [userLocation, mapLoaded, user]);
 
   // Update markers
   useEffect(() => {
@@ -481,6 +519,15 @@ const Map = () => {
       if (error) throw error;
 
       toast.success("Alert broadcasted!");
+
+      // Track daily alert count — show PremiumFooter on 3rd alert for free users
+      const newCount = alertCountToday + 1;
+      setAlertCountToday(newCount);
+      if (!isPremium && newCount >= 3) {
+        setPremiumFooterReason("3rd_mesh_alert");
+        setIsPremiumFooterOpen(true);
+      }
+
       resetCreateForm();
       fetchAlerts();
     } catch (error: any) {
@@ -900,6 +947,13 @@ const Map = () => {
           bottom: 80px !important;
         }
       `}</style>
+
+      {/* Premium Footer — triggers on Mesh-Alert limits for free users */}
+      <PremiumFooter
+        isOpen={isPremiumFooterOpen}
+        onClose={() => setIsPremiumFooterOpen(false)}
+        triggerReason={premiumFooterReason}
+      />
     </div>
   );
 };

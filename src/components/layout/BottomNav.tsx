@@ -1,25 +1,33 @@
 import { Home, Users, MessageCircle, Stethoscope, MapPin } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { icon: Home, label: "Home", path: "/" },
-  { icon: Users, label: "Social", path: "/social" },
-  { icon: MessageCircle, label: "Chats", path: "/chats" },
-  { icon: Stethoscope, label: "AI Vet", path: "/ai-vet" },
-  { icon: MapPin, label: "Map", path: "/map" },
+  { icon: Home, label: "nav.home", path: "/" },
+  { icon: Users, label: "nav.social", path: "/social" },
+  { icon: MessageCircle, label: "nav.chats", path: "/chats" },
+  { icon: Stethoscope, label: "nav.ai_vet", path: "/ai-vet" },
+  { icon: MapPin, label: "nav.map", path: "/map" },
 ];
 
 export const BottomNav = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useLanguage();
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border shadow-elevated">
       <div className="flex items-center justify-around h-nav max-w-md mx-auto px-2 pb-safe">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path;
+          const isActive = location.pathname === item.path ||
+            (item.path === "/" && location.pathname === "/");
+          // Brand hierarchy: Home = green (#22C55E), all others = huddle blue (#7DD3FC)
+          const isHomeIcon = item.path === "/";
+          const activeColor = isHomeIcon ? "text-[#22C55E]" : "text-[#7DD3FC]";
+          const activeBg = isHomeIcon ? "bg-[#22C55E]/10" : "bg-[#7DD3FC]/10";
+
           return (
             <motion.button
               key={item.path}
@@ -27,7 +35,7 @@ export const BottomNav = () => {
               className={cn(
                 "flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-xl transition-colors relative",
                 isActive
-                  ? "text-primary"
+                  ? activeColor
                   : "text-muted-foreground hover:text-foreground"
               )}
               whileTap={{ scale: 0.9 }}
@@ -35,12 +43,12 @@ export const BottomNav = () => {
               {isActive && (
                 <motion.div
                   layoutId="activeTab"
-                  className="absolute inset-0 bg-primary-soft rounded-xl"
+                  className={cn("absolute inset-0 rounded-xl", activeBg)}
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}
               <item.icon className="w-6 h-6 relative z-10" />
-              <span className="text-xs font-medium relative z-10">{item.label}</span>
+              <span className="text-xs font-medium relative z-10">{t(item.label)}</span>
             </motion.button>
           );
         })}

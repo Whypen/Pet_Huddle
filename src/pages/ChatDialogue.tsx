@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Send, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -26,37 +28,107 @@ const ChatDialogue = () => {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  // Realtime subscription for incoming messages in this chat room
+  useEffect(() => {
+    if (!chatId) return;
 
-    const newMessage: Message = {
+    const channel = supabase
+      .channel(`chat_room_${chatId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "chat_messages",
+        filter: `room_id=eq.${chatId}`,
+      }, (payload: any) => {
+        if (payload.new && payload.new.sender_id !== user?.id) {
+          const incoming: Message = {
+            id: payload.new.id,
+            content: payload.new.content,
+            senderId: payload.new.sender_id,
+            timestamp: new Date(payload.new.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          };
+          setMessages(prev => [...prev, incoming]);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [chatId, user?.id]);
+
+  // Load existing messages on mount
+  useEffect(() => {
+    if (!chatId) return;
+
+    const loadMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("chat_messages")
+          .select("id, content, sender_id, created_at")
+          .eq("room_id", chatId)
+          .order("created_at", { ascending: true })
+          .limit(100);
+
+        if (!error && data) {
+          const mapped: Message[] = data.map((m: any) => ({
+            id: m.id,
+            content: m.content,
+            senderId: m.sender_id,
+            timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          }));
+          setMessages(mapped);
+        }
+      } catch (err) {
+        console.error("Failed to load messages:", err);
+      }
+    };
+    loadMessages();
+  }, [chatId]);
+
+  const handleSend = async () => {
+    if (!input.trim() || !chatId) return;
+
+    const optimisticMessage: Message = {
       id: Date.now().toString(),
       content: input,
       senderId: user?.id || "",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     };
 
-    setMessages(prev => [...prev, newMessage]);
+    // Optimistic UI update
+    setMessages(prev => [...prev, optimisticMessage]);
     setInput("");
-
-    // Simulate response (in production, send to backend)
     setIsLoading(true);
-    setTimeout(() => {
-      const response: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "Message received! This is a demo response.",
-        senderId: "other",
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      };
-      setMessages(prev => [...prev, response]);
+
+    try {
+      // Persist to Supabase — realtime will broadcast to other clients
+      const { error } = await supabase
+        .from("chat_messages")
+        .insert({
+          room_id: chatId,
+          sender_id: user?.id,
+          content: optimisticMessage.content,
+        });
+
+      if (error) {
+        // Rollback optimistic update on failure
+        setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
+        toast.error("Failed to send message");
+      }
+    } catch (err) {
+      setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
+      toast.error("Network error");
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -142,10 +214,10 @@ const ChatDialogue = () => {
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
           <button
-            onClick={() => toast.info("Image upload coming soon")}
+            onClick={() => setIsPremiumFooterOpen(true)}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
-            <ImageIcon className="w-5 h-5 text-muted-foreground" />
+            <ImageIcon className="w-5 h-5" style={{ color: "#7DD3FC" }} />
           </button>
 
           <input
@@ -173,6 +245,11 @@ const ChatDialogue = () => {
       </div>
 
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PremiumFooter
+        isOpen={isPremiumFooterOpen}
+        onClose={() => setIsPremiumFooterOpen(false)}
+        triggerReason="chat_media"
+      />
     </div>
   );
 };
