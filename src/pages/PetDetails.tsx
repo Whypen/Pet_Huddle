@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PetDetails {
   id: string;
@@ -34,6 +35,7 @@ interface PetDetails {
 }
 
 const PetDetails = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const petId = searchParams.get("id");
@@ -59,7 +61,7 @@ const PetDetails = () => {
       setPet(data);
     } catch (error) {
       console.error("Error fetching pet:", error);
-      toast.error("Failed to load pet details");
+      toast.error(t("Failed to load pet details"));
       navigate("/");
     } finally {
       setLoading(false);
@@ -134,7 +136,7 @@ const PetDetails = () => {
             <Badge variant="secondary">{pet.species}</Badge>
             {pet.breed && <Badge variant="outline">{pet.breed}</Badge>}
             {pet.gender && <Badge variant="outline">{pet.gender}</Badge>}
-            {pet.neutered_spayed && <Badge variant="outline">Fixed</Badge>}
+            {pet.neutered_spayed && <Badge variant="outline">{t("Fixed")}</Badge>}
           </div>
         </div>
       </div>
@@ -146,29 +148,29 @@ const PetDetails = () => {
             {pet.dob && (
               <div className="p-4 rounded-xl bg-muted/50 text-center">
                 <Calendar className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">Age</p>
+                <p className="text-xs text-muted-foreground">{t("Age")}</p>
                 <p className="font-semibold">{calculateAge(pet.dob)} years</p>
               </div>
             )}
             {pet.weight && (
               <div className="p-4 rounded-xl bg-muted/50 text-center">
                 <Weight className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">Weight</p>
+                <p className="text-xs text-muted-foreground">{t("Weight")}</p>
                 <p className="font-semibold">{pet.weight} {pet.weight_unit}</p>
               </div>
             )}
             {pet.microchip_id && (
               <div className="p-4 rounded-xl bg-muted/50 text-center">
                 <Cpu className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">Microchipped</p>
+                <p className="text-xs text-muted-foreground">{t("Microchipped")}</p>
                 <p className="font-semibold text-xs">{pet.microchip_id.slice(0, 8)}...</p>
               </div>
             )}
             {pet.vet_contact && (
               <div className="p-4 rounded-xl bg-muted/50 text-center">
                 <Stethoscope className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">Vet On File</p>
-                <p className="font-semibold text-xs">Yes</p>
+                <p className="text-xs text-muted-foreground">{t("Vet On File")}</p>
+                <p className="font-semibold text-xs">{t("Yes")}</p>
               </div>
             )}
           </div>
@@ -184,7 +186,7 @@ const PetDetails = () => {
           {/* Temperament */}
           {pet.temperament && pet.temperament.length > 0 && (
             <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-3">Temperament</h3>
+              <h3 className="text-sm font-semibold mb-3">{t("Temperament")}</h3>
               <div className="flex flex-wrap gap-2">
                 {pet.temperament.map((temp) => (
                   <Badge key={temp} variant="secondary">{temp}</Badge>
@@ -196,7 +198,7 @@ const PetDetails = () => {
           {/* Routine */}
           {pet.routine && (
             <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-2">Daily Routine</h3>
+              <h3 className="text-sm font-semibold mb-2">{t("Daily Routine")}</h3>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{pet.routine}</p>
             </div>
           )}
@@ -206,7 +208,7 @@ const PetDetails = () => {
             <div className="p-4 rounded-xl bg-muted/50">
               <div className="flex items-center gap-2 mb-3">
                 <Syringe className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">Vaccinations</h3>
+                <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
               </div>
               <div className="space-y-2">
                 {pet.vaccinations.map((vax, idx) => (
@@ -229,7 +231,7 @@ const PetDetails = () => {
             <div className="p-4 rounded-xl bg-muted/50">
               <div className="flex items-center gap-2 mb-3">
                 <Pill className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">Medications</h3>
+                <h3 className="text-sm font-semibold">{t("Medications")}</h3>
               </div>
               <div className="space-y-2">
                 {pet.medications.map((med, idx) => (
@@ -249,7 +251,7 @@ const PetDetails = () => {
             <div className="p-4 rounded-xl bg-muted/50">
               <div className="flex items-center gap-2 mb-2">
                 <Stethoscope className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">Veterinarian</h3>
+                <h3 className="text-sm font-semibold">{t("Veterinarian")}</h3>
               </div>
               <p className="text-sm">{pet.vet_contact}</p>
             </div>

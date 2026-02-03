@@ -108,7 +108,7 @@ const Subscription = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold">Manage Subscription</h1>
+        <h1 className="text-xl font-bold">{t("Manage Subscription")}</h1>
       </header>
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
@@ -125,8 +125,8 @@ const Subscription = () => {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">huddle Premium</h2>
-            <p className="text-white/90 text-sm">Unlock all features</p>
+            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
+            <p className="text-white/90 text-sm">{t("Unlock all features")}</p>
           </div>
         </div>
 
@@ -139,10 +139,10 @@ const Subscription = () => {
               </div>
               <div>
                 <p className="font-semibold text-primary">
-                  You're a Premium Member!
+                  {t("You're a Premium Member!")}
                 </p>
                 <p className="text-sm text-primary/80">
-                  Next billing: {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+                  {t("Next billing:")} {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
                 </p>
               </div>
             </div>
@@ -153,14 +153,14 @@ const Subscription = () => {
         <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
           <div className="grid grid-cols-3 bg-muted/50">
             <div className="p-3">
-              <span className="text-sm font-medium text-muted-foreground">Feature</span>
+              <span className="text-sm font-medium text-muted-foreground">{t("Feature")}</span>
             </div>
             <div className="p-3 text-center border-l border-border">
-              <span className="text-sm font-medium">Free</span>
+              <span className="text-sm font-medium">{t("Free")}</span>
             </div>
             <div className="p-3 text-center border-l border-border bg-primary/5">
               <span className="text-sm font-semibold text-primary">
-                Premium
+                {t("Premium")}
               </span>
             </div>
           </div>
@@ -214,9 +214,9 @@ const Subscription = () => {
                     : "border-border hover:border-primary/50"
                 )}
               >
-                <p className="text-sm font-medium text-muted-foreground mb-1">Monthly</p>
+                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Monthly")}</p>
                 <p className="text-2xl font-bold">${pricing.monthly.price}</p>
-                <p className="text-xs text-muted-foreground">per month</p>
+                <p className="text-xs text-muted-foreground">{t("per month")}</p>
               </button>
 
               {/* Yearly Card */}
@@ -230,19 +230,19 @@ const Subscription = () => {
                 )}
               >
                 <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                  {pricing.yearly.savings}
+                  {t(pricing.yearly.savings)}
                 </span>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Yearly</p>
+                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Yearly")}</p>
                 <p className="text-2xl font-bold">${pricing.yearly.price}</p>
                 <p className="text-xs text-muted-foreground">
-                  ${pricing.yearly.monthlyEquivalent.toFixed(2)}/month
+                  ${pricing.yearly.monthlyEquivalent.toFixed(2)}{t("/month")}
                 </p>
               </button>
             </div>
 
             {/* Payment Method Selector - SPRINT 3: Apple Pay/Credit Card UI */}
             <div className="mb-6">
-              <h3 className="text-sm font-semibold text-muted-foreground mb-3">Payment Method</h3>
+              <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("Payment Method")}</h3>
               <div className="space-y-2">
                 {paymentMethods.map((method) => (
                   <button
@@ -256,7 +256,7 @@ const Subscription = () => {
                     )}
                   >
                     <method.icon className="w-5 h-5 text-muted-foreground" />
-                    <span className="font-medium">{method.name}</span>
+                    <span className="font-medium">{t(method.name)}</span>
                     {selectedPayment === method.id && (
                       <Check className="w-4 h-4 text-primary ml-auto" />
                     )}
@@ -310,7 +310,7 @@ const Subscription = () => {
 
         {/* Add-ons */}
         <div className="bg-card rounded-xl p-6 border border-border mb-6">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">Add-ons</h3>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("Add-ons")}</h3>
           <div className="grid grid-cols-2 gap-3">
             {addOns.map((item) => (
               <button
@@ -327,7 +327,7 @@ const Subscription = () => {
 
         {/* Billing Section */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-2">Billing</h3>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-2">{t("Billing")}</h3>
 
           <button
             className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
@@ -335,7 +335,7 @@ const Subscription = () => {
           >
             <div className="flex items-center gap-3">
               <CreditCard className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium">Payment Methods</span>
+              <span className="font-medium">{t("Payment Methods")}</span>
             </div>
             <span className="text-sm text-muted-foreground">
               {isPremium ? "•••• 4242" : "None"}
@@ -348,7 +348,7 @@ const Subscription = () => {
           >
             <div className="flex items-center gap-3">
               <History className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium">Transaction History</span>
+              <span className="font-medium">{t("Transaction History")}</span>
             </div>
           </button>
 
@@ -366,14 +366,14 @@ const Subscription = () => {
                     <>
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="text-sm font-medium">Premium Subscription</p>
+                          <p className="text-sm font-medium">{t("Premium Subscription")}</p>
                           <p className="text-xs text-muted-foreground">
                             {new Date().toLocaleDateString()}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-medium">$8.99 USD</p>
-                          <p className="text-xs text-accent">Completed</p>
+                          <p className="text-sm font-medium">{t("$8.99 USD")}</p>
+                          <p className="text-xs text-accent">{t("Completed")}</p>
                         </div>
                       </div>
                     </>
@@ -400,7 +400,7 @@ const Subscription = () => {
 
         {/* Footer */}
         <div className="mt-8 text-center">
-          <span className="text-xs text-muted-foreground">v1.0.0 (2026)</span>
+          <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
         </div>
       </div>
     </div>

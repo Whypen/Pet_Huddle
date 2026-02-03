@@ -129,7 +129,7 @@ const Map = () => {
       (pos) => {
         setUserLocationAccuracy(pos.coords.accuracy);
         if (pos.coords.accuracy && pos.coords.accuracy > 500) {
-          toast.warning("Location accuracy too low. Please retry with better GPS signal.");
+          toast.warning(t("Location accuracy too low. Please retry with better GPS signal."));
           // Fallback without persisting
           setUserLocation({ lat: 22.3193, lng: 114.1694 });
           return;
@@ -315,7 +315,7 @@ const Map = () => {
             position: relative;
           ">
             <span style="font-size: 18px;">🏥</span>
-            ${vet.is24h ? '<span style="position: absolute; top: -8px; right: -8px; background: #22C55E; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">24h</span>' : ''}
+            ${vet.is24h ? `<span style="position: absolute; top: -8px; right: -8px; background: #22C55E; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">${t("24h")}</span>` : ''}
           </div>
         `;
         el.addEventListener("click", () => setSelectedVet(vet));
@@ -494,7 +494,7 @@ const Map = () => {
 
   const handleCreateAlert = async () => {
     if (!user || !selectedLocation) {
-      toast.error("Please select a location on the map");
+      toast.error(t("Please select a location on the map"));
       return;
     }
     const canSend = await checkEmergencyAlertAvailable();
@@ -535,7 +535,7 @@ const Map = () => {
 
       if (error) throw error;
 
-      toast.success("Alert broadcasted!");
+      toast.success(t("Alert broadcasted!"));
 
       // Track daily alert count — show PremiumFooter on 3rd alert for free users
       const newCount = alertCountToday + 1;
@@ -565,7 +565,7 @@ const Map = () => {
 
   const handleSupport = async (alertId: string) => {
     if (!user) {
-      toast.error("Please login to support alerts");
+      toast.error(t("Please login to support alerts"));
       return;
     }
 
@@ -576,20 +576,20 @@ const Map = () => {
         interaction_type: "support",
       });
 
-      toast.success("Thanks for your support!");
+      toast.success(t("Thanks for your support!"));
       fetchAlerts();
     } catch (error: any) {
       if (error.code === "23505") {
-        toast.info("You've already supported this alert");
+        toast.info(t("You've already supported this alert"));
       } else {
-        toast.error("Failed to support alert");
+        toast.error(t("Failed to support alert"));
       }
     }
   };
 
   const handleReport = async (alertId: string) => {
     if (!user) {
-      toast.error("Please login to report alerts");
+      toast.error(t("Please login to report alerts"));
       return;
     }
 
@@ -600,12 +600,12 @@ const Map = () => {
         interaction_type: "report",
       });
 
-      toast.success("Alert reported");
+      toast.success(t("Alert reported"));
     } catch (error: any) {
       if (error.code === "23505") {
-        toast.info("You've already reported this alert");
+        toast.info(t("You've already reported this alert"));
       } else {
-        toast.error("Failed to report alert");
+        toast.error(t("Failed to report alert"));
       }
     }
   };
@@ -613,12 +613,12 @@ const Map = () => {
   const handleHide = (alertId: string) => {
     setHiddenAlerts((prev) => new Set([...prev, alertId]));
     setSelectedAlert(null);
-    toast.success("Alert hidden");
+    toast.success(t("Alert hidden"));
   };
 
   const handleBlockUser = () => {
     setSelectedAlert(null);
-    toast.success("You won't see posts from this user");
+    toast.success(t("You won't see posts from this user"));
   };
 
   const formatTimeAgo = (date: string) => {
@@ -697,7 +697,7 @@ const Map = () => {
         {isCreateOpen && (
           <div className="absolute top-4 left-4 right-4 bg-card rounded-xl p-4 shadow-elevated z-[1000]">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold">Tap map to select location</h3>
+              <h3 className="font-semibold">{t("Tap map to select location")}</h3>
               <button onClick={resetCreateForm}>
                 <X className="w-5 h-5" />
               </button>
@@ -753,7 +753,7 @@ const Map = () => {
               {/* Description */}
               <div className="space-y-1">
                 <Textarea
-                  placeholder="Brief description (max 20 words)..."
+                  placeholder={t("Brief description (max 20 words)...")}
                   value={description}
                   onChange={(e) => {
                     const words = e.target.value.trim().split(/\s+/).filter(Boolean);
@@ -840,7 +840,7 @@ const Map = () => {
                     if (selectedVet.phone) {
                       window.open(`tel:${selectedVet.phone}`);
                     } else {
-                      toast.info("Phone number not available");
+                      toast.info(t("Phone number not available"));
                     }
                   }}
                   className="h-12 rounded-xl"

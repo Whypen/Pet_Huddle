@@ -1,5 +1,6 @@
 import { Shield, Car } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface ProfileBadgesProps {
   isVerified?: boolean;
@@ -9,6 +10,7 @@ interface ProfileBadgesProps {
 }
 
 export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: ProfileBadgesProps) => {
+  const { t } = useLanguage();
   const iconSize = size === "sm" ? "w-3 h-3" : "w-4 h-4";
   const badgeSize = size === "sm" ? "w-5 h-5" : "w-6 h-6";
   
@@ -17,12 +19,12 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
       {isVerified && (
         <div 
           className={cn(
-            "rounded-full bg-warning flex items-center justify-center",
+            "rounded-full bg-primary flex items-center justify-center",
             badgeSize
           )}
-          title="Verified User"
+          title={t("Verified User")}
         >
-          <Shield className={cn(iconSize, "text-warning-foreground")} />
+          <Shield className={cn(iconSize, "text-white")} />
         </div>
       )}
       {hasCar && (
@@ -32,7 +34,7 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
             badgeSize
           )}
           style={{ backgroundColor: "#2563EB" }}
-          title="Has a Car"
+          title={t("Has a Car")}
         >
           <Car className={cn(iconSize, "text-white")} />
         </div>

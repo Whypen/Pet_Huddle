@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Message {
   id: string;
@@ -19,10 +20,11 @@ interface Message {
 }
 
 const ChatDialogue = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const chatId = searchParams.get("id");
-  const chatName = searchParams.get("name") || "Chat";
+  const chatName = searchParams.get("name") || t("Chat");
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -129,11 +131,11 @@ const ChatDialogue = () => {
       if (error) {
         // Rollback optimistic update on failure
         setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
-        toast.error("Failed to send message");
+        toast.error(t("Failed to send message"));
       }
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
-      toast.error("Network error");
+      toast.error(t("Network error"));
     } finally {
       setIsLoading(false);
     }
@@ -154,7 +156,7 @@ const ChatDialogue = () => {
         <UserAvatar name={chatName} size="sm" />
         <div className="flex-1">
           <h2 className="font-semibold">{chatName}</h2>
-          <p className="text-xs text-muted-foreground">Online</p>
+          <p className="text-xs text-muted-foreground">{t("Online")}</p>
         </div>
       </div>
 
@@ -162,8 +164,8 @@ const ChatDialogue = () => {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
-            <p className="text-muted-foreground text-sm">No messages yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Start the conversation!</p>
+            <p className="text-muted-foreground text-sm">{t("No messages yet")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("Start the conversation!")}</p>
           </div>
         )}
 
@@ -208,7 +210,7 @@ const ChatDialogue = () => {
               <div className="bg-accent-soft rounded-2xl rounded-bl-sm px-4 py-3">
                 <div className="flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Typing...</span>
+                  <span className="text-sm text-muted-foreground">{t("Typing...")}</span>
                 </div>
               </div>
             </motion.div>
@@ -241,7 +243,7 @@ const ChatDialogue = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Type a message..."
+            placeholder={t("Type a message...")}
             className="flex-1 bg-muted rounded-full px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/50 transition-all"
           />
 

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Contact {
   id: string;
@@ -37,6 +38,7 @@ const verifiedContacts: Contact[] = [
 ];
 
 export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGroupDialogProps) => {
+  const { t } = useLanguage();
   const [groupName, setGroupName] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<Contact[]>([]);
   const [allowMemberControl, setAllowMemberControl] = useState(false);
@@ -59,11 +61,11 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
 
   const handleCreate = () => {
     if (!groupName.trim()) {
-      toast.error("Please enter a group name");
+      toast.error(t("Please enter a group name"));
       return;
     }
     if (selectedMembers.length < 1) {
-      toast.error("Please add at least one member");
+      toast.error(t("Please add at least one member"));
       return;
     }
 
@@ -78,7 +80,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
     setSelectedMembers([]);
     setAllowMemberControl(false);
     onClose();
-    toast.success("Group created successfully!");
+    toast.success(t("Group created successfully!"));
   };
 
   return (
@@ -107,7 +109,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                   <Users className="w-5 h-5 text-primary" />
                 </div>
-                <h2 className="text-lg font-semibold">Create Group</h2>
+                <h2 className="text-lg font-semibold">{t("Create Group")}</h2>
               </div>
               <button
                 onClick={onClose}
@@ -121,12 +123,12 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
             <div className="flex-1 overflow-y-auto p-4 space-y-5">
               {/* Group Name */}
               <div className="space-y-2">
-                <Label htmlFor="groupName">Group Name</Label>
+                <Label htmlFor="groupName">{t("Group Name")}</Label>
                 <Input
                   id="groupName"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="Enter group name..."
+                  placeholder={t("Enter group name...")}
                   className="h-12 rounded-xl"
                 />
               </div>
@@ -134,7 +136,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
               {/* Selected Members */}
               {selectedMembers.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Members ({selectedMembers.length})</Label>
+                  <Label>{t("Members")} ({selectedMembers.length})</Label>
                   <div className="flex flex-wrap gap-2">
                     {selectedMembers.map((member) => (
                       <motion.div
@@ -162,11 +164,11 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
 
               {/* Add Contacts */}
               <div className="space-y-2">
-                <Label>Add Contacts</Label>
+                <Label>{t("Add Contacts")}</Label>
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search verified contacts..."
+                  placeholder={t("Search verified contacts...")}
                   className="h-11 rounded-xl"
                 />
                 
@@ -199,7 +201,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
 
                 {searchQuery && availableContacts.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    No verified contacts found
+                    {t("No verified contacts found")}
                   </p>
                 )}
               </div>
@@ -207,13 +209,13 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
               {/* Delegate Control */}
               <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
-                    <Crown className="w-5 h-5 text-amber-600" />
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Crown className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <p className="font-medium text-sm">Delegate Control</p>
+                    <p className="font-medium text-sm">{t("Delegate Control")}</p>
                     <p className="text-xs text-muted-foreground">
-                      Allow members to add/remove others
+                      {t("Allow members to add/remove others")}
                     </p>
                   </div>
                 </div>
@@ -224,7 +226,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
               </div>
 
               <p className="text-xs text-muted-foreground text-center">
-                You can always edit group settings by clicking the group name
+                {t("You can always edit group settings by clicking the group name")}
               </p>
             </div>
 
@@ -235,7 +237,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
                 disabled={!groupName.trim() || selectedMembers.length === 0}
                 className="w-full h-12 rounded-xl text-base font-semibold"
               >
-                Create Group
+                {t("Create Group")}
               </Button>
             </div>
           </motion.div>

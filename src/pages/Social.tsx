@@ -103,7 +103,7 @@ const Social = () => {
       
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-4">
-        <h1 className="text-2xl font-bold">Discovery</h1>
+        <h1 className="text-2xl font-bold">{t("Discovery")}</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsFilterOpen(true)}
@@ -173,7 +173,7 @@ const Social = () => {
                     </span>
                     <ProfileBadges isVerified={true} hasCar={true} />
                   </div>
-                  <h3 className="text-2xl font-bold text-primary-foreground">Sarah, 31 Years Old</h3>
+                  <h3 className="text-2xl font-bold text-primary-foreground">{t("Sarah, 31 Years Old")}</h3>
                   <div className="flex gap-2 mt-2 flex-wrap">
                     <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
                       #TrailHiker

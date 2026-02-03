@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface NetworkContextType {
   isOnline: boolean;
@@ -26,6 +27,7 @@ const MAX_RETRY_COUNT = 3;
 const OFFLINE_ACTIONS_KEY = "huddle_offline_actions";
 
 export const NetworkProvider = ({ children }: { children: ReactNode }) => {
+  const { t } = useLanguage();
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isServerReachable, setIsServerReachable] = useState(true);
   const [lastOnlineTime, setLastOnlineTime] = useState<Date | null>(null);
@@ -82,7 +84,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
 
     if (serverOk && isOnline) {
       setLastOnlineTime(new Date());
-      toast.success("Connection restored!");
+      toast.success(t("Connection restored!"));
 
       // Process pending offline actions
       if (pendingActions.length > 0) {
@@ -181,7 +183,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     };
 
     setPendingActions(prev => [...prev, newAction]);
-    toast.info("Action saved. Will sync when online.");
+    toast.info(t("Action saved. Will sync when online."));
   }, []);
 
   // Handle online/offline events
@@ -189,7 +191,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     const handleOnline = () => {
       setIsOnline(true);
       setHasShownOfflineToast(false);
-      toast.success("You're back online!");
+      toast.success(t("You're back online!"));
       retryConnection();
     };
 
@@ -197,7 +199,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       setIsOnline(false);
       setIsServerReachable(false);
       if (!hasShownOfflineToast) {
-        toast.error("You're offline. Some features may be limited.");
+        toast.error(t("You're offline. Some features may be limited."));
         setHasShownOfflineToast(true);
       }
     };
@@ -222,7 +224,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       if (serverOk) {
         setLastOnlineTime(new Date());
       } else if (!hasShownOfflineToast) {
-        toast.warning("Unable to reach server. Some features may be limited.");
+        toast.warning(t("Unable to reach server. Some features may be limited."));
         setHasShownOfflineToast(true);
       }
     };

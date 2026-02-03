@@ -76,8 +76,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
         {/* Left: Notifications */}
         <button
           className="p-2 rounded-full hover:bg-muted transition-colors relative"
-          aria-label="Notifications"
-          onClick={() => toast.info("Notifications coming soon")}
+          aria-label={t("Notifications")}
+          onClick={() => toast.info(t("Notifications coming soon"))}
         >
           <Bell className="w-5 h-5 text-muted-foreground" />
           {/* Notification dot */}
@@ -91,11 +91,11 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
         >
           <img
             src={huddleLogo}
-            alt="huddle"
+            alt={t("huddle")}
             className="h-8 w-8 object-cover rounded-lg"
           />
           <div className="hidden sm:flex flex-col">
-            <span className="text-base font-bold lowercase leading-tight">huddle</span>
+            <span className="text-base font-bold lowercase leading-tight">{t("huddle")}</span>
           </div>
         </button>
 
@@ -103,7 +103,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
         <button
           onClick={onMenuClick || (() => navigate('/settings'))}
           className="p-2 rounded-full hover:bg-muted transition-colors"
-          aria-label="Settings"
+          aria-label={t("Settings")}
         >
           <Settings className="w-5 h-5 text-muted-foreground" />
         </button>

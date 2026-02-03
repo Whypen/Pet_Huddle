@@ -82,7 +82,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                     {profile?.avatar_url ? (
                       <img
                         src={profile.avatar_url}
-                        alt="Profile"
+                        alt={t("Profile")}
                         className="w-12 h-12 rounded-full object-cover"
                       />
                     ) : (
@@ -93,18 +93,18 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                     <div
                       className={cn(
                         "absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center",
-                        isVerified ? "bg-gradient-to-r from-amber-400 to-amber-500" : "bg-muted"
+                        isVerified ? "bg-primary" : "bg-muted"
                       )}
                     >
                       {isVerified ? (
-                        <Crown className="w-3 h-3 text-amber-900" />
+                        <Crown className="w-3 h-3 text-white" />
                       ) : (
                         <Shield className="w-3 h-3 text-muted-foreground" />
                       )}
                     </div>
                   </div>
                   <div>
-                    <p className="font-semibold">{profile?.display_name || "User"}</p>
+                    <p className="font-semibold">{profile?.display_name || t("User")}</p>
                     <p className="text-xs text-muted-foreground">
                       {isVerified ? t("settings.verified_badge") : t("settings.pending")}
                     </p>
@@ -112,7 +112,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                       className={cn(
                         "inline-block mt-0.5 text-xs font-medium px-2 py-0.5 rounded-full",
                         isPremium
-                          ? "bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800"
+                          ? "bg-primary/10 text-primary"
                           : "bg-muted text-muted-foreground"
                       )}
                     >
@@ -154,7 +154,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
               
               {/* Version Footer */}
               <div className="px-6 pb-4 text-center">
-                <span className="text-xs text-muted-foreground">v1.0.0 (2026)</span>
+                <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
               </div>
             </div>
           </motion.div>

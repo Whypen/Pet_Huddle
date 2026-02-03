@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart, Bird, PawPrint } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SPECIES_LIST } from "@/lib/constants";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface FilterSheetProps {
   isOpen: boolean;
@@ -84,6 +85,7 @@ const languageOptions = [
 ];
 
 export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick }: FilterSheetProps) => {
+  const { t } = useLanguage();
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
 
   const handleRoleChange = (role: FilterState["role"]) => {
@@ -136,7 +138,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-              <h2 className="text-xl font-bold">Filters</h2>
+              <h2 className="text-xl font-bold">{t("Filters")}</h2>
               <button
                 onClick={onClose}
                 className="p-2 rounded-full hover:bg-muted transition-colors"
@@ -155,7 +157,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                 {/* Role Multi-Select (Checkboxes) */}
                 <div className="mb-5">
-                  <label className="text-sm font-medium mb-3 block">Looking for</label>
+                  <label className="text-sm font-medium mb-3 block">{t("Looking for")}</label>
                   <div className="space-y-2">
                     {roles.map((role) => {
                       const isSelected = localFilters.selectedRoles?.includes(role.id) || localFilters.role === role.id;
@@ -203,7 +205,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                 {/* Species Selector */}
                 <div className="mb-5">
-                  <label className="text-sm font-medium mb-2 block">Species</label>
+                  <label className="text-sm font-medium mb-2 block">{t("Species")}</label>
                   <div className="flex gap-2 flex-wrap">
                     {speciesOptions.map((option) => (
                       <button
@@ -226,7 +228,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                 {/* Distance Slider - SPRINT 3: 150km max, See Further toggle */}
                 <div className="mb-5">
                   <div className="flex justify-between items-center mb-2">
-                    <label className="text-sm font-medium">Distance</label>
+                    <label className="text-sm font-medium">{t("Distance")}</label>
                     <span className="text-sm font-semibold text-primary">{localFilters.distance} km</span>
                   </div>
                   <input
@@ -238,14 +240,14 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
                   />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>1 km</span>
+                    <span>{t("1 km")}</span>
                     <span>{localFilters.seeFurther ? "500 km" : "150 km (max)"}</span>
                   </div>
                   {/* See Further Toggle */}
                   <div className="mt-3 flex items-center justify-between p-3 rounded-xl bg-muted/50">
                     <div>
-                      <label className="text-sm font-medium">See Further</label>
-                      <p className="text-xs text-muted-foreground">Extend search beyond 150km</p>
+                      <label className="text-sm font-medium">{t("See Further")}</label>
+                      <p className="text-xs text-muted-foreground">{t("Extend search beyond 150km")}</p>
                     </div>
                     <input
                       type="checkbox"
@@ -258,11 +260,11 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                 {/* Demographics */}
                 <div className="mb-5">
-                  <label className="text-sm font-medium mb-3 block">Demographics</label>
+                  <label className="text-sm font-medium mb-3 block">{t("Demographics")}</label>
                   <div className="grid grid-cols-2 gap-3">
                     {/* Age Range */}
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Age Range</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">{t("Age Range")}</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="number"
@@ -292,7 +294,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                     {/* Gender */}
                     <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Gender</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">{t("Gender")}</label>
                       <select
                         value={localFilters.gender}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, gender: e.target.value }))}
@@ -306,7 +308,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                     {/* Pet Height */}
                     <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">Pet Height</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">{t("Pet Height")}</label>
                       <select
                         value={localFilters.petHeight}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, petHeight: e.target.value }))}
@@ -320,7 +322,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                     {/* SPRINT 3: Language Filter */}
                     <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">Languages</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">{t("Languages")}</label>
                       <div className="flex flex-wrap gap-2">
                         {languageOptions.map((lang) => {
                           const isSelected = localFilters.languages.includes(lang);
@@ -358,7 +360,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     Premium Filters
                   </h3>
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-xs font-semibold text-amber-900">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
                     PRO
                   </div>
@@ -377,8 +379,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   {/* Activity */}
                   <PremiumToggle
                     icon={Zap}
-                    label="Active Now"
-                    description="Seen in last 24 hours"
+                    label={t("Active Now")}
+                    description={t("Seen in last 24 hours")}
                     checked={localFilters.activeNow}
                     onToggle={() => handlePremiumToggle("activeNow")}
                   />
@@ -386,8 +388,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   {/* Compatibility */}
                   <PremiumToggle
                     icon={Heart}
-                    label="Pet Temperament Match"
-                    description="Filter by personality sync"
+                    label={t("Pet Temperament Match")}
+                    description={t("Filter by personality sync")}
                     checked={localFilters.temperamentMatch}
                     onToggle={() => handlePremiumToggle("temperamentMatch")}
                   />
@@ -395,8 +397,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   {/* Logistics & Skills */}
                   <div className="p-4 rounded-xl bg-muted/50 border border-border">
                     <div className="flex items-center gap-2 mb-3">
-                      <span className="text-sm font-medium">Logistics & Skills</span>
-                      <Lock className="w-3.5 h-3.5 text-amber-500" />
+                      <span className="text-sm font-medium">{t("Logistics & Skills")}</span>
+                      <Lock className="w-3.5 h-3.5 text-primary" />
                     </div>
                     <div className="flex gap-2 flex-wrap">
                       <button
@@ -409,7 +411,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         )}
                       >
                         <Car className="w-4 h-4" />
-                        Has a Car
+                        {t("Has a Car")}
                       </button>
                       <button
                         onClick={() => handlePremiumToggle("petSchoolGrad")}
@@ -421,7 +423,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         )}
                       >
                         <GraduationCap className="w-4 h-4" />
-                        Pet School Graduates
+                        {t("Pet School Graduates")}
                       </button>
                     </div>
                   </div>
@@ -469,13 +471,13 @@ const PremiumToggle = ({ icon: Icon, label, description, checked, onToggle }: Pr
     className="w-full flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border hover:border-primary/30 transition-all"
   >
     <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center">
-        <Icon className="w-5 h-5 text-amber-600" />
+      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
+        <Icon className="w-5 h-5 text-blue-600" />
       </div>
       <div className="text-left">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{label}</span>
-          <Lock className="w-3 h-3 text-amber-500" />
+          <Lock className="w-3 h-3 text-primary" />
         </div>
         <span className="text-xs text-muted-foreground">{description}</span>
       </div>

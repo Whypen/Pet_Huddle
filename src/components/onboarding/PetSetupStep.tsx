@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { SPECIES_LIST, BREED_OPTIONS, VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PetData {
   photoUrl: string;
@@ -39,6 +40,7 @@ interface PetSetupStepProps {
 }
 
 export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) => {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
@@ -125,15 +127,15 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
   const handleSubmit = async () => {
     // Validation
     if (!formData.name.trim()) {
-      toast.error("Please enter your pet's name");
+      toast.error(t("Please enter your pet's name"));
       return;
     }
     if (!formData.species) {
-      toast.error("Please select a species");
+      toast.error(t("Please select a species"));
       return;
     }
     if (formData.species === "Others" && !formData.customSpecies.trim()) {
-      toast.error("Please enter a custom species name");
+      toast.error(t("Please enter a custom species name"));
       return;
     }
 
@@ -152,7 +154,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
 
         if (uploadError) {
           console.error("Pet photo upload error:", uploadError);
-          toast.error("Failed to upload pet photo");
+          toast.error(t("Failed to upload pet photo"));
           throw uploadError;
         }
 
@@ -189,16 +191,16 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
 
       if (error) {
         console.error("Pet save error:", error);
-        toast.error(error.message || "Failed to save pet profile");
+        toast.error(error.message || t("Failed to save pet profile"));
         throw error;
       }
 
-      toast.success(`${formData.name} has been added to your huddle!`);
+      toast.success(`${formData.name} ${t("has been added to your huddle!")}`);
       onComplete();
     } catch (error: any) {
       console.error("Error saving pet:", error);
       if (!error.message?.includes("Failed to")) {
-        toast.error("Failed to save pet profile");
+        toast.error(t("Failed to save pet profile"));
       }
     } finally {
       setLoading(false);
@@ -212,7 +214,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mb-2">
           <PawPrint className="w-7 h-7 text-primary" />
         </div>
-        <h2 className="text-2xl font-bold text-foreground">Add Your Pet</h2>
+        <h2 className="text-2xl font-bold text-foreground">{t("Add Your Pet")}</h2>
         <p className="text-sm text-muted-foreground">
           Create a profile for your furry friend
         </p>
@@ -240,23 +242,23 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
       {/* Mandatory Fields */}
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label>Pet Name *</Label>
+          <Label>{t("Pet Name *")}</Label>
           <Input
             value={formData.name}
             onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="What's your pet's name?"
+            placeholder={t("What's your pet's name?")}
             className="h-12 rounded-xl"
           />
         </div>
 
         <div className="space-y-2">
-          <Label>Species *</Label>
+          <Label>{t("Species *")}</Label>
           <Select
             value={formData.species}
             onValueChange={(value) => setFormData(prev => ({ ...prev, species: value, breed: "" }))}
           >
             <SelectTrigger className="h-12 rounded-xl">
-              <SelectValue placeholder="Select species" />
+              <SelectValue placeholder={t("Select species")} />
             </SelectTrigger>
             <SelectContent>
               {SPECIES_LIST.map(option => (
@@ -272,11 +274,11 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
             animate={{ opacity: 1, height: "auto" }}
             className="space-y-2"
           >
-            <Label>Custom Species *</Label>
+            <Label>{t("Custom Species *")}</Label>
             <Input
               value={formData.customSpecies}
               onChange={(e) => setFormData(prev => ({ ...prev, customSpecies: e.target.value }))}
-              placeholder="Enter species name"
+              placeholder={t("Enter species name")}
               className="h-12 rounded-xl"
             />
           </motion.div>
@@ -284,13 +286,13 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
 
         {formData.species && formData.species !== "Others" && (
           <div className="space-y-2">
-            <Label>Breed</Label>
+            <Label>{t("Breed")}</Label>
             <Select
               value={formData.breed}
               onValueChange={(value) => setFormData(prev => ({ ...prev, breed: value }))}
             >
               <SelectTrigger className="h-12 rounded-xl">
-                <SelectValue placeholder="Select breed" />
+                <SelectValue placeholder={t("Select breed")} />
               </SelectTrigger>
               <SelectContent>
                 {getBreedOptions().map(breed => (
@@ -303,31 +305,31 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label>Gender</Label>
+            <Label>{t("Gender")}</Label>
             <Select
               value={formData.gender}
               onValueChange={(value) => setFormData(prev => ({ ...prev, gender: value }))}
             >
               <SelectTrigger className="h-12 rounded-xl">
-                <SelectValue placeholder="Select" />
+                <SelectValue placeholder={t("Select")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Male">Male</SelectItem>
-                <SelectItem value="Female">Female</SelectItem>
-                <SelectItem value="Unknown">Unknown</SelectItem>
+                <SelectItem value="Male">{t("Male")}</SelectItem>
+                <SelectItem value="Female">{t("Female")}</SelectItem>
+                <SelectItem value="Unknown">{t("Unknown")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label>Weight</Label>
+            <Label>{t("Weight")}</Label>
             <div className="flex gap-2">
               <Input
                 type="number"
                 min="0"
                 value={formData.weight || ""}
                 onChange={(e) => setFormData(prev => ({ ...prev, weight: parseFloat(e.target.value) || null }))}
-                placeholder="0"
+                placeholder={t("0")}
                 className="h-12 rounded-xl"
               />
               <Select
@@ -338,8 +340,8 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="kg">kg</SelectItem>
-                  <SelectItem value="lbs">lbs</SelectItem>
+                  <SelectItem value="kg">{t("kg")}</SelectItem>
+                  <SelectItem value="lbs">{t("lbs")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -347,7 +349,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         </div>
 
         <div className="space-y-2">
-          <Label>Date of Birth</Label>
+          <Label>{t("Date of Birth")}</Label>
           <Input
             type="date"
             value={formData.dob}
@@ -371,7 +373,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
 
         {/* Vaccinations */}
         <div className="space-y-3">
-          <Label className="text-sm">Vaccinations</Label>
+          <Label className="text-sm">{t("Vaccinations")}</Label>
           <div className="flex flex-wrap gap-2">
             {VACCINATION_OPTIONS.map(vax => {
               const isAdded = formData.vaccinations.some(v => v.name === vax);
@@ -399,7 +401,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
           <Textarea
             value={formData.medications}
             onChange={(e) => setFormData(prev => ({ ...prev, medications: e.target.value }))}
-            placeholder="Any current medications or medical conditions..."
+            placeholder={t("Any current medications or medical conditions...")}
             className="rounded-xl resize-none"
             rows={2}
           />
@@ -414,7 +416,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
           <Input
             value={formData.microchipId}
             onChange={(e) => validateMicrochip(e.target.value)}
-            placeholder="15-digit microchip number"
+            placeholder={t("15-digit microchip number")}
             className="h-11 rounded-xl font-mono"
             maxLength={15}
           />
@@ -434,18 +436,18 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         </h3>
 
         <div className="space-y-2">
-          <Label className="text-sm">Daily Routine</Label>
+          <Label className="text-sm">{t("Daily Routine")}</Label>
           <Textarea
             value={formData.routine}
             onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
-            placeholder="Walk times, feeding schedule, etc..."
+            placeholder={t("Walk times, feeding schedule, etc...")}
             className="rounded-xl resize-none"
             rows={2}
           />
         </div>
 
         <div className="space-y-3">
-          <Label className="text-sm">Temperament</Label>
+          <Label className="text-sm">{t("Temperament")}</Label>
           <div className="flex flex-wrap gap-2">
             {TEMPERAMENT_OPTIONS.map(temp => (
               <Badge
@@ -469,17 +471,17 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
           <Input
             value={formData.vetContact}
             onChange={(e) => setFormData(prev => ({ ...prev, vetContact: e.target.value }))}
-            placeholder="Vet name and phone number"
+            placeholder={t("Vet name and phone number")}
             className="h-11 rounded-xl"
           />
         </div>
 
         <div className="space-y-2">
-          <Label className="text-sm">Pet Bio</Label>
+          <Label className="text-sm">{t("Pet Bio")}</Label>
           <Textarea
             value={formData.bio}
             onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-            placeholder="Tell us about your pet's personality..."
+            placeholder={t("Tell us about your pet's personality...")}
             className="rounded-xl resize-none"
             rows={3}
           />
@@ -489,8 +491,8 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
       {/* Status Toggle */}
       <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
         <div>
-          <Label>Pet is Still Active</Label>
-          <p className="text-xs text-muted-foreground">Uncheck if passed away or rehomed</p>
+          <Label>{t("Pet is Still Active")}</Label>
+          <p className="text-xs text-muted-foreground">{t("Uncheck if passed away or rehomed")}</p>
         </div>
         <Switch
           checked={formData.isActive}

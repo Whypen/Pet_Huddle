@@ -153,7 +153,7 @@ export const ProfileModal = ({
                 {/* Pet Gallery */}
                 {profile.pets && profile.pets.length > 0 && (
                   <div className="mb-4">
-                    <h3 className="text-sm font-semibold mb-2">Pets</h3>
+                    <h3 className="text-sm font-semibold mb-2">{t("Pets")}</h3>
                     <div className="flex gap-3 overflow-x-auto pb-2">
                       {profile.pets.map((pet) => (
                         <div key={pet.id} className="flex-shrink-0 text-center">
@@ -214,7 +214,7 @@ export const ProfileModal = ({
                 <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
                   <Star className="w-6 h-6 text-warning" />
                 </div>
-                <span className="text-xs font-medium">Star</span>
+                <span className="text-xs font-medium">{t("Star")}</span>
               </motion.button>
             </div>
           </motion.div>

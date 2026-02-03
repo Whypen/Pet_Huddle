@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface SecurityIdentityStepProps {
   legalName: string;
@@ -25,12 +26,13 @@ export const SecurityIdentityStep = ({
   onVerificationComplete,
   onContinue,
 }: SecurityIdentityStepProps) => {
+  const { t } = useLanguage();
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "verified" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
 
   const handleStartVerification = () => {
     if (!legalName.trim() || !phone.trim()) {
-      toast.error("Please fill in your legal name and phone number first");
+      toast.error(t("Please fill in your legal name and phone number first"));
       return;
     }
 
@@ -40,7 +42,7 @@ export const SecurityIdentityStep = ({
     setTimeout(() => {
       setVerificationStatus("verified");
       onVerificationComplete(true);
-      toast.success("Identity verified successfully!");
+      toast.success(t("Identity verified successfully!"));
     }, 2500);
   };
 
@@ -51,7 +53,7 @@ export const SecurityIdentityStep = ({
     }
     setVerificationStatus("skipped");
     onVerificationComplete(false);
-    toast.info("Verification skipped - you can complete this later in settings");
+    toast.info(t("Verification skipped - you can complete this later in settings"));
   };
 
   const canContinue = (legalName.trim() && phone.trim()) && (verificationStatus === "verified" || verificationStatus === "skipped");
@@ -63,7 +65,7 @@ export const SecurityIdentityStep = ({
         <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-2">
           <Shield className="w-8 h-8 text-primary" />
         </div>
-        <h2 className="text-2xl font-bold text-foreground">Security & Identity</h2>
+        <h2 className="text-2xl font-bold text-foreground">{t("Security & Identity")}</h2>
         <p className="text-muted-foreground text-sm">
           Verify your identity to unlock full community features
         </p>
@@ -78,7 +80,7 @@ export const SecurityIdentityStep = ({
           </Label>
           <Input
             id="legalName"
-            placeholder="Enter your full legal name"
+            placeholder={t("Enter your full legal name")}
             value={legalName}
             onChange={(e) => onLegalNameChange(e.target.value)}
             className="h-12 rounded-xl"
@@ -90,14 +92,14 @@ export const SecurityIdentityStep = ({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="phone">Phone Number</Label>
+          <Label htmlFor="phone">{t("Phone Number")}</Label>
           <PhoneInput
             international
             defaultCountry="HK"
             value={phone}
             onChange={(value) => onPhoneChange(value || '')}
             className="phone-input-onboarding h-12 rounded-xl border border-border px-3"
-            placeholder="Enter phone number"
+            placeholder={t("Enter phone number")}
             disabled={verificationStatus === "verified"}
           />
         </div>
@@ -119,7 +121,7 @@ export const SecurityIdentityStep = ({
             <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
               <Shield className="w-6 h-6 text-muted-foreground" />
             </div>
-            <h3 className="font-semibold text-foreground mb-1">Identity Verification</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Identity Verification")}</h3>
             <p className="text-sm text-muted-foreground mb-4">
               Complete verification to earn your Gold Badge
             </p>
@@ -136,7 +138,7 @@ export const SecurityIdentityStep = ({
         {verificationStatus === "verifying" && (
           <div className="py-4">
             <Loader2 className="w-10 h-10 text-primary mx-auto mb-3 animate-spin" />
-            <h3 className="font-semibold text-foreground mb-1">Verifying Identity...</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Verifying Identity...")}</h3>
             <p className="text-sm text-muted-foreground">
               Processing your verification request
             </p>
@@ -148,7 +150,7 @@ export const SecurityIdentityStep = ({
             <div className="w-12 h-12 rounded-full bg-success/20 mx-auto mb-3 flex items-center justify-center">
               <Check className="w-6 h-6 text-success" />
             </div>
-            <h3 className="font-semibold text-foreground mb-1">Verified!</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Verified!")}</h3>
             <p className="text-sm text-muted-foreground">
               You've earned the Gold Verified Badge
             </p>
@@ -160,7 +162,7 @@ export const SecurityIdentityStep = ({
             <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
               <Shield className="w-6 h-6 text-muted-foreground" />
             </div>
-            <h3 className="font-semibold text-foreground mb-1">Verification Skipped</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Verification Skipped")}</h3>
             <p className="text-sm text-muted-foreground">
               You can complete verification later in Settings
             </p>

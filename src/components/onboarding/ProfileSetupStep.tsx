@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface ProfileData {
   avatarUrl: string;
@@ -85,6 +86,7 @@ const LANGUAGE_OPTIONS = [
 ];
 
 export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSetupStepProps) => {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -207,27 +209,27 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
   const handleSubmit = async () => {
     if (!formData.displayName.trim()) {
-      toast.error("Please enter a display name");
+      toast.error(t("Please enter a display name"));
       return;
     }
 
     if (!formData.dob) {
-      toast.error("Please enter your date of birth");
+      toast.error(t("Please enter your date of birth"));
       return;
     }
 
     if (!formData.locationName.trim()) {
-      toast.error("Please enter your location");
+      toast.error(t("Please enter your location"));
       return;
     }
 
     if (!formData.socialAvailability) {
-      toast.error("Please enable social availability");
+      toast.error(t("Please enable social availability"));
       return;
     }
 
     if (formData.availabilityStatus.length === 0) {
-      toast.error("Please select at least one availability status");
+      toast.error(t("Please select at least one availability status"));
       return;
     }
 
@@ -246,7 +248,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
         if (uploadError) {
           console.error("Avatar upload error:", uploadError);
-          toast.error("Failed to upload avatar");
+          toast.error(t("Failed to upload avatar"));
           throw uploadError;
         }
 
@@ -259,10 +261,10 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
       // Call onComplete which will save to database in Onboarding.tsx
       onComplete({ ...formData, avatarUrl });
-      toast.success("Profile information saved!");
+      toast.success(t("Profile information saved!"));
     } catch (error: any) {
       console.error("Error in profile setup:", error);
-      toast.error(error.message || "Failed to save profile");
+      toast.error(error.message || t("Failed to save profile"));
     } finally {
       setLoading(false);
     }
@@ -279,7 +281,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
   }) => (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       {checked ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-      <span>Show to others</span>
+      <span>{t("Show to others")}</span>
       <Switch checked={checked} onCheckedChange={onChange} className="scale-75" />
     </div>
   );
@@ -288,7 +290,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     <div className="space-y-6 pb-8">
       {/* Header */}
       <div className="text-center space-y-2 sticky top-0 bg-background/95 backdrop-blur-sm py-4 -mx-6 px-6 z-10">
-        <h2 className="text-2xl font-bold text-foreground">Profile Setup</h2>
+        <h2 className="text-2xl font-bold text-foreground">{t("Profile Setup")}</h2>
         <p className="text-sm text-muted-foreground flex items-center justify-center gap-2">
           <Sparkles className="w-4 h-4 text-warning" />
           Filling in more details increases your social level
@@ -317,29 +319,29 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       {/* Display Name, Phone & Bio */}
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label><span className="text-destructive">*</span> Display Name</Label>
+          <Label><span className="text-destructive">*</span> {t("Display Name")}</Label>
           <Input
             value={formData.displayName}
             onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
-            placeholder="How should others call you?"
+            placeholder={t("How should others call you?")}
             className="h-12 rounded-xl"
           />
         </div>
 
         <div className="space-y-2">
-          <Label>Phone (Optional)</Label>
+          <Label>{t("Phone (Optional)")}</Label>
           <Input
             type="tel"
             value={formData.phone}
             onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-            placeholder="+1 234 567 8900"
+            placeholder={t("+1 234 567 8900")}
             className="h-12 rounded-xl"
           />
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Bio</Label>
+            <Label>{t("Bio")}</Label>
             <PrivacyToggle
               label="Bio"
               checked={formData.showBio}
@@ -349,7 +351,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Textarea
             value={formData.bio}
             onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-            placeholder="Tell us about yourself..."
+            placeholder={t("Tell us about yourself...")}
             className="rounded-xl resize-none"
             rows={3}
           />
@@ -358,12 +360,12 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
       {/* Demographics Section */}
       <div className="space-y-4 pt-2 border-t border-border">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Demographics</h3>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Demographics")}</h3>
 
         {/* Gender */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Label>Gender</Label>
+            <Label>{t("Gender")}</Label>
             <PrivacyToggle
               label="Gender"
               checked={formData.showGender}
@@ -391,7 +393,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Sexual Orientation */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Label>Sexual Orientation</Label>
+            <Label>{t("Sexual Orientation")}</Label>
             <PrivacyToggle
               label="Orientation"
               checked={formData.showOrientation}
@@ -420,7 +422,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       {/* Date of Birth */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label><span className="text-destructive">*</span> Date of Birth</Label>
+          <Label><span className="text-destructive">*</span> {t("Date of Birth")}</Label>
           <PrivacyToggle
             label="Age"
             checked={formData.showAge}
@@ -445,7 +447,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Input
             value={formData.locationName}
             onChange={(e) => setFormData(prev => ({ ...prev, locationName: e.target.value }))}
-            placeholder="Your city"
+            placeholder={t("Your city")}
             className="h-12 rounded-xl pr-10"
           />
           {detectingLocation && (
@@ -456,7 +458,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
       {/* Pet Experience */}
       <div className="space-y-3">
-        <Label>Pet Experience</Label>
+        <Label>{t("Pet Experience")}</Label>
         <div className="flex flex-wrap gap-2">
           {PET_EXPERIENCE_OPTIONS.map(exp => (
             <Badge
@@ -474,7 +476,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         </div>
         {formData.petExperience.length > 0 && !formData.petExperience.includes("None") && (
           <div className="flex items-center gap-3">
-            <Label className="text-sm">Years of experience</Label>
+            <Label className="text-sm">{t("Years of experience")}</Label>
             <Input
               type="number"
               min="0"
@@ -492,8 +494,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <div className="flex items-center gap-2">
           <Car className="w-5 h-5 text-primary" />
           <div>
-            <Label>Pet Driver</Label>
-            <p className="text-xs text-muted-foreground">I have a car and can transport pets</p>
+            <Label>{t("Pet Driver")}</Label>
+            <p className="text-xs text-muted-foreground">{t("I have a car and can transport pets")}</p>
           </div>
         </div>
         <Switch
@@ -504,7 +506,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
       {/* Languages */}
       <div className="space-y-3">
-        <Label>Languages</Label>
+        <Label>{t("Languages")}</Label>
         <div className="flex flex-wrap gap-2">
           {LANGUAGE_OPTIONS.map(lang => (
             <Badge
@@ -532,7 +534,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Height */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Height (cm)</Label>
+            <Label>{t("Height (cm)")}</Label>
             <PrivacyToggle
               label="Height"
               checked={formData.showHeight}
@@ -545,7 +547,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             max="250"
             value={formData.height || ""}
             onChange={(e) => setFormData(prev => ({ ...prev, height: parseInt(e.target.value) || null }))}
-            placeholder="Your height in cm"
+            placeholder={t("Your height in cm")}
             className="h-12 rounded-xl"
           />
         </div>
@@ -553,7 +555,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Weight */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Weight</Label>
+            <Label>{t("Weight")}</Label>
             <PrivacyToggle
               label="Weight"
               checked={formData.showWeight}
@@ -566,7 +568,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               min="0"
               value={formData.weight || ""}
               onChange={(e) => setFormData(prev => ({ ...prev, weight: parseInt(e.target.value) || null }))}
-              placeholder="0"
+              placeholder={t("0")}
               className="h-12 rounded-xl flex-1"
             />
             <select
@@ -574,21 +576,21 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               onChange={(e) => setFormData(prev => ({ ...prev, weightUnit: e.target.value }))}
               className="h-12 rounded-xl bg-muted border border-border px-3"
             >
-              <option value="kg">kg</option>
-              <option value="lbs">lbs</option>
+              <option value="kg">{t("kg")}</option>
+              <option value="lbs">{t("lbs")}</option>
             </select>
           </div>
         </div>
 
         {/* Relationship Status */}
         <div className="space-y-2">
-          <Label>Relationship Status</Label>
+          <Label>{t("Relationship Status")}</Label>
           <select
             value={formData.relationshipStatus}
             onChange={(e) => setFormData(prev => ({ ...prev, relationshipStatus: e.target.value }))}
             className="w-full h-12 rounded-xl bg-muted border border-border px-3"
           >
-            <option value="">Select...</option>
+            <option value="">{t("Select...")}</option>
             {RELATIONSHIP_OPTIONS.map(r => (
               <option key={r} value={r}>{r}</option>
             ))}
@@ -598,7 +600,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Academic */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <Label>Academic & Skills</Label>
+            <Label>{t("Academic & Skills")}</Label>
             <PrivacyToggle
               label="Academic"
               checked={formData.showAcademic}
@@ -610,7 +612,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             onChange={(e) => setFormData(prev => ({ ...prev, degree: e.target.value }))}
             className="w-full h-11 rounded-xl bg-muted border border-border px-3 text-sm"
           >
-            <option value="">Select degree...</option>
+            <option value="">{t("Select degree...")}</option>
             {DEGREE_OPTIONS.map(d => (
               <option key={d} value={d}>{d}</option>
             ))}
@@ -619,13 +621,13 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             <Input
               value={formData.school}
               onChange={(e) => setFormData(prev => ({ ...prev, school: e.target.value }))}
-              placeholder="School Name"
+              placeholder={t("School Name")}
               className="h-11 rounded-xl"
             />
             <Input
               value={formData.major}
               onChange={(e) => setFormData(prev => ({ ...prev, major: e.target.value }))}
-              placeholder="Major"
+              placeholder={t("Major")}
               className="h-11 rounded-xl"
             />
           </div>
@@ -634,7 +636,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Occupation */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Occupation</Label>
+            <Label>{t("Occupation")}</Label>
             <PrivacyToggle
               label="Occupation"
               checked={formData.showOccupation}
@@ -644,7 +646,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Input
             value={formData.occupation}
             onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))}
-            placeholder="Job title / Occupation"
+            placeholder={t("Job title / Occupation")}
             className="h-11 rounded-xl"
           />
         </div>
@@ -652,7 +654,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Affiliation */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Affiliation</Label>
+            <Label>{t("Affiliation")}</Label>
             <PrivacyToggle
               label="Affiliation"
               checked={formData.showAffiliation}
@@ -662,7 +664,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Textarea
             value={formData.affiliation}
             onChange={(e) => setFormData(prev => ({ ...prev, affiliation: e.target.value }))}
-            placeholder="Local shelters, clubs, organizations..."
+            placeholder={t("Local shelters, clubs, organizations...")}
             className="rounded-xl resize-none"
             rows={2}
           />
@@ -671,8 +673,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         {/* Pet Ownership */}
         <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
           <div>
-            <Label>Currently own any pets?</Label>
-            <p className="text-xs text-muted-foreground">You can add pet profiles later</p>
+            <Label>{t("Currently own any pets?")}</Label>
+            <p className="text-xs text-muted-foreground">{t("You can add pet profiles later")}</p>
           </div>
           <Switch
             checked={formData.ownsPets}
@@ -684,8 +686,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <div className="space-y-3 p-4 rounded-xl bg-muted/50">
           <div className="flex items-center justify-between">
             <div>
-              <Label><span className="text-destructive">*</span> Social Availability</Label>
-              <p className="text-xs text-muted-foreground">Are you open to connecting?</p>
+              <Label><span className="text-destructive">*</span> {t("Social Availability")}</Label>
+              <p className="text-xs text-muted-foreground">{t("Are you open to connecting?")}</p>
             </div>
             <Switch
               checked={formData.socialAvailability}
@@ -699,7 +701,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               animate={{ opacity: 1, height: "auto" }}
               className="pt-3 space-y-2"
             >
-              <Label className="text-sm"><span className="text-destructive">*</span> I identify as:</Label>
+              <Label className="text-sm"><span className="text-destructive">*</span> {t("I identify as:")}</Label>
               <div className="flex flex-wrap gap-2">
                 {AVAILABILITY_STATUS_OPTIONS.map(status => (
                   <Badge

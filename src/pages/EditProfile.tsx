@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Option constants matching database schema
 const genderOptions = ["Male", "Female", "Non-binary", "PNA"];
@@ -23,6 +24,7 @@ const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French"
 const availabilityOptions = ["Pet Parents", "Pet Nanny", "Animal Friend (no pet)"];
 
 const EditProfile = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -229,10 +231,10 @@ const EditProfile = () => {
       if (error) throw error;
 
       await refreshProfile();
-      toast.success("Profile updated!");
+      toast.success(t("Profile updated!"));
       navigate(-1);
     } catch (error: any) {
-      toast.error(error.message || "Failed to update profile");
+      toast.error(error.message || t("Failed to update profile"));
     } finally {
       setLoading(false);
     }
@@ -247,7 +249,7 @@ const EditProfile = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold flex-1">Edit Profile</h1>
+        <h1 className="text-xl font-bold flex-1">{t("Edit Profile")}</h1>
         <Button onClick={handleSave} disabled={loading} size="sm" className="gap-2">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save
@@ -275,27 +277,27 @@ const EditProfile = () => {
 
           {/* BASIC INFO */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Basic Info</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
 
             {/* Display Name */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Display Name</label>
+              <label className="text-sm font-medium mb-2 block">{t("Display Name")}</label>
               <Input
                 value={formData.display_name}
                 onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
-                placeholder="Your display name"
+                placeholder={t("Your display name")}
                 className="h-12 rounded-xl"
               />
             </div>
 
             {/* Phone */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Phone</label>
+              <label className="text-sm font-medium mb-2 block">{t("Phone")}</label>
               <Input
                 type="tel"
                 value={formData.phone}
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+1 234 567 8900"
+                placeholder={t("+1 234 567 8900")}
                 className="h-12 rounded-xl"
               />
             </div>
@@ -303,9 +305,9 @@ const EditProfile = () => {
             {/* Date of Birth */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Date of Birth</label>
+                <label className="text-sm font-medium">{t("Date of Birth")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show Age</span>
+                  <span className="text-xs text-muted-foreground">{t("Show Age")}</span>
                   <Switch
                     checked={formData.show_age}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_age: checked }))}
@@ -323,9 +325,9 @@ const EditProfile = () => {
             {/* Bio */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Bio</label>
+                <label className="text-sm font-medium">{t("Bio")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_bio}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_bio: checked }))}
@@ -335,7 +337,7 @@ const EditProfile = () => {
               <Textarea
                 value={formData.bio}
                 onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-                placeholder="Tell others about yourself..."
+                placeholder={t("Tell others about yourself...")}
                 className="min-h-[100px] rounded-xl"
               />
             </div>
@@ -343,14 +345,14 @@ const EditProfile = () => {
 
           {/* DEMOGRAPHICS */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Demographics</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Demographics")}</h3>
 
             {/* Gender */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Gender</label>
+                <label className="text-sm font-medium">{t("Gender")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_gender}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_gender: checked }))}
@@ -378,9 +380,9 @@ const EditProfile = () => {
             {/* Sexual Orientation */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Sexual Orientation</label>
+                <label className="text-sm font-medium">{t("Sexual Orientation")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_orientation}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_orientation: checked }))}
@@ -408,14 +410,14 @@ const EditProfile = () => {
 
           {/* PHYSICAL */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Physical</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Physical")}</h3>
 
             {/* Height */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Height (cm)</label>
+                <label className="text-sm font-medium">{t("Height (cm)")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_height}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_height: checked }))}
@@ -426,7 +428,7 @@ const EditProfile = () => {
                 type="number"
                 value={formData.height}
                 onChange={(e) => setFormData(prev => ({ ...prev, height: e.target.value }))}
-                placeholder="Height in cm"
+                placeholder={t("Height in cm")}
                 className="h-12 rounded-xl"
               />
             </div>
@@ -434,9 +436,9 @@ const EditProfile = () => {
             {/* Weight */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium">Weight</label>
+                <label className="text-sm font-medium">{t("Weight")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_weight}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_weight: checked }))}
@@ -448,7 +450,7 @@ const EditProfile = () => {
                   type="number"
                   value={formData.weight}
                   onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
-                  placeholder="0"
+                  placeholder={t("0")}
                   className="h-12 rounded-xl flex-1"
                 />
                 <select
@@ -456,8 +458,8 @@ const EditProfile = () => {
                   onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
                   className="h-12 rounded-xl bg-muted border border-border px-3"
                 >
-                  <option value="kg">kg</option>
-                  <option value="lbs">lbs</option>
+                  <option value="kg">{t("kg")}</option>
+                  <option value="lbs">{t("lbs")}</option>
                 </select>
               </div>
             </div>
@@ -466,9 +468,9 @@ const EditProfile = () => {
           {/* EDUCATION & CAREER */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">Education & Career</span>
+              <span className="text-sm font-semibold">{t("Education & Career")}</span>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Show Academic</span>
+                <span className="text-xs text-muted-foreground">{t("Show Academic")}</span>
                 <Switch
                   checked={formData.show_academic}
                   onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_academic: checked }))}
@@ -478,13 +480,13 @@ const EditProfile = () => {
 
             {/* Degree */}
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Highest Degree</label>
+              <label className="text-xs text-muted-foreground mb-1 block">{t("Highest Degree")}</label>
               <select
                 value={formData.degree}
                 onChange={(e) => setFormData(prev => ({ ...prev, degree: e.target.value }))}
                 className="w-full h-11 rounded-lg bg-card border border-border px-3 text-sm"
               >
-                <option value="">Select degree...</option>
+                <option value="">{t("Select degree...")}</option>
                 {degreeOptions.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
@@ -494,23 +496,23 @@ const EditProfile = () => {
             <Input
               value={formData.school}
               onChange={(e) => setFormData(prev => ({ ...prev, school: e.target.value }))}
-              placeholder="School Name"
+              placeholder={t("School Name")}
               className="h-11 rounded-lg"
             />
 
             <Input
               value={formData.major}
               onChange={(e) => setFormData(prev => ({ ...prev, major: e.target.value }))}
-              placeholder="Major / Field of Study"
+              placeholder={t("Major / Field of Study")}
               className="h-11 rounded-lg"
             />
 
             {/* Occupation */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-muted-foreground">Occupation</label>
+                <label className="text-xs text-muted-foreground">{t("Occupation")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Show</span>
+                  <span className="text-xs text-muted-foreground">{t("Show")}</span>
                   <Switch
                     checked={formData.show_occupation}
                     onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_occupation: checked }))}
@@ -520,7 +522,7 @@ const EditProfile = () => {
               <Input
                 value={formData.occupation}
                 onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))}
-                placeholder="Job title / Occupation"
+                placeholder={t("Job title / Occupation")}
                 className="h-11 rounded-lg"
               />
             </div>
@@ -529,9 +531,9 @@ const EditProfile = () => {
           {/* Affiliation */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium">Affiliation</label>
+              <label className="text-sm font-medium">{t("Affiliation")}</label>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Show</span>
+                <span className="text-xs text-muted-foreground">{t("Show")}</span>
                 <Switch
                   checked={formData.show_affiliation}
                   onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_affiliation: checked }))}
@@ -541,24 +543,24 @@ const EditProfile = () => {
             <Textarea
               value={formData.affiliation}
               onChange={(e) => setFormData(prev => ({ ...prev, affiliation: e.target.value }))}
-              placeholder="Shelters, clubs, organizations..."
+              placeholder={t("Shelters, clubs, organizations...")}
               className="min-h-[80px] rounded-xl"
             />
           </div>
 
           {/* SOCIAL & LIFESTYLE */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Social & Lifestyle</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Social & Lifestyle")}</h3>
 
             {/* Relationship Status */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Relationship Status</label>
+              <label className="text-sm font-medium mb-2 block">{t("Relationship Status")}</label>
               <select
                 value={formData.relationship_status}
                 onChange={(e) => setFormData(prev => ({ ...prev, relationship_status: e.target.value }))}
                 className="w-full h-12 rounded-xl bg-muted border border-border px-3"
               >
-                <option value="">Select...</option>
+                <option value="">{t("Select...")}</option>
                 {relationshipOptions.map(r => (
                   <option key={r} value={r}>{r}</option>
                 ))}
@@ -570,8 +572,8 @@ const EditProfile = () => {
               <div className="flex items-center gap-3">
                 <Car className="w-5 h-5" style={{ color: "#2563EB" }} />
                 <div>
-                  <span className="text-sm font-medium">Pet Driver with Car?</span>
-                  <p className="text-xs text-muted-foreground">Important for pet transport</p>
+                  <span className="text-sm font-medium">{t("Pet Driver with Car?")}</span>
+                  <p className="text-xs text-muted-foreground">{t("Important for pet transport")}</p>
                 </div>
               </div>
               <Switch
@@ -582,7 +584,7 @@ const EditProfile = () => {
 
             {/* Languages */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Languages</label>
+              <label className="text-sm font-medium mb-2 block">{t("Languages")}</label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {languageOptions.map((lang) => (
                   <button
@@ -617,21 +619,21 @@ const EditProfile = () => {
                 <Input
                   value={customLanguage}
                   onChange={(e) => setCustomLanguage(e.target.value)}
-                  placeholder="Add other language..."
+                  placeholder={t("Add other language...")}
                   className="h-10 rounded-lg flex-1"
                   onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addCustomLanguage())}
                 />
-                <Button variant="secondary" size="sm" onClick={addCustomLanguage}>Add</Button>
+                <Button variant="secondary" size="sm" onClick={addCustomLanguage}>{t("Add")}</Button>
               </div>
             </div>
 
             {/* Location */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Location</label>
+              <label className="text-sm font-medium mb-2 block">{t("Location")}</label>
               <Input
                 value={formData.location_name}
                 onChange={(e) => setFormData(prev => ({ ...prev, location_name: e.target.value }))}
-                placeholder="City / Area"
+                placeholder={t("City / Area")}
                 className="h-12 rounded-xl"
               />
             </div>
@@ -639,11 +641,11 @@ const EditProfile = () => {
 
           {/* PET EXPERIENCE */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Pet Experience</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Pet Experience")}</h3>
 
             {/* Pet Experience Types */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Experience with</label>
+              <label className="text-sm font-medium mb-2 block">{t("Experience with")}</label>
               <div className="flex flex-wrap gap-2">
                 {petExperienceOptions.map((exp) => (
                   <button
@@ -664,14 +666,14 @@ const EditProfile = () => {
 
             {/* Years of Experience */}
             <div>
-              <label className="text-sm font-medium mb-2 block">Years of Experience</label>
+              <label className="text-sm font-medium mb-2 block">{t("Years of Experience")}</label>
               <Input
                 type="number"
                 min="0"
                 max="50"
                 value={formData.experience_years}
                 onChange={(e) => setFormData(prev => ({ ...prev, experience_years: e.target.value }))}
-                placeholder="0"
+                placeholder={t("0")}
                 className="h-12 rounded-xl w-24"
               />
             </div>
@@ -679,7 +681,7 @@ const EditProfile = () => {
 
           {/* Pet Ownership */}
           <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
-            <span className="text-sm font-medium">Currently own pets?</span>
+            <span className="text-sm font-medium">{t("Currently own pets?")}</span>
             <Switch
               checked={formData.owns_pets}
               onCheckedChange={(checked) => setFormData(prev => ({ ...prev, owns_pets: checked }))}
@@ -689,7 +691,7 @@ const EditProfile = () => {
           {/* Social Availability */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold">Social Availability</span>
+              <span className="text-sm font-semibold">{t("Social Availability")}</span>
               <Switch
                 checked={formData.social_availability}
                 onCheckedChange={(checked) => setFormData(prev => ({ ...prev, social_availability: checked }))}

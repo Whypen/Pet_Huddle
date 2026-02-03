@@ -1,5 +1,6 @@
 import { Shield, Car, Crown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface UserAvatarProps {
   avatarUrl?: string | null;
@@ -45,6 +46,7 @@ export const UserAvatar = ({
   className,
   onClick,
 }: UserAvatarProps) => {
+  const { t } = useLanguage();
   const initials = name ? name.charAt(0).toUpperCase() : "?";
 
   return (
@@ -58,7 +60,7 @@ export const UserAvatar = ({
       {avatarUrl ? (
         <img
           src={avatarUrl}
-          alt={name || "User"}
+          alt={name || t("User")}
           className={cn(
             sizeClasses[size],
             "rounded-full object-cover ring-2 ring-white"
@@ -97,14 +99,14 @@ export const UserAvatar = ({
               "absolute -bottom-1 -right-1 rounded-full flex items-center justify-center ring-2 ring-white",
               badgeSizeClasses[size],
               isPremium
-                ? "bg-gradient-to-r from-amber-400 to-amber-500"
+                ? "bg-primary"
                 : isVerified
-                ? "bg-yellow-500"
+                ? "bg-primary/80"
                 : "bg-gray-400"
             )}
           >
             {isPremium ? (
-              <Crown className={cn("text-amber-900", iconSizeClasses[size])} />
+              <Crown className={cn("text-white", iconSizeClasses[size])} />
             ) : (
               <Shield className={cn("text-white", iconSizeClasses[size])} />
             )}

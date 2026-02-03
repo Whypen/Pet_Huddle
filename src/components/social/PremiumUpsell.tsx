@@ -1,21 +1,23 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Crown, Check, Sparkles } from "lucide-react";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PremiumUpsellProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const features = [
-  "Verified-only matching",
-  "See who's active now",
-  "Pet temperament matching",
-  "Advanced logistics filters",
-  "Mutual friends visibility",
-  "Unlimited swipes",
-];
-
 export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
+  const { t } = useLanguage();
+  const features = [
+    t("Verified-only matching"),
+    t("See who's active now"),
+    t("Pet temperament matching"),
+    t("Advanced logistics filters"),
+    t("Mutual friends visibility"),
+    t("Unlimited swipes"),
+  ];
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -46,7 +48,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
             </button>
 
             {/* Header with Gradient */}
-            <div className="relative bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 px-6 pt-8 pb-12">
+            <div className="relative bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 px-6 pt-8 pb-12">
               <div className="absolute inset-0 overflow-hidden">
                 <motion.div
                   animate={{ rotate: 360 }}
@@ -69,8 +71,8 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
                 >
                   <Crown className="w-10 h-10 text-white" />
                 </motion.div>
-                <h2 className="text-2xl font-bold text-white mb-1">Huddle Premium</h2>
-                <p className="text-amber-100 text-sm">Unlock the full experience</p>
+                <h2 className="text-2xl font-bold text-white mb-1">{t("Huddle Premium")}</h2>
+                <p className="text-blue-100 text-sm">{t("Unlock the full experience")}</p>
               </div>
             </div>
 
@@ -97,18 +99,18 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
               <div className="text-center mb-5">
                 <div className="flex items-baseline justify-center gap-1">
                   <span className="text-3xl font-bold">$9.99</span>
-                  <span className="text-muted-foreground">/month</span>
+                  <span className="text-muted-foreground">{t("/month")}</span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Cancel anytime</p>
+                <p className="text-xs text-muted-foreground mt-1">{t("Cancel anytime")}</p>
               </div>
 
               {/* CTA Button */}
               <motion.button
                 whileTap={{ scale: 0.98 }}
-                className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 text-amber-900 font-semibold text-lg shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-xl bg-primary text-white font-semibold text-lg shadow-lg flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-5 h-5" />
-                Upgrade to Premium
+                {t("Upgrade to Premium")}
               </motion.button>
 
               {/* Skip */}
@@ -116,7 +118,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
                 onClick={onClose}
                 className="w-full py-3 text-muted-foreground text-sm mt-3"
               >
-                Maybe later
+                {t("Maybe later")}
               </button>
             </div>
           </motion.div>

@@ -308,7 +308,7 @@ const Chats = () => {
 
   const handleCreateGroup = () => {
     if (!isVerified) {
-      toast.error("Only verified users can create groups");
+      toast.error(t("Only verified users can create groups"));
       return;
     }
     setIsCreateGroupOpen(true);
@@ -360,7 +360,7 @@ const Chats = () => {
   const handleBookingCheckout = async () => {
     if (!profile?.id || !selectedNanny) return;
     if (!serviceDate || !selectedPet || !startTime || !endTime) {
-      toast.error("Please complete all booking details");
+      toast.error(t("Please complete all booking details"));
       return;
     }
     setBookingProcessing(true);
@@ -451,7 +451,7 @@ const Chats = () => {
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search conversations..."
+                placeholder={t("Search conversations...")}
                 className="pl-10 pr-10 h-10 rounded-full"
                 autoFocus
               />
@@ -518,7 +518,7 @@ const Chats = () => {
 
           {/* New Huddles */}
           <section className="px-5 py-4">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3">New Huddles</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("New Huddles")}</h3>
             <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
               {newHuddles.map((huddle, index) => (
                 <motion.button
@@ -558,7 +558,7 @@ const Chats = () => {
               {filteredChats.length === 0 ? (
                 <div className="text-center py-8">
                   <MessageSquare className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                  <p className="text-muted-foreground">No conversations found</p>
+                  <p className="text-muted-foreground">{t("No conversations found")}</p>
                 </div>
               ) : (
                 filteredChats.slice(0, chatVisibleCount).map((chat, index) => (
@@ -635,7 +635,7 @@ const Chats = () => {
             {filteredGroups.length === 0 ? (
               <div className="text-center py-8">
                 <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                <p className="text-muted-foreground">No groups found</p>
+                <p className="text-muted-foreground">{t("No groups found")}</p>
                 <p className="text-sm text-muted-foreground mt-1">
                   {isVerified ? "Create a group to start chatting!" : "Get verified to create groups"}
                 </p>

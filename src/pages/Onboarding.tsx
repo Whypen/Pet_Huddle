@@ -8,10 +8,12 @@ import { toast } from "sonner";
 import { SecurityIdentityStep } from "@/components/onboarding/SecurityIdentityStep";
 import { ProfileSetupStep } from "@/components/onboarding/ProfileSetupStep";
 import { PetSetupStep } from "@/components/onboarding/PetSetupStep";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 type OnboardingPhase = "security" | "profile" | "pet";
 
 const Onboarding = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
   const [phase, setPhase] = useState<OnboardingPhase>("security");
@@ -50,7 +52,7 @@ const Onboarding = () => {
       
       setPhase("profile");
     } catch (error: any) {
-      toast.error(error.message || "Failed to save security information");
+      toast.error(error.message || t("Failed to save security information"));
     }
   };
 
@@ -98,11 +100,11 @@ const Onboarding = () => {
         setPhase("pet");
       } else {
         await refreshProfile();
-        toast.success("Welcome to Huddle! 🎉");
+        toast.success(t("Welcome to Huddle! 🎉"));
         navigate("/", { replace: true });
       }
     } catch (error: any) {
-      toast.error(error.message || "Failed to save profile");
+      toast.error(error.message || t("Failed to save profile"));
     } finally {
       setLoading(false);
     }
@@ -121,12 +123,12 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success("Welcome to Huddle! 🎉");
+      toast.success(t("Welcome to Huddle! 🎉"));
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: any) {
-      toast.error(error.message || "Failed to complete setup");
+      toast.error(error.message || t("Failed to complete setup"));
     }
   };
 
@@ -142,12 +144,12 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success("Welcome to Huddle! You can add pets later.");
+      toast.success(t("Welcome to Huddle! You can add pets later."));
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: any) {
-      toast.error(error.message || "Failed to complete setup");
+      toast.error(error.message || t("Failed to complete setup"));
     }
   };
 
@@ -162,7 +164,7 @@ const Onboarding = () => {
             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
               <PawPrint className="w-4 h-4 text-primary-foreground" />
             </div>
-            <span className="font-bold text-lg text-foreground">Huddle</span>
+            <span className="font-bold text-lg text-foreground">{t("Huddle")}</span>
           </div>
           
           {/* Progress Indicator */}

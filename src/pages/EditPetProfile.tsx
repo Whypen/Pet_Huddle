@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Species options matching database
 const speciesOptions = [
@@ -29,6 +30,7 @@ const speciesOptions = [
 const genderOptions = ["Male", "Female"];
 
 const EditPetProfile = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const petId = searchParams.get("id");
@@ -116,7 +118,7 @@ const EditPetProfile = () => {
       }
     } catch (error) {
       console.error("Error fetching pet:", error);
-      toast.error("Failed to load pet");
+      toast.error(t("Failed to load pet"));
     } finally {
       setLoading(false);
     }
@@ -186,12 +188,12 @@ const EditPetProfile = () => {
     if (!user) return;
 
     if (!formData.name) {
-      toast.error("Pet name is required");
+      toast.error(t("Pet name is required"));
       return;
     }
 
     if (!formData.species && !formData.custom_species) {
-      toast.error("Species is required");
+      toast.error(t("Species is required"));
       return;
     }
 
@@ -253,7 +255,7 @@ const EditPetProfile = () => {
           });
 
         if (error) throw error;
-        toast.success("Pet added!");
+        toast.success(t("Pet added!"));
       } else {
         const { error } = await supabase
           .from("pets")
@@ -261,12 +263,12 @@ const EditPetProfile = () => {
           .eq("id", petId);
 
         if (error) throw error;
-        toast.success("Pet profile updated!");
+        toast.success(t("Pet profile updated!"));
       }
 
       navigate(-1);
     } catch (error: any) {
-      toast.error(error.message || "Failed to save pet");
+      toast.error(error.message || t("Failed to save pet"));
     } finally {
       setSaving(false);
     }
@@ -317,18 +319,18 @@ const EditPetProfile = () => {
 
           {/* Name */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Pet Name *</label>
+            <label className="text-sm font-medium mb-2 block">{t("Pet Name *")}</label>
             <Input
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-              placeholder="Pet's name"
+              placeholder={t("Pet's name")}
               className="h-12 rounded-xl"
             />
           </div>
 
           {/* Species */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Species *</label>
+            <label className="text-sm font-medium mb-2 block">{t("Species *")}</label>
             <div className="flex flex-wrap gap-2 mb-2">
               {speciesOptions.map((species) => (
                 <button
@@ -349,7 +351,7 @@ const EditPetProfile = () => {
               <Input
                 value={formData.custom_species}
                 onChange={(e) => setFormData(prev => ({ ...prev, custom_species: e.target.value }))}
-                placeholder="Enter species..."
+                placeholder={t("Enter species...")}
                 className="h-12 rounded-xl mt-2"
               />
             )}
@@ -357,11 +359,11 @@ const EditPetProfile = () => {
 
           {/* Breed */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Breed</label>
+            <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
             <Input
               value={formData.breed}
               onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
-              placeholder="Breed"
+              placeholder={t("Breed")}
               className="h-12 rounded-xl"
             />
           </div>
@@ -369,7 +371,7 @@ const EditPetProfile = () => {
           {/* Gender & Neutered/Spayed */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">Gender</label>
+              <label className="text-sm font-medium mb-2 block">{t("Gender")}</label>
               <div className="flex gap-2">
                 {genderOptions.map((gender) => (
                   <button
@@ -391,8 +393,8 @@ const EditPetProfile = () => {
             {/* Neutered/Spayed Toggle - Positioned next to Gender */}
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div>
-                <label className="font-medium text-sm">Neutered/Spayed</label>
-                <p className="text-xs text-muted-foreground">Fixed?</p>
+                <label className="font-medium text-sm">{t("Neutered/Spayed")}</label>
+                <p className="text-xs text-muted-foreground">{t("Fixed?")}</p>
               </div>
               <Switch
                 checked={formData.neutered_spayed}
@@ -403,7 +405,7 @@ const EditPetProfile = () => {
 
           {/* DOB */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Date of Birth</label>
+            <label className="text-sm font-medium mb-2 block">{t("Date of Birth")}</label>
             <Input
               type="date"
               value={formData.dob}
@@ -414,13 +416,13 @@ const EditPetProfile = () => {
 
           {/* Weight */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Weight</label>
+            <label className="text-sm font-medium mb-2 block">{t("Weight")}</label>
             <div className="flex gap-2">
               <Input
                 type="number"
                 value={formData.weight}
                 onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
-                placeholder="0"
+                placeholder={t("0")}
                 className="h-12 rounded-xl flex-1"
               />
               <select
@@ -428,16 +430,16 @@ const EditPetProfile = () => {
                 onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
                 className="h-12 rounded-xl bg-muted border border-border px-3"
               >
-                <option value="kg">kg</option>
-                <option value="lbs">lbs</option>
+                <option value="kg">{t("kg")}</option>
+                <option value="lbs">{t("lbs")}</option>
               </select>
             </div>
           </div>
 
           {/* Vaccinations - MM/YYYY Format */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
-            <h3 className="text-sm font-semibold">Vaccinations</h3>
-            <p className="text-xs text-muted-foreground">Enter vaccination dates in MM-YYYY format</p>
+            <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
+            <p className="text-xs text-muted-foreground">{t("Enter vaccination dates in MM-YYYY format")}</p>
             {formData.vaccinations.map((vax, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -455,7 +457,7 @@ const EditPetProfile = () => {
                 onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
                 className="flex-1 h-10 rounded-lg bg-card border border-border px-3 text-sm"
               >
-                <option value="">Select vaccine...</option>
+                <option value="">{t("Select vaccine...")}</option>
                 {VACCINATION_OPTIONS.map(v => (
                   <option key={v} value={v}>{v}</option>
                 ))}
@@ -464,7 +466,7 @@ const EditPetProfile = () => {
                 type="month"
                 value={vaccinationInput.date}
                 onChange={(e) => setVaccinationInput(prev => ({ ...prev, date: e.target.value }))}
-                placeholder="MM-YYYY"
+                placeholder={t("MM-YYYY")}
                 className="h-10 rounded-lg w-36"
               />
               <Button onClick={addVaccination} size="sm" variant="secondary">
@@ -474,7 +476,7 @@ const EditPetProfile = () => {
 
             {/* Next Vaccination Reminder */}
             <div className="pt-3 border-t border-border">
-              <label className="text-xs font-medium mb-2 block">Next Vaccination Reminder</label>
+              <label className="text-xs font-medium mb-2 block">{t("Next Vaccination Reminder")}</label>
               <Input
                 type="date"
                 value={formData.next_vaccination_reminder}
@@ -486,7 +488,7 @@ const EditPetProfile = () => {
 
           {/* Medications */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
-            <h3 className="text-sm font-semibold">Medications</h3>
+            <h3 className="text-sm font-semibold">{t("Medications")}</h3>
             {formData.medications.map((med, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -504,20 +506,20 @@ const EditPetProfile = () => {
               <Input
                 value={medicationInput.name}
                 onChange={(e) => setMedicationInput(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Medication name"
+                placeholder={t("Medication name")}
                 className="h-10 rounded-lg"
               />
               <div className="flex gap-2">
                 <Input
                   value={medicationInput.dosage}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, dosage: e.target.value }))}
-                  placeholder="Dosage"
+                  placeholder={t("Dosage")}
                   className="h-10 rounded-lg flex-1"
                 />
                 <Input
                   value={medicationInput.frequency}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, frequency: e.target.value }))}
-                  placeholder="Frequency"
+                  placeholder={t("Frequency")}
                   className="h-10 rounded-lg flex-1"
                 />
                 <Button onClick={addMedication} size="sm" variant="secondary">
@@ -529,7 +531,7 @@ const EditPetProfile = () => {
 
           {/* Temperament */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Temperament</label>
+            <label className="text-sm font-medium mb-2 block">{t("Temperament")}</label>
             <div className="flex flex-wrap gap-2">
               {TEMPERAMENT_OPTIONS.map((temp) => (
                 <button
@@ -550,22 +552,22 @@ const EditPetProfile = () => {
 
           {/* Vet Contact */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Vet Contact</label>
+            <label className="text-sm font-medium mb-2 block">{t("Vet Contact")}</label>
             <Input
               value={formData.vet_contact}
               onChange={(e) => setFormData(prev => ({ ...prev, vet_contact: e.target.value }))}
-              placeholder="Vet name / phone"
+              placeholder={t("Vet name / phone")}
               className="h-12 rounded-xl"
             />
           </div>
 
           {/* Microchip ID */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Microchip ID</label>
+            <label className="text-sm font-medium mb-2 block">{t("Microchip ID")}</label>
             <Input
               value={formData.microchip_id}
               onChange={(e) => setFormData(prev => ({ ...prev, microchip_id: validateMicrochip(e.target.value) }))}
-              placeholder="000000000000000"
+              placeholder={t("000000000000000")}
               className="h-12 rounded-xl font-mono"
               maxLength={15}
             />
@@ -574,22 +576,22 @@ const EditPetProfile = () => {
 
           {/* Bio */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Pet Bio</label>
+            <label className="text-sm font-medium mb-2 block">{t("Pet Bio")}</label>
             <Textarea
               value={formData.bio}
               onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-              placeholder="Tell us about your pet..."
+              placeholder={t("Tell us about your pet...")}
               className="min-h-[100px] rounded-xl"
             />
           </div>
 
           {/* Routine */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Daily Routine</label>
+            <label className="text-sm font-medium mb-2 block">{t("Daily Routine")}</label>
             <Textarea
               value={formData.routine}
               onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
-              placeholder="Feeding times, walks, play schedule..."
+              placeholder={t("Feeding times, walks, play schedule...")}
               className="min-h-[80px] rounded-xl"
             />
           </div>
@@ -598,8 +600,8 @@ const EditPetProfile = () => {
           <div className="space-y-3">
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div>
-                <span className="text-sm font-medium">Still Active</span>
-                <p className="text-xs text-muted-foreground">Is this pet still with you?</p>
+                <span className="text-sm font-medium">{t("Still Active")}</span>
+                <p className="text-xs text-muted-foreground">{t("Is this pet still with you?")}</p>
               </div>
               <Switch
                 checked={formData.is_active}
@@ -608,8 +610,8 @@ const EditPetProfile = () => {
             </div>
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div>
-                <span className="text-sm font-medium">Public Profile</span>
-                <p className="text-xs text-muted-foreground">Show this pet publicly</p>
+                <span className="text-sm font-medium">{t("Public Profile")}</span>
+                <p className="text-xs text-muted-foreground">{t("Show this pet publicly")}</p>
               </div>
               <Switch
                 checked={formData.is_public}

@@ -12,6 +12,7 @@ import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface Message {
   id: string;
@@ -29,6 +30,7 @@ interface Pet {
 }
 
 const AIVet = () => {
+  const { t } = useLanguage();
   const { user, profile } = useAuth();
   const { sendAiVetMessage, createAiVetConversation, getAiVetUsage } = useApi();
   const navigate = useNavigate();
@@ -160,7 +162,7 @@ const AIVet = () => {
       } else if (result.error === "rate_limit_exceeded") {
         setShowUpgradeModal(true);
         setIsPremiumOpen(true);
-        toast.error("You've reached your free message limit for this month");
+        toast.error(t("You've reached your free message limit for this month"));
       } else {
         throw new Error(result.error || "Failed to get response");
       }
@@ -213,8 +215,8 @@ const AIVet = () => {
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-accent rounded-full border-2 border-card" />
             </div>
             <div>
-              <h1 className="font-semibold">Dr. Huddle</h1>
-              <span className="text-xs text-accent">Online</span>
+              <h1 className="font-semibold">{t("Dr. Huddle")}</h1>
+              <span className="text-xs text-accent">{t("Online")}</span>
             </div>
           </div>
         </div>
@@ -230,7 +232,7 @@ const AIVet = () => {
       <div className="px-4 py-2 bg-primary-soft border-b border-border">
         {pets.length > 0 ? (
           <div className="flex items-center justify-center gap-2">
-            <span className="text-sm text-muted-foreground">Analyzing for:</span>
+            <span className="text-sm text-muted-foreground">{t("Analyzing for:")}</span>
             <select
               value={selectedPet?.id || ""}
               onChange={(e) => {
@@ -309,7 +311,7 @@ const AIVet = () => {
               <div className="bg-accent-soft rounded-2xl rounded-bl-sm px-4 py-3">
                 <div className="flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Dr. Huddle is thinking...</span>
+                  <span className="text-sm text-muted-foreground">{t("Dr. Huddle is thinking...")}</span>
                 </div>
               </div>
             </motion.div>
@@ -336,7 +338,7 @@ const AIVet = () => {
             className={cn("p-2 rounded-full hover:bg-muted transition-colors relative", !isPremium && "opacity-50")}
           >
             <Camera className="w-5 h-5 text-muted-foreground" />
-            {!isPremium && <Lock className="w-3 h-3 text-amber-500 absolute -top-0.5 -right-0.5" />}
+            {!isPremium && <Lock className="w-3 h-3 text-primary absolute -top-0.5 -right-0.5" />}
           </button>
 
           <div className="flex-1 relative">
@@ -345,7 +347,7 @@ const AIVet = () => {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && handleSend()}
-              placeholder="Type a message..."
+              placeholder={t("Type a message...")}
               className="w-full bg-muted rounded-full px-4 py-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-primary/50"
               disabled={isLoading}
             />
@@ -359,7 +361,7 @@ const AIVet = () => {
               ) : (
                 <div className="relative">
                   <Mic className="w-5 h-5 text-muted-foreground" />
-                  <Lock className="w-3 h-3 text-amber-500 absolute -top-1 -right-1" />
+                  <Lock className="w-3 h-3 text-primary absolute -top-1 -right-1" />
                 </div>
               )}
             </button>

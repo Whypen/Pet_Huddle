@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PetWizardProps {
   isOpen: boolean;
@@ -70,6 +71,7 @@ const temperamentOptions = [
 const genderOptions = ["Male", "Female", "Unknown"];
 
 export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -156,7 +158,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
 
   const handleNext = () => {
     if (currentStep === 1 && (!formData.name || !formData.species)) {
-      toast.error("Please enter a name and select a species");
+      toast.error(t("Please enter a name and select a species"));
       return;
     }
     if (currentStep < 4) {
@@ -221,11 +223,11 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
       
       if (error) throw error;
       
-      toast.success(`${formData.name} has been added to your Huddle! 🎉`);
+      toast.success(`${formData.name} ${t("has been added to your Huddle! 🎉")}`);
       onComplete();
       onClose();
     } catch (error: any) {
-      toast.error(error.message || "Failed to add pet");
+      toast.error(error.message || t("Failed to add pet"));
     } finally {
       setLoading(false);
     }
@@ -246,7 +248,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
           <button onClick={onClose} className="p-2 -ml-2">
             <X className="w-6 h-6" />
           </button>
-          <h1 className="text-lg font-semibold">Add New Pet</h1>
+          <h1 className="text-lg font-semibold">{t("Add New Pet")}</h1>
           <span className="text-sm text-muted-foreground">Step {currentStep}/4</span>
         </div>
         
@@ -278,7 +280,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 <div className="w-16 h-16 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-4">
                   <PawPrint className="w-8 h-8 text-accent" />
                 </div>
-                <h2 className="text-xl font-bold">Basic Info</h2>
+                <h2 className="text-xl font-bold">{t("Basic Info")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
                   Tell us about your pet
                 </p>
@@ -311,10 +313,10 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Name */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Pet Name *</label>
+                <label className="text-sm font-medium mb-2 block">{t("Pet Name *")}</label>
                 <Input
                   type="text"
-                  placeholder="What's your pet's name?"
+                  placeholder={t("What's your pet's name?")}
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="h-12 rounded-xl"
@@ -323,7 +325,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Species */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Species *</label>
+                <label className="text-sm font-medium mb-2 block">{t("Species *")}</label>
                 <div className="grid grid-cols-4 gap-2">
                   {speciesOptions.map((species) => (
                     <button
@@ -333,12 +335,12 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                       className={cn(
                         "flex flex-col items-center gap-2 p-4 rounded-xl transition-all",
                         formData.species === species.id
-                          ? "bg-accent text-accent-foreground"
+                          ? "bg-primary text-white"
                           : "bg-muted text-muted-foreground hover:bg-muted/80"
                       )}
                     >
                       <species.icon className="w-6 h-6" />
-                      <span className="text-xs font-medium">{species.label}</span>
+                      <span className="text-xs font-medium">{t(species.label)}</span>
                     </button>
                   ))}
                 </div>
@@ -347,10 +349,10 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               {/* Breed Search */}
               {formData.species && (
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Breed</label>
+                  <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
                   <Input
                     type="text"
-                    placeholder="Search breeds..."
+                    placeholder={t("Search breeds...")}
                     value={breedSearch}
                     onChange={(e) => setBreedSearch(e.target.value)}
                     className="h-12 rounded-xl mb-2"
@@ -380,7 +382,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Gender */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Gender</label>
+                <label className="text-sm font-medium mb-2 block">{t("Gender")}</label>
                 <div className="grid grid-cols-3 gap-2">
                   {genderOptions.map((gender) => (
                     <button
@@ -414,7 +416,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
                   <Stethoscope className="w-8 h-8 text-primary" />
                 </div>
-                <h2 className="text-xl font-bold">Health Vault</h2>
+                <h2 className="text-xl font-bold">{t("Health Vault")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
                   Keep track of important health info
                 </p>
@@ -423,7 +425,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               {/* DOB & Weight */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Date of Birth</label>
+                  <label className="text-sm font-medium mb-2 block">{t("Date of Birth")}</label>
                   <Input
                     type="date"
                     value={formData.dob}
@@ -435,7 +437,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   <label className="text-sm font-medium mb-2 block">Weight ({formData.weight_unit})</label>
                   <Input
                     type="number"
-                    placeholder="0"
+                    placeholder={t("0")}
                     value={formData.weight}
                     onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
                     className="h-12 rounded-xl"
@@ -450,7 +452,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </label>
                 <Input
                   type="text"
-                  placeholder="000000000000000"
+                  placeholder={t("000000000000000")}
                   value={formData.microchip_id}
                   onChange={(e) => setFormData(prev => ({ 
                     ...prev, 
@@ -466,7 +468,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Vaccinations */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Vaccinations</label>
+                <label className="text-sm font-medium mb-2 block">{t("Vaccinations")}</label>
                 <div className="space-y-2">
                   {formData.vaccinations.map((vax, index) => (
                     <div key={index} className="flex items-center gap-2 bg-muted rounded-lg p-3">
@@ -486,7 +488,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   <div className="flex gap-2">
                     <Input
                       type="text"
-                      placeholder="Vaccine name"
+                      placeholder={t("Vaccine name")}
                       value={vaccinationInput.name}
                       onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
                       className="h-10 rounded-lg flex-1"
@@ -511,10 +513,10 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Vet Contact */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Vet Contact</label>
+                <label className="text-sm font-medium mb-2 block">{t("Vet Contact")}</label>
                 <Input
                   type="text"
-                  placeholder="Vet clinic name or phone"
+                  placeholder={t("Vet clinic name or phone")}
                   value={formData.vet_contact}
                   onChange={(e) => setFormData(prev => ({ ...prev, vet_contact: e.target.value }))}
                   className="h-12 rounded-xl"
@@ -535,7 +537,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 <div className="w-16 h-16 rounded-full bg-warning/20 flex items-center justify-center mx-auto mb-4">
                   <Heart className="w-8 h-8 text-warning" />
                 </div>
-                <h2 className="text-xl font-bold">Personality</h2>
+                <h2 className="text-xl font-bold">{t("Personality")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
                   Help others understand your pet
                 </p>
@@ -543,7 +545,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Temperament */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Temperament Tags</label>
+                <label className="text-sm font-medium mb-2 block">{t("Temperament Tags")}</label>
                 <div className="flex flex-wrap gap-2">
                   {temperamentOptions.map((temp) => (
                     <button
@@ -567,9 +569,9 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Bio */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Bio</label>
+                <label className="text-sm font-medium mb-2 block">{t("Bio")}</label>
                 <Textarea
-                  placeholder="Tell us about your pet's personality, likes, and dislikes..."
+                  placeholder={t("Tell us about your pet's personality, likes, and dislikes...")}
                   value={formData.bio}
                   onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
                   className="rounded-xl min-h-[120px]"
@@ -578,9 +580,9 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               {/* Routine */}
               <div>
-                <label className="text-sm font-medium mb-2 block">Daily Routine</label>
+                <label className="text-sm font-medium mb-2 block">{t("Daily Routine")}</label>
                 <Textarea
-                  placeholder="Feeding times, walks, medications..."
+                  placeholder={t("Feeding times, walks, medications...")}
                   value={formData.routine}
                   onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
                   className="rounded-xl min-h-[100px]"
@@ -605,7 +607,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                     <PawPrint className="w-10 h-10 text-accent" />
                   )}
                 </div>
-                <h2 className="text-xl font-bold">Review</h2>
+                <h2 className="text-xl font-bold">{t("Review")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
                   Confirm {formData.name}'s details
                 </p>
@@ -613,46 +615,46 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               
               <div className="bg-card rounded-2xl border border-border p-4 space-y-4">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Name</span>
+                  <span className="text-muted-foreground">{t("Name")}</span>
                   <span className="font-medium">{formData.name}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Species</span>
+                  <span className="text-muted-foreground">{t("Species")}</span>
                   <span className="font-medium capitalize">{formData.species}</span>
                 </div>
                 {formData.breed && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Breed</span>
+                    <span className="text-muted-foreground">{t("Breed")}</span>
                     <span className="font-medium">{formData.breed}</span>
                   </div>
                 )}
                 {formData.gender && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Gender</span>
+                    <span className="text-muted-foreground">{t("Gender")}</span>
                     <span className="font-medium">{formData.gender}</span>
                   </div>
                 )}
                 {formData.dob && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Date of Birth</span>
+                    <span className="text-muted-foreground">{t("Date of Birth")}</span>
                     <span className="font-medium">{formData.dob}</span>
                   </div>
                 )}
                 {formData.weight && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Weight</span>
+                    <span className="text-muted-foreground">{t("Weight")}</span>
                     <span className="font-medium">{formData.weight} {formData.weight_unit}</span>
                   </div>
                 )}
                 {formData.microchip_id && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Microchip</span>
+                    <span className="text-muted-foreground">{t("Microchip")}</span>
                     <span className="font-mono text-sm">{formData.microchip_id}</span>
                   </div>
                 )}
                 {formData.temperament.length > 0 && (
                   <div>
-                    <span className="text-muted-foreground block mb-2">Temperament</span>
+                    <span className="text-muted-foreground block mb-2">{t("Temperament")}</span>
                     <div className="flex flex-wrap gap-1">
                       {formData.temperament.map((temp) => (
                         <span key={temp} className="px-2 py-1 bg-muted rounded-full text-xs">
@@ -664,7 +666,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 )}
                 {formData.vaccinations.length > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Vaccinations</span>
+                    <span className="text-muted-foreground">{t("Vaccinations")}</span>
                     <span className="font-medium">{formData.vaccinations.length} recorded</span>
                   </div>
                 )}

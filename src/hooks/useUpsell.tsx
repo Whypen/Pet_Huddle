@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 
 export type UpsellType = "star" | "emergency_alert" | "media" | "family_slot" | null;
@@ -19,6 +20,7 @@ interface UpsellModalState {
 
 export const useUpsell = () => {
   const { profile, user } = useAuth();
+  const { t } = useLanguage();
   const [upsellModal, setUpsellModal] = useState<UpsellModalState>({
     isOpen: false,
     type: null,
@@ -47,8 +49,8 @@ export const useUpsell = () => {
       setUpsellModal({
         isOpen: true,
         type: "star",
-        title: "Out of Stars!",
-        description: "Buy a Star Pack to boost your profile visibility and get more matches.",
+        title: t("Out of Stars!"),
+        description: t("Buy a Star Pack to boost your profile visibility and get more matches."),
         price: 4.99,
       });
       return false;
@@ -76,8 +78,8 @@ export const useUpsell = () => {
       setUpsellModal({
         isOpen: true,
         type: "emergency_alert",
-        title: "No Emergency Alerts Left",
-        description: "Buy an Emergency Alert to broadcast a lost pet notification to nearby users.",
+        title: t("No Emergency Alerts Left"),
+        description: t("Buy an Emergency Alert to broadcast a lost pet notification to nearby users."),
         price: 2.99,
       });
       return false;
@@ -112,8 +114,8 @@ export const useUpsell = () => {
       setUpsellModal({
         isOpen: true,
         type: "media",
-        title: "Out of Media Credits",
-        description: "Upgrade to Premium for unlimited media or buy a 10-pack to continue uploading photos and videos to AI Vet.",
+        title: t("Out of Media Credits"),
+        description: t("Upgrade to Premium for unlimited media or buy a 10-pack to continue uploading photos and videos to AI Vet."),
         price: 3.99,
       });
       return false;
@@ -131,22 +133,20 @@ export const useUpsell = () => {
 
     const { data: currentProfile } = await supabase
       .from("profiles")
-      .select("family_slots")
+      .select("family_slots, care_circle")
       .eq("id", user.id)
       .single();
 
     const familySlots = currentProfile?.family_slots || 0;
-
-    // Assume base limit is 2 family members (free tier)
-    // TODO: Add actual family member count check
-    const currentFamilyCount = 2; // Replace with actual query
+    const careCircle = Array.isArray(currentProfile?.care_circle) ? currentProfile?.care_circle : [];
+    const currentFamilyCount = careCircle.length;
 
     if (currentFamilyCount >= 2 + familySlots) {
       setUpsellModal({
         isOpen: true,
         type: "family_slot",
-        title: "Family Limit Reached",
-        description: "Buy additional family slots to add more members to your huddle account.",
+        title: t("Family Limit Reached"),
+        description: t("Buy additional family slots to add more members to your huddle account."),
         price: 5.99,
       });
       return false;

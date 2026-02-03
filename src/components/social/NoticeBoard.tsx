@@ -24,6 +24,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const categories = [
   { id: "Social", label: "Social", icon: MessageSquare, color: "bg-primary" },
@@ -66,6 +67,7 @@ const dummyCatPost: Notice = {
 };
 
 export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => {
+  const { t } = useLanguage();
   const { user } = useAuth();
   const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
@@ -155,7 +157,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
 
   const handleCreateNotice = async () => {
     if (!user || !content.trim()) {
-      toast.error("Please enter some content");
+      toast.error(t("Please enter some content"));
       return;
     }
 
@@ -192,7 +194,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
 
       if (error) throw error;
 
-      toast.success("Notice posted!");
+      toast.success(t("Notice posted!"));
       setContent("");
       setCategory("Social");
       setImageFile(null);
@@ -200,7 +202,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
       setIsCreateOpen(false);
       fetchNotices(true);
     } catch (error: any) {
-      toast.error(error.message || "Failed to post notice");
+      toast.error(error.message || t("Failed to post notice"));
     } finally {
       setCreating(false);
     }
@@ -212,27 +214,27 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
       const newLiked = new Set(prev);
       if (newLiked.has(noticeId)) {
         newLiked.delete(noticeId);
-        toast.success("Support removed");
+        toast.success(t("Support removed"));
       } else {
         newLiked.add(noticeId);
-        toast.success("Thanks for your support!");
+        toast.success(t("Thanks for your support!"));
       }
       return newLiked;
     });
   };
 
   const handleReport = (noticeId: string) => {
-    toast.success("Notice reported - our team will review it");
+    toast.success(t("Notice reported - our team will review it"));
   };
 
   const handleHide = (noticeId: string) => {
     setHiddenNotices(prev => new Set([...prev, noticeId]));
-    toast.success("Notice hidden");
+    toast.success(t("Notice hidden"));
   };
 
   const handleBlockUser = (authorId: string) => {
     setBlockedUsers(prev => new Set([...prev, authorId]));
-    toast.success("You won't see posts from this user");
+    toast.success(t("You won't see posts from this user"));
   };
 
   const getCategoryStyle = (cat: string) => {
@@ -245,10 +247,10 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     const then = new Date(date);
     const diff = now.getTime() - then.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours < 1) return "Just now";
-    if (hours < 24) return `${hours}h ago`;
+    if (hours < 1) return t("Just now");
+    if (hours < 24) return `${hours}${t("h ago")}`;
     const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    return `${days}${t("d ago")}`;
   };
 
   const visibleNotices = notices.filter(notice => 
@@ -263,9 +265,9 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 group"
         >
-          <h3 className="text-lg font-semibold">Notice Board</h3>
-          <span className="px-2 py-0.5 rounded-full bg-warning/20 text-warning text-xs font-medium">
-            Premium
+          <h3 className="text-lg font-semibold">{t("Notice Board")}</h3>
+          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+            {t("Premium")}
           </span>
           {isExpanded ? (
             <ChevronUp className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
@@ -278,9 +280,9 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           <Button
             onClick={() => setIsCreateOpen(true)}
             size="sm"
-            className="rounded-full bg-accent hover:bg-accent/90"
+            className="rounded-full bg-primary hover:bg-primary/90 text-white"
           >
-            Post
+            {t("Post")}
           </Button>
         ) : (
           <Button
@@ -290,7 +292,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
             className="rounded-full"
           >
             <Lock className="w-4 h-4 mr-1" />
-            Unlock
+            {t("Unlock")}
           </Button>
         )}
       </div>
@@ -311,7 +313,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
             ) : visibleNotices.length === 0 ? (
               <div className="bg-muted/50 rounded-xl p-6 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No notices yet</p>
+                <p className="text-sm text-muted-foreground">{t("No notices yet")}</p>
               </div>
             ) : (
               <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-visible pr-1">
@@ -453,7 +455,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
               className="w-full bg-card rounded-t-3xl p-6"
             >
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Create Notice</h3>
+                <h3 className="text-lg font-semibold">{t("Create Notice")}</h3>
                 <button onClick={() => setIsCreateOpen(false)}>
                   <X className="w-6 h-6" />
                 </button>
@@ -473,14 +475,14 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                     )}
                   >
                     <cat.icon className="w-4 h-4" />
-                    {cat.label}
+                    {t(cat.label)}
                   </button>
                 ))}
               </div>
 
               {/* Content */}
               <Textarea
-                placeholder="What's on your mind?"
+                placeholder={t("What's on your mind?")}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className="rounded-xl min-h-[100px] mb-4"
@@ -521,12 +523,12 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                 <Button
                   onClick={handleCreateNotice}
                   disabled={creating || !content.trim()}
-                  className="flex-1 h-12 rounded-xl bg-accent hover:bg-accent/90"
+                  className="flex-1 h-12 rounded-xl bg-primary hover:bg-primary/90 text-white"
                 >
                   {creating ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    "Post Notice"
+                    t("Post Notice")
                   )}
                 </Button>
               </div>

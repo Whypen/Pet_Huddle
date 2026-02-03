@@ -94,7 +94,7 @@ const Settings = () => {
   const isVerified = profile?.is_verified;
   const isGold = profile?.tier === "gold";
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-  const currentFamilyCount = 0;
+  const currentFamilyCount = profile?.care_circle?.length || 0;
   const availableFamilySlots = Math.max(0, (profile?.family_slots || 0) - currentFamilyCount);
 
   // Handle pause all notifications
@@ -115,29 +115,29 @@ const Settings = () => {
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) {
-      toast.error("Please enter an email");
+      toast.error(t("Please enter an email"));
       return;
     }
     if (availableFamilySlots <= 0) {
       await checkFamilySlotsAvailable();
       return;
     }
-    toast.success("Invite sent!");
+    toast.success(t("Invite sent!"));
     setInviteEmail("");
     setShowInviteModal(false);
   };
 
   const handleDeleteAccount = () => {
-    toast.success("Account deletion requested. You will receive a confirmation email.");
+    toast.success(t("Account deletion requested. You will receive a confirmation email."));
     setShowDeleteConfirm(false);
   };
 
   const handleBugSubmit = () => {
     if (!bugDescription.trim()) {
-      toast.error("Please describe the bug");
+      toast.error(t("Please describe the bug"));
       return;
     }
-    toast.success("Bug report submitted. Thank you!");
+    toast.success(t("Bug report submitted. Thank you!"));
     setBugDescription("");
     setShowBugReport(false);
   };
@@ -155,13 +155,13 @@ const Settings = () => {
       });
 
       if (error) {
-        toast.error("Current password is incorrect");
+        toast.error(t("Current password is incorrect"));
       } else {
         setPasswordVerified(true);
-        toast.success("Password verified");
+        toast.success(t("Password verified"));
       }
     } catch (error) {
-      toast.error("Failed to verify password");
+      toast.error(t("Failed to verify password"));
     } finally {
       setPasswordLoading(false);
     }
@@ -169,11 +169,11 @@ const Settings = () => {
 
   const handleChangePassword = async () => {
     if (newPassword.length < 8) {
-      toast.error("Password must be at least 8 characters");
+      toast.error(t("Password must be at least 8 characters"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toast.error(t("Passwords do not match"));
       return;
     }
 
@@ -182,14 +182,14 @@ const Settings = () => {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
 
-      toast.success("Password updated successfully");
+      toast.success(t("Password updated successfully"));
       setShowPasswordChange(false);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setPasswordVerified(false);
     } catch (error) {
-      toast.error("Failed to update password");
+      toast.error(t("Failed to update password"));
     } finally {
       setPasswordLoading(false);
     }
@@ -215,7 +215,7 @@ const Settings = () => {
     setBiometric(true);
     setShowBiometricSetup(false);
     setBiometricStep(0);
-    toast.success("Biometric authentication enabled");
+    toast.success(t("Biometric authentication enabled"));
   };
 
   return (
@@ -227,7 +227,7 @@ const Settings = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold">Account Settings</h1>
+        <h1 className="text-xl font-bold">{t("Account Settings")}</h1>
       </header>
 
       <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
@@ -238,7 +238,7 @@ const Settings = () => {
               {profile?.avatar_url ? (
                 <img
                   src={profile.avatar_url}
-                  alt="Profile"
+                  alt={t("Profile")}
                   className="w-16 h-16 rounded-full object-cover"
                 />
               ) : (
@@ -250,18 +250,22 @@ const Settings = () => {
               <div
                 className={cn(
                   "absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center",
-                  isVerified ? "bg-gradient-to-r from-amber-400 to-amber-500" : "bg-muted"
+                  isGold
+                    ? "bg-gradient-to-r from-amber-400 to-amber-500"
+                    : isVerified
+                      ? "bg-primary"
+                      : "bg-muted"
                 )}
               >
                 {isVerified ? (
-                  <Crown className="w-3.5 h-3.5 text-amber-900" />
+                  <Crown className={cn("w-3.5 h-3.5", isGold ? "text-amber-900" : "text-white")} />
                 ) : (
                   <Shield className="w-3.5 h-3.5 text-muted-foreground" />
                 )}
               </div>
             </div>
             <div className="flex-1">
-              <h2 className="font-semibold text-lg">{profile?.display_name || "User"}</h2>
+              <h2 className="font-semibold text-lg">{profile?.display_name || t("User")}</h2>
               <p className="text-sm text-muted-foreground">
                 {isVerified ? t("settings.verified_badge") : t("settings.pending")}
               </p>
@@ -275,7 +279,7 @@ const Settings = () => {
                     : "bg-muted text-muted-foreground"
                 )}
               >
-                {isPremium ? (isGold ? "Gold" : "Premium") : "Free"}
+                {isPremium ? (isGold ? t("Gold") : t("Premium")) : t("Free")}
               </span>
             </div>
             <button
@@ -291,11 +295,11 @@ const Settings = () => {
         <section className="p-4 border-b border-border">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-semibold">Family</h3>
+              <h3 className="font-semibold">{t("Family")}</h3>
               <p className="text-xs text-muted-foreground">
                 {availableFamilySlots > 0
-                  ? `${availableFamilySlots} invite slot(s) available`
-                  : "No invite slots available"}
+                  ? t("Invite slots available") + `: ${availableFamilySlots}`
+                  : t("No invite slots available")}
               </p>
             </div>
             <Button
@@ -307,7 +311,7 @@ const Settings = () => {
                 }
               }}
             >
-              Invite
+              {t("Invite")}
             </Button>
           </div>
         </section>
@@ -348,9 +352,9 @@ const Settings = () => {
               <div className="flex items-center gap-3">
                 <Shield className="w-5 h-5 text-muted-foreground" />
                 <div className="text-left">
-                  <span className="font-medium block">Identity Verification</span>
+                  <span className="font-medium block">{t("Identity Verification")}</span>
                   {profile?.verification_status === 'pending' && (
-                    <span className="text-xs text-warning">Waiting for Approval</span>
+                    <span className="text-xs text-warning">{t("Waiting for Approval")}</span>
                   )}
                   {profile?.verification_status === 'approved' && profile?.is_verified && (
                     <span className="text-xs text-primary flex items-center gap-1">
@@ -358,7 +362,7 @@ const Settings = () => {
                     </span>
                   )}
                   {(!profile?.verification_status || profile?.verification_status === 'not_submitted') && (
-                    <span className="text-xs text-muted-foreground">Upload ID/Passport</span>
+                    <span className="text-xs text-muted-foreground">{t("Upload ID/Passport")}</span>
                   )}
                 </div>
               </div>
@@ -402,8 +406,8 @@ const Settings = () => {
               <div className="flex items-center gap-3">
                 <EyeOff className="w-5 h-5 text-muted-foreground" />
                 <div>
-                  <span className="font-medium">Non-Social</span>
-                  <p className="text-xs text-muted-foreground">Hide from social discovery</p>
+                  <span className="font-medium">{t("Non-Social")}</span>
+                  <p className="text-xs text-muted-foreground">{t("Hide from social discovery")}</p>
                 </div>
               </div>
               <Switch checked={nonSocial} onCheckedChange={setNonSocial} />
@@ -413,15 +417,15 @@ const Settings = () => {
               <div className="flex items-center gap-3">
                 <MapPin className="w-5 h-5 text-muted-foreground" />
                 <div>
-                  <span className="font-medium">Hide from Map</span>
-                  <p className="text-xs text-muted-foreground">Don't show my location</p>
+                  <span className="font-medium">{t("Hide from Map")}</span>
+                  <p className="text-xs text-muted-foreground">{t("Don't show my location")}</p>
                 </div>
               </div>
               <Switch checked={hideFromMap} onCheckedChange={setHideFromMap} />
             </div>
 
             <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-              onClick={() => toast.info("Trusted locations feature coming soon")}>
+              onClick={() => toast.info(t("Trusted locations feature coming soon"))}>
               <div className="flex items-center gap-3">
                 <Shield className="w-5 h-5 text-muted-foreground" />
                 <span className="font-medium">{t("settings.trusted_locations")}</span>
@@ -497,7 +501,7 @@ const Settings = () => {
                 )}
               >
                 {language === option.value && <Check className="w-4 h-4" />}
-                {option.label}
+                {t(option.label)}
               </button>
             ))}
           </div>
@@ -510,8 +514,8 @@ const Settings = () => {
             className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
           >
             <div className="flex items-center gap-3">
-              <Crown className="w-5 h-5 text-amber-500" />
-              <span className="font-medium">Manage Subscription</span>
+              <Crown className="w-5 h-5 text-primary" />
+              <span className="font-medium">{t("Manage Subscription")}</span>
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
@@ -524,7 +528,7 @@ const Settings = () => {
           </h3>
           <div className="space-y-1">
             <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-              onClick={() => toast.info("Contact support@huddle.app for help")}>
+              onClick={() => toast.info(t("Contact support@huddle.app for help"))}>
               <div className="flex items-center gap-3">
                 <HelpCircle className="w-5 h-5 text-muted-foreground" />
                 <span className="font-medium">{t("settings.help_support")}</span>
@@ -583,8 +587,8 @@ const Settings = () => {
               <span className="font-medium">{t("settings.logout")}</span>
             </button>
 
-            <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-amber-600"
-              onClick={() => toast.warning("To deactivate, contact support@huddle.app")}>
+            <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive"
+              onClick={() => toast.warning(t("To deactivate, contact support@huddle.app"))}>
               <EyeOff className="w-5 h-5" />
               <span className="font-medium">{t("settings.deactivate")}</span>
             </button>
@@ -601,7 +605,7 @@ const Settings = () => {
 
         {/* Footer */}
         <div className="p-6 text-center">
-          <span className="text-xs text-muted-foreground">v1.0.0 (2026)</span>
+          <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
         </div>
       </div>
 
@@ -636,14 +640,14 @@ const Settings = () => {
               className="w-full max-w-sm bg-card rounded-2xl p-6"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="text-lg font-semibold mb-2">Invite Family Member</h3>
+              <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
               <p className="text-xs text-muted-foreground mb-4">
                 Sends an invite to join your huddle family.
               </p>
               <Input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="Email address"
+                placeholder={t("Email address")}
                 className="mb-4"
               />
               <div className="flex gap-2">
@@ -676,7 +680,7 @@ const Settings = () => {
               exit={{ opacity: 0, scale: 0.95 }}
               className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
             >
-              <h2 className="text-lg font-bold mb-4">Change Password</h2>
+              <h2 className="text-lg font-bold mb-4">{t("Change Password")}</h2>
 
               {!passwordVerified ? (
                 <>
@@ -687,7 +691,7 @@ const Settings = () => {
                     type="password"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder="Current password"
+                    placeholder={t("Current password")}
                     className="mb-4"
                   />
                   <div className="flex gap-3">
@@ -709,19 +713,19 @@ const Settings = () => {
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground mb-4">Enter your new password</p>
+                  <p className="text-sm text-muted-foreground mb-4">{t("Enter your new password")}</p>
                   <Input
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="New password (min 8 characters)"
+                    placeholder={t("New password (min 8 characters)")}
                     className="mb-3"
                   />
                   <Input
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirm new password"
+                    placeholder={t("Confirm new password")}
                     className="mb-4"
                   />
                   <div className="flex gap-3">
@@ -766,7 +770,7 @@ const Settings = () => {
               exit={{ opacity: 0, scale: 0.95 }}
               className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
             >
-              <h2 className="text-lg font-bold mb-6 text-center">Biometric Setup</h2>
+              <h2 className="text-lg font-bold mb-6 text-center">{t("Biometric Setup")}</h2>
 
               {/* Progress Stepper */}
               <div className="flex justify-center gap-2 mb-6">
@@ -874,7 +878,7 @@ const Settings = () => {
               <Textarea
                 value={bugDescription}
                 onChange={(e) => setBugDescription(e.target.value)}
-                placeholder="Describe the issue..."
+                placeholder={t("Describe the issue...")}
                 className="min-h-[120px] mb-4"
               />
               <div className="flex gap-3">
@@ -908,7 +912,7 @@ const Settings = () => {
               className="fixed inset-4 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-card rounded-2xl p-6 z-50 flex flex-col gap-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">Identity Verification</h3>
+                <h3 className="text-lg font-bold">{t("Identity Verification")}</h3>
                 <button onClick={() => setShowIDUpload(false)} className="p-2 rounded-full hover:bg-muted">
                   <ArrowLeft className="w-5 h-5" />
                 </button>
@@ -921,8 +925,8 @@ const Settings = () => {
 
                 {profile?.verification_status === 'pending' && (
                   <div className="p-4 rounded-xl bg-warning/10 border border-warning/20">
-                    <p className="text-sm text-warning font-medium">⏳ Waiting for Approval</p>
-                    <p className="text-xs text-muted-foreground mt-1">Your ID is under review</p>
+                    <p className="text-sm text-warning font-medium">{t("⏳ Waiting for Approval")}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t("Your ID is under review")}</p>
                   </div>
                 )}
 
@@ -931,7 +935,7 @@ const Settings = () => {
                     <p className="text-sm text-primary font-medium flex items-center gap-2">
                       <Check className="w-4 h-4" /> Verified Huddler
                     </p>
-                    <p className="text-xs text-muted-foreground mt-1">Your identity is verified</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t("Your identity is verified")}</p>
                   </div>
                 )}
 
@@ -943,7 +947,7 @@ const Settings = () => {
                         <p className="text-sm font-medium mb-1">
                           {idFile ? idFile.name : "Click to upload ID/Passport"}
                         </p>
-                        <p className="text-xs text-muted-foreground">PNG, JPG, PDF up to 10MB</p>
+                        <p className="text-xs text-muted-foreground">{t("PNG, JPG, PDF up to 10MB")}</p>
                       </div>
                       <input
                         type="file"
@@ -982,11 +986,11 @@ const Settings = () => {
                           if (updateError) throw updateError;
 
                           await refreshProfile();
-                          toast.success("ID uploaded! Waiting for approval");
+                          toast.success(t("ID uploaded! Waiting for approval"));
                           setShowIDUpload(false);
                           setIDFile(null);
                         } catch (error: any) {
-                          toast.error(error.message || "Upload failed");
+                          toast.error(error.message || t("Upload failed"));
                         } finally {
                           setIdUploading(false);
                         }

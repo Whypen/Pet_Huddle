@@ -1,6 +1,7 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LanguageContext } from "@/contexts/LanguageContext";
 
 interface Props {
   children: ReactNode;
@@ -14,6 +15,8 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
+  static contextType = LanguageContext;
+  declare context: React.ContextType<typeof LanguageContext>;
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -48,6 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
+    const t = this.context?.t || ((value: string) => value);
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
@@ -63,9 +67,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Error Message */}
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-foreground">Something went wrong</h1>
+              <h1 className="text-2xl font-bold text-foreground">{t("Something went wrong")}</h1>
               <p className="text-muted-foreground">
-                We encountered an unexpected error. Please try again or return to the home page.
+                {t("We encountered an unexpected error. Please try again or return to the home page.")}
               </p>
             </div>
 
@@ -90,7 +94,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="w-full h-12 rounded-xl"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
-                Try Again
+                {t("Try Again")}
               </Button>
               <Button
                 variant="outline"
@@ -98,13 +102,13 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="w-full h-12 rounded-xl"
               >
                 <Home className="w-4 h-4 mr-2" />
-                Go to Home
+                {t("Go to Home")}
               </Button>
             </div>
 
             {/* Help Text */}
             <p className="text-xs text-muted-foreground">
-              If this issue persists, please contact support or report a bug through the Settings page.
+              {t("If this issue persists, please contact support or report a bug through the Settings page.")}
             </p>
           </div>
         </div>

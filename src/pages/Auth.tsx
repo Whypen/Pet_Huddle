@@ -12,17 +12,18 @@ import { z } from "zod";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import huddleLogo from "@/assets/huddle-logo.jpg";
-
-const emailSchema = z.string().email("Please enter a valid email address");
-const phoneSchema = z.string().regex(/^\+?[1-9]\d{7,14}$/, "Please enter a valid phone number");
-// SPRINT 1: Strict password validation - 8+ chars, 1 upper, 1 number, 1 special
-const passwordSchema = z.string()
-  .min(8, "Password must be at least 8 characters")
-  .regex(/[A-Z]/, "Password must contain at least 1 uppercase letter")
-  .regex(/[0-9]/, "Password must contain at least 1 number")
-  .regex(/[^A-Za-z0-9]/, "Password must contain at least 1 special character");
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
+  const { t } = useLanguage();
+  const emailSchema = z.string().email(t("Please enter a valid email address"));
+  const phoneSchema = z.string().regex(/^\+?[1-9]\d{7,14}$/, t("Please enter a valid phone number"));
+  // SPRINT 1: Strict password validation - 8+ chars, 1 upper, 1 number, 1 special
+  const passwordSchema = z.string()
+    .min(8, t("Password must be at least 8 characters"))
+    .regex(/[A-Z]/, t("Password must contain at least 1 uppercase letter"))
+    .regex(/[0-9]/, t("Password must contain at least 1 number"))
+    .regex(/[^A-Za-z0-9]/, t("Password must contain at least 1 special character"));
   const navigate = useNavigate();
   const { signIn, signUp, user, profile } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
@@ -106,7 +107,7 @@ const Auth = () => {
 
         if (error) {
           if (error.message.includes("Invalid login credentials")) {
-            toast.error("Invalid email/phone or password");
+            toast.error(t("Invalid email/phone or password"));
           } else {
             toast.error(error.message);
           }
@@ -117,12 +118,12 @@ const Auth = () => {
           } else {
             localStorage.removeItem('rememberedIdentifier');
           }
-          toast.success("Welcome back!");
+          toast.success(t("Welcome back!"));
         }
       } else {
         // Sign up - only support email for now
         if (!isEmailLogin) {
-          toast.error("Please use an email address to sign up");
+          toast.error(t("Please use an email address to sign up"));
           setLoading(false);
           return;
         }
@@ -130,12 +131,12 @@ const Auth = () => {
         const { error } = await signUp(cleanedIdentifier, password, displayName);
         if (error) {
           if (error.message.includes("User already registered")) {
-            toast.error("An account with this email already exists");
+            toast.error(t("An account with this email already exists"));
           } else {
             toast.error(error.message);
           }
         } else {
-          toast.success("Account created! Let's set up your profile.");
+          toast.success(t("Account created! Let's set up your profile."));
         }
       }
     } finally {
@@ -210,7 +211,7 @@ const Auth = () => {
                     <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                     <Input
                       type="text"
-                      placeholder="Display Name"
+                      placeholder={t("Display Name")}
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
                       className="pl-12 h-12 rounded-xl border-border"
@@ -227,7 +228,7 @@ const Auth = () => {
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
                     <Input
                       type="text"
-                      placeholder="Email"
+                      placeholder={t("Email")}
                       value={identifier}
                       onChange={(e) => {
                         setIdentifier(e.target.value);
@@ -246,7 +247,7 @@ const Auth = () => {
                       setErrors((prev) => ({ ...prev, identifier: undefined }));
                     }}
                     className={`phone-input-auth h-12 rounded-xl ${errors.identifier ? "border-destructive" : "border-border"}`}
-                    placeholder="Mobile Number"
+                    placeholder={t("Mobile Number")}
                   />
                 )}
               </div>
@@ -267,7 +268,7 @@ const Auth = () => {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
                   type={showPassword ? "text" : "password"}
-                  placeholder="Password"
+                  placeholder={t("Password")}
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
@@ -347,7 +348,7 @@ const Auth = () => {
                 <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
+                <span className="bg-card px-2 text-muted-foreground">{t("Or continue with")}</span>
               </div>
             </div>
 
@@ -360,7 +361,7 @@ const Auth = () => {
               >
                 <Lock className="w-4 h-4 mr-2" />
                 Apple
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">Soon</span>
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("Soon")}</span>
               </Button>
               <Button
                 type="button"
@@ -369,8 +370,8 @@ const Auth = () => {
                 className="h-12 rounded-xl relative"
               >
                 <Lock className="w-4 h-4 mr-2" />
-                Google
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">Soon</span>
+                {t("Google")}
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("Soon")}</span>
               </Button>
             </div>
           </div>
@@ -380,18 +381,18 @@ const Auth = () => {
               className="w-full text-center text-sm text-primary mt-4 hover:underline"
               onClick={async () => {
                 if (!identifier || !identifier.includes("@")) {
-                  toast.error("Enter your email address to reset password");
+                  toast.error(t("Enter your email address to reset password"));
                   return;
                 }
                 const { error } = await supabase.auth.resetPasswordForEmail(identifier, {
                   redirectTo: `${window.location.origin}/auth`,
                 });
                 toast[error ? "error" : "success"](
-                  error ? "Failed to send reset email" : "Reset link sent to your email!"
+                  error ? t("Failed to send reset email") : t("Reset link sent to your email!")
                 );
               }}
             >
-              Forgot Password?
+              {t("Forgot Password?")}
             </button>
           )}
         </div>
@@ -400,9 +401,9 @@ const Auth = () => {
       {/* Footer */}
       <div className="py-8 text-center">
         <p className="text-xs text-muted-foreground">
-          By continuing, you agree to our{" "}
-          <span className="text-primary">Terms of Service</span> and{" "}
-          <span className="text-primary">Privacy Policy</span>
+          {t("By continuing, you agree to our")}{" "}
+          <span className="text-primary">{t("Terms of Service")}</span> {t("and")}{" "}
+          <span className="text-primary">{t("Privacy Policy")}</span>
         </p>
       </div>
     </div>

@@ -5,6 +5,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Star, AlertTriangle, Camera, Users, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface UpsellModalProps {
   isOpen: boolean;
@@ -25,24 +26,24 @@ const ICON_MAP = {
 
 const COLOR_MAP = {
   star: {
-    bg: "from-amber-400 to-amber-500",
-    iconBg: "bg-amber-100 dark:bg-amber-900/20",
-    iconColor: "text-amber-600",
+    bg: "from-blue-500 to-blue-600",
+    iconBg: "bg-blue-100 dark:bg-blue-900/20",
+    iconColor: "text-blue-600",
   },
   emergency_alert: {
-    bg: "from-red-400 to-red-500",
-    iconBg: "bg-red-100 dark:bg-red-900/20",
-    iconColor: "text-red-600",
+    bg: "from-blue-500 to-blue-600",
+    iconBg: "bg-blue-100 dark:bg-blue-900/20",
+    iconColor: "text-blue-600",
   },
   media: {
-    bg: "from-blue-400 to-blue-500",
+    bg: "from-blue-500 to-blue-600",
     iconBg: "bg-blue-100 dark:bg-blue-900/20",
     iconColor: "text-blue-600",
   },
   family_slot: {
-    bg: "from-green-400 to-green-500",
-    iconBg: "bg-green-100 dark:bg-green-900/20",
-    iconColor: "text-green-600",
+    bg: "from-blue-500 to-blue-600",
+    iconBg: "bg-blue-100 dark:bg-blue-900/20",
+    iconColor: "text-blue-600",
   },
 };
 
@@ -55,6 +56,7 @@ export const UpsellModal = ({
   onClose,
   onBuy,
 }: UpsellModalProps) => {
+  const { t } = useLanguage();
   if (!type) return null;
 
   const Icon = ICON_MAP[type];
@@ -105,21 +107,21 @@ export const UpsellModal = ({
 
             {/* Price */}
             <div className="bg-muted/50 rounded-xl p-4 mb-6 text-center">
-              <p className="text-sm text-muted-foreground mb-1">One-time purchase</p>
+              <p className="text-sm text-muted-foreground mb-1">{t("One-time purchase")}</p>
               <p className="text-3xl font-bold">${price.toFixed(2)}</p>
             </div>
 
             {/* Actions */}
             <div className="flex gap-3">
               <Button onClick={onClose} variant="outline" className="flex-1">
-                Maybe Later
+                {t("Maybe Later")}
               </Button>
               <Button
                 onClick={onBuy}
-                className={`flex-1 bg-gradient-to-r ${colors.bg} hover:opacity-90 text-white`}
+                className="flex-1 bg-primary hover:bg-primary/90 text-white"
               >
                 <Sparkles className="w-4 h-4 mr-2" />
-                Buy Now
+                {t("Buy Now")}
               </Button>
             </div>
 
@@ -127,8 +129,10 @@ export const UpsellModal = ({
             {type === "media" && (
               <div className="mt-4 p-3 bg-primary/10 rounded-lg border border-primary/20">
                 <p className="text-xs text-center text-muted-foreground">
-                  💡 <span className="font-semibold">Premium Tip:</span> Get unlimited media
-                  uploads + more features for just $8.99/month
+                  {t("Premium Tip:")}{" "}
+                  <span className="font-semibold">
+                    {t("Get unlimited media uploads + more features for just $8.99/month")}
+                  </span>
                 </p>
               </div>
             )}

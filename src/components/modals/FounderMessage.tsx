@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useApi } from "@/hooks/useApi";
+import { useLanguage } from "@/contexts/LanguageContext";
 import huddleLogo from "@/assets/huddle-logo.jpg";
 
 interface FounderMessageProps {
@@ -10,6 +11,7 @@ interface FounderMessageProps {
 }
 
 export const FounderMessage = ({ onClose }: FounderMessageProps) => {
+  const { t } = useLanguage();
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { getFounderMessage } = useApi();
@@ -23,13 +25,17 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
         } else {
           // Default message if API fails
           setMessage(
-            "Welcome to huddle! 🐾\n\nI built this app because I believe every pet deserves the best care, and every pet parent deserves a supportive community.\n\nWhether you're looking for a trusted pet sitter, seeking advice from Dr. Huddle, or just want to connect with fellow animal lovers in your area - we're here for you.\n\nThank you for joining our pack. Together, we're making pet care social.\n\nWith love,\nThe huddle Team"
+            t(
+              "Welcome to huddle! 🐾\n\nI built this app because I believe every pet deserves the best care, and every pet parent deserves a supportive community.\n\nWhether you're looking for a trusted pet sitter, seeking advice from Dr. Huddle, or just want to connect with fellow animal lovers in your area - we're here for you.\n\nThank you for joining our pack. Together, we're making pet care social.\n\nWith love,\nThe huddle Team"
+            )
           );
         }
       } catch (error) {
         console.error("Error fetching founder message:", error);
         setMessage(
-          "Welcome to huddle! 🐾\n\nThank you for joining our community of pet lovers. We're excited to have you here!\n\nExplore, connect, and give your pets the best care possible.\n\nThe huddle Team"
+          t(
+            "Welcome to huddle! 🐾\n\nThank you for joining our community of pet lovers. We're excited to have you here!\n\nExplore, connect, and give your pets the best care possible.\n\nThe huddle Team"
+          )
         );
       } finally {
         setLoading(false);
@@ -72,11 +78,11 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
             </button>
 
             <div className="w-20 h-20 mx-auto rounded-full bg-white shadow-lg overflow-hidden mb-3">
-              <img src={huddleLogo} alt="huddle" className="w-full h-full object-cover" />
+              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-cover" />
             </div>
 
-            <h2 className="text-xl font-bold text-white mb-1">Welcome to huddle</h2>
-            <p className="text-white/80 text-sm">Pet care & social</p>
+            <h2 className="text-xl font-bold text-white mb-1">{t("Welcome to huddle")}</h2>
+            <p className="text-white/80 text-sm">{t("Family mesh for pets")}</p>
           </div>
 
           {/* Message content */}

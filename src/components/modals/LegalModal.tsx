@@ -221,7 +221,7 @@ export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
 
             {/* Footer */}
             <div className="p-4 border-t border-border text-center">
-              <span className="text-xs text-muted-foreground">v1.0.0 (2026)</span>
+              <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
             </div>
           </motion.div>
         </>

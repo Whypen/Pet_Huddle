@@ -49,6 +49,7 @@ export interface Profile {
   show_bio: boolean;
   last_lat?: number | null;
   last_lng?: number | null;
+  care_circle?: string[] | null;
 }
 
 interface AuthContextType {
@@ -93,7 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         social_availability, availability_status,
         show_gender, show_orientation, show_age, show_height, show_weight,
         show_academic, show_affiliation, show_occupation, show_bio,
-        last_lat, last_lng
+        last_lat, last_lng, care_circle
       `)
       .eq("id", userId)
       .maybeSingle();

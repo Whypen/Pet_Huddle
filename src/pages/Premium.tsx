@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Stripe product IDs are intentionally server-side only.
 
@@ -101,6 +102,7 @@ const ADD_ONS: AddOn[] = [
 ];
 
 const Premium = () => {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const { profile, user, refreshProfile } = useAuth();
   const [searchParams] = useSearchParams();
@@ -121,7 +123,7 @@ const Premium = () => {
   useEffect(() => {
     if (sessionId && !hasActiveSubscription) {
       setIsPolling(true);
-      toast.info("Processing your payment...");
+      toast.info(t("Processing your payment..."));
 
       const pollInterval = setInterval(async () => {
         await refreshProfile();
@@ -134,7 +136,7 @@ const Premium = () => {
         if (updatedProfile && (updatedProfile.tier === "premium" || updatedProfile.tier === "gold")) {
           setIsPolling(false);
           clearInterval(pollInterval);
-          toast.success("Welcome to huddle Premium!");
+          toast.success(t("Welcome to huddle Premium!"));
         }
       }, 3000);
 
@@ -143,7 +145,7 @@ const Premium = () => {
         if (isPolling) {
           setIsPolling(false);
           clearInterval(pollInterval);
-          toast.warning("Payment processing is taking longer than expected. Please check back in a few minutes.");
+          toast.warning(t("Payment processing is taking longer than expected. Please check back in a few minutes."));
         }
       }, 30000);
 
@@ -170,7 +172,7 @@ const Premium = () => {
   // =====================================================
   const createCheckoutSession = async (type: string, mode: "subscription" | "payment", amount?: number) => {
     if (!user) {
-      toast.error("Please sign in first");
+      toast.error(t("Please sign in first"));
       return;
     }
 
@@ -195,7 +197,7 @@ const Premium = () => {
       }
     } catch (error: any) {
       console.error("Checkout error:", error);
-      toast.error("Failed to create checkout session");
+      toast.error(t("Failed to create checkout session"));
     } finally {
       setIsProcessing(false);
     }
@@ -231,7 +233,7 @@ const Premium = () => {
       }
     } catch (error: any) {
       console.error("Portal error:", error);
-      toast.error("Failed to open billing portal");
+      toast.error(t("Failed to open billing portal"));
     } finally {
       setIsProcessing(false);
     }
@@ -246,7 +248,7 @@ const Premium = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold">huddle Premium</h1>
+        <h1 className="text-xl font-bold">{t("huddle Premium")}</h1>
       </header>
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
@@ -275,8 +277,8 @@ const Premium = () => {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">huddle Premium</h2>
-            <p className="text-white/90 text-sm">Unlock the full huddle experience</p>
+            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
+            <p className="text-white/90 text-sm">{t("Unlock the full huddle experience")}</p>
           </div>
         </motion.div>
 
@@ -352,8 +354,8 @@ const Premium = () => {
           >
             <Loader2 className="w-5 h-5 text-primary animate-spin" />
             <div>
-              <p className="font-semibold text-primary">Processing Payment...</p>
-              <p className="text-sm text-muted-foreground">This may take a few seconds</p>
+              <p className="font-semibold text-primary">{t("Processing Payment...")}</p>
+              <p className="text-sm text-muted-foreground">{t("This may take a few seconds")}</p>
             </div>
           </motion.div>
         )}
@@ -363,28 +365,28 @@ const Premium = () => {
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
               <Star className="w-4 h-4 text-amber-500" />
-              <span className="text-xs font-medium text-muted-foreground">Stars</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Stars")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.stars_count || 0}</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
               <AlertTriangle className="w-4 h-4 text-red-500" />
-              <span className="text-xs font-medium text-muted-foreground">Alerts</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Alerts")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.mesh_alert_count || 0}</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
               <Camera className="w-4 h-4 text-blue-500" />
-              <span className="text-xs font-medium text-muted-foreground">Media</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Media")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.media_credits || 0}</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
               <Users className="w-4 h-4 text-green-500" />
-              <span className="text-xs font-medium text-muted-foreground">Family</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Family")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.family_slots || 0}</p>
           </div>
@@ -394,10 +396,10 @@ const Premium = () => {
         <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
           <div className="grid grid-cols-4 bg-muted/50">
             <div className="p-3">
-              <span className="text-xs font-medium text-muted-foreground">Feature</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("Feature")}</span>
             </div>
             <div className="p-3 text-center border-l border-border">
-              <span className="text-xs font-medium">Free</span>
+              <span className="text-xs font-medium">{t("Free")}</span>
             </div>
             <div className="p-3 text-center border-l border-border bg-blue-50 dark:bg-blue-900/20">
               <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
@@ -405,7 +407,7 @@ const Premium = () => {
               </span>
             </div>
             <div className="p-3 text-center border-l border-border bg-amber-50 dark:bg-amber-900/20">
-              <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">Gold</span>
+              <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">{t("Gold")}</span>
             </div>
           </div>
 
@@ -472,9 +474,9 @@ const Premium = () => {
               >
                 <div className="flex items-center gap-2 mb-2">
                   <Sparkles className="w-5 h-5 text-[#2563EB]" />
-                  <span className="font-bold">Premium</span>
+                  <span className="font-bold">{t("Premium")}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">Best for individuals</p>
+                <p className="text-xs text-muted-foreground">{t("Best for individuals")}</p>
               </button>
 
               <button
@@ -488,9 +490,9 @@ const Premium = () => {
               >
                 <div className="flex items-center gap-2 mb-2">
                   <Crown className="w-5 h-5 text-amber-500" />
-                  <span className="font-bold">Gold</span>
+                  <span className="font-bold">{t("Gold")}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">Ultimate experience</p>
+                <p className="text-xs text-muted-foreground">{t("Ultimate experience")}</p>
               </button>
             </div>
 
@@ -505,11 +507,11 @@ const Premium = () => {
                     : "border-border hover:border-primary/50"
                 )}
               >
-                <p className="text-sm font-medium text-muted-foreground mb-1">Monthly</p>
+                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Monthly")}</p>
                 <p className="text-2xl font-bold">
                   ${pricing[selectedTier].monthly.price}
                 </p>
-                <p className="text-xs text-muted-foreground">per month</p>
+                <p className="text-xs text-muted-foreground">{t("per month")}</p>
               </button>
 
               <button
@@ -524,7 +526,7 @@ const Premium = () => {
                 <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
                   {pricing[selectedTier].yearly.savings}
                 </span>
-                <p className="text-sm font-medium text-muted-foreground mb-1">Yearly</p>
+                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Yearly")}</p>
                 <p className="text-2xl font-bold">${pricing[selectedTier].yearly.price}</p>
                 <p className="text-xs text-muted-foreground">
                   ${pricing[selectedTier].yearly.monthlyEquivalent.toFixed(2)}/month
@@ -570,7 +572,7 @@ const Premium = () => {
 
         {/* Add-on Store */}
         <div className="mt-8">
-          <h3 className="text-lg font-bold mb-4">Add-on Store</h3>
+          <h3 className="text-lg font-bold mb-4">{t("Add-on Store")}</h3>
           <div className="grid grid-cols-2 gap-3">
             {ADD_ONS.map((addOn) => (
               <motion.div
