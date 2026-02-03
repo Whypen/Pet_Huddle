@@ -57,54 +57,17 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [pendingActions]);
 
-  // Check server reachability
-  const checkServerHealth = useCallback(async (): Promise<boolean> => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      try {
-        const response = await fetch(`${API_URL}/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-        return response.ok;
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        // Suppress fetch errors in console to avoid noise
-        return false;
-      }
-    } catch (error) {
-      return false;
-    }
-  }, []);
-
-  // Retry connection
+  // Retry connection - sync pending actions when coming back online
   const retryConnection = useCallback(async () => {
-    // Skip health checks for relative URLs (development/same-server deployments)
-    const isRelativeUrl = API_URL.startsWith('/');
-    if (isRelativeUrl) {
-      setIsServerReachable(true);
-      setLastOnlineTime(new Date());
-      toast.success("Connection restored!");
-      return;
+    setIsServerReachable(true);
+    setLastOnlineTime(new Date());
+    toast.success("Connection restored!");
+
+    // Process pending offline actions
+    if (pendingActions.length > 0) {
+      processPendingActions();
     }
-
-    const serverOk = await checkServerHealth();
-    setIsServerReachable(serverOk);
-
-    if (serverOk && isOnline) {
-      setLastOnlineTime(new Date());
-      toast.success("Connection restored!");
-
-      // Process pending offline actions
-      if (pendingActions.length > 0) {
-        processPendingActions();
-      }
-    }
-  }, [checkServerHealth, isOnline, pendingActions]);
+  }, [pendingActions]);
 
   // Process pending offline actions
   const processPendingActions = useCallback(async () => {
