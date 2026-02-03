@@ -14,7 +14,6 @@ import {
   Bell,
   BellOff,
   Globe,
-  HelpCircle,
   Bug,
   FileText,
   Scale,
@@ -61,7 +60,6 @@ const Settings = () => {
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
   const [bugDescription, setBugDescription] = useState("");
 
   // Password change state
@@ -96,6 +94,7 @@ const Settings = () => {
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
   const currentFamilyCount = profile?.care_circle?.length || 0;
   const availableFamilySlots = Math.max(0, (profile?.family_slots || 0) - currentFamilyCount);
+  const inviteLink = user ? `${window.location.origin}/invite?ref=${user.id}` : "";
 
   // Handle pause all notifications
   const handlePauseAll = (checked: boolean) => {
@@ -114,17 +113,19 @@ const Settings = () => {
   };
 
   const handleInvite = async () => {
-    if (!inviteEmail.trim()) {
-      toast.error(t("Please enter an email"));
-      return;
-    }
+    if (!user) return;
     if (availableFamilySlots <= 0) {
       await checkFamilySlotsAvailable();
       return;
     }
-    toast.success(t("Invite sent!"));
-    setInviteEmail("");
-    setShowInviteModal(false);
+    const link = `${window.location.origin}/invite?ref=${user.id}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success(t("Invite link copied"));
+    } catch (error) {
+      console.error("Failed to copy invite link:", error);
+      toast.error(t("Failed to copy invite link"));
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -304,6 +305,10 @@ const Settings = () => {
             </div>
             <Button
               onClick={async () => {
+                if (!isGold) {
+                  setIsPremiumOpen(true);
+                  return;
+                }
                 if (availableFamilySlots > 0) {
                   setShowInviteModal(true);
                 } else {
@@ -358,7 +363,7 @@ const Settings = () => {
                   )}
                   {profile?.verification_status === 'approved' && profile?.is_verified && (
                     <span className="text-xs text-primary flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Verified
+                      <Check className="w-3 h-3" /> {t("Verified")}
                     </span>
                   )}
                   {(!profile?.verification_status || profile?.verification_status === 'not_submitted') && (
@@ -424,14 +429,6 @@ const Settings = () => {
               <Switch checked={hideFromMap} onCheckedChange={setHideFromMap} />
             </div>
 
-            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-              onClick={() => toast.info(t("Trusted locations feature coming soon"))}>
-              <div className="flex items-center gap-3">
-                <Shield className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.trusted_locations")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
           </div>
         </section>
 
@@ -519,23 +516,6 @@ const Settings = () => {
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground" />
           </button>
-        </section>
-
-        {/* Help & Support - Moved to main menu level */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.help_support")}
-          </h3>
-          <div className="space-y-1">
-            <button className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-              onClick={() => toast.info(t("Contact support@huddle.app for help"))}>
-              <div className="flex items-center gap-3">
-                <HelpCircle className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.help_support")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-          </div>
         </section>
 
         {/* Report Bug, Privacy Policy, Terms - In main menu */}
@@ -642,20 +622,19 @@ const Settings = () => {
             >
               <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
               <p className="text-xs text-muted-foreground mb-4">
-                Sends an invite to join your huddle family.
+                {t("Share this link to invite a family member to your huddle.")}
               </p>
               <Input
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder={t("Email address")}
+                value={inviteLink}
+                readOnly
                 className="mb-4"
               />
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowInviteModal(false)} className="flex-1">
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button onClick={handleInvite} className="flex-1">
-                  Send Invite
+                  {t("Copy Invite Link")}
                 </Button>
               </div>
             </motion.div>
@@ -685,7 +664,7 @@ const Settings = () => {
               {!passwordVerified ? (
                 <>
                   <p className="text-sm text-muted-foreground mb-4">
-                    First, verify your current password
+                    {t("First, verify your current password")}
                   </p>
                   <Input
                     type="password"
@@ -700,14 +679,14 @@ const Settings = () => {
                       className="flex-1"
                       onClick={() => setShowPasswordChange(false)}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       className="flex-1"
                       onClick={handleVerifyPassword}
                       disabled={passwordLoading || !currentPassword}
                     >
-                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify"}
+                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Verify")}
                     </Button>
                   </div>
                 </>
@@ -737,14 +716,14 @@ const Settings = () => {
                         setPasswordVerified(false);
                       }}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       className="flex-1"
                       onClick={handleChangePassword}
                       disabled={passwordLoading || !newPassword || !confirmPassword}
                     >
-                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update"}
+                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Update")}
                     </Button>
                   </div>
                 </>
@@ -795,14 +774,14 @@ const Settings = () => {
                 </div>
 
                 <p className="font-medium">
-                  {biometricStep === 1 && "Place your finger on the sensor"}
-                  {biometricStep === 2 && "Scanning..."}
-                  {biometricStep === 3 && "Success!"}
+                  {biometricStep === 1 && t("Place your finger on the sensor")}
+                  {biometricStep === 2 && t("Scanning...")}
+                  {biometricStep === 3 && t("Success!")}
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  {biometricStep === 1 && "Touch the fingerprint sensor"}
-                  {biometricStep === 2 && "Keep your finger steady"}
-                  {biometricStep === 3 && "Biometric authentication enabled"}
+                  {biometricStep === 1 && t("Touch the fingerprint sensor")}
+                  {biometricStep === 2 && t("Keep your finger steady")}
+                  {biometricStep === 3 && t("Biometric authentication enabled")}
                 </p>
 
                 {biometricLoading && biometricStep < 3 && (
@@ -837,7 +816,7 @@ const Settings = () => {
                 </div>
                 <h2 className="text-lg font-bold mb-2">{t("settings.delete")}?</h2>
                 <p className="text-sm text-muted-foreground">
-                  This action cannot be undone. All your data will be permanently deleted.
+                  {t("This action cannot be undone. All your data will be permanently deleted.")}
                 </p>
               </div>
               <div className="flex gap-3">
@@ -886,7 +865,7 @@ const Settings = () => {
                   {t("common.cancel")}
                 </Button>
                 <Button className="flex-1" onClick={handleBugSubmit}>
-                  Submit
+                  {t("Submit")}
                 </Button>
               </div>
             </motion.div>
@@ -920,7 +899,7 @@ const Settings = () => {
 
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Upload a government-issued ID or passport to get the Gold Huddler badge. Our team will review and approve within 24-48 hours.
+                  {t("Upload a government-issued ID or passport for review. Approval typically takes 24-48 hours.")}
                 </p>
 
                 {profile?.verification_status === 'pending' && (
@@ -930,10 +909,10 @@ const Settings = () => {
                   </div>
                 )}
 
-                {profile?.is_verified && (
+                {profile?.verification_status === "approved" && profile?.is_verified && (
                   <div className="p-4 rounded-xl bg-primary/10 border border-primary/20">
                     <p className="text-sm text-primary font-medium flex items-center gap-2">
-                      <Check className="w-4 h-4" /> Verified Huddler
+                      <Check className="w-4 h-4" /> {t("Verified Huddler")}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">{t("Your identity is verified")}</p>
                   </div>
@@ -945,7 +924,7 @@ const Settings = () => {
                       <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors">
                         <Shield className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
                         <p className="text-sm font-medium mb-1">
-                          {idFile ? idFile.name : "Click to upload ID/Passport"}
+                          {idFile ? idFile.name : t("Click to upload ID/Passport")}
                         </p>
                         <p className="text-xs text-muted-foreground">{t("PNG, JPG, PDF up to 10MB")}</p>
                       </div>

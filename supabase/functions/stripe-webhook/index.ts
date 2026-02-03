@@ -20,6 +20,19 @@ const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") as string;
 // Initialize Supabase client with SERVICE ROLE (bypasses RLS)
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// Stripe Product IDs (authoritative registry per APP_MASTER_SPEC)
+const STRIPE_PRODUCTS: Record<string, string> = {
+  premium: "prod_TuEpCL4vGGwUpk",
+  gold: "prod_TuF4blxU2yHqBV",
+  verified_badge: "prod_TuFRNkLiOOKuHZ",
+  star_pack: "prod_TuFPF3zjXiWiK8",
+  emergency_alert: "prod_TuFKa021SiFK58",
+  vet_media: "prod_TuFLRWYZGrItCP",
+  family_slot: "prod_TuFNGDVKRYPPsG",
+  "5_media_pack": "prod_TuFQ8x2UN7yYjm",
+  "7_day_extension": "prod_TuFIj3NC2W7TvV",
+};
+
 interface WebhookResponse {
   success: boolean;
   message: string;

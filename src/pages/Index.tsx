@@ -1,11 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Settings, Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2 } from "lucide-react";
+import { Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
-import { PetWizard } from "@/components/pets/PetWizard";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
@@ -84,7 +83,6 @@ const Index = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPetWizardOpen, setIsPetWizardOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -144,7 +142,10 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader
+        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onMenuClick={() => setIsSettingsOpen(true)}
+      />
       
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-4">
@@ -165,18 +166,12 @@ const Index = () => {
             <p className="text-muted-foreground text-sm">{t("home.subtitle")}</p>
           </div>
         </div>
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-        >
-          <Settings className="w-6 h-6 text-muted-foreground" />
-        </button>
       </header>
 
       {pets.length === 0 ? (
         /* Empty State */
         <section className="px-5 py-8">
-          <EmptyPetState onAddPet={() => setIsPetWizardOpen(true)} />
+          <EmptyPetState onAddPet={() => navigate("/edit-pet-profile")} />
         </section>
       ) : (
         <>
@@ -218,7 +213,7 @@ const Index = () => {
                 </motion.button>
               ))}
               <button 
-                onClick={() => setIsPetWizardOpen(true)}
+                onClick={() => navigate("/edit-pet-profile")}
                 className="flex-shrink-0 w-16 h-16 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors ml-1"
               >
                 <Plus className="w-6 h-6 text-muted-foreground" />
@@ -336,11 +331,6 @@ const Index = () => {
       </section>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PetWizard 
-        isOpen={isPetWizardOpen} 
-        onClose={() => setIsPetWizardOpen(false)} 
-        onComplete={fetchPets}
-      />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );

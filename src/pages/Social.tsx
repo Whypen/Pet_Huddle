@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, X, Star, SlidersHorizontal, HandMetal } from "lucide-react";
+import { X, Star, SlidersHorizontal, HandMetal } from "lucide-react";
 import sarahBella from "@/assets/users/sarah-bella.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -9,6 +9,7 @@ import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ActiveFilters } from "@/components/social/ActiveFilters";
 import { NoticeBoard } from "@/components/social/NoticeBoard";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ const Social = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [showMatchModal, setShowMatchModal] = useState(false);
   const { upsellModal, closeUpsellModal, buyAddOn, checkStarsAvailable } = useUpsell();
 
   // SPRINT 3: Initialize age filter to ±3 years from user's age
@@ -57,6 +59,9 @@ const Social = () => {
     setCardPosition({ x: xMove, y: 0, rotate: direction === "right" ? 20 : -20 });
     setTimeout(() => {
       setShowCard(false);
+      if (direction === "right") {
+        setShowMatchModal(true);
+      }
       setTimeout(() => {
         setCardPosition({ x: 0, y: 0, rotate: 0 });
         setShowCard(true);
@@ -99,7 +104,10 @@ const Social = () => {
 
   return (
     <div className="min-h-screen bg-background pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader
+        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onMenuClick={() => setIsSettingsOpen(true)}
+      />
       
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-4">
@@ -114,12 +122,6 @@ const Social = () => {
             {(filters.species.length > 0 || filters.distance !== defaultFilters.distance || filters.gender || filters.petHeight) && (
               <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent" />
             )}
-          </button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-          >
-            <Settings className="w-6 h-6 text-muted-foreground" />
           </button>
         </div>
       </header>
@@ -168,22 +170,22 @@ const Social = () => {
                 {/* Card Content */}
                 <div className="absolute bottom-0 left-0 right-0 p-5">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-accent text-accent-foreground text-xs font-semibold px-2 py-1 rounded-full">
-                      ✓ Verified
+                    <span className="bg-[#2563EB] text-white text-xs font-semibold px-2 py-1 rounded-full">
+                      {t("✓ Verified")}
                     </span>
                     <ProfileBadges isVerified={true} hasCar={true} />
                   </div>
                   <h3 className="text-2xl font-bold text-primary-foreground">{t("Sarah, 31 Years Old")}</h3>
                   <div className="flex gap-2 mt-2 flex-wrap">
                     <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
-                      #TrailHiker
+                      {t("#TrailHiker")}
                     </span>
                     <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
-                      #DogFriendly
+                      {t("#DogFriendly")}
                     </span>
                   </div>
                   <p className="text-primary-foreground/90 text-sm mt-3">
-                    Love hiking with Bella and meeting new friends! Available for weekend adventures.
+                    {t("Love hiking with Bella and meeting new friends! Available for weekend adventures.")}
                   </p>
                 </div>
               </motion.div>
@@ -203,7 +205,7 @@ const Social = () => {
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => handleSwipe("right")}
-            className="w-16 h-16 rounded-full bg-accent shadow-card flex items-center justify-center"
+            className="w-16 h-16 rounded-full bg-[#2563EB] shadow-card flex items-center justify-center"
           >
             <HandMetal className="w-7 h-7 text-accent-foreground" />
           </motion.button>
@@ -217,7 +219,7 @@ const Social = () => {
               }
             }}
           >
-            <Star className="w-6 h-6 text-warning" />
+            <Star className="w-6 h-6" style={{ color: "#2563EB" }} />
           </motion.button>
         </div>
       </section>
@@ -281,6 +283,33 @@ const Social = () => {
         onClose={closeUpsellModal}
         onBuy={() => buyAddOn(upsellModal.type)}
       />
+      <AnimatePresence>
+        {showMatchModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowMatchModal(false)}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="fixed inset-x-6 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated text-center"
+            >
+              <h2 className="text-2xl font-bold mb-2">{t("social.match")}</h2>
+              <p className="text-sm text-muted-foreground mb-4">
+                {t("You and Sarah waved at each other. Start a chat to say hi!")}
+              </p>
+              <Button onClick={() => setShowMatchModal(false)} className="w-full">
+                {t("Start Chat")}
+              </Button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

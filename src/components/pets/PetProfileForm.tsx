@@ -48,10 +48,11 @@ export const PetProfileForm = ({
   initialData,
   onSave,
   onCancel,
-  submitLabel = "Save Pet Profile",
+  submitLabel,
   showCancel = true,
 }: PetProfileFormProps) => {
   const { t } = useLanguage();
+  const submitText = submitLabel || t("Save Pet Profile");
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>(initialData?.photoUrl || "");
@@ -90,9 +91,9 @@ export const PetProfileForm = ({
     const months = now.getMonth() - birth.getMonth();
 
     if (years < 1) {
-      return `${Math.max(0, years * 12 + months)} months`;
+      return `${Math.max(0, years * 12 + months)} ${t("months")}`;
     }
-    return `${years} year${years !== 1 ? "s" : ""}`;
+    return `${years} ${years !== 1 ? t("years") : t("year")}`;
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -504,7 +505,7 @@ export const PetProfileForm = ({
           ) : (
             <>
               <Check className="w-5 h-5 mr-2" />
-              {t(submitLabel)}
+              {submitText}
             </>
           )}
         </Button>

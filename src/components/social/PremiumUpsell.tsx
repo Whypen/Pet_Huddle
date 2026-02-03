@@ -48,7 +48,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
             </button>
 
             {/* Header with Gradient */}
-            <div className="relative bg-gradient-to-br from-blue-500 via-blue-600 to-blue-700 px-6 pt-8 pb-12">
+            <div className="relative bg-gradient-to-br from-[#2563EB] via-[#1E40AF] to-[#1E3A8A] px-6 pt-8 pb-12">
               <div className="absolute inset-0 overflow-hidden">
                 <motion.div
                   animate={{ rotate: 360 }}
@@ -72,7 +72,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
                   <Crown className="w-10 h-10 text-white" />
                 </motion.div>
                 <h2 className="text-2xl font-bold text-white mb-1">{t("Huddle Premium")}</h2>
-                <p className="text-blue-100 text-sm">{t("Unlock the full experience")}</p>
+                <p className="text-white/80 text-sm">{t("Unlock the full experience")}</p>
               </div>
             </div>
 

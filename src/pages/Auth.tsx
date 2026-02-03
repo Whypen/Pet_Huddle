@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,14 +16,14 @@ import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
   const { t } = useLanguage();
-  const emailSchema = z.string().email(t("Please enter a valid email address"));
-  const phoneSchema = z.string().regex(/^\+?[1-9]\d{7,14}$/, t("Please enter a valid phone number"));
+  const emailSchema = z.string().email(t("auth.errors.invalid_email"));
+  const phoneSchema = z.string().regex(/^\+?[1-9]\d{7,14}$/, t("auth.errors.invalid_phone"));
   // SPRINT 1: Strict password validation - 8+ chars, 1 upper, 1 number, 1 special
   const passwordSchema = z.string()
-    .min(8, t("Password must be at least 8 characters"))
-    .regex(/[A-Z]/, t("Password must contain at least 1 uppercase letter"))
-    .regex(/[0-9]/, t("Password must contain at least 1 number"))
-    .regex(/[^A-Za-z0-9]/, t("Password must contain at least 1 special character"));
+    .min(8, t("auth.errors.password_min"))
+    .regex(/[A-Z]/, t("auth.errors.password_upper"))
+    .regex(/[0-9]/, t("auth.errors.password_number"))
+    .regex(/[^A-Za-z0-9]/, t("auth.errors.password_special"));
   const navigate = useNavigate();
   const { signIn, signUp, user, profile } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
@@ -74,7 +74,7 @@ const Auth = () => {
         newErrors.identifier = phoneResult.error.errors[0].message;
       }
     } else {
-      newErrors.identifier = "Please enter a valid email or phone number";
+      newErrors.identifier = t("auth.errors.invalid_identifier");
     }
 
     const passwordResult = passwordSchema.safeParse(password);
@@ -107,7 +107,7 @@ const Auth = () => {
 
         if (error) {
           if (error.message.includes("Invalid login credentials")) {
-            toast.error(t("Invalid email/phone or password"));
+            toast.error(t("auth.errors.invalid"));
           } else {
             toast.error(error.message);
           }
@@ -118,12 +118,12 @@ const Auth = () => {
           } else {
             localStorage.removeItem('rememberedIdentifier');
           }
-          toast.success(t("Welcome back!"));
+          toast.success(t("auth.welcome_back"));
         }
       } else {
         // Sign up - only support email for now
         if (!isEmailLogin) {
-          toast.error(t("Please use an email address to sign up"));
+          toast.error(t("auth.use_email_signup"));
           setLoading(false);
           return;
         }
@@ -131,12 +131,12 @@ const Auth = () => {
         const { error } = await signUp(cleanedIdentifier, password, displayName);
         if (error) {
           if (error.message.includes("User already registered")) {
-            toast.error(t("An account with this email already exists"));
+            toast.error(t("auth.errors.account_exists"));
           } else {
             toast.error(error.message);
           }
         } else {
-          toast.success(t("Account created! Let's set up your profile."));
+          toast.success(t("auth.account_created"));
         }
       }
     } finally {
@@ -153,7 +153,7 @@ const Auth = () => {
           animate={{ scale: 1, opacity: 1 }}
           className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
         >
-          <img src={huddleLogo} alt="huddle" className="w-full h-full object-cover" />
+          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
         </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
@@ -161,7 +161,7 @@ const Auth = () => {
           transition={{ delay: 0.1 }}
           className="text-3xl font-bold text-foreground lowercase"
         >
-          huddle
+          {t("app.name")}
         </motion.h1>
         {/* Subheadline intentionally removed per spec */}
       </div>
@@ -184,7 +184,7 @@ const Auth = () => {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Login
+              {t("auth.login")}
             </button>
             <button
               onClick={() => setIsLogin(false)}
@@ -194,7 +194,7 @@ const Auth = () => {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Sign Up
+              {t("auth.signup")}
             </button>
           </div>
 
@@ -256,7 +256,7 @@ const Auth = () => {
                 onClick={() => setIdentifier('')}
                 className="text-xs text-primary mt-1 ml-1 hover:underline"
               >
-                {isEmail(identifier) ? 'Use phone number instead' : 'Use email instead'}
+                {isEmail(identifier) ? t("auth.use_phone") : t("auth.use_email")}
               </button>
               {errors.identifier && (
                 <p className="text-destructive text-xs mt-1 ml-1">{errors.identifier}</p>
@@ -294,16 +294,16 @@ const Auth = () => {
               {!isLogin && !errors.password && password.length > 0 && (
                 <div className="mt-2 space-y-1 text-xs ml-1">
                   <p className={password.length >= 8 ? "text-[#22C55E]" : "text-muted-foreground"}>
-                    ✓ At least 8 characters
+                    {t("auth.password_strength.length")}
                   </p>
                   <p className={/[A-Z]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
-                    ✓ One uppercase letter
+                    {t("auth.password_strength.upper")}
                   </p>
                   <p className={/[0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
-                    ✓ One number
+                    {t("auth.password_strength.number")}
                   </p>
                   <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
-                    ✓ One special character
+                    {t("auth.password_strength.special")}
                   </p>
                 </div>
               )}
@@ -321,7 +321,7 @@ const Auth = () => {
                   htmlFor="rememberMe"
                   className="text-sm text-muted-foreground cursor-pointer"
                 >
-                  Remember Me
+                  {t("auth.remember")}
                 </label>
               </div>
             )}
@@ -334,9 +334,9 @@ const Auth = () => {
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : isLogin ? (
-                "Login"
+                t("auth.login")
               ) : (
-                "Create Account"
+                t("auth.create_account")
               )}
             </Button>
           </form>
@@ -348,7 +348,7 @@ const Auth = () => {
                 <div className="w-full border-t border-border"></div>
               </div>
               <div className="relative flex justify-center text-xs">
-                <span className="bg-card px-2 text-muted-foreground">{t("Or continue with")}</span>
+                <span className="bg-card px-2 text-muted-foreground">{t("auth.or_continue")}</span>
               </div>
             </div>
 
@@ -360,8 +360,8 @@ const Auth = () => {
                 className="h-12 rounded-xl relative"
               >
                 <Lock className="w-4 h-4 mr-2" />
-                Apple
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("Soon")}</span>
+                {t("auth.apple")}
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("auth.soon")}</span>
               </Button>
               <Button
                 type="button"
@@ -370,8 +370,8 @@ const Auth = () => {
                 className="h-12 rounded-xl relative"
               >
                 <Lock className="w-4 h-4 mr-2" />
-                {t("Google")}
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("Soon")}</span>
+                {t("auth.google")}
+                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("auth.soon")}</span>
               </Button>
             </div>
           </div>
@@ -381,18 +381,18 @@ const Auth = () => {
               className="w-full text-center text-sm text-primary mt-4 hover:underline"
               onClick={async () => {
                 if (!identifier || !identifier.includes("@")) {
-                  toast.error(t("Enter your email address to reset password"));
+                  toast.error(t("auth.reset_enter_email"));
                   return;
                 }
                 const { error } = await supabase.auth.resetPasswordForEmail(identifier, {
                   redirectTo: `${window.location.origin}/auth`,
                 });
                 toast[error ? "error" : "success"](
-                  error ? t("Failed to send reset email") : t("Reset link sent to your email!")
+                  error ? t("auth.reset_failed") : t("auth.reset_sent")
                 );
               }}
             >
-              {t("Forgot Password?")}
+              {t("auth.forgot_password")}
             </button>
           )}
         </div>
@@ -401,9 +401,14 @@ const Auth = () => {
       {/* Footer */}
       <div className="py-8 text-center">
         <p className="text-xs text-muted-foreground">
-          {t("By continuing, you agree to our")}{" "}
-          <span className="text-primary">{t("Terms of Service")}</span> {t("and")}{" "}
-          <span className="text-primary">{t("Privacy Policy")}</span>
+          {t("auth.by_continuing")}{" "}
+          <Link to="/terms" className="text-[#2563EB] hover:underline">
+            {t("auth.terms")}
+          </Link>{" "}
+          {t("auth.and")}{" "}
+          <Link to="/privacy" className="text-[#2563EB] hover:underline">
+            {t("auth.privacy")}
+          </Link>
         </p>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, Users, MessageSquare, Search, X, DollarSign, Loader2 } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -401,7 +401,10 @@ const Chats = () => {
 
   return (
     <div className="min-h-screen bg-background pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader
+        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onMenuClick={() => setIsSettingsOpen(true)}
+      />
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2">
@@ -428,12 +431,6 @@ const Chats = () => {
             <Users className="w-3.5 h-3.5" />
             Create Group
           </motion.button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-          >
-            <Settings className="w-5 h-5 text-muted-foreground" />
-          </button>
         </div>
       </header>
 

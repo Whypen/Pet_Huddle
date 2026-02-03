@@ -166,6 +166,19 @@ const EditProfile = () => {
   const handleSave = async () => {
     if (!user) return;
 
+    if (!formData.display_name.trim()) {
+      toast.error(t("Legal name is required"));
+      return;
+    }
+    if (!formData.phone.trim()) {
+      toast.error(t("Phone number is required"));
+      return;
+    }
+    if (!formData.dob) {
+      toast.error(t("Date of birth is required"));
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -279,14 +292,15 @@ const EditProfile = () => {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
 
-            {/* Display Name */}
+            {/* Legal Name */}
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("Display Name")}</label>
+              <label className="text-sm font-medium mb-2 block">{t("Legal Name")}</label>
               <Input
                 value={formData.display_name}
                 onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
-                placeholder={t("Your display name")}
+                placeholder={t("Your legal name")}
                 className="h-12 rounded-xl"
+                required
               />
             </div>
 
@@ -299,6 +313,7 @@ const EditProfile = () => {
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                 placeholder={t("+1 234 567 8900")}
                 className="h-12 rounded-xl"
+                required
               />
             </div>
 
@@ -319,6 +334,7 @@ const EditProfile = () => {
                 value={formData.dob}
                 onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
                 className="h-12 rounded-xl"
+                required
               />
             </div>
 

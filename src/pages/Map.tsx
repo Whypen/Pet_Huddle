@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Settings, 
   Search, 
   AlertTriangle, 
   X,
@@ -626,15 +625,18 @@ const Map = () => {
     const then = new Date(date);
     const diff = now.getTime() - then.getTime();
     const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours < 1) return "Just now";
-    if (hours < 24) return `${hours}h ago`;
+    if (hours < 1) return t("Just now");
+    if (hours < 24) return `${hours}${t("h ago")}`;
     const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    return `${days}${t("d ago")}`;
   };
 
   return (
     <div className="h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader
+        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onMenuClick={() => setIsSettingsOpen(true)}
+      />
       
       {/* Header */}
       <header className="px-4 pt-4 pb-3 bg-card z-10 flex-shrink-0">
@@ -654,12 +656,6 @@ const Map = () => {
             <Switch checked={isOnline} onCheckedChange={setIsOnline} />
           </div>
           
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-          >
-            <Settings className="w-6 h-6 text-muted-foreground" />
-          </button>
         </div>
       </header>
 
@@ -985,3 +981,12 @@ const Map = () => {
 };
 
 export default Map;
+  // Reset stale map state on initial load
+  useEffect(() => {
+    setAlerts([]);
+    setVetClinics([]);
+    setHiddenAlerts(new Set());
+    setSelectedAlert(null);
+    setSelectedVet(null);
+    setLoading(true);
+  }, []);

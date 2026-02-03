@@ -8,13 +8,14 @@ import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import huddleLogo from "@/assets/huddle-logo.jpg";
 
 interface SecurityIdentityStepProps {
   legalName: string;
   phone: string;
   onLegalNameChange: (value: string) => void;
   onPhoneChange: (value: string) => void;
-  onVerificationComplete: (verified: boolean) => void;
+  onVerificationStatusChange: (status: "pending" | "skipped") => void;
   onContinue: () => void;
 }
 
@@ -23,11 +24,11 @@ export const SecurityIdentityStep = ({
   phone,
   onLegalNameChange,
   onPhoneChange,
-  onVerificationComplete,
+  onVerificationStatusChange,
   onContinue,
 }: SecurityIdentityStepProps) => {
   const { t } = useLanguage();
-  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "verified" | "skipped">("idle");
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
 
   const handleStartVerification = () => {
@@ -38,11 +39,11 @@ export const SecurityIdentityStep = ({
 
     setVerificationStatus("verifying");
     
-    // Mock Stripe Identity verification
+    // Mock verification submission (pending review)
     setTimeout(() => {
-      setVerificationStatus("verified");
-      onVerificationComplete(true);
-      toast.success(t("Identity verified successfully!"));
+      setVerificationStatus("pending");
+      onVerificationStatusChange("pending");
+      toast.success(t("Verification submitted for review"));
     }, 2500);
   };
 
@@ -52,22 +53,22 @@ export const SecurityIdentityStep = ({
       return;
     }
     setVerificationStatus("skipped");
-    onVerificationComplete(false);
+    onVerificationStatusChange("skipped");
     toast.info(t("Verification skipped - you can complete this later in settings"));
   };
 
-  const canContinue = (legalName.trim() && phone.trim()) && (verificationStatus === "verified" || verificationStatus === "skipped");
+  const canContinue = (legalName.trim() && phone.trim()) && (verificationStatus === "pending" || verificationStatus === "skipped");
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-2">
-          <Shield className="w-8 h-8 text-primary" />
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white shadow-elevated mb-2 overflow-hidden">
+          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
         </div>
         <h2 className="text-2xl font-bold text-foreground">{t("Security & Identity")}</h2>
         <p className="text-muted-foreground text-sm">
-          Verify your identity to unlock full community features
+          {t("Verify your identity to unlock full community features")}
         </p>
       </div>
 
@@ -76,7 +77,7 @@ export const SecurityIdentityStep = ({
         <div className="space-y-2">
           <Label htmlFor="legalName" className="flex items-center gap-2">
             <User className="w-4 h-4 text-muted-foreground" />
-            Legal Name
+            {t("Legal Name")}
           </Label>
           <Input
             id="legalName"
@@ -87,7 +88,7 @@ export const SecurityIdentityStep = ({
             disabled={verificationStatus === "verified"}
           />
           <p className="text-xs text-muted-foreground">
-            This is kept private and used only for verification
+            {t("This is kept private and used only for verification")}
           </p>
         </div>
 
@@ -123,14 +124,14 @@ export const SecurityIdentityStep = ({
             </div>
             <h3 className="font-semibold text-foreground mb-1">{t("Identity Verification")}</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Complete verification to earn your Gold Badge
+              {t("Submit your ID for review to earn a verified badge")}
             </p>
             <Button
               onClick={handleStartVerification}
               className="w-full h-11 rounded-xl"
               disabled={!legalName.trim() || !phone.trim()}
             >
-              Start Verification
+              {t("Start Verification")}
             </Button>
           </>
         )}
@@ -138,21 +139,21 @@ export const SecurityIdentityStep = ({
         {verificationStatus === "verifying" && (
           <div className="py-4">
             <Loader2 className="w-10 h-10 text-primary mx-auto mb-3 animate-spin" />
-            <h3 className="font-semibold text-foreground mb-1">{t("Verifying Identity...")}</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Submitting for Review...")}</h3>
             <p className="text-sm text-muted-foreground">
-              Processing your verification request
+              {t("Processing your verification request")}
             </p>
           </div>
         )}
 
-        {verificationStatus === "verified" && (
+        {verificationStatus === "pending" && (
           <div className="py-4">
-            <div className="w-12 h-12 rounded-full bg-success/20 mx-auto mb-3 flex items-center justify-center">
-              <Check className="w-6 h-6 text-success" />
+            <div className="w-12 h-12 rounded-full bg-warning/10 mx-auto mb-3 flex items-center justify-center">
+              <Check className="w-6 h-6 text-warning" />
             </div>
-            <h3 className="font-semibold text-foreground mb-1">{t("Verified!")}</h3>
+            <h3 className="font-semibold text-foreground mb-1">{t("Verification Submitted")}</h3>
             <p className="text-sm text-muted-foreground">
-              You've earned the Gold Verified Badge
+              {t("Your verification is pending approval")}
             </p>
           </div>
         )}
@@ -164,7 +165,7 @@ export const SecurityIdentityStep = ({
             </div>
             <h3 className="font-semibold text-foreground mb-1">{t("Verification Skipped")}</h3>
             <p className="text-sm text-muted-foreground">
-              You can complete verification later in Settings
+              {t("You can complete verification later in Settings")}
             </p>
           </div>
         )}
@@ -181,10 +182,10 @@ export const SecurityIdentityStep = ({
             <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-warning-foreground">
-                Skipping verification may affect your user journey
+                {t("Skipping verification may affect your user journey")}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Unverified users have limited access to certain community features and may appear less trustworthy to others.
+                {t("Unverified users have limited access to certain community features and may appear less trustworthy to others.")}
               </p>
             </div>
           </div>
@@ -199,7 +200,7 @@ export const SecurityIdentityStep = ({
             onClick={handleSkip}
             className="w-full h-11 text-muted-foreground"
           >
-            {showSkipWarning ? "Yes, Skip Verification" : "Skip for now"}
+            {showSkipWarning ? t("Yes, Skip Verification") : t("Skip for now")}
           </Button>
         )}
 
@@ -208,7 +209,7 @@ export const SecurityIdentityStep = ({
             onClick={onContinue}
             className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90"
           >
-            Continue to Profile Setup
+            {t("Continue to Profile Setup")}
             <ChevronRight className="w-5 h-5 ml-2" />
           </Button>
         )}

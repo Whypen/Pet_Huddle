@@ -235,7 +235,7 @@ const ChatDialogue = () => {
             }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
-            <ImageIcon className="w-5 h-5" style={{ color: "#2563EB" }} />
+            <ImageIcon className="w-5 h-5 text-primary" />
           </button>
 
           <input

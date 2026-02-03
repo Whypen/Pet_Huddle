@@ -360,7 +360,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     Premium Filters
                   </h3>
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 text-xs font-semibold text-white">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#2563EB] to-[#1E40AF] text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
                     PRO
                   </div>
@@ -471,8 +471,8 @@ const PremiumToggle = ({ icon: Icon, label, description, checked, onToggle }: Pr
     className="w-full flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border hover:border-primary/30 transition-all"
   >
     <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 flex items-center justify-center">
-        <Icon className="w-5 h-5 text-blue-600" />
+      <div className="w-10 h-10 rounded-full bg-[#DBEAFE] flex items-center justify-center">
+        <Icon className="w-5 h-5 text-[#2563EB]" />
       </div>
       <div className="text-left">
         <div className="flex items-center gap-2">

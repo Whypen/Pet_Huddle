@@ -206,7 +206,7 @@ const HazardScanner = () => {
                 </div>
                 <h2 className="text-xl font-semibold">{t("Scan for Hazards")}</h2>
                 <p className="text-sm text-muted-foreground">
-                  Upload a photo of any object your pet found. AI will identify if it's toxic or safe.
+                  {t("Upload a photo of any object your pet found. AI will identify if it's toxic or safe.")}
                 </p>
               </div>
 
@@ -235,7 +235,7 @@ const HazardScanner = () => {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-4"
             >
-              <img src={imagePreview} alt="Preview" className="w-full rounded-xl" />
+              <img src={imagePreview} alt={t("Preview")} className="w-full rounded-xl" />
 
               <div className="flex gap-3">
                 <Button
@@ -244,7 +244,7 @@ const HazardScanner = () => {
                   className="flex-1 h-12 rounded-xl"
                   disabled={scanning}
                 >
-                  Change Photo
+                  {t("Change Photo")}
                 </Button>
                 <Button
                   onClick={scanImage}
@@ -254,12 +254,12 @@ const HazardScanner = () => {
                   {scanning ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Scanning...
+                      {t("Scanning...")}
                     </>
                   ) : (
                     <>
                       <AlertTriangle className="w-5 h-5 mr-2" />
-                      Scan for Hazards
+                      {t("Scan for Hazards")}
                     </>
                   )}
                 </Button>
@@ -279,7 +279,7 @@ const HazardScanner = () => {
                 <AlertTriangle className="w-12 h-12 text-warning mx-auto mb-3" />
                 <h3 className="font-semibold text-lg mb-2">{t("Hazard Detected")}</h3>
                 <p className="text-sm text-muted-foreground">
-                  <strong>{result.object}</strong> identified as {result.category.replace(/_/g, ' ').toLowerCase()}
+                  <strong>{result.object}</strong> {t("identified as")} {result.category.replace(/_/g, ' ').toLowerCase()}
                 </p>
               </div>
 
@@ -341,7 +341,7 @@ const HazardScanner = () => {
               </div>
 
               <Button onClick={resetScanner} className="w-full h-12 rounded-xl">
-                Scan Another Item
+                {t("Scan Another Item")}
               </Button>
             </motion.div>
           )}
@@ -394,11 +394,11 @@ const HazardScanner = () => {
                 onClick={() => window.open('tel:emergency-vet')}
                 className="w-full h-14 rounded-xl bg-destructive hover:bg-destructive/90 text-lg font-semibold"
               >
-                Call Emergency Vet Now
+                {t("Call Emergency Vet Now")}
               </Button>
 
               <Button onClick={resetScanner} variant="outline" className="w-full h-12 rounded-xl">
-                Scan Another Item
+                {t("Scan Another Item")}
               </Button>
             </motion.div>
           )}
@@ -415,13 +415,13 @@ const HazardScanner = () => {
                 <CheckCircle className="w-16 h-16 text-success mx-auto mb-4" />
                 <h3 className="font-semibold text-lg mb-2">{t("All Clear!")}</h3>
                 <p className="text-sm text-muted-foreground mb-1">
-                  <strong>{result.object}</strong> appears to be safe
+                  <strong>{result.object}</strong> {t("appears to be safe")}
                 </p>
                 <p className="text-xs text-muted-foreground">{t("Photo saved to your history")}</p>
               </div>
 
               <Button onClick={resetScanner} className="w-full h-12 rounded-xl">
-                Scan Another Item
+                {t("Scan Another Item")}
               </Button>
             </motion.div>
           )}

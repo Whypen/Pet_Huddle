@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, ArrowLeft, Plus, Mic, Send, Lock, Loader2, Image, Camera } from "lucide-react";
+import { ArrowLeft, Plus, Mic, Send, Lock, Loader2, Image, Camera } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import aiVetAvatar from "@/assets/ai-vet-avatar.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
@@ -174,8 +174,9 @@ const AIVet = () => {
         const fallbackMessage: Message = {
           id: `ai-${Date.now()}`,
           role: "assistant",
-          content:
-            "I appreciate your question! Based on what you've described, I'd suggest keeping a close eye on your pet over the next day or two. Monitor for any changes in appetite, energy levels, or the symptoms you mentioned.\n\nIf things don't improve within 48 hours, or if you notice anything concerning, I'd definitely recommend visiting your local vet for a proper check-up. They'll be able to give your pet a hands-on examination.\n\nIn the meantime, I'm here if you have any more questions! 🐕",
+          content: t(
+            "I appreciate your question! Based on what you've described, I'd suggest keeping a close eye on your pet over the next day or two. Monitor for any changes in appetite, energy levels, or the symptoms you mentioned.\n\nIf things don't improve within 48 hours, or if you notice anything concerning, I'd definitely recommend visiting your local vet for a proper check-up. They'll be able to give your pet a hands-on examination.\n\nIn the meantime, I'm here if you have any more questions! 🐕"
+          ),
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
         setMessages((prev) => [...prev, fallbackMessage]);
@@ -185,12 +186,25 @@ const AIVet = () => {
     }
   };
 
-  const handlePremiumFeature = () => {
+  const handlePremiumFeature = async () => {
     if (!isPremium) {
-      const mediaCredits = profile?.media_credits || 0;
-      if (mediaCredits <= 0) {
-        setIsPremiumFooterOpen(true);
-        return;
+      try {
+        if (!user) return;
+        const { data: currentProfile } = await supabase
+          .from("profiles")
+          .select("media_credits, tier")
+          .eq("id", user.id)
+          .single();
+
+        const mediaCredits = currentProfile?.media_credits || 0;
+        const tier = currentProfile?.tier || "free";
+
+        if (tier === "free" && mediaCredits <= 0) {
+          setIsPremiumFooterOpen(true);
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to refresh media credits:", error);
       }
       setIsPremiumOpen(true);
     }
@@ -198,7 +212,10 @@ const AIVet = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader
+        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onMenuClick={() => setIsSettingsOpen(true)}
+      />
 
       {/* Chat Header */}
       <header className="flex items-center justify-between px-4 py-3 bg-card border-b border-border">
@@ -220,12 +237,6 @@ const AIVet = () => {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-        >
-          <Settings className="w-5 h-5 text-muted-foreground" />
-        </button>
       </header>
 
       {/* Analysis Bar - Pet Selector */}

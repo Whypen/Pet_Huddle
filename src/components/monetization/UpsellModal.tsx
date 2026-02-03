@@ -26,24 +26,24 @@ const ICON_MAP = {
 
 const COLOR_MAP = {
   star: {
-    bg: "from-blue-500 to-blue-600",
-    iconBg: "bg-blue-100 dark:bg-blue-900/20",
-    iconColor: "text-blue-600",
+    bg: "from-[#2563EB] to-[#1E40AF]",
+    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
+    iconColor: "text-[#2563EB]",
   },
   emergency_alert: {
-    bg: "from-blue-500 to-blue-600",
-    iconBg: "bg-blue-100 dark:bg-blue-900/20",
-    iconColor: "text-blue-600",
+    bg: "from-[#2563EB] to-[#1E40AF]",
+    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
+    iconColor: "text-[#2563EB]",
   },
   media: {
-    bg: "from-blue-500 to-blue-600",
-    iconBg: "bg-blue-100 dark:bg-blue-900/20",
-    iconColor: "text-blue-600",
+    bg: "from-[#2563EB] to-[#1E40AF]",
+    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
+    iconColor: "text-[#2563EB]",
   },
   family_slot: {
-    bg: "from-blue-500 to-blue-600",
-    iconBg: "bg-blue-100 dark:bg-blue-900/20",
-    iconColor: "text-blue-600",
+    bg: "from-[#2563EB] to-[#1E40AF]",
+    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
+    iconColor: "text-[#2563EB]",
   },
 };
 

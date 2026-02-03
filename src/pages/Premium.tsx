@@ -138,7 +138,7 @@ const Premium = () => {
           clearInterval(pollInterval);
           toast.success(t("Welcome to huddle Premium!"));
         }
-      }, 3000);
+      }, 2000);
 
       // Timeout after 30 seconds
       setTimeout(() => {
@@ -291,7 +291,7 @@ const Premium = () => {
               "rounded-xl p-4 mb-6",
               isGold
                 ? "bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-900/20 dark:to-amber-800/20"
-                : "bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20"
+                : "bg-primary/10"
             )}
           >
             <div className="flex items-center gap-3">
@@ -300,13 +300,13 @@ const Premium = () => {
                   "w-10 h-10 rounded-full flex items-center justify-center",
                   isGold
                     ? "bg-gradient-to-r from-amber-400 to-amber-500"
-                    : "bg-gradient-to-r from-blue-400 to-blue-500"
+                    : "bg-[#2563EB]"
                 )}
               >
                 {isGold ? (
                   <Crown className="w-5 h-5 text-amber-900" />
                 ) : (
-                  <Sparkles className="w-5 h-5 text-blue-900" />
+                  <Sparkles className="w-5 h-5 text-white" />
                 )}
               </div>
               <div>
@@ -315,20 +315,20 @@ const Premium = () => {
                     "font-semibold",
                     isGold
                       ? "text-amber-800 dark:text-amber-200"
-                      : "text-blue-800 dark:text-blue-200"
+                      : "text-primary"
                   )}
                 >
-                  You're a {isGold ? "Gold" : "Premium"} Member!
+                  {isGold ? t("You're a Gold Member!") : t("You're a Premium Member!")}
                 </p>
                 <p
                   className={cn(
                     "text-sm",
                     isGold
                       ? "text-amber-600 dark:text-amber-400"
-                      : "text-blue-600 dark:text-blue-400"
+                      : "text-primary/80"
                   )}
                 >
-                  Status: {profile?.subscription_status || "active"}
+                  {t("Status:")} {profile?.subscription_status || t("active")}
                 </p>
               </div>
               <Button
@@ -339,7 +339,7 @@ const Premium = () => {
                 className="ml-auto"
               >
                 <ExternalLink className="w-4 h-4 mr-2" />
-                Manage
+                {t("Manage")}
               </Button>
             </div>
           </motion.div>
@@ -378,7 +378,7 @@ const Premium = () => {
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
-              <Camera className="w-4 h-4 text-blue-500" />
+              <Camera className="w-4 h-4 text-[#2563EB]" />
               <span className="text-xs font-medium text-muted-foreground">{t("Media")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.media_credits || 0}</p>
@@ -401,9 +401,9 @@ const Premium = () => {
             <div className="p-3 text-center border-l border-border">
               <span className="text-xs font-medium">{t("Free")}</span>
             </div>
-            <div className="p-3 text-center border-l border-border bg-blue-50 dark:bg-blue-900/20">
-              <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
-                Premium
+            <div className="p-3 text-center border-l border-border bg-primary/5">
+              <span className="text-xs font-semibold text-primary">
+                {t("Premium")}
               </span>
             </div>
             <div className="p-3 text-center border-l border-border bg-amber-50 dark:bg-amber-900/20">
@@ -416,7 +416,7 @@ const Premium = () => {
               key={feature.name}
               className={cn("grid grid-cols-4", i % 2 === 0 && "bg-muted/30")}
             >
-              <div className="p-3 text-xs">{feature.name}</div>
+              <div className="p-3 text-xs">{t(feature.name)}</div>
               <div className="p-3 text-center border-l border-border">
                 {typeof feature.free === "boolean" ? (
                   feature.free ? (
@@ -425,19 +425,19 @@ const Premium = () => {
                     <span className="text-muted-foreground">—</span>
                   )
                 ) : (
-                  <span className="text-xs text-muted-foreground">{feature.free}</span>
+                  <span className="text-xs text-muted-foreground">{t(feature.free)}</span>
                 )}
               </div>
-              <div className="p-3 text-center border-l border-border bg-blue-50/50 dark:bg-blue-900/10">
+              <div className="p-3 text-center border-l border-border bg-primary/5">
                 {typeof feature.premium === "boolean" ? (
                   feature.premium ? (
-                    <Check className="w-3 h-3 text-blue-600 mx-auto" />
+                    <Check className="w-3 h-3 text-[#2563EB] mx-auto" />
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )
                 ) : (
-                  <span className="text-xs font-medium text-blue-800 dark:text-blue-200">
-                    {feature.premium}
+                  <span className="text-xs font-medium text-primary">
+                    {t(feature.premium)}
                   </span>
                 )}
               </div>
@@ -450,7 +450,7 @@ const Premium = () => {
                   )
                 ) : (
                   <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                    {feature.gold}
+                    {t(feature.gold)}
                   </span>
                 )}
               </div>
@@ -542,7 +542,7 @@ const Premium = () => {
                 "w-full py-6 text-lg gap-2 mb-6",
                 selectedTier === "gold"
                   ? "bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
-                  : "bg-gradient-to-r from-[#2563EB] to-blue-400 hover:from-blue-400 hover:to-blue-500 text-blue-900"
+                  : "bg-gradient-to-r from-[#2563EB] to-[#1E40AF] hover:from-[#1E40AF] hover:to-[#1E3A8A] text-white"
               )}
               style={{
                 boxShadow:
@@ -554,7 +554,7 @@ const Premium = () => {
               {isProcessing ? (
                 <>
                   <Loader2 className="w-5 h-5 animate-spin" />
-                  Processing...
+                  {t("Processing...")}
                 </>
               ) : (
                 <>
@@ -563,7 +563,7 @@ const Premium = () => {
                   ) : (
                     <Sparkles className="w-5 h-5" />
                   )}
-                  Upgrade to {selectedTier === "gold" ? "Gold" : "Premium"}
+                  {t("Upgrade to")} {selectedTier === "gold" ? t("Gold") : t("Premium")}
                 </>
               )}
             </Button>
@@ -587,7 +587,7 @@ const Premium = () => {
                       "w-10 h-10 rounded-full flex items-center justify-center",
                       addOn.id === "star_pack" && "bg-amber-100 dark:bg-amber-900/20",
                       addOn.id === "emergency_alert" && "bg-red-100 dark:bg-red-900/20",
-                      addOn.id === "vet_media" && "bg-blue-100 dark:bg-blue-900/20",
+                      addOn.id === "vet_media" && "bg-[#DBEAFE] dark:bg-blue-900/20",
                       addOn.id === "family_slot" && "bg-green-100 dark:bg-green-900/20",
                       addOn.id === "verified_badge" && "bg-purple-100 dark:bg-purple-900/20"
                     )}
@@ -598,8 +598,8 @@ const Premium = () => {
                     <span className="text-xs font-bold text-primary">×{addOn.quantity}</span>
                   )}
                 </div>
-                <h4 className="font-semibold text-sm mb-1">{addOn.name}</h4>
-                <p className="text-xs text-muted-foreground mb-3">{addOn.description}</p>
+                <h4 className="font-semibold text-sm mb-1">{t(addOn.name)}</h4>
+                <p className="text-xs text-muted-foreground mb-3">{t(addOn.description)}</p>
                 <div className="flex items-center justify-between">
                   <span className="text-lg font-bold">${addOn.price}</span>
                   <Button
@@ -608,7 +608,7 @@ const Premium = () => {
                     size="sm"
                     variant="outline"
                   >
-                    Buy
+                    {t("Buy")}
                   </Button>
                 </div>
               </motion.div>
@@ -619,7 +619,7 @@ const Premium = () => {
         {/* Footer */}
         <div className="mt-8 text-center">
           <span className="text-xs text-muted-foreground">
-            Secure payments powered by Stripe
+            {t("Secure payments powered by Stripe")}
           </span>
         </div>
       </div>

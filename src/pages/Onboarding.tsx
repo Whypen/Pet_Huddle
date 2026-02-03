@@ -22,7 +22,7 @@ const Onboarding = () => {
   // Security step data
   const [legalName, setLegalName] = useState("");
   const [phone, setPhone] = useState("");
-  const [isVerified, setIsVerified] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<"pending" | "skipped" | "none">("none");
   
   // Track if user owns pets (from profile step)
   const [ownsPets, setOwnsPets] = useState(false);
@@ -44,7 +44,8 @@ const Onboarding = () => {
         .update({
           legal_name: legalName,
           phone: phone,
-          is_verified: isVerified,
+          is_verified: false,
+          verification_status: verificationStatus === "pending" ? "pending" : "not_submitted",
         })
         .eq("id", user.id);
 
@@ -197,7 +198,7 @@ const Onboarding = () => {
                 phone={phone}
                 onLegalNameChange={setLegalName}
                 onPhoneChange={setPhone}
-                onVerificationComplete={setIsVerified}
+                onVerificationStatusChange={(status) => setVerificationStatus(status)}
                 onContinue={handleSecurityComplete}
               />
             </motion.div>
