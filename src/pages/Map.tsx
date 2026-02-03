@@ -631,6 +631,16 @@ const Map = () => {
     return `${days}${t("d ago")}`;
   };
 
+  // Reset stale map state on initial load
+  useEffect(() => {
+    setAlerts([]);
+    setVetClinics([]);
+    setHiddenAlerts(new Set());
+    setSelectedAlert(null);
+    setSelectedVet(null);
+    setLoading(true);
+  }, []);
+
   return (
     <div className="h-screen bg-background flex flex-col pb-nav">
       <GlobalHeader
@@ -981,12 +991,3 @@ const Map = () => {
 };
 
 export default Map;
-  // Reset stale map state on initial load
-  useEffect(() => {
-    setAlerts([]);
-    setVetClinics([]);
-    setHiddenAlerts(new Set());
-    setSelectedAlert(null);
-    setSelectedVet(null);
-    setLoading(true);
-  }, []);
