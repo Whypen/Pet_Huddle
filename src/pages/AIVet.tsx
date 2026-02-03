@@ -6,6 +6,7 @@ import aiVetAvatar from "@/assets/ai-vet-avatar.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/integrations/supabase/client";
@@ -34,6 +35,7 @@ const AIVet = () => {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -44,7 +46,7 @@ const AIVet = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const isPremium = profile?.user_role === "premium";
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user's pets
   useEffect(() => {
@@ -183,6 +185,11 @@ const AIVet = () => {
 
   const handlePremiumFeature = () => {
     if (!isPremium) {
+      const mediaCredits = profile?.media_credits || 0;
+      if (mediaCredits <= 0) {
+        setIsPremiumFooterOpen(true);
+        return;
+      }
       setIsPremiumOpen(true);
     }
   };
@@ -374,6 +381,11 @@ const AIVet = () => {
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PremiumFooter
+        isOpen={isPremiumFooterOpen}
+        onClose={() => setIsPremiumFooterOpen(false)}
+        triggerReason="chat_media"
+      />
     </div>
   );
 };

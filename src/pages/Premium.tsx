@@ -21,22 +21,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-// =====================================================
-// STRIPE PRODUCT IDS (Dynamic Fetch Best Practice)
-// =====================================================
-const STRIPE_PRODUCTS = {
-  premium_monthly: "prod_TuEpCL4vGGwUpk",
-  premium_annual: "prod_TuEpCL4vGGwUpk",
-  gold_monthly: "prod_TuF4blxU2yHqBV",
-  gold_annual: "prod_TuF4blxU2yHqBV",
-  verified_badge: "prod_TuFRNkLiOOKuHZ",
-  emergency_alert: "prod_TuFKa021SiFK58",
-  vet_media: "prod_TuFLRWYZGrItCP",
-  family_slot: "prod_TuFNGDVKRYPPsG",
-  star_pack: "prod_TuFPF3zjXiWiK8",
-  media_pack_5: "prod_TuFQ8x2UN7yYjm",
-  extension_7day: "prod_TuFIj3NC2W7TvV",
-};
+// Stripe product IDs are intentionally server-side only.
 
 interface PlanFeature {
   name: string;
@@ -265,13 +250,13 @@ const Premium = () => {
       </header>
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
-        {/* Hero Banner with Gold Gradient */}
+        {/* Hero Banner */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative bg-gradient-to-br from-[#FBBF24] via-[#F59E0B] to-[#D97706] rounded-2xl p-6 mb-6 overflow-hidden"
+          className="relative bg-gradient-to-br from-[#2563EB] via-[#3B82F6] to-[#1D4ED8] rounded-2xl p-6 mb-6 overflow-hidden"
           style={{
-            boxShadow: "0 8px 32px rgba(251, 191, 36, 0.3)",
+            boxShadow: "0 8px 32px rgba(37, 99, 235, 0.3)",
           }}
         >
           <div className="absolute inset-0 overflow-hidden">
@@ -291,7 +276,7 @@ const Premium = () => {
               <Crown className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-2xl font-bold text-white mb-1">huddle Premium</h2>
-            <p className="text-amber-100 text-sm">Unlock the full huddle experience</p>
+            <p className="text-white/90 text-sm">Unlock the full huddle experience</p>
           </div>
         </motion.div>
 

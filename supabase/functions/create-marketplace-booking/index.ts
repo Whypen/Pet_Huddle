@@ -26,6 +26,8 @@ serve(async (req: Request) => {
       serviceEndDate,
       successUrl,
       cancelUrl,
+      petId,
+      locationName,
     } = await req.json();
 
     if (!clientId || !sitterId || !amount || !serviceStartDate || !serviceEndDate) {
@@ -52,6 +54,34 @@ serve(async (req: Request) => {
     if (!sitter.payouts_enabled || !sitter.charges_enabled) {
       return new Response(
         JSON.stringify({ error: "Sitter account not ready for payments" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validate amount against sitter hourly rate and duration
+    const start = new Date(serviceStartDate);
+    const end = new Date(serviceEndDate);
+    const durationMs = end.getTime() - start.getTime();
+    if (isNaN(durationMs) || durationMs <= 0) {
+      return new Response(
+        JSON.stringify({ error: "Invalid service date range" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const durationHours = durationMs / (1000 * 60 * 60);
+    const hourlyRate = sitter?.hourly_rate;
+    if (!hourlyRate) {
+      return new Response(
+        JSON.stringify({ error: "Sitter hourly rate not set" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const expectedAmount = Math.round(hourlyRate * durationHours);
+    if (amount !== expectedAmount) {
+      return new Response(
+        JSON.stringify({ error: "Invalid booking amount" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -91,12 +121,16 @@ serve(async (req: Request) => {
             sitter_id: sitterId,
             service_start_date: serviceStartDate,
             service_end_date: serviceEndDate,
+            pet_id: petId || "",
+            location_name: locationName || "",
           },
         },
         metadata: {
           type: "marketplace_booking",
           client_id: clientId,
           sitter_id: sitterId,
+          pet_id: petId || "",
+          location_name: locationName || "",
         },
         success_url: successUrl,
         cancel_url: cancelUrl,

@@ -22,6 +22,7 @@ import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { PremiumFooter } from "@/components/monetization/PremiumFooter";
+import { UpsellModal } from "@/components/monetization/UpsellModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -32,6 +33,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { demoUsers, demoAlerts, DemoUser, DemoAlert } from "@/lib/demoData";
+import { useUpsell } from "@/hooks/useUpsell";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -101,11 +103,13 @@ const Map = () => {
   const [isOnline, setIsOnline] = useState(true);
   const [showConfirmRemove, setShowConfirmRemove] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [userLocationAccuracy, setUserLocationAccuracy] = useState<number | null>(null);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [premiumFooterReason, setPremiumFooterReason] = useState<string>("mesh_alert");
   const [alertCountToday, setAlertCountToday] = useState(0); // track daily alert count for 3rd-alert trigger
+  const { upsellModal, closeUpsellModal, buyAddOn, checkEmergencyAlertAvailable } = useUpsell();
 
-  const isPremium = profile?.user_role === 'premium';
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
   const broadcastRange = isPremium ? 5 : 1;
 
   // Default center (Hong Kong)
@@ -122,7 +126,16 @@ const Map = () => {
   // Get user location
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (pos) => {
+        setUserLocationAccuracy(pos.coords.accuracy);
+        if (pos.coords.accuracy && pos.coords.accuracy > 500) {
+          toast.warning("Location accuracy too low. Please retry with better GPS signal.");
+          // Fallback without persisting
+          setUserLocation({ lat: 22.3193, lng: 114.1694 });
+          return;
+        }
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
       () => setUserLocation({ lat: 22.3193, lng: 114.1694 }) // HK default fallback
     );
   }, []);
@@ -257,7 +270,7 @@ const Map = () => {
       .addTo(map.current);
 
     // Persist user location to Supabase profiles
-    if (user) {
+    if (user && (!userLocationAccuracy || userLocationAccuracy <= 500)) {
       supabase
         .from("profiles")
         .update({ last_lat: userLocation.lat, last_lng: userLocation.lng })
@@ -482,6 +495,10 @@ const Map = () => {
   const handleCreateAlert = async () => {
     if (!user || !selectedLocation) {
       toast.error("Please select a location on the map");
+      return;
+    }
+    const canSend = await checkEmergencyAlertAvailable();
+    if (!canSend) {
       return;
     }
 
@@ -953,6 +970,15 @@ const Map = () => {
         isOpen={isPremiumFooterOpen}
         onClose={() => setIsPremiumFooterOpen(false)}
         triggerReason={premiumFooterReason}
+      />
+      <UpsellModal
+        isOpen={upsellModal.isOpen}
+        type={upsellModal.type}
+        title={upsellModal.title}
+        description={upsellModal.description}
+        price={upsellModal.price}
+        onClose={closeUpsellModal}
+        onBuy={() => buyAddOn(upsellModal.type)}
       />
     </div>
   );

@@ -69,6 +69,9 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const { user } = useAuth();
   const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [lastCreatedAt, setLastCreatedAt] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -83,12 +86,18 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetchNotices();
+    fetchNotices(true);
   }, []);
 
-  const fetchNotices = async () => {
+  const fetchNotices = async (reset: boolean = false) => {
     try {
-      const { data, error } = await supabase
+      if (reset) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+
+      let query = supabase
         .from("notice_board")
         .select(`
           id,
@@ -106,13 +115,29 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
         .order("created_at", { ascending: false })
         .limit(20);
 
+      if (!reset && lastCreatedAt) {
+        query = query.lt("created_at", lastCreatedAt);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      // Combine dummy cat post with real notices
-      setNotices([dummyCatPost, ...(data || [])]);
+      const newNotices = data || [];
+      if (reset) {
+        setNotices([dummyCatPost, ...newNotices]);
+      } else {
+        setNotices(prev => [...prev, ...newNotices]);
+      }
+      const last = newNotices[newNotices.length - 1];
+      if (last?.created_at) {
+        setLastCreatedAt(last.created_at);
+      }
+      setHasMore(newNotices.length === 20);
     } catch (error) {
       console.error("Error fetching notices:", error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
@@ -173,7 +198,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
       setImageFile(null);
       setImagePreview(null);
       setIsCreateOpen(false);
-      fetchNotices();
+      fetchNotices(true);
     } catch (error: any) {
       toast.error(error.message || "Failed to post notice");
     } finally {
@@ -397,6 +422,18 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <Button
+            variant="outline"
+            onClick={() => fetchNotices(false)}
+            disabled={loadingMore}
+          >
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : "Load more"}
+          </Button>
+        </div>
+      )}
 
       {/* Create Notice Modal */}
       <AnimatePresence>

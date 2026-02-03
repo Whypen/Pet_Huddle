@@ -169,7 +169,7 @@ async function handleCheckoutSessionCompleted(
   // =====================================================
   if (session.mode === "subscription") {
     const subscriptionId = session.subscription as string;
-    const tier = type === "gold" ? "gold" : "premium";
+    const tier = type?.startsWith("gold") ? "gold" : "premium";
 
     // Update user tier and subscription
     const { error: upgradeError } = await supabase.rpc("upgrade_user_tier", {
@@ -233,6 +233,18 @@ async function handleCheckoutSessionCompleted(
         .eq("id", userId);
 
       console.log(`[CHECKOUT COMPLETED] User ${userId} verified badge granted`);
+    }
+
+    // Handle marketplace booking paid state
+    if (type === "marketplace_booking" && session.payment_intent) {
+      await supabase
+        .from("marketplace_bookings")
+        .update({
+          status: "paid",
+          paid_at: new Date().toISOString(),
+          escrow_status: "pending",
+        })
+        .eq("stripe_payment_intent_id", session.payment_intent as string);
     }
   }
 

@@ -16,7 +16,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const { t } = useLanguage();
 
   const isVerified = profile?.is_verified;
-  const isPremium = profile?.user_role === "premium";
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   const menuItems = [
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },

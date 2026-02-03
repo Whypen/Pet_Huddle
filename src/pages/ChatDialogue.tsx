@@ -23,7 +23,7 @@ const ChatDialogue = () => {
   const [searchParams] = useSearchParams();
   const chatId = searchParams.get("id");
   const chatName = searchParams.get("name") || "Chat";
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -38,6 +38,14 @@ const ChatDialogue = () => {
   // Realtime subscription for incoming messages in this chat room
   useEffect(() => {
     if (!chatId) return;
+
+    // Ensure current user is a member of the room (required for RLS)
+    if (user?.id) {
+      supabase
+        .from("chat_room_members")
+        .upsert({ room_id: chatId, user_id: user.id })
+        .catch((err: any) => console.warn("Failed to join chat room:", err));
+    }
 
     const channel = supabase
       .channel(`chat_room_${chatId}`)
@@ -214,7 +222,15 @@ const ChatDialogue = () => {
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
           <button
-            onClick={() => setIsPremiumFooterOpen(true)}
+            onClick={() => {
+              const isFree = !profile?.tier || profile?.tier === "free";
+              const mediaCredits = profile?.media_credits || 0;
+              if (isFree && mediaCredits <= 0) {
+                setIsPremiumFooterOpen(true);
+                return;
+              }
+              // TODO: open media picker
+            }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
             <ImageIcon className="w-5 h-5" style={{ color: "#2563EB" }} />

@@ -64,65 +64,10 @@ const HazardScanner = () => {
     setScanning(true);
 
     try {
-      // RATE LIMITING: Check if user can perform scan (3 scans/hour for free tier)
-      const { data: canScan, error: rateLimitError } = await supabase
-        .rpc('check_scan_rate_limit', { user_uuid: user.id });
-
-      if (rateLimitError) {
-        console.error("Rate limit check failed:", rateLimitError);
-      }
-
-      if (canScan === false) {
-        toast.error("Rate limit exceeded. Free tier: 3 scans per hour. Upgrade to Premium for unlimited scans!");
-        setScanning(false);
-        return;
-      }
-
-      // CACHE CHECK: Generate image hash to check for duplicate scans
+      // Generate image hash for cache lookup
       const imageHash = await generateImageHash(imageFile);
 
-      // Check cache first
-      const { data: cachedResult, error: cacheError } = await supabase
-        .from('triage_cache')
-        .select('*')
-        .eq('image_hash', imageHash)
-        .gt('expires_at', new Date().toISOString())
-        .maybeSingle();
-
-      if (cachedResult) {
-        // CACHE HIT: Use cached result instead of calling GPT-4o-mini
-        console.log("Cache hit! Saved API costs.");
-        toast.success("🎯 Found in community cache - $0 cost!", {
-          description: `This ${cachedResult.object_identified} has been scanned ${cachedResult.hit_count || 1} time(s) before`
-        });
-
-        const cachedScanResult: HazardResult = {
-          object: cachedResult.object_identified,
-          category: cachedResult.hazard_type,
-          toxicity_level: cachedResult.toxicity_level,
-          immediate_action: cachedResult.immediate_action
-        };
-
-        setResult(cachedScanResult);
-
-        // Update cache hit count
-        await supabase
-          .from('triage_cache')
-          .update({
-            hit_count: (cachedResult.hit_count || 0) + 1,
-            last_accessed_at: new Date().toISOString()
-          })
-          .eq('id', cachedResult.id);
-
-        if (cachedScanResult.category !== 'INERT') {
-          setShowIntentGate(true);
-        }
-
-        setScanning(false);
-        return;
-      }
-
-      // CACHE MISS: Upload image and call AI
+      // Upload image before server-side scan
       const fileExt = imageFile.name.split(".").pop();
       const filePath = `${user.id}/${Date.now()}.${fileExt}`;
 
@@ -136,15 +81,30 @@ const HazardScanner = () => {
         .from("hazard-scans")
         .getPublicUrl(filePath);
 
-      // Record scan for rate limiting
-      await supabase.from('scan_rate_limits').insert({
-        user_id: user.id,
-        scan_timestamp: new Date().toISOString()
+      // Server-authoritative scan via Edge Function (rate limit + cache)
+      const { data, error } = await supabase.functions.invoke("hazard-scan", {
+        body: { userId: user.id, imageUrl: publicUrl, imageHash }
       });
 
-      // In production, this would call GPT-4o-mini Vision API via Supabase Edge Function
-      // For MVP/demo, we'll simulate the response
-      await simulateAIResponse(publicUrl, imageHash);
+      if (error) throw error;
+
+      if (data?.error === "rate_limit_exceeded") {
+        toast.error("Rate limit exceeded. Free tier: 3 scans per 24 hours. Upgrade to Premium for unlimited scans!");
+        setScanning(false);
+        return;
+      }
+
+      if (data?.result) {
+        const scanResult = data.result as HazardResult;
+        setResult(scanResult);
+
+        if (scanResult.category !== "INERT") {
+          setShowIntentGate(true);
+        } else {
+          await saveToDatabase(publicUrl, scanResult, false);
+          toast.success("Photo saved - no hazards detected!");
+        }
+      }
 
     } catch (error: any) {
       console.error("Scan error:", error);
@@ -163,47 +123,7 @@ const HazardScanner = () => {
     return hashHex;
   };
 
-  const simulateAIResponse = async (imageUrl: string, imageHash: string) => {
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Mock response - in production, this would come from GPT-4o-mini
-    const mockResult: HazardResult = {
-      object: "Chocolate bar",
-      category: "TOXIC_FOOD",
-      toxicity_level: "HIGH",
-      immediate_action: "Contact your vet immediately. Do NOT induce vomiting. Monitor for symptoms including vomiting, diarrhea, increased heart rate, and seizures."
-    };
-
-    setResult(mockResult);
-
-    // CACHE WRITE: Store result for future scans (uses service_role via RLS policy)
-    // In production, the Edge Function would handle this
-    try {
-      await supabase.from('triage_cache').insert({
-        image_hash: imageHash,
-        object_identified: mockResult.object,
-        is_hazard: mockResult.category !== 'INERT',
-        hazard_type: mockResult.category,
-        toxicity_level: mockResult.toxicity_level,
-        immediate_action: mockResult.immediate_action,
-        ai_response: mockResult,
-        hit_count: 1
-      });
-    } catch (cacheWriteError) {
-      // Non-critical error, continue even if cache write fails
-      console.warn("Failed to write to cache:", cacheWriteError);
-    }
-
-    // If hazard detected, show intent gate
-    if (mockResult.category !== 'INERT') {
-      setShowIntentGate(true);
-    } else {
-      // If inert, save and show success
-      await saveToDatabase(imageUrl, mockResult, false);
-      toast.success("Photo saved - no hazards detected!");
-    }
-  };
+  // simulateAIResponse removed — handled server-side
 
   const handleIntentSelection = async (didIngest: boolean) => {
     if (!result || !imageFile || !user) return;

@@ -134,6 +134,32 @@ serve(async (req: Request) => {
       // One-time payment — attach the live Product ID so the
       // Stripe receipt shows the correct product name & SKU.
       const productId = STRIPE_PRODUCTS[type];
+      // Server-authoritative pricing for add-ons
+      const ADDON_PRICES: Record<string, number> = {
+        star_pack: 499,
+        emergency_alert: 299,
+        vet_media: 399,
+        family_slot: 599,
+        verified_badge: 999,
+        "5_media_pack": 399,
+        "7_day_extension": 499,
+      };
+
+      const expectedAmount = ADDON_PRICES[type];
+      if (!expectedAmount) {
+        return new Response(
+          JSON.stringify({ error: `Unknown add-on type: ${type}` }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (amount && amount !== expectedAmount) {
+        return new Response(
+          JSON.stringify({ error: "Invalid amount for add-on" }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
       sessionParams.line_items = [
         {
           price_data: {
@@ -142,7 +168,7 @@ serve(async (req: Request) => {
               ? { product: productId }
               : { product_data: { name: type.replace(/_/g, " ").toUpperCase() } }
             ),
-            unit_amount: amount,
+            unit_amount: expectedAmount,
           },
           quantity: 1,
         },

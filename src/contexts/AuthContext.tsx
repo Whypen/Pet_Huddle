@@ -28,6 +28,12 @@ export interface Profile {
   location_name: string | null;
   is_verified: boolean;
   user_role: string;
+  tier?: string | null;
+  subscription_status?: string | null;
+  stars_count?: number | null;
+  mesh_alert_count?: number | null;
+  media_credits?: number | null;
+  family_slots?: number | null;
   onboarding_completed: boolean;
   owns_pets: boolean;
   social_availability: boolean;
@@ -41,6 +47,8 @@ export interface Profile {
   show_affiliation: boolean;
   show_occupation: boolean;
   show_bio: boolean;
+  last_lat?: number | null;
+  last_lng?: number | null;
 }
 
 interface AuthContextType {
@@ -79,10 +87,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         degree, school, major, affiliation, occupation,
         pet_experience, experience_years, relationship_status,
         has_car, languages, location_name,
-        is_verified, user_role, onboarding_completed, owns_pets,
+        is_verified, user_role, tier, subscription_status,
+        stars_count, mesh_alert_count, media_credits, family_slots,
+        onboarding_completed, owns_pets,
         social_availability, availability_status,
         show_gender, show_orientation, show_age, show_height, show_weight,
-        show_academic, show_affiliation, show_occupation, show_bio
+        show_academic, show_affiliation, show_occupation, show_bio,
+        last_lat, last_lng
       `)
       .eq("id", userId)
       .maybeSingle();
@@ -165,6 +176,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
+    // Clear local storage stale records
+    localStorage.removeItem("rememberedIdentifier");
+    localStorage.removeItem("huddle_offline_actions");
+    localStorage.removeItem("pending_addon");
   };
 
   const refreshProfile = async () => {

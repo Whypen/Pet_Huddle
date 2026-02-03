@@ -38,6 +38,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useUpsell } from "@/hooks/useUpsell";
+import { UpsellModal } from "@/components/monetization/UpsellModal";
 
 const languageOptions: { value: Language; label: string }[] = [
   { value: "en", label: "English" },
@@ -49,6 +51,7 @@ const Settings = () => {
   const navigate = useNavigate();
   const { user, profile, signOut, refreshProfile } = useAuth();
   const { t, language, setLanguage } = useLanguage();
+  const { upsellModal, closeUpsellModal, buyAddOn, checkFamilySlotsAvailable } = useUpsell();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
@@ -57,6 +60,8 @@ const Settings = () => {
   const [showBugReport, setShowBugReport] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
   const [bugDescription, setBugDescription] = useState("");
 
   // Password change state
@@ -87,7 +92,10 @@ const Settings = () => {
   const [emailNotif, setEmailNotif] = useState(true);
 
   const isVerified = profile?.is_verified;
-  const isPremium = profile?.user_role === "premium";
+  const isGold = profile?.tier === "gold";
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
+  const currentFamilyCount = 0;
+  const availableFamilySlots = Math.max(0, (profile?.family_slots || 0) - currentFamilyCount);
 
   // Handle pause all notifications
   const handlePauseAll = (checked: boolean) => {
@@ -103,6 +111,20 @@ const Settings = () => {
   const handleLogout = async () => {
     await signOut();
     navigate("/auth");
+  };
+
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) {
+      toast.error("Please enter an email");
+      return;
+    }
+    if (availableFamilySlots <= 0) {
+      await checkFamilySlotsAvailable();
+      return;
+    }
+    toast.success("Invite sent!");
+    setInviteEmail("");
+    setShowInviteModal(false);
   };
 
   const handleDeleteAccount = () => {
@@ -247,11 +269,13 @@ const Settings = () => {
                 className={cn(
                   "inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full",
                   isPremium
-                    ? "bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800"
+                    ? isGold
+                      ? "bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800"
+                      : "bg-primary/10 text-primary"
                     : "bg-muted text-muted-foreground"
                 )}
               >
-                {isPremium ? "Premium" : "Free"}
+                {isPremium ? (isGold ? "Gold" : "Premium") : "Free"}
               </span>
             </div>
             <button
@@ -260,6 +284,31 @@ const Settings = () => {
             >
               <ChevronRight className="w-5 h-5 text-muted-foreground" />
             </button>
+          </div>
+        </section>
+
+        {/* Family Section */}
+        <section className="p-4 border-b border-border">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold">Family</h3>
+              <p className="text-xs text-muted-foreground">
+                {availableFamilySlots > 0
+                  ? `${availableFamilySlots} invite slot(s) available`
+                  : "No invite slots available"}
+              </p>
+            </div>
+            <Button
+              onClick={async () => {
+                if (availableFamilySlots > 0) {
+                  setShowInviteModal(true);
+                } else {
+                  await checkFamilySlotsAvailable();
+                }
+              }}
+            >
+              Invite
+            </Button>
           </div>
         </section>
 
@@ -558,8 +607,57 @@ const Settings = () => {
 
       {/* Modals */}
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <UpsellModal
+        isOpen={upsellModal.isOpen}
+        type={upsellModal.type}
+        title={upsellModal.title}
+        description={upsellModal.description}
+        price={upsellModal.price}
+        onClose={closeUpsellModal}
+        onBuy={() => buyAddOn(upsellModal.type)}
+      />
       <LegalModal isOpen={showPrivacy} onClose={() => setShowPrivacy(false)} type="privacy" />
       <LegalModal isOpen={showTerms} onClose={() => setShowTerms(false)} type="terms" />
+
+      {/* Invite Modal */}
+      <AnimatePresence>
+        {showInviteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowInviteModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm bg-card rounded-2xl p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold mb-2">Invite Family Member</h3>
+              <p className="text-xs text-muted-foreground mb-4">
+                Sends an invite to join your huddle family.
+              </p>
+              <Input
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="Email address"
+                className="mb-4"
+              />
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setShowInviteModal(false)} className="flex-1">
+                  Cancel
+                </Button>
+                <Button onClick={handleInvite} className="flex-1">
+                  Send Invite
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Password Change Modal */}
       <AnimatePresence>

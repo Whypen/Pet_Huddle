@@ -176,6 +176,8 @@ const Chats = () => {
   const [activeFilterTab, setActiveFilterTab] = useState("Nannies");
   const [chats, setChats] = useState<ChatUser[]>(mockChats);
   const [groups, setGroups] = useState<Group[]>(mockGroups);
+  const [chatVisibleCount, setChatVisibleCount] = useState(10);
+  const [groupVisibleCount, setGroupVisibleCount] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
@@ -190,6 +192,7 @@ const Chats = () => {
   const [endTime, setEndTime] = useState("17:00");
   const [selectedPet, setSelectedPet] = useState("");
   const [userPets, setUserPets] = useState<{ id: string; name: string; species: string }[]>([]);
+  const [sitterHourlyRate, setSitterHourlyRate] = useState<number | null>(null);
 
   const isVerified = profile?.is_verified;
 
@@ -199,12 +202,39 @@ const Chats = () => {
       supabase.from("pets").select("id, name, species").eq("owner_id", profile.id).then(({ data }) => {
         if (data) setUserPets(data);
       });
+      if (selectedNanny?.id) {
+        supabase
+          .from("sitter_profiles")
+          .select("hourly_rate")
+          .eq("user_id", selectedNanny.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            setSitterHourlyRate(data?.hourly_rate || null);
+          });
+      }
       setServiceDate("");
       setStartTime("09:00");
       setEndTime("17:00");
       setSelectedPet("");
+      if (sitterHourlyRate) {
+        const start = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${startTime}`);
+        const end = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${endTime}`);
+        const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
+        const expected = Math.round((sitterHourlyRate * hours) / 100);
+        if (expected > 0) setBookingAmount(expected.toString());
+      }
     }
-  }, [nannyBookingOpen]);
+  }, [nannyBookingOpen, profile?.id, selectedNanny?.id]);
+
+  useEffect(() => {
+    if (!sitterHourlyRate || !serviceDate) return;
+    const start = new Date(`${serviceDate}T${startTime}`);
+    const end = new Date(`${serviceDate}T${endTime}`);
+    const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
+    if (!hours) return;
+    const expected = Math.round((sitterHourlyRate * hours) / 100);
+    if (expected > 0) setBookingAmount(expected.toString());
+  }, [sitterHourlyRate, serviceDate, startTime, endTime]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -329,28 +359,29 @@ const Chats = () => {
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
   const handleBookingCheckout = async () => {
     if (!profile?.id || !selectedNanny) return;
-    if (!serviceDate || !selectedPet) {
-      toast.error("Please select a service date and pet");
+    if (!serviceDate || !selectedPet || !startTime || !endTime) {
+      toast.error("Please complete all booking details");
       return;
     }
     setBookingProcessing(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      const startIso = new Date(`${serviceDate}T${startTime}`).toISOString();
+      const endIso = new Date(`${serviceDate}T${endTime}`).toISOString();
+
+      const { data, error } = await supabase.functions.invoke("create-marketplace-booking", {
         body: {
-          userId: profile.id,
-          type: "nanny_booking",
-          mode: "payment",
+          clientId: profile.id,
+          sitterId: selectedNanny.id,
           amount: Math.round(parseFloat(bookingAmount) * 100), // cents
-          metadata: {
-            nanny_id: selectedNanny.id,
-            nanny_name: selectedNanny.name,
-            service_date: serviceDate,
-            start_time: startTime,
-            end_time: endTime,
-            pet_id: selectedPet,
-            pet_name: userPets.find(p => p.id === selectedPet)?.name || "",
-          },
+          serviceStartDate: startIso,
+          serviceEndDate: endIso,
+          petId: selectedPet,
+          locationName:
+            profile.location_name ||
+            (profile.last_lat && profile.last_lng
+              ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}`
+              : ""),
           successUrl: `${window.location.origin}/chats?booking_success=true`,
           cancelUrl: `${window.location.origin}/chats`,
         },
@@ -530,7 +561,7 @@ const Chats = () => {
                   <p className="text-muted-foreground">No conversations found</p>
                 </div>
               ) : (
-                filteredChats.map((chat, index) => (
+                filteredChats.slice(0, chatVisibleCount).map((chat, index) => (
                   <motion.div
                     key={chat.id}
                     initial={{ opacity: 0, x: -20 }}
@@ -583,6 +614,16 @@ const Chats = () => {
                 ))
               )}
             </div>
+            {filteredChats.length > chatVisibleCount && (
+              <div className="flex justify-center pt-2">
+                <button
+                  className="text-sm text-primary hover:underline"
+                  onClick={() => setChatVisibleCount((c) => c + 10)}
+                >
+                  Load more
+                </button>
+              </div>
+            )}
           </section>
         </>
       )}
@@ -600,7 +641,7 @@ const Chats = () => {
                 </p>
               </div>
             ) : (
-              filteredGroups.map((group, index) => (
+              filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
                 <motion.div
                   key={group.id}
                   initial={{ opacity: 0, x: -20 }}
@@ -638,6 +679,16 @@ const Chats = () => {
               ))
             )}
           </div>
+          {filteredGroups.length > groupVisibleCount && (
+            <div className="flex justify-center pt-2">
+              <button
+                className="text-sm text-primary hover:underline"
+                onClick={() => setGroupVisibleCount((c) => c + 10)}
+              >
+                Load more
+              </button>
+            </div>
+          )}
         </section>
       )}
 
@@ -746,7 +797,10 @@ const Chats = () => {
                 <label className="text-sm font-medium mb-1.5 block">{t("booking.location")}</label>
                 <div className="h-10 rounded-xl bg-muted/40 border border-border px-4 flex items-center">
                   <span className="text-sm text-muted-foreground">
-                    {profile?.location_name || t("booking.location_not_set")}
+                    {profile?.location_name ||
+                      (profile?.last_lat && profile?.last_lng
+                        ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}`
+                        : t("booking.location_not_set"))}
                   </span>
                 </div>
               </div>
@@ -761,10 +815,13 @@ const Chats = () => {
                     onChange={(e) => setBookingAmount(e.target.value)}
                     min="10"
                     max="500"
+                    disabled={!!sitterHourlyRate}
                     className="flex-1 h-12 rounded-xl bg-muted border border-border px-4 text-lg font-semibold outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">{t("booking.amount_note")}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {sitterHourlyRate ? t("booking.amount_calculated") : t("booking.amount_note")}
+                </p>
               </div>
 
               <div className="flex gap-3">
@@ -772,11 +829,18 @@ const Chats = () => {
                   onClick={() => setNannyBookingOpen(false)}
                   className="flex-1 py-3 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  Cancel
+                  {t("booking.cancel")}
                 </button>
                 <button
                   onClick={handleBookingCheckout}
-                  disabled={bookingProcessing || parseFloat(bookingAmount) < 10 || !serviceDate || !selectedPet}
+                  disabled={
+                    bookingProcessing ||
+                    parseFloat(bookingAmount) < 10 ||
+                    !serviceDate ||
+                    !startTime ||
+                    !endTime ||
+                    !selectedPet
+                  }
                   className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
                   style={{ backgroundColor: "#2563EB" }}
                 >
@@ -785,7 +849,7 @@ const Chats = () => {
                   ) : (
                     <>
                       <DollarSign className="w-4 h-4" />
-                      Pay ${bookingAmount} via Stripe
+                      {t("booking.pay")} ${bookingAmount}
                     </>
                   )}
                 </button>

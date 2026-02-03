@@ -177,6 +177,7 @@ const translations: Record<Language, Record<string, string>> = {
     "booking.location_not_set": "Set location in your profile",
     "booking.amount": "Booking Amount (USD)",
     "booking.amount_note": "Minimum $10 · Payment held in escrow until service completed",
+    "booking.amount_calculated": "Price is calculated from sitter hourly rate",
     "booking.cancel": "Cancel",
     "booking.pay": "Pay via Stripe",
     // Common
@@ -358,6 +359,7 @@ const translations: Record<Language, Record<string, string>> = {
     "booking.location_not_set": "請在個人資料中設定地點",
     "booking.amount": "預約金額（美元）",
     "booking.amount_note": "最低 $10 · 金額將托管至服務完成",
+    "booking.amount_calculated": "價格依保姆時薪自動計算",
     "booking.cancel": "取消",
     "booking.pay": "前往付款",
     // Common
@@ -539,6 +541,7 @@ const translations: Record<Language, Record<string, string>> = {
     "booking.location_not_set": "请在个人资料中设置地点",
     "booking.amount": "预约金额（美元）",
     "booking.amount_note": "最低 $10 · 金额将托管至服务完成",
+    "booking.amount_calculated": "价格按保姆时薪自动计算",
     "booking.cancel": "取消",
     "booking.pay": "前往付款",
     // Common

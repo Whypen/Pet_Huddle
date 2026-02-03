@@ -12,6 +12,8 @@ import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
+import { useUpsell } from "@/hooks/useUpsell";
+import { UpsellModal } from "@/components/monetization/UpsellModal";
 
 const nearbyUsers = [
   { id: 1, name: "Marcus", location: "Central Park", isVerified: true, hasCar: false },
@@ -25,6 +27,7 @@ const Social = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const { upsellModal, closeUpsellModal, buyAddOn, checkStarsAvailable } = useUpsell();
 
   // SPRINT 3: Initialize age filter to ±3 years from user's age
   const getUserAge = () => {
@@ -47,7 +50,7 @@ const Social = () => {
   const [cardPosition, setCardPosition] = useState({ x: 0, y: 0, rotate: 0 });
   const [showCard, setShowCard] = useState(true);
 
-  const isPremium = profile?.user_role === 'premium';
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   const handleSwipe = (direction: "left" | "right") => {
     const xMove = direction === "right" ? 500 : -500;
@@ -207,6 +210,12 @@ const Social = () => {
           <motion.button
             whileTap={{ scale: 0.9 }}
             className="w-14 h-14 rounded-full bg-card shadow-card flex items-center justify-center border border-border"
+            onClick={async () => {
+              const ok = await checkStarsAvailable();
+              if (ok) {
+                // TODO: apply boost action
+              }
+            }}
           >
             <Star className="w-6 h-6 text-warning" />
           </motion.button>
@@ -263,6 +272,15 @@ const Social = () => {
         }}
       />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <UpsellModal
+        isOpen={upsellModal.isOpen}
+        type={upsellModal.type}
+        title={upsellModal.title}
+        description={upsellModal.description}
+        price={upsellModal.price}
+        onClose={closeUpsellModal}
+        onBuy={() => buyAddOn(upsellModal.type)}
+      />
     </div>
   );
 };

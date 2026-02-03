@@ -11,6 +11,11 @@ import {
   Sparkles,
   Loader2,
   Apple,
+  Star,
+  AlertTriangle,
+  Camera,
+  Users,
+  Shield,
 } from "lucide-react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,6 +49,14 @@ const paymentMethods = [
   { id: "paypal", name: "PayPal", icon: CreditCard },
 ];
 
+const addOns = [
+  { id: "star_pack", name: "3 Star Pack", icon: Star },
+  { id: "emergency_alert", name: "Emergency Alert", icon: AlertTriangle },
+  { id: "vet_media", name: "AI Vet Media", icon: Camera },
+  { id: "family_slot", name: "Family Slot", icon: Users },
+  { id: "verified_badge", name: "Verified Badge", icon: Shield },
+];
+
 const Subscription = () => {
   const navigate = useNavigate();
   const { profile, user, refreshProfile } = useAuth();
@@ -53,7 +66,7 @@ const Subscription = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
 
-  const isPremium = profile?.user_role === "premium";
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Updated pricing per requirements
   const pricing = {
@@ -61,85 +74,26 @@ const Subscription = () => {
     yearly: { price: 80, period: "year", monthlyEquivalent: 6.67, savings: "Save 26%" },
   };
 
-  const handleUpgrade = async () => {
-    if (!user) return;
-
-    setIsProcessing(true);
-
-    try {
-      // MOCK PAYMENT FLOW - 2 second delay
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Update user_role to premium in database
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .update({
-          user_role: "premium",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", user.id);
-
-      if (profileError) throw profileError;
-
-      // Create subscription record (mock)
-      const subscriptionData = {
-        user_id: user.id,
-        plan_type: selectedPlan,
-        amount: selectedPlan === "monthly" ? pricing.monthly.price : pricing.yearly.price,
-        currency: "USD",
-        status: "active",
-        current_period_start: new Date().toISOString(),
-        current_period_end: new Date(
-          Date.now() + (selectedPlan === "monthly" ? 30 : 365) * 24 * 60 * 60 * 1000
-        ).toISOString(),
-      };
-
-      // Try to insert subscription record
-      await supabase.from("subscriptions").insert(subscriptionData);
-
-      // Create payment record
-      await supabase.from("payments").insert({
-        user_id: user.id,
-        amount: selectedPlan === "monthly" ? pricing.monthly.price : pricing.yearly.price,
-        currency: "USD",
-        status: "completed",
-        payment_method: selectedPayment,
-        description: `Huddle Premium ${selectedPlan === "monthly" ? "Monthly" : "Yearly"} Subscription`,
-      });
-
-      await refreshProfile();
-      toast.success("Welcome to Huddle Premium!");
-    } catch (error: any) {
-      console.error("Subscription error:", error);
-      toast.error("Payment failed. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleUpgrade = () => {
+    navigate("/premium");
   };
 
-  const handleCancel = async () => {
+  const handleManageBilling = async () => {
     if (!user) return;
-
     setIsProcessing(true);
-
     try {
-      // Mock cancellation - 1 second delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          user_role: "free",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", user.id);
-
+      const { data, error } = await supabase.functions.invoke("create-portal-session", {
+        body: {
+          userId: user.id,
+          returnUrl: `${window.location.origin}/subscription`,
+        },
+      });
       if (error) throw error;
-
-      await refreshProfile();
-      toast.success("Subscription cancelled. You'll retain premium until the end of your billing period.");
-    } catch (error) {
-      toast.error("Failed to cancel subscription");
+      if (data?.url) {
+        window.location.href = data.url;
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to open billing portal");
     } finally {
       setIsProcessing(false);
     }
@@ -159,7 +113,7 @@ const Subscription = () => {
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
         {/* Hero */}
-        <div className="relative bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 rounded-2xl p-6 mb-6 overflow-hidden">
+        <div className="relative bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-6 mb-6 overflow-hidden">
           <div className="absolute inset-0 overflow-hidden">
             <motion.div
               animate={{ rotate: 360 }}
@@ -172,22 +126,22 @@ const Subscription = () => {
               <Crown className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-2xl font-bold text-white mb-1">huddle Premium</h2>
-            <p className="text-amber-100 text-sm">Unlock all features</p>
+            <p className="text-white/90 text-sm">Unlock all features</p>
           </div>
         </div>
 
         {/* Current Status */}
         {isPremium && (
-          <div className="bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-900/20 dark:to-amber-800/20 rounded-xl p-4 mb-6">
+          <div className="bg-primary/10 rounded-xl p-4 mb-6">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-amber-900" />
+              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-white" />
               </div>
               <div>
-                <p className="font-semibold text-amber-800 dark:text-amber-200">
+                <p className="font-semibold text-primary">
                   You're a Premium Member!
                 </p>
-                <p className="text-sm text-amber-600 dark:text-amber-400">
+                <p className="text-sm text-primary/80">
                   Next billing: {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
                 </p>
               </div>
@@ -204,8 +158,8 @@ const Subscription = () => {
             <div className="p-3 text-center border-l border-border">
               <span className="text-sm font-medium">Free</span>
             </div>
-            <div className="p-3 text-center border-l border-border bg-amber-50 dark:bg-amber-900/20">
-              <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+            <div className="p-3 text-center border-l border-border bg-primary/5">
+              <span className="text-sm font-semibold text-primary">
                 Premium
               </span>
             </div>
@@ -228,15 +182,15 @@ const Subscription = () => {
                   <span className="text-xs text-muted-foreground">{feature.free}</span>
                 )}
               </div>
-              <div className="p-3 text-center border-l border-border bg-amber-50/50 dark:bg-amber-900/10">
+              <div className="p-3 text-center border-l border-border bg-primary/5">
                 {typeof feature.premium === "boolean" ? (
                   feature.premium ? (
-                    <Check className="w-4 h-4 text-amber-600 mx-auto" />
+                    <Check className="w-4 h-4 text-primary mx-auto" />
                   ) : (
                     <X className="w-4 h-4 text-muted-foreground mx-auto" />
                   )
                 ) : (
-                  <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  <span className="text-xs font-medium text-primary">
                     {feature.premium}
                   </span>
                 )}
@@ -334,7 +288,7 @@ const Subscription = () => {
             <Button
               onClick={handleUpgrade}
               disabled={isProcessing}
-              className="w-full py-6 text-lg gap-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
+              className="w-full py-6 text-lg gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {isProcessing ? (
                 <>
@@ -354,24 +308,31 @@ const Subscription = () => {
           </div>
         )}
 
+        {/* Add-ons */}
+        <div className="bg-card rounded-xl p-6 border border-border mb-6">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">Add-ons</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {addOns.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => navigate("/premium")}
+                className="flex items-center gap-2 p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
+              >
+                <item.icon className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium">{item.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Billing Section */}
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-muted-foreground mb-2">Billing</h3>
 
           <button
-              className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
-              onClick={async () => {
-                try {
-                  const { data, error } = await supabase.functions.invoke("create-portal-session", {
-                    body: { userId: user?.id, returnUrl: `${window.location.origin}/subscription` },
-                  });
-                  if (error) throw error;
-                  if (data?.url) window.location.href = data.url;
-                } catch (e: any) {
-                  toast.error(e.message || "Failed to open billing portal");
-                }
-              }}
-            >
+            className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
+            onClick={handleManageBilling}
+          >
             <div className="flex items-center gap-3">
               <CreditCard className="w-5 h-5 text-muted-foreground" />
               <span className="font-medium">Payment Methods</span>
@@ -428,11 +389,11 @@ const Subscription = () => {
 
           {isPremium && (
             <button
-              onClick={handleCancel}
+              onClick={handleManageBilling}
               disabled={isProcessing}
-              className="w-full p-4 text-center text-destructive font-medium rounded-xl border border-destructive/30 hover:bg-destructive/10 transition-colors"
+              className="w-full p-4 text-center text-muted-foreground font-medium rounded-xl border border-border hover:bg-muted/50 transition-colors"
             >
-              {isProcessing ? "Cancelling..." : "Cancel Subscription"}
+              {isProcessing ? "Opening portal..." : "Manage Billing"}
             </button>
           )}
         </div>

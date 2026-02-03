@@ -197,30 +197,34 @@ serve(async (req) => {
     let eventType = 'FCM_SENT';
     let eventStatus = 'SUCCESS';
 
-    try {
-      sendResult = await sendFCMNotificationsBatched(fcmTokens, notificationPayload);
-      console.log(`[Mesh-Alert] Sent ${sendResult.successCount} successful, ${sendResult.failureCount} failed`);
-
-      if (sendResult.successCount === 0 && sendResult.failureCount > 0) {
-        eventType = 'MOCK_SENT';
-        eventStatus = 'SUCCESS';
-      }
-    } catch (fcmError: any) {
-      console.error('[Mesh-Alert] FCM send failed (possibly missing keys):', fcmError);
-
-      // If FCM keys are missing, continue with mock results
+    const fcmKey = Deno.env.get('FCM_SERVICE_ACCOUNT_KEY');
+    if (!fcmKey) {
+      console.warn('[Mesh-Alert] FCM service not configured. Notifications disabled.');
       sendResult = {
         successCount: 0,
-        failureCount: fcmTokens.length,
-        results: fcmTokens.map(token => ({
-          success: false,
-          token,
-          error: 'FCM service not configured or keys missing'
-        }))
+        failureCount: 0,
+        results: []
       };
-
-      eventType = 'MOCK_SENT';
-      eventStatus = 'SUCCESS';
+      eventType = 'FCM_DISABLED';
+      eventStatus = 'FAILED';
+    } else {
+      try {
+        sendResult = await sendFCMNotificationsBatched(fcmTokens, notificationPayload);
+        console.log(`[Mesh-Alert] Sent ${sendResult.successCount} successful, ${sendResult.failureCount} failed`);
+      } catch (fcmError: any) {
+        console.error('[Mesh-Alert] FCM send failed:', fcmError);
+        sendResult = {
+          successCount: 0,
+          failureCount: fcmTokens.length,
+          results: fcmTokens.map(token => ({
+            success: false,
+            token,
+            error: 'FCM send failed'
+          }))
+        };
+        eventType = 'FCM_FAILED';
+        eventStatus = 'FAILED';
+      }
     }
 
     // =====================================================

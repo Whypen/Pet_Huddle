@@ -122,6 +122,8 @@ const Onboarding = () => {
       
       await refreshProfile();
       toast.success("Welcome to Huddle! 🎉");
+      localStorage.removeItem("huddle_offline_actions");
+      localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: any) {
       toast.error(error.message || "Failed to complete setup");
@@ -141,6 +143,8 @@ const Onboarding = () => {
       
       await refreshProfile();
       toast.success("Welcome to Huddle! You can add pets later.");
+      localStorage.removeItem("huddle_offline_actions");
+      localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: any) {
       toast.error(error.message || "Failed to complete setup");

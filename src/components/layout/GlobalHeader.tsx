@@ -27,7 +27,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
 
-  const isPremium = profile?.user_role === 'premium';
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user's pets
   useEffect(() => {
