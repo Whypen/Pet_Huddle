@@ -16,19 +16,31 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-// Product to Price ID mapping (fetch dynamically in production)
-const PRICE_IDS: Record<string, string> = {
-  premium_monthly: "price_premium_monthly",
-  premium_annual: "price_premium_annual",
-  gold_monthly: "price_gold_monthly",
-  gold_annual: "price_gold_annual",
-  star_pack: "price_star_pack",
-  emergency_alert: "price_emergency_alert",
-  vet_media: "price_vet_media",
-  family_slot: "price_family_slot",
-  verified_badge: "price_verified_badge",
-  "5_media_pack": "price_5_media_pack",
-  "7_day_extension": "price_7_day_extension",
+// =====================================================
+// STRIPE PRODUCT ID MAP — live IDs from Stripe Dashboard
+// Subscriptions: premium_monthly / premium_annual use the
+//   same Product; Stripe resolves the correct Price by the
+//   plan key passed in from Premium.tsx.
+// Add-ons: one-time payment mode — amount is set by the
+//   client; Product ID is attached for receipt labelling.
+// =====================================================
+const STRIPE_PRODUCTS: Record<string, string> = {
+  // Subscription tiers
+  premium_monthly:  "prod_TuEpCL4vGGwUpk",
+  premium_annual:   "prod_TuEpCL4vGGwUpk",  // same Product; annual Price is a child
+  gold_monthly:     "prod_TuF4blxU2yHqBV",
+  gold_annual:      "prod_TuF4blxU2yHqBV",  // same Product; annual Price is a child
+
+  // Identity & badges
+  verified_badge:   "prod_TuFRNkLiOOKuHZ",
+
+  // Add-on packs
+  star_pack:        "prod_TuFPF3zjXiWiK8",
+  emergency_alert:  "prod_TuFKa021SiFK58",
+  vet_media:        "prod_TuFLRWYZGrItCP",
+  family_slot:      "prod_TuFNGDVKRYPPsG",
+  "5_media_pack":   "prod_TuFQ8x2UN7yYjm",
+  "7_day_extension":"prod_TuFIj3NC2W7TvV",
 };
 
 serve(async (req: Request) => {
@@ -90,21 +102,46 @@ serve(async (req: Request) => {
     };
 
     if (mode === "subscription") {
+      // Recurring prices — authoritative amounts live server-side
+      const SUB_PRICES: Record<string, { amount: number; interval: "month" | "year" }> = {
+        premium_monthly: { amount: 899,   interval: "month" },
+        premium_annual:  { amount: 8000,  interval: "year"  },
+        gold_monthly:    { amount: 1999,  interval: "month" },
+        gold_annual:     { amount: 18000, interval: "year"  },
+      };
+
+      const sub = SUB_PRICES[type];
+      if (!sub) {
+        return new Response(
+          JSON.stringify({ error: `Unknown subscription type: ${type}` }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
       sessionParams.line_items = [
         {
-          price: PRICE_IDS[type] || "price_premium_monthly",
+          price_data: {
+            currency: "usd",
+            product: STRIPE_PRODUCTS[type],
+            recurring: { interval: sub.interval },
+            unit_amount: sub.amount,
+          },
           quantity: 1,
         },
       ];
       sessionParams.payment_method_types = ["card"];
     } else {
+      // One-time payment — attach the live Product ID so the
+      // Stripe receipt shows the correct product name & SKU.
+      const productId = STRIPE_PRODUCTS[type];
       sessionParams.line_items = [
         {
           price_data: {
             currency: "usd",
-            product_data: {
-              name: type.replace(/_/g, " ").toUpperCase(),
-            },
+            ...(productId
+              ? { product: productId }
+              : { product_data: { name: type.replace(/_/g, " ").toUpperCase() } }
+            ),
             unit_amount: amount,
           },
           quantity: 1,
