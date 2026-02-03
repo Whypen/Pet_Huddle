@@ -221,6 +221,13 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!isOnline) return;
 
+    // Skip health checks for relative URLs (development/same-server deployments)
+    const isRelativeUrl = API_URL.startsWith('/');
+    if (isRelativeUrl) {
+      setIsServerReachable(true);
+      return;
+    }
+
     const checkHealth = async () => {
       const serverOk = await checkServerHealth();
       setIsServerReachable(serverOk);
