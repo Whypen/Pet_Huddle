@@ -20,7 +20,7 @@ interface OfflineAction {
 
 const NetworkContext = createContext<NetworkContextType | undefined>(undefined);
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api/v1";
+const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
 const PING_INTERVAL = 30000; // 30 seconds
 const MAX_RETRY_COUNT = 3;
 const OFFLINE_ACTIONS_KEY = "huddle_offline_actions";
