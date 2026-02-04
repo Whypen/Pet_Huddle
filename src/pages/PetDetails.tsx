@@ -178,7 +178,7 @@ const PetDetails = () => {
           {/* Bio */}
           {pet.bio && (
             <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-2">About {pet.name}</h3>
+              <h3 className="text-sm font-semibold mb-2">{t("About")} {pet.name}</h3>
               <p className="text-sm text-muted-foreground">{pet.bio}</p>
             </div>
           )}
@@ -220,7 +220,7 @@ const PetDetails = () => {
               </div>
               {pet.next_vaccination_reminder && (
                 <div className="mt-3 p-2 rounded-lg bg-primary/10 border border-primary/20">
-                  <p className="text-xs text-primary font-medium">Next Reminder: {pet.next_vaccination_reminder}</p>
+                  <p className="text-xs text-primary font-medium">{t("Next Reminder")}: {pet.next_vaccination_reminder}</p>
                 </div>
               )}
             </div>

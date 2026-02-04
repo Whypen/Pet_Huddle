@@ -158,12 +158,12 @@ const Premium = () => {
   // =====================================================
   const pricing = {
     premium: {
-      monthly: { price: 8.99, period: "month" },
-      yearly: { price: 80, period: "year", monthlyEquivalent: 6.67, savings: "Save 26%" },
+      monthly: { price: 8.99, periodKey: "period.month" },
+      yearly: { price: 80, periodKey: "period.year", monthlyEquivalent: 6.67, savingsKey: "premium.savings_26" },
     },
     gold: {
-      monthly: { price: 19.99, period: "month" },
-      yearly: { price: 180, period: "year", monthlyEquivalent: 15, savings: "Save 25%" },
+      monthly: { price: 19.99, periodKey: "period.month" },
+      yearly: { price: 180, periodKey: "period.year", monthlyEquivalent: 15, savingsKey: "premium.savings_25" },
     },
   };
 
@@ -256,7 +256,7 @@ const Premium = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative bg-gradient-to-br from-[#2563EB] via-[#3B82F6] to-[#1D4ED8] rounded-2xl p-6 mb-6 overflow-hidden"
+          className="relative bg-gradient-to-br from-[#3283FF] via-[#1E40AF] to-[#1E3A8A] rounded-2xl p-6 mb-6 overflow-hidden"
           style={{
             boxShadow: "0 8px 32px rgba(37, 99, 235, 0.3)",
           }}
@@ -300,7 +300,7 @@ const Premium = () => {
                   "w-10 h-10 rounded-full flex items-center justify-center",
                   isGold
                     ? "bg-gradient-to-r from-amber-400 to-amber-500"
-                    : "bg-[#2563EB]"
+                    : "bg-[#3283FF]"
                 )}
               >
                 {isGold ? (
@@ -378,14 +378,14 @@ const Premium = () => {
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
-              <Camera className="w-4 h-4 text-[#2563EB]" />
+              <Camera className="w-4 h-4 text-[#3283FF]" />
               <span className="text-xs font-medium text-muted-foreground">{t("Media")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.media_credits || 0}</p>
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
-              <Users className="w-4 h-4 text-green-500" />
+              <Users className="w-4 h-4 text-[#A6D539]" />
               <span className="text-xs font-medium text-muted-foreground">{t("Family")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.family_slots || 0}</p>
@@ -431,7 +431,7 @@ const Premium = () => {
               <div className="p-3 text-center border-l border-border bg-primary/5">
                 {typeof feature.premium === "boolean" ? (
                   feature.premium ? (
-                    <Check className="w-3 h-3 text-[#2563EB] mx-auto" />
+                    <Check className="w-3 h-3 text-[#3283FF] mx-auto" />
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )
@@ -468,12 +468,12 @@ const Premium = () => {
                 className={cn(
                   "p-4 rounded-xl border-2 text-left transition-all",
                   selectedTier === "premium"
-                    ? "border-[#2563EB] bg-[#2563EB]/5"
-                    : "border-border hover:border-[#2563EB]/50"
+                    ? "border-[#3283FF] bg-[#3283FF]/5"
+                    : "border-border hover:border-[#3283FF]/50"
                 )}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-[#2563EB]" />
+                  <Sparkles className="w-5 h-5 text-[#3283FF]" />
                   <span className="font-bold">{t("Premium")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">{t("Best for individuals")}</p>
@@ -524,12 +524,15 @@ const Premium = () => {
                 )}
               >
                 <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                  {pricing[selectedTier].yearly.savings}
+                  {t(pricing[selectedTier].yearly.savingsKey)}
                 </span>
                 <p className="text-sm font-medium text-muted-foreground mb-1">{t("Yearly")}</p>
                 <p className="text-2xl font-bold">${pricing[selectedTier].yearly.price}</p>
                 <p className="text-xs text-muted-foreground">
-                  ${pricing[selectedTier].yearly.monthlyEquivalent.toFixed(2)}/month
+                  {t("per_month_short").replace(
+                    "{value}",
+                    pricing[selectedTier].yearly.monthlyEquivalent.toFixed(2)
+                  )}
                 </p>
               </button>
             </div>
@@ -542,7 +545,7 @@ const Premium = () => {
                 "w-full py-6 text-lg gap-2 mb-6",
                 selectedTier === "gold"
                   ? "bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
-                  : "bg-gradient-to-r from-[#2563EB] to-[#1E40AF] hover:from-[#1E40AF] hover:to-[#1E3A8A] text-white"
+                  : "bg-gradient-to-r from-[#3283FF] to-[#1E40AF] hover:from-[#1E40AF] hover:to-[#1E3A8A] text-white"
               )}
               style={{
                 boxShadow:
@@ -588,7 +591,7 @@ const Premium = () => {
                       addOn.id === "star_pack" && "bg-amber-100 dark:bg-amber-900/20",
                       addOn.id === "emergency_alert" && "bg-red-100 dark:bg-red-900/20",
                       addOn.id === "vet_media" && "bg-[#DBEAFE] dark:bg-blue-900/20",
-                      addOn.id === "family_slot" && "bg-green-100 dark:bg-green-900/20",
+                      addOn.id === "family_slot" && "bg-[#A6D539]/15 dark:bg-[#A6D539]/20",
                       addOn.id === "verified_badge" && "bg-purple-100 dark:bg-purple-900/20"
                     )}
                   >

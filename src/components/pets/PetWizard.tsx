@@ -249,7 +249,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
             <X className="w-6 h-6" />
           </button>
           <h1 className="text-lg font-semibold">{t("Add New Pet")}</h1>
-          <span className="text-sm text-muted-foreground">Step {currentStep}/4</span>
+          <span className="text-sm text-muted-foreground">{t("Step")} {currentStep}/4</span>
         </div>
         
         <div className="flex gap-2">
@@ -294,7 +294,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                     "bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors"
                   )}>
                     {photoPreview ? (
-                      <img src={photoPreview} alt="Pet" className="w-full h-full object-cover" />
+                      <img src={photoPreview} alt={t("Pet")} className="w-full h-full object-cover" />
                     ) : (
                       <Camera className="w-8 h-8 text-muted-foreground" />
                     )}
@@ -373,7 +373,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                             : "bg-muted/50 hover:bg-muted"
                         )}
                       >
-                        {breed}
+                        {t(breed)}
                       </button>
                     ))}
                   </div>
@@ -396,7 +396,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                           : "bg-muted text-muted-foreground hover:bg-muted/80"
                       )}
                     >
-                      {gender}
+                      {t(gender)}
                     </button>
                   ))}
                 </div>
@@ -418,7 +418,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </div>
                 <h2 className="text-xl font-bold">{t("Health Vault")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Keep track of important health info
+                  {t("Keep track of important health info")}
                 </p>
               </div>
               
@@ -434,7 +434,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-2 block">Weight ({formData.weight_unit})</label>
+                  <label className="text-sm font-medium mb-2 block">{t("Weight")} ({formData.weight_unit})</label>
                   <Input
                     type="number"
                     placeholder={t("0")}
@@ -448,7 +448,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               {/* Microchip */}
               <div>
                 <label className="text-sm font-medium mb-2 block">
-                  Microchip ID (15 digits)
+                  {t("Microchip ID (15 digits)")}
                 </label>
                 <Input
                   type="text"
@@ -462,7 +462,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   maxLength={15}
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  {formData.microchip_id.length}/15 digits
+                  {formData.microchip_id.length}/15 {t("digits")}
                 </p>
               </div>
               
@@ -539,7 +539,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </div>
                 <h2 className="text-xl font-bold">{t("Personality")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Help others understand your pet
+                  {t("Help others understand your pet")}
                 </p>
               </div>
               
@@ -561,7 +561,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                           : "bg-muted text-muted-foreground hover:bg-muted/80"
                       )}
                     >
-                      {temp}
+                      {t(temp)}
                     </button>
                   ))}
                 </div>
@@ -609,7 +609,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </div>
                 <h2 className="text-xl font-bold">{t("Review")}</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                  Confirm {formData.name}'s details
+                  {t("Confirm")} {formData.name}{t("'s details")}
                 </p>
               </div>
               
@@ -620,18 +620,18 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">{t("Species")}</span>
-                  <span className="font-medium capitalize">{formData.species}</span>
+                  <span className="font-medium capitalize">{t(formData.species)}</span>
                 </div>
                 {formData.breed && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t("Breed")}</span>
-                    <span className="font-medium">{formData.breed}</span>
+                    <span className="font-medium">{t(formData.breed)}</span>
                   </div>
                 )}
                 {formData.gender && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t("Gender")}</span>
-                    <span className="font-medium">{formData.gender}</span>
+                    <span className="font-medium">{t(formData.gender)}</span>
                   </div>
                 )}
                 {formData.dob && (
@@ -658,7 +658,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                     <div className="flex flex-wrap gap-1">
                       {formData.temperament.map((temp) => (
                         <span key={temp} className="px-2 py-1 bg-muted rounded-full text-xs">
-                          {temp}
+                          {t(temp)}
                         </span>
                       ))}
                     </div>
@@ -667,7 +667,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 {formData.vaccinations.length > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">{t("Vaccinations")}</span>
-                    <span className="font-medium">{formData.vaccinations.length} recorded</span>
+                    <span className="font-medium">{formData.vaccinations.length} {t("recorded")}</span>
                   </div>
                 )}
               </div>
@@ -685,22 +685,22 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
             className="h-12 rounded-xl"
           >
             <ChevronLeft className="w-5 h-5 mr-1" />
-            Back
+            {t("Back")}
           </Button>
         )}
         
         <Button
           onClick={handleNext}
           disabled={loading}
-          className="flex-1 h-12 rounded-xl bg-accent hover:bg-accent/90 text-accent-foreground"
+          className="flex-1 h-12 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
           ) : currentStep === 4 ? (
-            `Add ${formData.name || 'Pet'}`
+            `${t("Add")} ${formData.name || t("Pet")}`
           ) : (
             <>
-              Continue
+              {t("Continue")}
               <ChevronRight className="w-5 h-5 ml-1" />
             </>
           )}

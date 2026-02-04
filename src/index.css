@@ -24,15 +24,15 @@
     --background: 40 30% 98%;
     --foreground: 220 20% 20%;
     
-    /* Primary - Royal Blue #2563EB (Action Color) */
-    --primary: 221 83% 53%;
+    /* Primary - Huddle Blue #3283FF (Action Color) */
+    --primary: 216 100% 60%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 221 80% 95%;
+    --primary-soft: 216 100% 95%;
     
-    /* Accent - Gold/Amber */
-    --accent: 88 50% 53%;
+    /* Accent - Huddle Green */
+    --accent: 78 65% 53%;
     --accent-foreground: 0 0% 100%;
-    --accent-soft: 88 40% 92%;
+    --accent-soft: 78 65% 92%;
     
     /* Warning/Gold Badge */
     --warning: 45 93% 47%;
@@ -47,7 +47,7 @@
     --secondary: 40 10% 94%;
     --secondary-foreground: 220 20% 25%;
     --muted: 40 10% 94%;
-    --muted-foreground: 220 10% 50%;
+    --muted-foreground: 217 4% 65%;
     
     /* Popover */
     --popover: 0 0% 100%;
@@ -60,7 +60,7 @@
     /* Borders & Input */
     --border: 40 15% 88%;
     --input: 40 10% 94%;
-    --ring: 207 60% 50%;
+    --ring: 216 100% 60%;
     
     /* Radius */
     --radius: 1rem;
@@ -79,16 +79,20 @@
     /* Sidebar */
     --sidebar-background: 40 20% 97%;
     --sidebar-foreground: 220 20% 20%;
-    --sidebar-primary: 207 60% 50%;
+    --sidebar-primary: 216 100% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 40 15% 95%;
     --sidebar-accent-foreground: 220 20% 20%;
     --sidebar-border: 40 15% 88%;
-    --sidebar-ring: 207 60% 50%;
+    --sidebar-ring: 216 100% 60%;
     
     /* Status Colors */
-    --success: 142 71% 45%; /* Green #22C55E */
-    --info: 221 83% 53%; /* Royal Blue #2563EB */
+    --success: 78 65% 53%; /* Green #A6D539 */
+    --info: 216 100% 60%; /* Blue #3283FF */
+  }
+
+  .font-huddle {
+    font-family: Calibri, "Helvetica Neue", Arial, sans-serif;
   }
 
   .dark {

@@ -85,7 +85,7 @@ export const UserAvatar = ({
           {hasCar && (
             <div
               className={cn(
-                "absolute -top-1 -right-1 rounded-full bg-[#2563EB] flex items-center justify-center ring-2 ring-white",
+                "absolute -top-1 -right-1 rounded-full bg-[#3283FF] flex items-center justify-center ring-2 ring-white",
                 badgeSizeClasses[size]
               )}
             >
@@ -101,8 +101,8 @@ export const UserAvatar = ({
               isPremium
                 ? "bg-primary"
                 : isVerified
-                ? "bg-primary/80"
-                : "bg-[#94A3B8]"
+                ? "bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706]"
+                : "bg-[#A1A4A9]"
             )}
           >
             {isPremium ? (

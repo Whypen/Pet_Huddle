@@ -40,7 +40,7 @@ mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 const alertTypeColors: Record<string, string> = {
   Stray: "#FBBF24",
   Lost: "#EF4444",
-  Found: "#22C55E",
+  Found: "#A6D539",
   Others: "#6B7280",
   stray: "#FBBF24",
   lost: "#EF4444",
@@ -160,7 +160,7 @@ const Map = () => {
       
       const clinics: VetClinic[] = data.elements.map((el: any) => ({
         id: `vet-${el.id}`,
-        name: el.tags?.name || "Veterinary Clinic",
+        name: el.tags?.name || t("map.vet_clinic"),
         lat: el.lat || el.center?.lat,
         lng: el.lon || el.center?.lon,
         phone: el.tags?.phone || el.tags?.["contact:phone"],
@@ -173,13 +173,13 @@ const Map = () => {
       console.error("Error fetching vet clinics:", error);
       // Fallback demo data
       setVetClinics([
-        { id: "vet-1", name: "Hong Kong Veterinary Clinic", lat: 22.2855, lng: 114.1577, is24h: true },
-        { id: "vet-2", name: "Central Pet Hospital", lat: 22.2820, lng: 114.1588, is24h: false },
-        { id: "vet-3", name: "Wan Chai Animal Care", lat: 22.2770, lng: 114.1730, is24h: true },
-        { id: "vet-4", name: "Kowloon Vet Centre", lat: 22.3018, lng: 114.1695, is24h: false },
+        { id: "vet-1", name: t("map.vet.hk_clinic"), lat: 22.2855, lng: 114.1577, is24h: true },
+        { id: "vet-2", name: t("map.vet.central_hospital"), lat: 22.2820, lng: 114.1588, is24h: false },
+        { id: "vet-3", name: t("map.vet.wan_chai"), lat: 22.2770, lng: 114.1730, is24h: true },
+        { id: "vet-4", name: t("map.vet.kowloon"), lat: 22.3018, lng: 114.1695, is24h: false },
       ]);
     }
-  }, []);
+  }, [t]);
 
   // Initialize map
   useEffect(() => {
@@ -256,7 +256,7 @@ const Map = () => {
       <div style="
         width: 20px;
         height: 20px;
-        background-color: #2563EB;
+        background-color: #3283FF;
         border-radius: 50%;
         border: 3px solid white;
         box-shadow: 0 0 0 4px rgba(37,99,235,0.3), 0 4px 12px rgba(0,0,0,0.3);
@@ -314,7 +314,7 @@ const Map = () => {
             position: relative;
           ">
             <span style="font-size: 18px;">🏥</span>
-            ${vet.is24h ? `<span style="position: absolute; top: -8px; right: -8px; background: #22C55E; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">${t("24h")}</span>` : ''}
+            ${vet.is24h ? `<span style="position: absolute; top: -8px; right: -8px; background: #A6D539; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">${t("24h")}</span>` : ''}
           </div>
         `;
         el.addEventListener("click", () => setSelectedVet(vet));
@@ -343,7 +343,7 @@ const Map = () => {
           <div style="
             width: 40px;
             height: 40px;
-            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            background: linear-gradient(135deg, #3283FF, #8B5CF6);
             border-radius: 50%;
             border: 3px solid white;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -428,7 +428,7 @@ const Map = () => {
         <div style="
           width: 36px;
           height: 36px;
-          background-color: ${alertTypeColors[alert.alert_type] || "#3B82F6"};
+          background-color: ${alertTypeColors[alert.alert_type] || "#3283FF"};
           border-radius: 50%;
           border: 3px solid white;
           box-shadow: 0 4px 12px rgba(0,0,0,0.4);
@@ -547,7 +547,7 @@ const Map = () => {
       resetCreateForm();
       fetchAlerts();
     } catch (error: any) {
-      toast.error(error.message || "Failed to create alert");
+      toast.error(error.message || t("map.create_alert_failed"));
     } finally {
       setCreating(false);
     }
@@ -751,7 +751,7 @@ const Map = () => {
                       backgroundColor: alertType === type ? alertTypeColors[type] : undefined,
                     }}
                   >
-                    {type}
+                    {t(type)}
                   </button>
                 ))}
               </div>
@@ -771,7 +771,9 @@ const Map = () => {
                 />
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
-                    {description.trim().split(/\s+/).filter(Boolean).length}/{MAX_ALERT_WORDS} words
+                    {t("map.word_count")
+                      .replace("{count}", String(description.trim().split(/\s+/).filter(Boolean).length))
+                      .replace("{max}", String(MAX_ALERT_WORDS))}
                   </span>
                 </div>
               </div>
@@ -790,7 +792,7 @@ const Map = () => {
               ) : (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
                   <Camera className="w-5 h-5" />
-                  Add photo
+                  {t("map.add_photo")}
                   <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                 </label>
               )}
@@ -802,7 +804,11 @@ const Map = () => {
                 className="w-full h-12 rounded-xl"
                 style={{ backgroundColor: alertTypeColors[alertType] }}
               >
-                {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : `Broadcast ${alertType} Alert`}
+                {creating ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  t("map.broadcast_alert").replace("{type}", t(alertType))
+                )}
               </Button>
             </div>
           ) : null}
@@ -833,7 +839,7 @@ const Map = () => {
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
                   {selectedVet.is24h && (
-                    <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                    <span className="text-xs bg-[#A6D539] text-white px-2 py-0.5 rounded-full">
                       {t("map.24h")}
                     </span>
                   )}
@@ -893,7 +899,7 @@ const Map = () => {
                     className="px-3 py-1 rounded-full text-white text-sm font-medium"
                     style={{ backgroundColor: alertTypeColors[selectedAlert.alert_type] }}
                   >
-                    {selectedAlert.alert_type}
+                    {t(selectedAlert.alert_type)}
                   </span>
                   <span className="text-sm text-muted-foreground">
                     {formatTimeAgo(selectedAlert.created_at)}
@@ -917,16 +923,20 @@ const Map = () => {
                   {selectedAlert.creator?.avatar_url ? (
                     <img src={selectedAlert.creator.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
                   ) : (
-                    <span className="text-xs font-semibold">{selectedAlert.creator?.display_name?.charAt(0) || "?"}</span>
+                    <span className="text-xs font-semibold">
+                      {selectedAlert.creator?.display_name?.charAt(0) || t("Unknown").charAt(0)}
+                    </span>
                   )}
                 </div>
-                <span className="text-sm font-medium">{selectedAlert.creator?.display_name || "Anonymous"}</span>
-                <span className="text-sm text-muted-foreground ml-auto">{selectedAlert.support_count} supports</span>
+                <span className="text-sm font-medium">{selectedAlert.creator?.display_name || t("Anonymous")}</span>
+                <span className="text-sm text-muted-foreground ml-auto">
+                  {t("map.supports").replace("{count}", String(selectedAlert.support_count))}
+                </span>
               </div>
 
               {/* Actions */}
               <div className="grid grid-cols-2 gap-2 mb-4">
-                <Button onClick={() => handleSupport(selectedAlert.id)} className="h-12 rounded-xl bg-accent hover:bg-accent/90">
+                <Button onClick={() => handleSupport(selectedAlert.id)} className="h-12 rounded-xl bg-primary hover:bg-primary/90">
                   <ThumbsUp className="w-5 h-5 mr-2" />
                   {t("social.support")}
                 </Button>
@@ -949,7 +959,7 @@ const Map = () => {
                   className="flex-1 flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground hover:text-destructive"
                 >
                   <Ban className="w-4 h-4" />
-                  Block User
+                  {t("Block User")}
                 </button>
               </div>
             </motion.div>

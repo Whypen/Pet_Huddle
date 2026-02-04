@@ -276,7 +276,7 @@ const EditProfile = () => {
             <label className="relative cursor-pointer group">
               <div className="w-28 h-28 rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
                 {photoPreview ? (
-                  <img src={photoPreview} alt="Profile" className="w-full h-full object-cover" />
+                  <img src={photoPreview} alt={t("Profile")} className="w-full h-full object-cover" />
                 ) : (
                   <Camera className="w-8 h-8 text-muted-foreground" />
                 )}
@@ -586,7 +586,7 @@ const EditProfile = () => {
             {/* Has Car */}
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div className="flex items-center gap-3">
-                <Car className="w-5 h-5" style={{ color: "#2563EB" }} />
+                <Car className="w-5 h-5" style={{ color: "#3283FF" }} />
                 <div>
                   <span className="text-sm font-medium">{t("Pet Driver with Car?")}</span>
                   <p className="text-xs text-muted-foreground">{t("Important for pet transport")}</p>

@@ -27,9 +27,9 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const categories = [
-  { id: "Social", label: "Social", icon: MessageSquare, color: "bg-primary" },
-  { id: "Charity", label: "Charity", icon: Heart, color: "bg-accent" },
-  { id: "News", label: "News", icon: Megaphone, color: "bg-warning" },
+  { id: "Social", labelKey: "notice.category.social", icon: MessageSquare, color: "bg-primary" },
+  { id: "Charity", labelKey: "notice.category.charity", icon: Heart, color: "bg-accent" },
+  { id: "News", labelKey: "notice.category.news", icon: Megaphone, color: "bg-warning" },
 ];
 
 interface Notice {
@@ -51,24 +51,22 @@ interface NoticeBoardProps {
   onPremiumClick: () => void;
 }
 
-// Dummy cat post data
-const dummyCatPost: Notice = {
-  id: "dummy-cat",
-  content: "Just adopted this adorable tabby! 🐱 Looking for other cat parents in the area to share tips and maybe arrange some playdates. She's 2 years old and loves to cuddle!",
-  category: "Social",
-  image_url: null,
-  created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-  author_id: "cat-lover-123",
-  author: {
-    display_name: "Cat Lover",
-    avatar_url: null,
-    is_verified: true,
-  },
-};
-
 export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const dummyCatPost: Notice = {
+    id: "dummy-cat",
+    content: t("notice.dummy_content"),
+    category: "Social",
+    image_url: null,
+    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    author_id: "cat-lover-123",
+    author: {
+      display_name: t("notice.dummy_author"),
+      avatar_url: null,
+      is_verified: true,
+    },
+  };
   const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -334,14 +332,14 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                           />
                         ) : (
                           <span className="text-sm font-semibold">
-                            {notice.author?.display_name?.charAt(0) || "?"}
+                            {notice.author?.display_name?.charAt(0) || t("Unknown").charAt(0)}
                           </span>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-sm truncate">
-                            {notice.author?.display_name || "Anonymous"}
+                            {notice.author?.display_name || t("Anonymous")}
                           </span>
                           {notice.author?.is_verified && (
                             <span className="w-4 h-4 rounded-full bg-warning flex items-center justify-center flex-shrink-0">
@@ -352,7 +350,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                             "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
                             getCategoryStyle(notice.category)
                           )}>
-                            {notice.category}
+                            {t(notice.category)}
                           </span>
                         </div>
                         <p className="text-sm text-foreground">{notice.content}</p>
@@ -379,7 +377,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                                   ? "bg-primary/10"
                                   : "hover:bg-muted"
                               )}
-                              title="Support"
+                              title={t("Support")}
                             >
                               <ThumbsUp className={cn(
                                 "w-4 h-4 transition-colors",
@@ -398,18 +396,18 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                               <DropdownMenuContent align="end">
                                 <DropdownMenuItem onClick={() => handleReport(notice.id)}>
                                   <Flag className="w-4 h-4 mr-2" />
-                                  Report
+                                  {t("Report")}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleHide(notice.id)}>
                                   <EyeOff className="w-4 h-4 mr-2" />
-                                  Hide
+                                  {t("Hide")}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => handleBlockUser(notice.author_id)}
                                   className="text-destructive"
                                 >
                                   <Ban className="w-4 h-4 mr-2" />
-                                  Block User
+                                  {t("Block User")}
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -432,7 +430,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
             onClick={() => fetchNotices(false)}
             disabled={loadingMore}
           >
-            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : "Load more"}
+            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Load more")}
           </Button>
         </div>
       )}
@@ -475,7 +473,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                     )}
                   >
                     <cat.icon className="w-4 h-4" />
-                    {t(cat.label)}
+                    {t(cat.labelKey)}
                   </button>
                 ))}
               </div>

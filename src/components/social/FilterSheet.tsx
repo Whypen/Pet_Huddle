@@ -51,9 +51,9 @@ export const defaultFilters: FilterState = {
 };
 
 const roles = [
-  { id: "nannies", label: "Nannies" },
-  { id: "playdates", label: "Playdates" },
-  { id: "animal-lovers", label: "Animal Lovers" },
+  { id: "nannies", labelKey: "social.nannies" },
+  { id: "playdates", labelKey: "social.playdates" },
+  { id: "animal-lovers", labelKey: "social.animal_lovers" },
 ] as const;
 
 // Species options from master list with icons
@@ -152,7 +152,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
               {/* Basic Filters Section */}
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
-                  Basic Filters
+                  {t("Basic Filters")}
                 </h3>
 
                 {/* Role Multi-Select (Checkboxes) */}
@@ -196,7 +196,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                               </svg>
                             )}
                           </div>
-                          <span className="font-medium">{role.label}</span>
+                          <span className="font-medium">{t(role.labelKey)}</span>
                         </button>
                       );
                     })}
@@ -219,7 +219,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         )}
                       >
                         <option.icon className="w-4 h-4" />
-                        {option.label}
+                        {t(option.label)}
                       </button>
                     ))}
                   </div>
@@ -229,7 +229,9 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                 <div className="mb-5">
                   <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-medium">{t("Distance")}</label>
-                    <span className="text-sm font-semibold text-primary">{localFilters.distance} km</span>
+                    <span className="text-sm font-semibold text-primary">
+                      {t("map.distance_km").replace("{count}", String(localFilters.distance))}
+                    </span>
                   </div>
                   <input
                     type="range"
@@ -240,8 +242,12 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
                   />
                   <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>{t("1 km")}</span>
-                    <span>{localFilters.seeFurther ? "500 km" : "150 km (max)"}</span>
+                    <span>{t("map.distance_km").replace("{count}", "1")}</span>
+                    <span>
+                      {localFilters.seeFurther
+                        ? t("map.distance_km").replace("{count}", "500")
+                        : t("map.distance_km_max").replace("{count}", "150")}
+                    </span>
                   </div>
                   {/* See Further Toggle */}
                   <div className="mt-3 flex items-center justify-between p-3 rounded-xl bg-muted/50">
@@ -301,7 +307,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
                       >
                         {genderOptions.map(opt => (
-                          <option key={opt} value={opt === "Any" ? "" : opt}>{opt}</option>
+                          <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
                         ))}
                       </select>
                     </div>
@@ -315,7 +321,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
                       >
                         {petHeightOptions.map(opt => (
-                          <option key={opt} value={opt === "Any" ? "" : opt}>{opt}</option>
+                          <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
                         ))}
                       </select>
                     </div>
@@ -344,7 +350,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                                   : "bg-muted text-muted-foreground hover:bg-muted/80"
                               )}
                             >
-                              {lang}
+                              {t(lang)}
                             </button>
                           );
                         })}
@@ -358,11 +364,11 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                    Premium Filters
+                    {t("Premium Filters")}
                   </h3>
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#2563EB] to-[#1E40AF] text-xs font-semibold text-white">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#3283FF] to-[#1E40AF] text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
-                    PRO
+                    {t("PRO")}
                   </div>
                 </div>
 
@@ -370,8 +376,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   {/* Verification */}
                   <PremiumToggle
                     icon={Shield}
-                    label="Verified Only"
-                    description="ID-checked users only"
+                    label={t("Verified Only")}
+                    description={t("ID-checked users only")}
                     checked={localFilters.verifiedOnly}
                     onToggle={() => handlePremiumToggle("verifiedOnly")}
                   />
@@ -431,8 +437,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   {/* Connections */}
                   <PremiumToggle
                     icon={Users}
-                    label="Common Huddle Friends"
-                    description="Show mutual connections"
+                    label={t("Common Huddle Friends")}
+                    description={t("Show mutual connections")}
                     checked={localFilters.commonFriends}
                     onToggle={() => handlePremiumToggle("commonFriends")}
                   />
@@ -445,9 +451,9 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
               <motion.button
                 whileTap={{ scale: 0.98 }}
                 onClick={handleApply}
-                className="w-full py-4 rounded-xl bg-accent text-accent-foreground font-semibold text-lg shadow-lg"
+                className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-semibold text-lg shadow-lg"
               >
-                Apply Filters
+                {t("Apply Filters")}
               </motion.button>
             </div>
           </motion.div>
@@ -472,7 +478,7 @@ const PremiumToggle = ({ icon: Icon, label, description, checked, onToggle }: Pr
   >
     <div className="flex items-center gap-3">
       <div className="w-10 h-10 rounded-full bg-[#DBEAFE] flex items-center justify-center">
-        <Icon className="w-5 h-5 text-[#2563EB]" />
+        <Icon className="w-5 h-5 text-[#3283FF]" />
       </div>
       <div className="text-left">
         <div className="flex items-center gap-2">

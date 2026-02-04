@@ -48,7 +48,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
             </button>
 
             {/* Header with Gradient */}
-            <div className="relative bg-gradient-to-br from-[#2563EB] via-[#1E40AF] to-[#1E3A8A] px-6 pt-8 pb-12">
+            <div className="relative bg-gradient-to-br from-[#3283FF] via-[#1E40AF] to-[#1E3A8A] px-6 pt-8 pb-12">
               <div className="absolute inset-0 overflow-hidden">
                 <motion.div
                   animate={{ rotate: 360 }}

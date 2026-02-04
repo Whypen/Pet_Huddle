@@ -579,7 +579,7 @@ const Chats = () => {
                       />
                       {/* Online indicator */}
                       {(chat.isOnline || onlineUsers.has(chat.id)) && (
-                        <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-green-500 ring-2 ring-white" />
+                        <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -595,8 +595,8 @@ const Chats = () => {
                         <button
                           onClick={(e) => handleNannyBookClick(e, chat)}
                           className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
-                          style={{ backgroundColor: "#2563EB" }}
-                          title="Book Nanny"
+                          style={{ backgroundColor: "#A6D539" }}
+                          title={t("Book Nanny")}
                         >
                           <DollarSign className="w-4 h-4 text-white" />
                         </button>
@@ -805,7 +805,7 @@ const Chats = () => {
               <div className="mb-4">
                 <label className="text-sm font-medium mb-2 block">{t("booking.amount")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold" style={{ color: "#2563EB" }}>$</span>
+                  <span className="text-lg font-bold" style={{ color: "#A6D539" }}>$</span>
                   <input
                     type="number"
                     value={bookingAmount}
@@ -839,7 +839,7 @@ const Chats = () => {
                     !selectedPet
                   }
                   className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
-                  style={{ backgroundColor: "#2563EB" }}
+                  style={{ backgroundColor: "#A6D539" }}
                 >
                   {bookingProcessing ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

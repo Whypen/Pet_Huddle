@@ -305,7 +305,7 @@ const EditPetProfile = () => {
             <label className="relative cursor-pointer group">
               <div className="w-[100px] h-[100px] rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
                 {photoPreview ? (
-                  <img src={photoPreview} alt="Pet" className="w-full h-full object-cover" />
+                  <img src={photoPreview} alt={t("Pet")} className="w-full h-full object-cover" />
                 ) : (
                   <Camera className="w-8 h-8 text-muted-foreground" />
                 )}
@@ -343,7 +343,7 @@ const EditPetProfile = () => {
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   )}
                 >
-                  {species.label}
+                  {t(species.label)}
                 </button>
               ))}
             </div>

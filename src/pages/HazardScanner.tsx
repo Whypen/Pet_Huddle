@@ -51,7 +51,7 @@ const HazardScanner = () => {
 
         if (compressedFile.size < file.size) {
           const savedKB = ((file.size - compressedFile.size) / 1024).toFixed(0);
-          toast.success(`${t("Image optimized (saved")} ${savedKB}${t("KB)")}`);
+          toast.success(t("hazard.image_optimized").replace("{savedKB}", savedKB));
         }
       } catch (error) {
         console.error("Compression error:", error);
@@ -91,7 +91,7 @@ const HazardScanner = () => {
       if (error) throw error;
 
       if (data?.error === "rate_limit_exceeded") {
-        toast.error(t("Rate limit exceeded. Free tier: 3 scans per 24 hours. Upgrade to Premium for unlimited scans!"));
+        toast.error(t("hazard.rate_limit"));
         setScanning(false);
         return;
       }

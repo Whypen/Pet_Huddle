@@ -293,16 +293,16 @@ const Auth = () => {
               )}
               {!isLogin && !errors.password && password.length > 0 && (
                 <div className="mt-2 space-y-1 text-xs ml-1">
-                  <p className={password.length >= 8 ? "text-[#22C55E]" : "text-muted-foreground"}>
+                  <p className={password.length >= 8 ? "text-[#A6D539]" : "text-muted-foreground"}>
                     {t("auth.password_strength.length")}
                   </p>
-                  <p className={/[A-Z]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
+                  <p className={/[A-Z]/.test(password) ? "text-[#A6D539]" : "text-muted-foreground"}>
                     {t("auth.password_strength.upper")}
                   </p>
-                  <p className={/[0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
+                  <p className={/[0-9]/.test(password) ? "text-[#A6D539]" : "text-muted-foreground"}>
                     {t("auth.password_strength.number")}
                   </p>
-                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#22C55E]" : "text-muted-foreground"}>
+                  <p className={/[^A-Za-z0-9]/.test(password) ? "text-[#A6D539]" : "text-muted-foreground"}>
                     {t("auth.password_strength.special")}
                   </p>
                 </div>
@@ -402,11 +402,11 @@ const Auth = () => {
       <div className="py-8 text-center">
         <p className="text-xs text-muted-foreground">
           {t("auth.by_continuing")}{" "}
-          <Link to="/terms" className="text-[#2563EB] hover:underline">
+          <Link to="/terms" className="text-[#3283FF] hover:underline">
             {t("auth.terms")}
           </Link>{" "}
           {t("auth.and")}{" "}
-          <Link to="/privacy" className="text-[#2563EB] hover:underline">
+          <Link to="/privacy" className="text-[#3283FF] hover:underline">
             {t("auth.privacy")}
           </Link>
         </p>

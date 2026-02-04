@@ -111,7 +111,7 @@ const Social = () => {
       
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-4">
-        <h1 className="text-2xl font-bold">{t("Discovery")}</h1>
+        <h1 className="text-2xl font-bold">{t("social.discovery")}</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsFilterOpen(true)}
@@ -162,7 +162,7 @@ const Social = () => {
               >
                 <img 
                   src={sarahBella} 
-                  alt="Sarah & Bella" 
+                  alt={t("Sarah & Bella")} 
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-foreground/90 via-foreground/30 to-transparent" />
@@ -170,7 +170,7 @@ const Social = () => {
                 {/* Card Content */}
                 <div className="absolute bottom-0 left-0 right-0 p-5">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-[#2563EB] text-white text-xs font-semibold px-2 py-1 rounded-full">
+                    <span className="bg-[#3283FF] text-white text-xs font-semibold px-2 py-1 rounded-full">
                       {t("✓ Verified")}
                     </span>
                     <ProfileBadges isVerified={true} hasCar={true} />
@@ -205,7 +205,7 @@ const Social = () => {
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => handleSwipe("right")}
-            className="w-16 h-16 rounded-full bg-[#2563EB] shadow-card flex items-center justify-center"
+            className="w-16 h-16 rounded-full bg-[#3283FF] shadow-card flex items-center justify-center"
           >
             <HandMetal className="w-7 h-7 text-accent-foreground" />
           </motion.button>
@@ -219,7 +219,7 @@ const Social = () => {
               }
             }}
           >
-            <Star className="w-6 h-6" style={{ color: "#2563EB" }} />
+            <Star className="w-6 h-6" style={{ color: "#3283FF" }} />
           </motion.button>
         </div>
       </section>
@@ -239,15 +239,15 @@ const Social = () => {
               <div className="relative">
                 <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent p-0.5">
                   <div className="w-full h-full rounded-full bg-muted flex items-center justify-center text-lg font-semibold">
-                    {user.name.charAt(0)}
+                    {t(user.name).charAt(0)}
                   </div>
                 </div>
                 <div className="absolute -bottom-1 -right-1">
                   <ProfileBadges isVerified={user.isVerified} hasCar={user.hasCar} size="sm" />
                 </div>
               </div>
-              <span className="text-xs font-medium">{user.name}</span>
-              <span className="text-xs text-muted-foreground">{user.location}</span>
+              <span className="text-xs font-medium">{t(user.name)}</span>
+              <span className="text-xs text-muted-foreground">{t(user.location)}</span>
             </motion.div>
           ))}
         </div>

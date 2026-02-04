@@ -40,10 +40,10 @@ import { cn } from "@/lib/utils";
 import { useUpsell } from "@/hooks/useUpsell";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 
-const languageOptions: { value: Language; label: string }[] = [
-  { value: "en", label: "English" },
-  { value: "zh-TW", label: "繁體中文" },
-  { value: "zh-CN", label: "简体中文" },
+const languageOptions: { value: Language; labelKey: string }[] = [
+  { value: "en", labelKey: "language.english" },
+  { value: "zh-TW", labelKey: "language.zh_tw" },
+  { value: "zh-CN", labelKey: "language.zh_cn" },
 ];
 
 const Settings = () => {
@@ -254,12 +254,14 @@ const Settings = () => {
                   isGold
                     ? "bg-gradient-to-r from-amber-400 to-amber-500"
                     : isVerified
-                      ? "bg-primary"
+                      ? "bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706]"
                       : "bg-muted"
                 )}
               >
-                {isVerified ? (
-                  <Crown className={cn("w-3.5 h-3.5", isGold ? "text-amber-900" : "text-white")} />
+                {isGold ? (
+                  <Crown className="w-3.5 h-3.5 text-amber-900" />
+                ) : isVerified ? (
+                  <Shield className="w-3.5 h-3.5 text-white" />
                 ) : (
                   <Shield className="w-3.5 h-3.5 text-muted-foreground" />
                 )}
@@ -299,8 +301,8 @@ const Settings = () => {
               <h3 className="font-semibold">{t("Family")}</h3>
               <p className="text-xs text-muted-foreground">
                 {availableFamilySlots > 0
-                  ? t("Invite slots available") + `: ${availableFamilySlots}`
-                  : t("No invite slots available")}
+                  ? t("invite.slots_available").replace("{count}", String(availableFamilySlots))
+                  : t("invite.no_slots")}
               </p>
             </div>
             <Button
@@ -498,7 +500,7 @@ const Settings = () => {
                 )}
               >
                 {language === option.value && <Check className="w-4 h-4" />}
-                {t(option.label)}
+                {t(option.labelKey)}
               </button>
             ))}
           </div>
@@ -977,7 +979,7 @@ const Settings = () => {
                       disabled={!idFile || idUploading}
                       className="w-full"
                     >
-                      {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Upload & Submit"}
+                      {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Upload & Submit")}
                     </Button>
                   </>
                 )}

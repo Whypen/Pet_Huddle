@@ -23,10 +23,10 @@ export const BottomNav = () => {
         {navItems.map((item) => {
           const isActive = location.pathname === item.path ||
             (item.path === "/" && location.pathname === "/");
-          // Brand hierarchy: Home = green (#22C55E), all others = Royal Blue (#2563EB)
+          // Brand hierarchy: Home = green (#A6D539), all others = Huddle Blue (#3283FF)
           const isHomeIcon = item.path === "/";
-          const activeColor = isHomeIcon ? "text-[#22C55E]" : "text-[#2563EB]";
-          const activeBg = isHomeIcon ? "bg-[#22C55E]/10" : "bg-[#2563EB]/10";
+          const activeColor = isHomeIcon ? "text-[#A6D539]" : "text-[#3283FF]";
+          const activeBg = isHomeIcon ? "bg-[#A6D539]/10" : "bg-[#3283FF]/10";
 
           return (
             <motion.button

@@ -24,10 +24,10 @@ interface Pet {
 }
 
 const quickActions = [
-  { icon: Stethoscope, label: "AI Vet", path: "/ai-vet", color: "bg-primary" },
-  { icon: MapPin, label: "Map", path: "/map", color: "bg-accent" },
-  { icon: Users, label: "Social", path: "/social", color: "bg-primary" },
-  { icon: MessageCircle, label: "Chat", path: "/chats", color: "bg-accent" },
+  { icon: Stethoscope, labelKey: "nav.ai_vet", path: "/ai-vet", color: "bg-primary" },
+  { icon: MapPin, labelKey: "nav.map", path: "/map", color: "bg-primary" },
+  { icon: Users, labelKey: "nav.social", path: "/social", color: "bg-primary" },
+  { icon: MessageCircle, labelKey: "nav.chats", path: "/chats", color: "bg-primary" },
 ];
 
 // SPRINT 2: Species-specific huddle Wisdom tips
@@ -129,7 +129,7 @@ const Index = () => {
     return tips[Math.floor(Math.random() * tips.length)];
   };
 
-  const displayName = profile?.display_name || "Friend";
+  const displayName = profile?.display_name || t("Friend");
   const firstName = displayName.split(" ")[0];
 
   if (loading) {
@@ -156,7 +156,7 @@ const Index = () => {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              Hi, {firstName}! 👋
+              {t("home.greeting").replace("{name}", firstName)}
               <ProfileBadges 
                 isVerified={profile?.is_verified} 
                 hasCar={profile?.has_car} 
@@ -256,7 +256,7 @@ const Index = () => {
                     <div className="flex gap-4 mt-2 text-primary-foreground/80 text-sm flex-wrap">
                       {selectedPet.weight && (
                         <>
-                          <span>Weight: {selectedPet.weight}{selectedPet.weight_unit}</span>
+                          <span>{t("Weight")}: {selectedPet.weight}{selectedPet.weight_unit}</span>
                           <span>•</span>
                         </>
                       )}
@@ -271,7 +271,9 @@ const Index = () => {
                     <div className="mt-4 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
                       <div className="flex items-center gap-2 text-primary-foreground">
                         <Clock className="w-4 h-4" />
-                        <span className="text-sm font-medium">{t("home.next_event")}: Mid-day Walk, 12:00 PM</span>
+                        <span className="text-sm font-medium">
+                          {t("home.next_event")}: {t("home.next_event_sample")}
+                        </span>
                       </div>
                     </div>
                   </motion.div>
@@ -295,7 +297,7 @@ const Index = () => {
                   <div>
                     <h4 className="font-semibold text-primary-foreground mb-1">{t("home.wisdom")}</h4>
                     <p className="text-sm text-primary-foreground/90">
-                      {getRandomTip(selectedPet.species)}
+                      {t(getRandomTip(selectedPet.species))}
                     </p>
                   </div>
                 </div>
@@ -310,7 +312,7 @@ const Index = () => {
         <div className="flex justify-around">
           {quickActions.map((action, index) => (
             <motion.a
-              key={action.label}
+              key={action.labelKey}
               href={action.path}
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -324,7 +326,7 @@ const Index = () => {
               )}>
                 <action.icon className="w-6 h-6 text-primary-foreground" />
               </div>
-              <span className="text-xs font-medium text-muted-foreground">{action.label}</span>
+              <span className="text-xs font-medium text-muted-foreground">{t(action.labelKey)}</span>
             </motion.a>
           ))}
         </div>

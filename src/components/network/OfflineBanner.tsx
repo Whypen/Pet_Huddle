@@ -37,7 +37,7 @@ export const OfflineBanner = () => {
       return {
         icon: <Check className="w-4 h-4" />,
         message: "Connection restored",
-        bgColor: "bg-green-500",
+        bgColor: "bg-[#A6D539]",
         textColor: "text-white",
       };
     }

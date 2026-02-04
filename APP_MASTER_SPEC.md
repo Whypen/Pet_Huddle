@@ -67,7 +67,7 @@ Optional external WebSocket server referenced via `VITE_WS_URL` for chat presenc
 
 ### Nanny Booking & Escrow Management
 **Flow (must be enforced exactly):**
-1. User clicks **Blue $ icon** in chat → opens `BookingModal`
+1. User clicks **Green $ icon** in chat → opens `BookingModal`
 2. Modal collects: Service Date (Calendar), Start/End Time (Time Picker), Pet Selection (Dropdown from user’s pets), Location (auto-fill from profile.lat/lng)
 3. Client calls `create-marketplace-booking` Edge Function
 4. Function creates Stripe Checkout Session with **destination charge**
@@ -96,10 +96,10 @@ Optional external WebSocket server referenced via `VITE_WS_URL` for chat presenc
 ## III. BRAND IDENTITY & VISUAL STANDARDS
 
 **Color Hierarchy (non-negotiable):**
-- **Royal Blue (#2563EB)**: All primary actions, Car safety icon, Chat send buttons, Mapbox pins
-- **Huddle Green (#22C55E)**: Home dashboard icon, Huddle Wisdom icon, success states only
-- **Grey (#94A3B8)**: Secondary helper text, captions, deactivated states
-- **Gold Gradient** (linear-gradient 135deg #FBBF24 → #F59E0B → #D97706): Stars badges + Gold Tier UI only
+- **Huddle Blue (#3283ff)**: All primary actions, Car safety icon, Chat send buttons, Mapbox pins
+- **Huddle Green (#a6d539)**: Home dashboard icon, Huddle Wisdom icon, success states, money/nanny icon
+- **Huddle Grey (#a1a4a9)**: Secondary helper text, captions, deactivated states
+- **Gold Gradient** (linear-gradient 135deg #FBBF24 → #F59E0B → #D97706): Stars badges, Gold Tier UI, Verified badge (approved only)
 
 **Header Cleanup (mandatory purge):**
 - Remove **"pet care & social"** text (including pseudo-elements)
@@ -155,6 +155,33 @@ Optional external WebSocket server referenced via `VITE_WS_URL` for chat presenc
 10. Vouch increment only possible after completed booking + dispute window
 11. Free tier hazard scans hard-limited to **3 per 24h** (server enforced)
 12. `transactions` table contains Stripe events for all fulfilled payments
+
+---
+
+## VII. IMPLEMENTATION NOTES (CURRENT BUILD SNAPSHOT)
+
+These notes describe **what is currently implemented in the local codebase**. They do **not** override the requirements above unless explicitly approved.
+
+- **Add Pet Flow**: The “Add Pet” entry points now route directly to `/edit-pet-profile` to keep the Add and Edit layout identical (no PetWizard flow).  
+  Evidence: `src/pages/Index.tsx` (Add Pet action → `/edit-pet-profile`).
+
+- **Match Modal (Social)**: A match confirmation modal appears after a right swipe to confirm a “Double Wave” and prompt chat initiation.  
+  Evidence: `src/pages/Social.tsx` (match modal block).
+
+- **Invite Family (Gold)**: Free users see an upsell, Gold users get an invite share-link modal with copy‑to‑clipboard.  
+  Evidence: `src/pages/Settings.tsx` (Family section button logic + invite modal).
+
+- **Auth Legal Links**: Terms and Privacy are now clickable and route to `/terms` and `/privacy`, styled in Royal Blue with hover underline.  
+  Evidence: `src/pages/Auth.tsx` (footer links).
+
+- **Identity Verification**: Onboarding now submits verification as **pending review** (no self‑claim of verified), and Settings reflects “pending/approved” states.  
+  Evidence: `src/pages/Onboarding.tsx`, `src/components/onboarding/SecurityIdentityStep.tsx`, `src/pages/Settings.tsx`.
+
+- **Map Stale State Reset**: Map state clears alerts/clinics/selection on initial load to avoid stale records.  
+  Evidence: `src/pages/Map.tsx` (reset useEffect).
+
+- **Translations**: Core app translations remain in `LanguageContext` with `t()` lookup. Two JSON files (`src/i18n/en.json`, `src/i18n/zh-TW.json`) were added for future externalization but are not yet wired into `LanguageContext`.  
+  Evidence: `src/contexts/LanguageContext.tsx`, `src/i18n/en.json`, `src/i18n/zh-TW.json`.
 
 This document is now **locked**. No further changes unless a major product pivot occurs.  
 All future development, audits, and refactors must align 100% with this spec.

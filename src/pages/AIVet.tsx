@@ -68,7 +68,7 @@ const AIVet = () => {
       const greeting: Message = {
         id: "greeting",
         role: "assistant",
-        content: `Hello there! I'm Dr. Huddle, your friendly AI pet assistant. 🐾\n\nI see you've selected ${selectedPet.name}${selectedPet.breed ? `, your ${selectedPet.breed}` : ""}${petAge ? ` (${petAge} year${petAge > 1 ? "s" : ""} old)` : ""}. I'm here to help with any questions about ${selectedPet.name}'s health and wellness.\n\nWhile I can provide helpful information and guidance, remember that I'm always happy to point you toward your local vet for hands-on care. What can I help you with today?`,
+        content: `${t("Hello there! I'm Dr. Huddle, your friendly AI pet assistant. 🐾")}\n\n${t("I see you've selected")} ${selectedPet.name}${selectedPet.breed ? `, ${t("your")} ${selectedPet.breed}` : ""}${petAge ? ` (${petAge} ${t(petAge > 1 ? "years" : "year")} ${t("old")})` : ""}. ${t("I'm here to help with any questions about")} ${selectedPet.name}${t("'s health and wellness.")}\n\n${t("While I can provide helpful information and guidance, remember that I'm always happy to point you toward your local vet for hands-on care.")} ${t("What can I help you with today?")}`,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages([greeting]);
@@ -162,7 +162,7 @@ const AIVet = () => {
       } else if (result.error === "rate_limit_exceeded") {
         setShowUpgradeModal(true);
         setIsPremiumOpen(true);
-        toast.error(t("You've reached your free message limit for this month"));
+        toast.error(t("ai.errors.free_limit"));
       } else {
         throw new Error(result.error || "Failed to get response");
       }
@@ -174,9 +174,7 @@ const AIVet = () => {
         const fallbackMessage: Message = {
           id: `ai-${Date.now()}`,
           role: "assistant",
-          content: t(
-            "I appreciate your question! Based on what you've described, I'd suggest keeping a close eye on your pet over the next day or two. Monitor for any changes in appetite, energy levels, or the symptoms you mentioned.\n\nIf things don't improve within 48 hours, or if you notice anything concerning, I'd definitely recommend visiting your local vet for a proper check-up. They'll be able to give your pet a hands-on examination.\n\nIn the meantime, I'm here if you have any more questions! 🐕"
-          ),
+          content: t("ai.fallback_message"),
           timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         };
         setMessages((prev) => [...prev, fallbackMessage]);
@@ -228,7 +226,7 @@ const AIVet = () => {
           </button>
           <div className="flex items-center gap-3">
             <div className="relative">
-              <img src={aiVetAvatar} alt="Dr. Huddle" className="w-10 h-10 rounded-full object-cover" />
+              <img src={aiVetAvatar} alt={t("Dr. Huddle")} className="w-10 h-10 rounded-full object-cover" />
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-accent rounded-full border-2 border-card" />
             </div>
             <div>
@@ -274,7 +272,9 @@ const AIVet = () => {
         {/* Free tier remaining count */}
         {!isPremium && remaining !== null && (
           <p className="text-xs text-center text-muted-foreground mt-1">
-            {remaining > 0 ? `${remaining} free conversations remaining this month` : "Free conversations exhausted"}
+            {remaining > 0
+              ? t("ai.free_remaining").replace("{count}", String(remaining))
+              : t("ai.free_exhausted")}
           </p>
         )}
       </div>
@@ -335,8 +335,7 @@ const AIVet = () => {
       {/* Safety Disclaimer */}
       <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90 backdrop-blur-sm px-4 py-2 border-t border-border">
         <p className="text-xs text-muted-foreground text-center max-w-md mx-auto">
-          Dr. Huddle is an AI assistant for informational purposes only. Information provided can be wrong. Always seek
-          professional veterinary opinions. Visit a clinic immediately if you have doubts or an emergency.
+          {t("ai.disclaimer")}
         </p>
       </div>
 

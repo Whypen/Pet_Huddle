@@ -19,7 +19,7 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
       {isVerified && (
         <div 
           className={cn(
-            "rounded-full bg-primary flex items-center justify-center",
+            "rounded-full bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706] flex items-center justify-center",
             badgeSize
           )}
           title={t("Verified User")}
@@ -33,7 +33,7 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
             "rounded-full flex items-center justify-center",
             badgeSize
           )}
-          style={{ backgroundColor: "#2563EB" }}
+          style={{ backgroundColor: "#3283FF" }}
           title={t("Has a Car")}
         >
           <Car className={cn(iconSize, "text-white")} />

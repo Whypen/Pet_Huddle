@@ -225,7 +225,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         <label className="relative cursor-pointer group">
           <div className="w-28 h-28 rounded-2xl bg-muted overflow-hidden border-4 border-primary/20 group-hover:border-primary/40 transition-colors">
             {photoPreview ? (
-              <img src={photoPreview} alt="Pet" className="w-full h-full object-cover" />
+              <img src={photoPreview} alt={t("Pet")} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <Camera className="w-8 h-8 text-muted-foreground" />

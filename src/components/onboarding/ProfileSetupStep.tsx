@@ -302,7 +302,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <label className="relative cursor-pointer group">
           <div className="w-28 h-28 rounded-full bg-muted overflow-hidden border-4 border-primary/20 group-hover:border-primary/40 transition-colors">
             {avatarPreview ? (
-              <img src={avatarPreview} alt="Avatar" className="w-full h-full object-cover" />
+              <img src={avatarPreview} alt={t("Avatar")} className="w-full h-full object-cover" />
             ) : (
               <div className="w-full h-full flex items-center justify-center">
                 <Camera className="w-8 h-8 text-muted-foreground" />

@@ -1,13 +1,14 @@
 // =====================================================
-// PREMIUM FOOTER — Royal Blue slide-up upsell strip
+// PREMIUM FOOTER — Huddle Blue slide-up upsell strip
 // Triggers: NoticeBoard 'Create', Mesh-Alert slider > 1km/12h,
 //           Chat Media click, 3rd Mesh-Alert broadcast
-// Brand: bg #2563EB, all text white — NO exceptions
+// Brand: bg #3283FF, all text white — NO exceptions
 // =====================================================
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Crown, X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PremiumFooterProps {
   isOpen: boolean;
@@ -50,6 +51,7 @@ const PREMIUM_FEATURES = [
 
 export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: PremiumFooterProps) => {
   const navigate = useNavigate();
+  const { t } = useLanguage();
   const msg = TRIGGER_MESSAGES[triggerReason] || TRIGGER_MESSAGES.default;
 
   return (
@@ -75,14 +77,14 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
           >
             <div
               className="rounded-t-2xl p-5 shadow-2xl"
-              style={{ backgroundColor: "#2563EB" }}
+              style={{ backgroundColor: "#3283FF" }}
             >
               {/* Header row: crown + title + close */}
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Crown className="w-5 h-5 text-white" />
                   <span className="text-sm font-bold text-white uppercase tracking-wide">
-                    huddle Premium
+                    {t("huddle Premium")}
                   </span>
                 </div>
                 <button
@@ -94,15 +96,15 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
               </div>
 
               {/* Contextual trigger message */}
-              <h3 className="text-lg font-bold text-white mb-1">{msg.title}</h3>
-              <p className="text-sm text-white/90 mb-3">{msg.body}</p>
+              <h3 className="text-lg font-bold text-white mb-1">{t(msg.title)}</h3>
+              <p className="text-sm text-white/90 mb-3">{t(msg.body)}</p>
 
               {/* Feature checklist — always visible */}
               <div className="flex flex-wrap gap-x-3 gap-y-1.5 mb-4">
                 {PREMIUM_FEATURES.map((feature) => (
                   <span key={feature} className="flex items-center gap-1 text-xs text-white/90">
                     <Check className="w-3 h-3 text-white flex-shrink-0" />
-                    {feature}
+                    {t(feature)}
                   </span>
                 ))}
               </div>
@@ -115,15 +117,15 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
                     onClose();
                   }}
                   className="flex-1 bg-white font-bold py-3 rounded-xl text-sm shadow-md hover:shadow-lg transition-shadow"
-                  style={{ color: "#2563EB" }}
+                  style={{ color: "#3283FF" }}
                 >
-                  Upgrade Now
+                  {t("Upgrade Now")}
                 </button>
                 <button
                   onClick={onClose}
                   className="px-4 py-3 rounded-xl text-white/80 text-sm hover:text-white transition-colors"
                 >
-                  Maybe Later
+                  {t("Maybe Later")}
                 </button>
               </div>
             </div>
