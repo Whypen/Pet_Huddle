@@ -95,11 +95,14 @@ export const useApi = () => {
 
   // AI Vet API
   const createAiVetConversation = useCallback((petId?: string) => {
+    if (!session?.user?.id) {
+      return Promise.resolve({ success: false, error: "Missing user session" });
+    }
     return fetchApi("/ai-vet/conversations", {
       method: "POST",
-      body: JSON.stringify({ petId }),
+      body: JSON.stringify({ petId, userId: session.user.id }),
     });
-  }, [fetchApi]);
+  }, [fetchApi, session?.user?.id]);
 
   const getAiVetConversations = useCallback(() => {
     return fetchApi("/ai-vet/conversations");
@@ -115,15 +118,21 @@ export const useApi = () => {
     petId?: string,
     petProfile?: { name: string; species: string; breed?: string | null; weight?: number | null; weight_unit?: string | null }
   ) => {
+    if (!session?.user?.id) {
+      return Promise.resolve({ success: false, error: "Missing user session" });
+    }
     return fetchApi("/ai-vet/chat", {
       method: "POST",
-      body: JSON.stringify({ conversationId, message, petId, petProfile }),
+      body: JSON.stringify({ conversationId, message, petId, petProfile, userId: session.user.id }),
     });
-  }, [fetchApi]);
+  }, [fetchApi, session?.user?.id]);
 
   const getAiVetUsage = useCallback(() => {
-    return fetchApi("/ai-vet/usage");
-  }, [fetchApi]);
+    if (!session?.user?.id) {
+      return Promise.resolve({ success: false, error: "Missing user session" });
+    }
+    return fetchApi(`/ai-vet/usage?userId=${session.user.id}`);
+  }, [fetchApi, session?.user?.id]);
 
   // Social API
   const getNearbyUsers = useCallback((lat: number, lng: number, radius?: number) => {

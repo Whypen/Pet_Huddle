@@ -170,7 +170,7 @@ const AIVet = () => {
         if (!isPremium && result.data.remaining !== undefined) {
           setRemaining(result.data.remaining);
         }
-      } else if (result.error === "rate_limit_exceeded") {
+      } else if (result.error === "rate_limit_exceeded" || result.error === "quota_exceeded") {
         setShowUpgradeModal(true);
         setIsPremiumOpen(true);
         toast.error(t("ai.errors.free_limit"));
