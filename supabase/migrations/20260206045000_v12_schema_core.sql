@@ -51,16 +51,24 @@ before insert on public.profiles
 for each row
 execute function public.set_profiles_user_id();
 
-alter table public.profiles
-  add constraint if not exists profiles_user_id_unique unique (user_id);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_user_id_unique') then
+    alter table public.profiles add constraint profiles_user_id_unique unique (user_id);
+  end if;
+end $$;
 
-alter table public.profiles
-  add constraint if not exists profiles_user_id_len check (char_length(user_id) = 10) not valid;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_user_id_len') then
+    alter table public.profiles add constraint profiles_user_id_len check (char_length(user_id) = 10) not valid;
+  end if;
+end $$;
 
 -- Age gate constraint (allow NOT VALID for backfill)
-alter table public.profiles
-  add constraint if not exists profiles_min_age
-  check (dob is null or dob <= (current_date - interval '16 years')) not valid;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_min_age') then
+    alter table public.profiles add constraint profiles_min_age check (dob is null or dob <= (current_date - interval '16 years')) not valid;
+  end if;
+end $$;
 
 -- Pets additions
 alter table public.pets
@@ -70,21 +78,30 @@ alter table public.pets
   add column if not exists phone_no text,
   add column if not exists next_vaccination_reminder date;
 
-alter table public.pets
-  add constraint if not exists pets_weight_lt_100 check (weight is null or weight < 100);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'pets_weight_lt_100') then
+    alter table public.pets add constraint pets_weight_lt_100 check (weight is null or weight < 100);
+  end if;
+end $$;
 
-alter table public.pets
-  add constraint if not exists pets_next_vaccination_future
-  check (next_vaccination_reminder is null or next_vaccination_reminder > current_date);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'pets_next_vaccination_future') then
+    alter table public.pets add constraint pets_next_vaccination_future
+      check (next_vaccination_reminder is null or next_vaccination_reminder > current_date);
+  end if;
+end $$;
 
 -- vaccination_dates <= current_date for each element (if array exists)
-alter table public.pets
-  add constraint if not exists pets_vaccination_dates_past
-  check (
-    vaccination_dates is null
-    or array_length(vaccination_dates, 1) is null
-    or (select bool_and(d <= current_date) from unnest(vaccination_dates) d)
-  );
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'pets_vaccination_dates_past') then
+    alter table public.pets add constraint pets_vaccination_dates_past
+      check (
+        vaccination_dates is null
+        or array_length(vaccination_dates, 1) is null
+        or (select bool_and(d <= current_date) from unnest(vaccination_dates) d)
+      );
+  end if;
+end $$;
 
 -- Threads
 create table if not exists public.threads (
@@ -169,8 +186,11 @@ alter table public.transactions
   add column if not exists escrow_status text,
   add column if not exists idempotency_key text;
 
-alter table public.transactions
-  add constraint if not exists transactions_idempotency_unique unique (idempotency_key);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'transactions_idempotency_unique') then
+    alter table public.transactions add constraint transactions_idempotency_unique unique (idempotency_key);
+  end if;
+end $$;
 
 -- PostGIS index for geo queries
 create index if not exists profiles_location_geog_gix on public.profiles using gist (location_geog);
