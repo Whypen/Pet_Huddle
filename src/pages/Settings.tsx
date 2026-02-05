@@ -546,47 +546,6 @@ const Settings = () => {
           </button>
         </section>
 
-        {/* Help & Support */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.help_support")}
-          </h3>
-          <div className="space-y-1">
-            <button
-              onClick={() => setShowBugReport(true)}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Bug className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.report_bug")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <button
-              onClick={() => navigate("/privacy")}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.privacy_policy")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <button
-              onClick={() => navigate("/terms")}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Scale className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.terms")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-          </div>
-        </section>
-
         {/* Danger Zone */}
         <section className="p-4 border-b border-border">
           <div className="space-y-2">

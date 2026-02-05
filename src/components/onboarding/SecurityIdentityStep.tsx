@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Shield, User, AlertTriangle, Check, Loader2, ChevronRight } from "lucide-react";
+import { Shield, User, AlertTriangle, Check, Loader2, ChevronRight, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -132,13 +132,16 @@ export const SecurityIdentityStep = ({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="phone">{t("Phone Number")}</Label>
+          <Label htmlFor="phone" className="flex items-center gap-2">
+            <Phone className="w-4 h-4 text-muted-foreground" />
+            {t("Phone Number")}
+          </Label>
           <PhoneInput
             international
             defaultCountry="HK"
             value={phone}
             onChange={(value) => onPhoneChange(value || '')}
-            className="phone-input-onboarding h-12 rounded-xl border border-border px-3"
+            className="phone-input-onboarding h-12 rounded-xl border border-border px-3 bg-muted"
             placeholder={t("Enter phone number")}
             disabled={verificationStatus === "verified"}
           />

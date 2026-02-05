@@ -8,7 +8,6 @@ import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { FilterSheet, FilterState, defaultFilters } from "@/components/social/FilterSheet";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ActiveFilters } from "@/components/social/ActiveFilters";
-import { NoticeBoard } from "@/components/social/NoticeBoard";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { useUpsell } from "@/hooks/useUpsell";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 
-const Social = () => {
+const Discover = () => {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const navigate = useNavigate();
@@ -37,7 +36,6 @@ const Social = () => {
   const [showStarPopup, setShowStarPopup] = useState(false);
   const [starPopupMessage, setStarPopupMessage] = useState("");
   const { upsellModal, closeUpsellModal, buyAddOn, checkStarsAvailable } = useUpsell();
-  const showThreadsOnly = true;
 
   const nearbyUsers = [
     { id: 1, name: "social.user.marcus.name", location: "social.location.central_park", isVerified: true, hasCar: false },
@@ -68,48 +66,6 @@ const Social = () => {
   const [showCard, setShowCard] = useState(true);
 
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-
-  if (showThreadsOnly) {
-    return (
-      <div className="min-h-screen bg-background pb-nav relative">
-        <GlobalHeader
-          onUpgradeClick={() => setIsPremiumOpen(true)}
-          onMenuClick={() => setIsSettingsOpen(true)}
-        />
-
-        {isUnder16 && (
-          <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-            <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
-              {t("Social features restricted for users under 16.")}
-            </div>
-          </div>
-        )}
-
-        <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
-          <header className="flex items-center justify-between px-5 pt-4 pb-4">
-            <h1 className="text-2xl font-bold">{t("Threads")}</h1>
-          </header>
-          <section className="px-5 py-2 pb-8">
-            <NoticeBoard
-              isPremium={isPremium}
-              onPremiumClick={() => setIsPremiumOpen(true)}
-            />
-          </section>
-        </div>
-
-        <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-        <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
-        <UpsellModal
-          isOpen={upsellModal.isOpen}
-          type={upsellModal.type}
-          title={upsellModal.title}
-          description={upsellModal.description}
-          onClose={closeUpsellModal}
-          onConfirm={() => buyAddOn(upsellModal.type)}
-        />
-      </div>
-    );
-  }
 
   const mainProfile = {
     id: "sarah",
@@ -364,13 +320,7 @@ const Social = () => {
         </div>
         </section>
 
-        {/* Notice Board */}
-        <section className="px-5 py-4 pb-8">
-        <NoticeBoard 
-          isPremium={isPremium} 
-          onPremiumClick={() => setIsPremiumOpen(true)} 
-        />
-        </section>
+        {/* Discovery only */}
       </div>
 
       {/* Drawers & Modals */}
@@ -486,4 +436,4 @@ const Social = () => {
   );
 };
 
-export default Social;
+export default Discover;

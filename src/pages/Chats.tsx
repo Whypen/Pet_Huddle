@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2 } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -454,6 +454,25 @@ const Chats = () => {
           </motion.button>
         </div>
       </header>
+
+      {/* Discover Section */}
+      <section className="px-5 pb-3">
+        <button
+          onClick={() => navigate("/discover")}
+          className="w-full rounded-2xl border border-border bg-card p-4 text-left shadow-card hover:bg-muted transition-colors"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">{t("Discover")}</p>
+              <p className="text-base font-semibold">{t("Find new huddlers nearby")}</p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("Extend search if run out of profiles")}
+          </p>
+        </button>
+      </section>
 
       {/* Search Bar */}
       <AnimatePresence>

@@ -321,9 +321,9 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                       </select>
                     </div>
 
-                    {/* Pet Height */}
+                    {/* Pet Size */}
                     <div className="col-span-2">
-                      <label className="text-xs text-muted-foreground mb-1 block">{t("Pet Height")}</label>
+                      <label className="text-xs text-muted-foreground mb-1 block">{t("Pet Size")}</label>
                       <select
                         value={localFilters.petHeight}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, petHeight: e.target.value }))}

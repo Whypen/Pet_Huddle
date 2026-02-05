@@ -12,6 +12,7 @@ import { OfflineBanner } from "@/components/network/OfflineBanner";
 import { BottomNav } from "@/components/layout/BottomNav";
 import Index from "./pages/Index";
 import Social from "./pages/Social";
+import Discover from "./pages/Discover";
 import Chats from "./pages/Chats";
 import ChatDialogue from "./pages/ChatDialogue";
 import AIVet from "./pages/AIVet";
@@ -109,6 +110,17 @@ const App = () => (
                       <ProtectedRoute>
                         <div className="max-w-md mx-auto min-h-screen bg-background relative">
                           <Chats />
+                          <BottomNav />
+                        </div>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/discover"
+                    element={
+                      <ProtectedRoute>
+                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                          <Discover />
                           <BottomNav />
                         </div>
                       </ProtectedRoute>

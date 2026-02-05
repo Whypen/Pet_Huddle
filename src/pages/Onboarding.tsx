@@ -34,6 +34,11 @@ const Onboarding = () => {
     }
   }, [profile, navigate]);
 
+  useEffect(() => {
+    if (profile?.legal_name && !legalName) setLegalName(profile.legal_name);
+    if (profile?.phone && !phone) setPhone(profile.phone);
+  }, [profile, legalName, phone]);
+
   const handleSecurityComplete = async () => {
     if (!user) return;
     
@@ -45,7 +50,7 @@ const Onboarding = () => {
           legal_name: legalName,
           phone: phone,
           is_verified: false,
-          verification_status: verificationStatus === "pending" ? "pending" : "not_submitted",
+          verification_status: verificationStatus === "pending" ? "pending" : null,
         })
         .eq("id", user.id);
 
@@ -71,6 +76,8 @@ const Onboarding = () => {
           gender_genre: profileData.genderGenre || null,
           dob: profileData.dob || null,
           location_name: profileData.locationName || null,
+          location_country: profileData.locationCountry || null,
+          location_district: profileData.locationDistrict || null,
           pet_experience: profileData.petExperience,
           experience_years: profileData.experienceYears,
           height: profileData.height,
@@ -213,6 +220,13 @@ const Onboarding = () => {
             >
               <ProfileSetupStep
                 userId={user.id}
+                initialData={{
+                  displayName: profile?.display_name || "",
+                  phone: profile?.phone || "",
+                  locationName: profile?.location_name || "",
+                  locationCountry: profile?.location_country || "",
+                  locationDistrict: profile?.location_district || "",
+                }}
                 onComplete={handleProfileComplete}
               />
             </motion.div>
