@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Lock, User, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, Loader2, Phone } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
+import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
@@ -36,7 +37,6 @@ const Auth = () => {
   const [signupEmail, setSignupEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [legalName, setLegalName] = useState("");
   const [signupPhone, setSignupPhone] = useState("");
   const [errors, setErrors] = useState<{
     loginEmail?: string;
@@ -44,7 +44,6 @@ const Auth = () => {
     signupEmail?: string;
     password?: string;
     displayName?: string;
-    legalName?: string;
     phone?: string;
   }>({});
 
@@ -82,7 +81,6 @@ const Auth = () => {
       signupEmail?: string;
       password?: string;
       displayName?: string;
-      legalName?: string;
       phone?: string;
     } = {};
 
@@ -106,17 +104,16 @@ const Auth = () => {
     }
 
     if (!isLogin) {
-      if (!displayName.trim() || !legalName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
+      if (!displayName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
         newErrors.displayName = !displayName.trim() ? t("error.missing_fields") : undefined;
-        newErrors.legalName = !legalName.trim() ? t("error.missing_fields") : undefined;
         newErrors.phone = !signupPhone.trim() ? t("error.missing_fields") : undefined;
         newErrors.signupEmail = !signupEmail.trim() ? t("error.missing_fields") : undefined;
       }
       if (!displayName.trim()) {
         newErrors.displayName = t("auth.errors.display_name_required");
       }
-      if (!legalName.trim()) {
-        newErrors.legalName = t("auth.errors.legal_name_required");
+      if (/\d/.test(displayName)) {
+        newErrors.displayName = t("auth.errors.display_name_required");
       }
       const phoneResult = phoneSchema.safeParse(signupPhone || "");
       if (!phoneResult.success) {
@@ -129,7 +126,7 @@ const Auth = () => {
     }
 
     setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0 && !isLogin && (!displayName.trim() || !legalName.trim() || !signupPhone.trim() || !signupEmail.trim())) {
+    if (Object.keys(newErrors).length > 0 && !isLogin && (!displayName.trim() || !signupPhone.trim() || !signupEmail.trim())) {
       toast.error(t("error.missing_fields"));
     }
     return Object.keys(newErrors).length === 0;
@@ -170,7 +167,7 @@ const Auth = () => {
           toast.success(t("auth.welcome_back"));
         }
       } else {
-        const { error } = await signUp(signupEmail, password, displayName, legalName, signupPhone);
+        const { error } = await signUp(signupEmail, password, displayName, signupPhone);
         if (error) {
           if (error.message.includes("User already registered")) {
             toast.error(t("auth.errors.account_exists"));
@@ -190,6 +187,13 @@ const Auth = () => {
     <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft flex flex-col">
       {/* Header */}
       <div className="pt-12 pb-8 text-center">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
+        >
+          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
+        </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -247,7 +251,7 @@ const Auth = () => {
                     <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                     <Input
                       type="text"
-                      placeholder={t("Display Name")}
+                      placeholder={t("Display/User Name")}
                       value={displayName}
                       onChange={(e) => {
                         setDisplayName(e.target.value);
@@ -278,33 +282,19 @@ const Auth = () => {
                   )}
 
                   <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                    <Input
-                      type="text"
-                      placeholder={t("Legal Name")}
-                      value={legalName}
-                      onChange={(e) => {
-                        setLegalName(e.target.value);
-                        setErrors((prev) => ({ ...prev, legalName: undefined }));
+                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
+                    <PhoneInput
+                      international
+                      defaultCountry="HK"
+                      value={signupPhone}
+                      onChange={(value) => {
+                        setSignupPhone(value || "");
+                        setErrors((prev) => ({ ...prev, phone: undefined }));
                       }}
-                      className={`pl-12 h-12 rounded-xl ${errors.legalName ? "border-destructive" : "border-border"}`}
+                      className={`phone-input-auth h-12 rounded-xl bg-muted border ${errors.phone ? "border-destructive" : "border-border"} pl-12`}
+                      placeholder={t("Phone (+XXX)")}
                     />
                   </div>
-                  {errors.legalName && (
-                    <p className="text-destructive text-xs mt-1 ml-1">{errors.legalName}</p>
-                  )}
-
-                  <PhoneInput
-                    international
-                    defaultCountry="HK"
-                    value={signupPhone}
-                    onChange={(value) => {
-                      setSignupPhone(value || "");
-                      setErrors((prev) => ({ ...prev, phone: undefined }));
-                    }}
-                    className={`phone-input-auth h-12 rounded-xl ${errors.phone ? "border-destructive" : "border-border"}`}
-                    placeholder={t("Phone (+XXX)")}
-                  />
                   {errors.phone && (
                     <p className="text-destructive text-xs mt-1 ml-1">{errors.phone}</p>
                   )}

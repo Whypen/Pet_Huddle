@@ -63,7 +63,6 @@ interface AuthContextType {
     email: string,
     password: string,
     displayName: string,
-    legalName: string,
     phone: string
   ) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string, phone?: string) => Promise<{ error: Error | null }>;
@@ -151,7 +150,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     email: string,
     password: string,
     displayName: string,
-    legalName: string,
     phone: string
   ) => {
     const redirectUrl = `${window.location.origin}/`;
@@ -163,7 +161,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         emailRedirectTo: redirectUrl,
         data: {
           display_name: displayName || email.split("@")[0],
-          legal_name: legalName,
           phone,
         },
       },
@@ -175,7 +172,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .upsert({
           id: data.user.id,
           display_name: displayName || email.split("@")[0],
-          legal_name: legalName,
           phone,
         });
     }
