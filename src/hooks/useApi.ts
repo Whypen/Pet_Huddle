@@ -46,6 +46,13 @@ export const useApi = () => {
       const data = await response.json();
 
       if (!response.ok) {
+        if (response.status === 429) {
+          return {
+            success: false,
+            error: "quota_exceeded",
+            message: "Quota Exceeded",
+          };
+        }
         return {
           success: false,
           error: data.error || data.message || "Request failed",

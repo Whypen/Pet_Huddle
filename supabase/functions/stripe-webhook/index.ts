@@ -144,6 +144,13 @@ serve(async (req: Request): Promise<Response> => {
     });
   } catch (error: any) {
     console.error(`[STRIPE WEBHOOK] Error: ${error.message}`);
+    const message = `${error?.message || ""}`.toLowerCase();
+    if (message.includes("quota") || message.includes("rate limit")) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Quota Exceeded" }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
     return new Response(
       JSON.stringify({ success: false, message: error.message }),
       { status: 500, headers: { "Content-Type": "application/json" } }

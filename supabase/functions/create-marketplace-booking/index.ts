@@ -189,6 +189,13 @@ serve(async (req: Request) => {
     );
   } catch (error: any) {
     console.error("Marketplace booking error:", error);
+    const message = `${error?.message || ""}`.toLowerCase();
+    if (message.includes("quota") || message.includes("rate limit")) {
+      return new Response(
+        JSON.stringify({ error: "Quota Exceeded" }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json" } }
