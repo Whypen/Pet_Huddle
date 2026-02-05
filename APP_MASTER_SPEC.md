@@ -1,187 +1,609 @@
 # APP_MASTER_SPEC — huddle
-
-## I. CORE ARCHITECTURE & SYSTEM STATE
-
-### Frontend Framework & Global State
-Huddle is built on **React + TypeScript + Vite**.  
-Routing is **strictly defined** using React Router with these exact paths:
-
-- `/` (home/dashboard)
-- `/social` (discovery/swipe)
-- `/chats` (chat list)
-- `/chat-dialogue?id=` (single chat room)
-- `/ai-vet` (AI veterinary assistant)
-- `/map` (Mapbox map view)
-- `/auth` (login/signup)
-- `/onboarding` (3-phase onboarding)
-- `/edit-profile`, `/edit-pet-profile`, `/pet-details?id=`
-- `/settings` (gear icon → account/family/privacy)
-- `/subscription`, `/premium` (monetization center)
-
-**State management** is centralized through three React Contexts:
-- `AuthContext`: handles user/session/profile, tier, monetization counters, sign in/up/out, profile refresh.
-- `LanguageContext`: manages i18n with `t(key)` wrapper.
-- `NetworkContext`: detects online/offline, queues offline actions.
-
-**Realtime** is powered by **Supabase Realtime** (Postgres Changes) for `chat_messages` and `map_alerts`.  
-Optional external WebSocket server referenced via `VITE_WS_URL` for chat presence/online status.
-
-### Backend & Database Integrity
-**Single source of truth**: Supabase PostgreSQL database with **Row Level Security (RLS)** enabled on every core table.
-
-**Edge Functions (Deno)** are the only server-side logic:
-- `create-checkout-session` → Stripe Checkout (subs + add-ons)
-- `create-portal-session` → Stripe Billing Portal
-- `create-connect-account` → Stripe Connect Express onboarding
-- `create-marketplace-booking` → destination charge + escrow
-- `stripe-webhook` → idempotent fulfillment (subscriptions, add-ons, bookings)
-- `mesh-alert` → batch FCM notifications + logs
-
-**Service Role Key** (`SUPABASE_SERVICE_ROLE_KEY`) must be used inside Edge Functions to bypass RLS for administrative operations (tier upgrades, credit increments, escrow releases).
-
-**Audit Trail**: All Stripe events must be persisted to a `transactions` table (unique `stripe_event_id`) to guarantee idempotent fulfillment and traceability.
-
-### Stripe Fintech Integration (V16 Locked)
-**Product IDs (must never be hardcoded in client — always fetched dynamically or stored server-side):**
-
-- Premium: `prod_TuEpCL4vGGwUpk`
-- Gold: `prod_TuF4blxU2yHqBV`
-- Verified Badge: `prod_TuFRNkLiOOKuHZ`
-- Star/Booster Pack: `prod_TuFPF3zjXiWiK8`
-- Emergency Alert: `prod_TuFKa021SiFK58`
-- Vet Media Upload: `prod_TuFLRWYZGrItCP`
-- Family Slot: `prod_TuFNGDVKRYPPsG`
-- 5-Media Pack: `prod_TuFQ8x2UN7yYjm`
-- 7-Day Extension: `prod_TuFIj3NC2W7TvV`
-
-**Metadata contract**: Every Checkout Session must include:
-- `metadata.user_id`
-- `metadata.type` (premium, gold, star_pack, family_slot, etc.)
-- Booking-specific: `metadata.client_id`, `metadata.sitter_id`, `metadata.service_start`, `metadata.service_end`
-
-**Pricing model**: Subscription prices are server-side only. One-time add-ons must be validated server-side against fixed product metadata.
-
-**Idempotency (required)**: Edge functions must generate Stripe idempotency keys on session creation; webhook handlers must short-circuit if `stripe_event_id` already exists in `transactions`.
-
-## II. REVENUE ENGINE & MARKETPLACE LOGIC
-
-### Nanny Booking & Escrow Management
-**Flow (must be enforced exactly):**
-1. User clicks **Green $ icon** in chat → opens `BookingModal`
-2. Modal collects: Service Date (Calendar), Start/End Time (Time Picker), Pet Selection (Dropdown from user’s pets), Location (auto-fill from profile.lat/lng)
-3. Client calls `create-marketplace-booking` Edge Function
-4. Function creates Stripe Checkout Session with **destination charge**
-5. `application_fee_amount` = **exactly 10%** of total (hardcoded server-side)
-6. Booking inserted into `marketplace_bookings` with status `pending`, `escrow_release_date`, `escrow_status`
-7. Stripe webhook (`checkout.session.completed`) marks `paid`, records transaction
-8. `release_escrow_funds()` pg_cron job runs **hourly**, releases funds 48 hours after `service_end_time` if `dispute_flag = false`
-
-**Dispute handling**: MVP button in booking detail → calls `file_booking_dispute()` RPC → sets `dispute_flag = true` → holds escrow until admin review.
-
-**Vouch system data source**: `vouch_score` increments must be derived from `marketplace_bookings` only (no manual increments from client).
-
-### Monetization Protection & Triggers
-**Trigger logic (must be enforced in UI + hooks):**
-- Stars: if `stars_count === 0` on boost click → open upsell modal
-- Mesh Alert: if `mesh_alert_count === 0` → open upsell modal
-- AI Vet / Camera: if `media_credits === 0` and tier = 'free' → slide up Premium footer
-- Family: if current family count ≥ `2 + family_slots` → open Family Slot upsell
-
-**Family sync**: After purchase, `family_slots` increments → **enable Invite UI** in `/settings` (missing today)
-
-**Protect_monetized_fields** trigger must block any client-side UPDATE to `tier`, `stars_count`, `mesh_alert_count`, `media_credits`, `family_slots`, `verified`
-
-**Credit counters (authoritative)**: UI must always refetch from `profiles` before consuming credits to prevent stale local state.
-
-## III. BRAND IDENTITY & VISUAL STANDARDS
-
-**Color Hierarchy (non-negotiable):**
-- **Huddle Blue (#3283ff)**: All primary actions, Car safety icon, Chat send buttons, Mapbox pins
-- **Huddle Green (#a6d539)**: Home dashboard icon, Huddle Wisdom icon, success states, money/nanny icon
-- **Huddle Grey (#a1a4a9)**: Secondary helper text, captions, deactivated states
-- **Gold Gradient** (linear-gradient 135deg #FBBF24 → #F59E0B → #D97706): Stars badges, Gold Tier UI, Verified badge (approved only)
-
-**Header Cleanup (mandatory purge):**
-- Remove **"pet care & social"** text (including pseudo-elements)
-- Remove pet head icon (SVG or rendered)
-- Right side must contain **only Gear (settings) icon**
-
-**Modal & Z-Index**: All modals (chat, booking, add pet, upsell) **must** use `z-[50+]` to prevent overlap by nav bars or map.
-
-**Mobile Validation**: Every screen must be tested at ≤430px width. Fix any overlapping fixed elements, inconsistent padding/margins, or broken layouts.
-
-## IV. VULNERABILITY MITIGATION (THE KILL LIST – MUST BE ELIMINATED)
-
-**Fintech & Security**
-1. **Amount tampering**: Edge functions must validate booking/add-on amounts against sitter_profiles.hourly_rate or fixed product metadata.
-2. **Webhook idempotency**: `stripe_event_id` must be unique in `transactions` table. Duplicate events return 200 but do nothing.
-3. **Chat privacy**: Update RLS on `chat_messages` → only allow SELECT/INSERT where user is member (via room_members or conversations table).
-4. **RLS bypass**: Only service_role key in Edge Functions can modify monetized fields.
-5. **Map spoofing**: Reject geolocation accuracy > 500m before saving to `profiles.last_lat/lng`.
-
-**Operational & Logic**
-6. **Vouch integrity**: `vouch_score` can only increment after booking `completed` AND dispute window passed.
-7. **I18N gaps**: Audit entire `src/` with grep for hardcoded strings; wrap all in `t()`.
-8. **Stale local storage**: Clear stale pet-management records on logout or onboarding complete.
-9. **No pagination**: Add infinite scroll or pagination to notice board and chat lists.
-10. **Mock FCM risk**: If FCM keys missing, log warning and disable mesh-alert send.
-11. **Hazard scan throttling**: enforce 3 scans per 24 hours for free tier using `scan_rate_limits` RPC; do not rely on client-only gating.
-12. **Triage cache integrity**: `triage_cache` writes must be server-authoritative to prevent spoofed hazard results.
-
-## V. DATA FLOW & SYNCHRONIZATION (CRITICAL HANDOFFS)
-
-**Webhook-to-UI Handshake**
-- After Stripe redirect, `Premium.tsx` must poll `profiles.tier` every 2s (max 30s) with loading state until webhook fulfillment is confirmed.
-
-**Family Slot Invite Flow**
-- Purchase → increment `family_slots`
-- Settings → show “Invite” button only if `family_slots > 0` and slots available
-- Invite must validate against current family count
-
-**Hazard Scan Flow**
-- Compress image → compute hash → check `triage_cache` → if miss, upload + AI classify → write cache → log rate limit in `scan_rate_limits`
-
-## VI. ZERO-DEFECT VERIFICATION CHECKLIST (MUST ALL PASS BEFORE FINAL)
-
-1. Every **Car icon**, **Chat action icon**, **primary UI trigger** is **Royal Blue (#2563EB)**
-2. **Nanny Booking Modal** contains DatePicker, TimeRangePicker, Pet Dropdown, Location auto-fill
-3. `stripe-webhook` Edge Function deployed with current **PRICE_IDS** and idempotency logic
-4. `npm run build` passes with **zero TypeScript errors** in `types/supabase.ts`
-5. **Header** has no “pet care & social” text, no pet head icon, only Gear icon on right
-6. All modals have `z-[50+]` and work on mobile (≤430px)
-7. Upsell triggers fire on **all** defined conditions (stars=0, alerts=0, media=0 free, family slots full)
-8. `protect_monetized_fields` trigger blocks client-side updates to tier/credits
-9. Every user-facing string is wrapped in `t()` (audit complete)
-10. Vouch increment only possible after completed booking + dispute window
-11. Free tier hazard scans hard-limited to **3 per 24h** (server enforced)
-12. `transactions` table contains Stripe events for all fulfilled payments
+**Version:** v1.1.1-alignment-pass  
+**Audience:** New full-stack developer rebuilding from scratch  
+**Status:** Locked (Canonical)  
+**Source of Truth Rule:** This document overrides all prior specs. Any change requires explicit version bump and `SPEC_CHANGELOG.md` entry.
 
 ---
 
-## VII. IMPLEMENTATION NOTES (CURRENT BUILD SNAPSHOT)
+## 0. Product DNA
 
-These notes describe **what is currently implemented in the local codebase**. They do **not** override the requirements above unless explicitly approved.
+huddle is a mobile-first pet-care super-app blending:
+- Family mesh safety (emergency broadcasts)
+- Nanny marketplace (escrow bookings, platform fee)
+- Social discovery (swipes, matching, realtime chat)
+- Fintech monetization (subscriptions, add-ons, webhook-driven fulfillment)
+- AI support (AI Vet + hazard scanning)
 
-- **Add Pet Flow**: The “Add Pet” entry points now route directly to `/edit-pet-profile` to keep the Add and Edit layout identical (no PetWizard flow).  
-  Evidence: `src/pages/Index.tsx` (Add Pet action → `/edit-pet-profile`).
+**Experience target:**  
+Instagram/TikTok smoothness + Balenciaga-minimal polish.  
+No dead ends, no lag spikes, no broken flows.
 
-- **Match Modal (Social)**: A match confirmation modal appears after a right swipe to confirm a “Double Wave” and prompt chat initiation.  
-  Evidence: `src/pages/Social.tsx` (match modal block).
+**Cost-priority principles:**
+- Offline-first map behavior where possible
+- Pinned/static location interactions over continuous live tracking
+- Image compression before upload
+- Rule-based social filtering (no expensive custom ML infra)
+- OpenAI API integration (no model training/fine-tuning infra)
+- Supabase serverless-first architecture
 
-- **Invite Family (Gold)**: Free users see an upsell, Gold users get an invite share-link modal with copy‑to‑clipboard.  
-  Evidence: `src/pages/Settings.tsx` (Family section button logic + invite modal).
+---
 
-- **Auth Legal Links**: Terms and Privacy are now clickable and route to `/terms` and `/privacy`, styled in Royal Blue with hover underline.  
-  Evidence: `src/pages/Auth.tsx` (footer links).
+## 1. Workspace & Output Rules
 
-- **Identity Verification**: Onboarding now submits verification as **pending review** (no self‑claim of verified), and Settings reflects “pending/approved” states.  
-  Evidence: `src/pages/Onboarding.tsx`, `src/components/onboarding/SecurityIdentityStep.tsx`, `src/pages/Settings.tsx`.
+### 1.1 Mandatory Workspace Path
+All generated files, migrations, scripts, reports, and artifacts must be saved under:  
+`/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle`
 
-- **Map Stale State Reset**: Map state clears alerts/clinics/selection on initial load to avoid stale records.  
-  Evidence: `src/pages/Map.tsx` (reset useEffect).
+### 1.2 Repository Contracts
+- Frontend: React + TypeScript + Vite
+- Backend: Supabase Cloud (Postgres + Edge Functions + Storage + Realtime)
+- No hardcoded `localhost` API/WS endpoints in source files
+- Config must be environment-driven
 
-- **Translations**: Core app translations remain in `LanguageContext` with `t()` lookup. Two JSON files (`src/i18n/en.json`, `src/i18n/zh-TW.json`) were added for future externalization but are not yet wired into `LanguageContext`.  
-  Evidence: `src/contexts/LanguageContext.tsx`, `src/i18n/en.json`, `src/i18n/zh-TW.json`.
+### 1.3 Documentation Contracts
+- Required docs:
+  - `APP_MASTER_SPEC.md` (this file)
+  - `SPEC_CHANGELOG.md`
+  - `RUNBOOK.md` (dev + prod operations)
+  - `SECURITY.md` (security controls and incident response)
+  - `TEST_PLAN.md` (UAT + E2E definitions)
 
-This document is now **locked**. No further changes unless a major product pivot occurs.  
-All future development, audits, and refactors must align 100% with this spec.
+---
+
+## 2. System Architecture
+
+## 2.1 Frontend Stack
+- React + TypeScript + Vite
+- Tailwind CSS + shadcn/ui + Framer Motion
+- React Router with v7 future flags:
+  - `v7_startTransition: true`
+  - `v7_relativeSplatPath: true`
+- Query/data layer: React Query (or equivalent) for network state, retries, stale caching
+- Form handling: schema-driven validation (Zod/Yup recommended)
+
+### 2.1.1 Vite Requirements
+- HMR enabled
+- Split chunks for large routes
+- Build target optimized for modern mobile browsers
+- Environment variables loaded from `.env`, `.env.local`, deployment env
+
+---
+
+## 2.2 Required Routes
+
+- `/` (home/dashboard)
+- `/social`
+- `/chats`
+- `/chat-dialogue?id=`
+- `/ai-vet`
+- `/map`
+- `/auth`
+- `/onboarding`
+- `/edit-profile`
+- `/edit-pet-profile`
+- `/pet-details?id=`
+- `/settings`
+- `/subscription`
+- `/premium`
+- `/manage-subscription`
+- `/verify-identity`
+- `/admin`
+- `/privacy`
+- `/terms`
+- `*` (not found)
+
+### 2.2.1 Route Access Control
+- Public: `/auth`, `/privacy`, `/terms`
+- Auth-required: all user app routes
+- Admin-only: `/admin`
+- Verified-only actions: identity-locked flows and sensitive marketplace actions (where specified)
+- Age-gated routes:
+  - `/social` and `/chats` are blocked for users under 16 using a non-interactive overlay.
+
+---
+
+## 2.3 Global State & Providers
+
+### 2.3.1 AuthContext
+Manages:
+- session + user
+- profile snapshot
+- tier and counters (`stars_count`, `mesh_alert_count`, `media_credits`, `family_slots`)
+- auth actions:
+  - email/password sign-in
+  - phone auth
+  - sign-out
+  - refresh profile
+
+### 2.3.2 LanguageContext
+- `t(key)` translation wrapper
+- Fallback order: selected locale -> `en`
+- No hardcoded user-facing strings
+
+### 2.3.3 NetworkContext
+- Online/offline detection
+- Offline action queue + replay
+- No UX-blocking false negatives for cloud mode
+
+### 2.3.4 Error Boundary
+- App-level crash fallback
+- Recovery CTA: Retry + Go Home
+- Error telemetry sent to monitoring
+
+---
+
+## 2.4 Backend Stack (Supabase)
+
+### 2.4.1 Supabase Services
+- Postgres
+- Realtime
+- Auth
+- Storage
+- Edge Functions
+- pg_cron (for scheduled releases/maintenance)
+
+### 2.4.2 Required Edge Functions
+- `create-checkout-session`
+- `create-portal-session`
+- `create-connect-account`
+- `create-marketplace-booking`
+- `stripe-webhook`
+- `mesh-alert`
+- `hazard-scan`
+
+### 2.4.3 Service Role Usage
+`SUPABASE_SERVICE_ROLE_KEY` allowed only in server-side/Edge code paths for privileged operations.
+
+---
+
+## 2.5 PWA Requirements
+
+- `manifest.json`:
+  - app name/short name
+  - icons (192, 512)
+  - `display: standalone`
+  - theme/background colors
+- Service Worker:
+  - app shell cache
+  - offline fallback route
+  - stale-while-revalidate for non-critical assets
+- Install prompts:
+  - Android + iOS guided UX
+- Must not cache sensitive auth responses insecurely
+
+---
+
+## 3. Environment & Connectivity
+
+## 3.1 Required Environment Variables
+
+### Frontend
+- `VITE_API_URL`
+- `VITE_WS_URL`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_MAPBOX_TOKEN`
+- `VITE_OPENAI_BASE_URL` (if proxied, optional)
+
+### Backend / Edge
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `OPENAI_API_KEY`
+- `FCM_SERVER_KEY` (or provider equivalent)
+
+## 3.2 Connectivity Rules
+- No hardcoded API/WS localhost strings in app source
+- Missing env var:
+  - log clear warning
+  - fail gracefully without crashing
+- Cloud mode should not show false “unreachable server” banners
+
+## 3.3 Environment Profiles & Safety
+- Development / localhost:
+  - Use `.env.local` with `ALLOW_STRIPE_FALLBACK=true` and `ALLOW_WEBHOOK_TEST_BYPASS=true` for local Stripe-less testing.
+- Production:
+  - Use `.env.production` with both flags set to `false` or unset.
+  - Never ship test bypass mode enabled.
+- Hosted platforms:
+  - Configure env vars separately per environment in Vercel/Netlify dashboards.
+- CI guardrail:
+  - CI must fail if bypass flags are enabled in production env files.
+
+---
+
+## 4. Data Model (Canonical Contracts)
+
+## 4.1 `public.profiles` Required Columns
+
+- `id`
+- `display_name`
+- `legal_name`
+- `phone`
+- `avatar_url`
+- `bio`
+- `gender_genre`
+- `orientation`
+- `dob`
+- `height`
+- `weight`
+- `weight_unit`
+- `degree`
+- `school`
+- `major`
+- `affiliation`
+- `occupation`
+- `pet_experience`
+- `experience_years`
+- `relationship_status`
+- `has_car`
+- `languages`
+- `location_name`
+- `is_verified`
+- `user_role`
+- `tier`
+- `subscription_status`
+- `stars_count`
+- `mesh_alert_count`
+- `media_credits`
+- `family_slots`
+- `onboarding_completed`
+- `owns_pets`
+- `social_availability`
+- `availability_status`
+- `show_gender`
+- `show_orientation`
+- `show_age`
+- `show_height`
+- `show_weight`
+- `show_academic`
+- `show_affiliation`
+- `show_occupation`
+- `show_bio`
+- `last_lat`
+- `last_lng`
+- `care_circle`
+- `verification_status`
+- `verification_comment`
+- `verification_document_url` (required for verification workflow)
+
+## 4.2 Verification Enums
+- `verification_status` values: `pending | approved | rejected`
+
+## 4.3 Additional Required Tables
+- `pets`
+- `chat_rooms` / `chat_room_members` / `chat_messages`
+- `marketplace_bookings`
+- `transactions` (unique `stripe_event_id`)
+- `scan_rate_limits`
+- `triage_cache`
+- `map_alerts`
+- `family_invites`
+- `notification_logs`
+- `admin_audit_logs`
+
+## 4.4 Required Constraints/Policies
+- RLS on all user data tables
+- Chat visibility only for room members
+- Unique constraint for Stripe webhook idempotency
+- Trigger/protection for monetized fields (client cannot tamper)
+
+## 4.5 Schema Alignment (Mandatory)
+- `public.profiles` must include (at minimum) the 49 canonical profile fields listed in section 4.1.
+- Explicit required profile columns for schema-cache stability:
+  - `occupation TEXT`
+  - `verification_status TEXT`
+  - `verification_comment TEXT`
+- `public.pets` must include:
+  - `neutered_spayed BOOLEAN`
+  - `clinic_name TEXT`
+  - `preferred_vet TEXT`
+  - `phone_no TEXT`
+  - `next_vaccination_reminder DATE` with validation `> CURRENT_DATE`
+- Identity verification storage bucket must exist:
+  - `identity_verification` (private by default, admin-readable).
+
+---
+
+## 5. Feature Requirements (End-to-End)
+
+## 5.1 Auth & Onboarding
+- Auth methods:
+  - email/password (`signInWithPassword`)
+  - phone auth
+- Login mode:
+  - Default to email login.
+  - Allow instant toggle to phone login (`Use phone instead` / `Use email instead`).
+- Signup identity contract:
+  - Email and phone are both mandatory on sign-up.
+  - Missing email/phone must hard-block submit and show localized popup error.
+- Mandatory signup fields:
+  - legal name
+  - display name
+  - phone (+country code format)
+- Remember-me behavior:
+  - Persist chosen login method + identifier in `localStorage`.
+  - Session persistence uses secure browser storage through Supabase auth client config.
+- Validation errors localized
+- Onboarding cannot proceed with missing required identity fields
+- DOB is mandatory and must be captured at registration/onboarding for age enforcement.
+
+## 5.2 Identity Verification + Admin Review
+Flow:
+1. User starts `/verify-identity`.
+2. Screen 1: select country + document type (`ID`, `Passport`, `Driver's License`).
+3. Screen 2: legal disclaimer for biometric processing and deletion policy; continue only after explicit consent.
+4. Screen 3: selfie capture (`I am ready`).
+5. Screen 4: ID document capture (`I am ready`).
+6. Upload artifacts to `identity_verification` bucket and set `verification_status = pending`.
+7. Screen 5: success state — `Social access granted pending review`.
+8. Admin reviews from `/admin` queue and approves/rejects with comment.
+9. Approved user gets verified state + gold badge treatment.
+10. Rejected user receives explicit rejection reason in UI.
+11. Verified users cannot edit locked identity fields:
+   - legal_name
+   - display_name
+   - phone
+
+## 5.2.1 Age Gating
+- Users under 16 are blocked from Social/Chat interactivity.
+- UI implementation requirement:
+  - Add a transparent `pointer-events-none` overlay on `/social` and `/chats`.
+  - Show notice: `Social features restricted for users under 16.`
+- Age calculation must use `dob` from `profiles`.
+
+## 5.3 Pet Management
+- Add/Edit/New screens share one canonical layout and field set
+- Breed dropdowns must be available for all species.
+- Vaccination dates must use date pickers (same style/format as DOB pickers).
+- `next_vaccination_reminder` must be a future date.
+- Vet contact split fields: `clinic_name`, `preferred_vet`, `phone_no` (country code selector + validation).
+- Ownership toggle:
+  - if `pets_profile_count > 0`: `currently_owned_pets = YES`; block `Animal Friend (No Pet)`.
+  - if `pets_profile_count == 0`: default `currently_owned_pets = NO` and preselect `Animal Friend (No Pet)`.
+- Changes persist immediately and reflect in UI
+
+## 5.4 Social + Match + Chat
+- Swipe cards with expandable profile modal
+- Match event must trigger modal and route to chat
+- Realtime messaging with optimistic UI + reconciliation
+- No dead buttons or broken handlers
+
+## 5.5 Nanny Marketplace + Escrow
+Flow:
+1. Green `$` icon opens booking modal
+2. Required fields:
+   - date
+   - start/end time
+   - pet
+   - location
+   - currency/price display
+3. Create checkout via Edge function
+4. Stripe checkout (USD default)
+5. On success webhook marks payment + logs transaction
+6. Escrow release cron enforces wait window
+7. Dispute flow pauses release and requires admin review
+
+**Fee rule:** `application_fee_amount = Math.round(total * 0.1)`
+
+## 5.6 Revenue & Upsells
+Trigger logic:
+- `stars_count === 0` -> stars upsell
+- `mesh_alert_count === 0` -> alert upsell
+- `media_credits === 0` + free tier -> media/premium upsell
+- family count >= base + slots -> family upsell
+
+Post-purchase:
+- webhook updates profile counters/tier
+- UI polls/refetches to sync state
+
+## 5.7 Invite Family
+- Free tier: upsell path
+- Gold/purchased slots: invite link/share page
+- Invite consume/limit enforced by backend
+
+## 5.8 AI Vet + Hazard Scanner
+- AI prompt includes active pet context:
+  - name, species, breed, weight
+- Hazard scan free tier limit:
+  - 3 scans per rolling 24h
+- Caching and repeated image dedupe allowed to reduce cost
+
+## 5.9 Map & Alerts
+- Pin types/colors:
+  - Lost red
+  - Stray blue
+  - Friend green
+  - Found grey
+  - Vet hospital emoji
+- Reject low-quality geolocation accuracy thresholds
+- Mesh alerts routed to nearby users and logged
+- Manual pin mode:
+  - `Pin Location` display window: 2 hours
+  - `Lost/Stray` display window: 12 hours
+
+## 5.10 Notifications
+- Event types:
+  - match
+  - message
+  - booking status
+  - dispute
+  - verification decision
+- Push + in-app notification model
+- Missing push creds must degrade safely with logging
+
+## 5.11 Settings / Navigation UX
+- Rename gear menu entry to `Settings`.
+- Side menu must include:
+  - `Report a Bug`
+  - `Privacy & Safety Policy`
+  - `Terms`
+- `Logout` must remain outside side menu groupings.
+- Family invite upsell banner must be centered, gold-themed, with copy:
+  - `Upgrade to Gold for Family Sharing.`
+  - link target: `/manage-subscription`
+
+---
+
+## 6. Brand & Visual System
+
+## 6.1 Color Tokens
+- Blue: `#3283ff`
+- Green: `#a6d539`
+- Grey: `#a1a4a9`
+- Gold gradient: restricted to premium/verified/gold contexts
+
+## 6.2 Typography
+- Brand string always lowercase: `huddle`
+- Calibri for key brand wordmark usage
+
+## 6.3 Header Rules
+- No “pet care & social” subtitle
+- No extra pet-head icon artifacts
+- Single gear icon in expected placement
+
+## 6.4 Modal Rules
+- z-index `z-[50+]` minimum
+- Critical overlays may use higher stacking (`z-[9999]`)
+
+## 6.5 Mobile Rules
+- Support <= 430px width
+- No overlap with fixed nav/footer
+- Touch target minimum 44x44px
+- Smooth native-like interactions
+
+---
+
+## 7. Security & Vulnerability Mitigation (Zero Tolerance)
+
+1. Server-side amount validation for all payments/bookings  
+2. Stripe webhook idempotency by unique event ID  
+3. RLS hardening for chat, profile, bookings, verification  
+4. Service role only in trusted server contexts  
+5. Geolocation spoofing checks  
+6. Verification self-claim blocked  
+7. Protected monetization fields trigger/policy  
+8. CSRF/XSS-safe form and rendering patterns  
+9. Audit logs for admin actions and monetization changes  
+10. Secret management and no leakage to client bundles
+11. Age assurance enforcement and account termination rights for false age/verification data
+12. Zero tolerance moderation: harassment, hate speech, sexual exploitation
+13. KYC artifact handling with least-privilege bucket policies and auditable admin actions
+
+---
+
+## 8. Performance Requirements
+
+- Route-level lazy loading for heavy pages
+- Pagination/virtualization for chat/feed
+- Image compression + responsive loading
+- Debounced map/filter/search interactions
+- Minimize bundle size and chunk warnings
+- Background retries with capped exponential backoff
+
+---
+
+## 9. Accessibility (a11y) Standards
+
+- WCAG 2.2 AA baseline
+- Keyboard navigation across interactive components
+- Focus trap and return-focus on modals
+- Proper labels/aria semantics
+- Error states readable via screen readers
+- Color contrast >= required thresholds
+
+---
+
+## 10. Testing Strategy
+
+## 10.1 Automated
+- Unit: hooks, validators, utilities
+- Integration: auth/profile/chat/bookings/webhook logic
+- E2E: critical user journeys and admin review flow
+
+## 10.2 Required Persona UAT
+- Free new user
+- Premium user
+- Gold verified user
+- Sitter
+- Matched social user
+- Admin reviewer
+
+## 10.3 Must-pass Scenarios
+- Incomplete signup blocked
+- Profile + pet persistence
+- Chat outsider denied by RLS
+- Booking + checkout handoff
+- Webhook fulfillment idempotency
+- Verification approval lock behavior
+- Upsell trigger + post-purchase unlock
+
+---
+
+## 11. CI/CD & Deployment
+
+## 11.1 CI Pipeline (GitHub Actions)
+- install
+- typecheck
+- lint
+- unit/integration tests
+- build
+- migration validation
+- optional preview deployment
+
+## 11.2 CD Pipeline
+- Protected `main` branch
+- Required status checks
+- Environment-scoped secrets
+- Rollback plan required before production push
+
+## 11.3 Observability
+- Sentry (frontend + edge)
+- Supabase logs and alerts
+- Webhook failure alerting
+- Booking/payment anomaly alerts
+
+---
+
+## 12. Operations & Maintenance
+
+## 12.1 Auto-Purge Script
+- Purge test auth users, profiles, pets, optional relational records
+- Preserve storage bucket objects when in “preserve-media” mode
+- Dry-run + execution logs required
+
+## 12.2 Data Migration Discipline
+- Every schema change via migration file
+- Never manual drift without migration backfill
+- Migration naming timestamped and descriptive
+
+---
+
+## 13. Release Verification Gate (All YES Required)
+
+1. Primary action/icon color rules compliant  
+2. Booking modal complete and functional  
+3. Webhook deployed with idempotency  
+4. Build passes with zero TS errors  
+5. Header cleanup compliant  
+6. Modals layered correctly on mobile  
+7. Upsell triggers wired for all defined conditions  
+8. Monetized field protection active  
+9. i18n coverage complete  
+10. Vouch logic constrained correctly  
+11. Invite family logic slot/tier-safe  
+12. No dead links/buttons/routes  
+13. Admin verification flow operational end-to-end
+14. Age-gating under-16 overlay active on Social/Chat
+15. Identity verification `/verify-identity` 5-step KYC flow functional
+16. Stripe checkout currency defaults to USD
+17. Map pin TTL rules enforced (2h pin / 12h lost-stray)
+
+---
+
+## Final Lock Statement
+This is the canonical rebuild guide for huddle.  
+No change is valid unless:
+1. version bump is made, and  
+2. `SPEC_CHANGELOG.md` is updated with rationale, scope, migration impact, and rollback notes.

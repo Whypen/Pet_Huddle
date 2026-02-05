@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
-import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
@@ -30,18 +29,39 @@ const Auth = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
 
-  const [identifier, setIdentifier] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPhone, setLoginPhone] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [errors, setErrors] = useState<{ identifier?: string; password?: string }>({});
+  const [legalName, setLegalName] = useState("");
+  const [signupPhone, setSignupPhone] = useState("");
+  const [errors, setErrors] = useState<{
+    loginEmail?: string;
+    loginPhone?: string;
+    signupEmail?: string;
+    password?: string;
+    displayName?: string;
+    legalName?: string;
+    phone?: string;
+  }>({});
 
   // Load remembered identifier on mount
   useEffect(() => {
-    const remembered = localStorage.getItem('rememberedIdentifier');
-    if (remembered) {
-      setIdentifier(remembered);
-      setRememberMe(true);
+    setRememberMe(localStorage.getItem("rememberMe") === "true");
+    const rememberedMethod = localStorage.getItem("rememberedLoginMethod");
+    const rememberedIdentifier = localStorage.getItem("rememberedIdentifier");
+    if (rememberedMethod === "phone" || rememberedMethod === "email") {
+      setLoginMethod(rememberedMethod);
+      if (rememberedIdentifier) {
+        if (rememberedMethod === "phone") {
+          setLoginPhone(rememberedIdentifier);
+        } else {
+          setLoginEmail(rememberedIdentifier);
+        }
+      }
     }
   }, []);
 
@@ -55,26 +75,29 @@ const Auth = () => {
     return null;
   }
 
-  const isEmail = (value: string) => value.includes('@');
-  const isPhone = (value: string) => /^\+?[0-9\s-]+$/.test(value) && !value.includes('@');
-
   const validateForm = () => {
-    const newErrors: { identifier?: string; password?: string } = {};
+    const newErrors: {
+      loginEmail?: string;
+      loginPhone?: string;
+      signupEmail?: string;
+      password?: string;
+      displayName?: string;
+      legalName?: string;
+      phone?: string;
+    } = {};
 
-    // Validate identifier (email or phone)
-    if (isEmail(identifier)) {
-      const emailResult = emailSchema.safeParse(identifier);
+    if (isLogin && loginMethod === "email") {
+      const emailResult = emailSchema.safeParse(loginEmail);
       if (!emailResult.success) {
-        newErrors.identifier = emailResult.error.errors[0].message;
+        newErrors.loginEmail = emailResult.error.errors[0].message;
       }
-    } else if (isPhone(identifier)) {
-      const cleaned = identifier.replace(/[\s-]/g, '');
-      const phoneResult = phoneSchema.safeParse(cleaned);
+    }
+
+    if (isLogin && loginMethod === "phone") {
+      const phoneResult = phoneSchema.safeParse(loginPhone || "");
       if (!phoneResult.success) {
-        newErrors.identifier = phoneResult.error.errors[0].message;
+        newErrors.loginPhone = phoneResult.error.errors[0].message;
       }
-    } else {
-      newErrors.identifier = t("auth.errors.invalid_identifier");
     }
 
     const passwordResult = passwordSchema.safeParse(password);
@@ -82,7 +105,33 @@ const Auth = () => {
       newErrors.password = passwordResult.error.errors[0].message;
     }
 
+    if (!isLogin) {
+      if (!displayName.trim() || !legalName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
+        newErrors.displayName = !displayName.trim() ? t("error.missing_fields") : undefined;
+        newErrors.legalName = !legalName.trim() ? t("error.missing_fields") : undefined;
+        newErrors.phone = !signupPhone.trim() ? t("error.missing_fields") : undefined;
+        newErrors.signupEmail = !signupEmail.trim() ? t("error.missing_fields") : undefined;
+      }
+      if (!displayName.trim()) {
+        newErrors.displayName = t("auth.errors.display_name_required");
+      }
+      if (!legalName.trim()) {
+        newErrors.legalName = t("auth.errors.legal_name_required");
+      }
+      const phoneResult = phoneSchema.safeParse(signupPhone || "");
+      if (!phoneResult.success) {
+        newErrors.phone = phoneResult.error.errors[0].message;
+      }
+      const emailResult = emailSchema.safeParse(signupEmail || "");
+      if (!emailResult.success) {
+        newErrors.signupEmail = emailResult.error.errors[0].message;
+      }
+    }
+
     setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0 && !isLogin && (!displayName.trim() || !legalName.trim() || !signupPhone.trim() || !signupEmail.trim())) {
+      toast.error(t("error.missing_fields"));
+    }
     return Object.keys(newErrors).length === 0;
   };
 
@@ -94,15 +143,12 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      const isEmailLogin = isEmail(identifier);
-      const cleanedIdentifier = isEmailLogin ? identifier : identifier.replace(/[\s-]/g, '');
-
       if (isLogin) {
-        // Attempt sign in with email or phone
+        const loginIdentifier = loginMethod === "email" ? loginEmail : loginPhone;
         const { error } = await signIn(
-          isEmailLogin ? cleanedIdentifier : '',
+          loginMethod === "email" ? loginIdentifier : "",
           password,
-          isEmailLogin ? undefined : cleanedIdentifier
+          loginMethod === "phone" ? loginIdentifier : undefined
         );
 
         if (error) {
@@ -112,23 +158,19 @@ const Auth = () => {
             toast.error(error.message);
           }
         } else {
-          // Save identifier if remember me is checked
           if (rememberMe) {
-            localStorage.setItem('rememberedIdentifier', identifier);
+            localStorage.setItem("rememberMe", "true");
+            localStorage.setItem("rememberedLoginMethod", loginMethod);
+            localStorage.setItem("rememberedIdentifier", loginMethod === "email" ? loginEmail : loginPhone);
           } else {
-            localStorage.removeItem('rememberedIdentifier');
+            localStorage.removeItem("rememberMe");
+            localStorage.removeItem("rememberedLoginMethod");
+            localStorage.removeItem("rememberedIdentifier");
           }
           toast.success(t("auth.welcome_back"));
         }
       } else {
-        // Sign up - only support email for now
-        if (!isEmailLogin) {
-          toast.error(t("auth.use_email_signup"));
-          setLoading(false);
-          return;
-        }
-
-        const { error } = await signUp(cleanedIdentifier, password, displayName);
+        const { error } = await signUp(signupEmail, password, displayName, legalName, signupPhone);
         if (error) {
           if (error.message.includes("User already registered")) {
             toast.error(t("auth.errors.account_exists"));
@@ -148,18 +190,11 @@ const Auth = () => {
     <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft flex flex-col">
       {/* Header */}
       <div className="pt-12 pb-8 text-center">
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
-        >
-          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
-        </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="text-3xl font-bold text-foreground lowercase"
+          className="text-3xl font-bold text-foreground lowercase font-huddle"
         >
           {t("app.name")}
         </motion.h1>
@@ -202,10 +237,11 @@ const Auth = () => {
             <AnimatePresence mode="wait">
               {!isLogin && (
                 <motion.div
-                  key="displayName"
+                  key="signupFields"
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
+                  className="space-y-3"
                 >
                   <div className="relative">
                     <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -213,55 +249,118 @@ const Auth = () => {
                       type="text"
                       placeholder={t("Display Name")}
                       value={displayName}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      className="pl-12 h-12 rounded-xl border-border"
+                      onChange={(e) => {
+                        setDisplayName(e.target.value);
+                        setErrors((prev) => ({ ...prev, displayName: undefined }));
+                      }}
+                      className={`pl-12 h-12 rounded-xl ${errors.displayName ? "border-destructive" : "border-border"}`}
                     />
                   </div>
+                  {errors.displayName && (
+                    <p className="text-destructive text-xs mt-1 ml-1">{errors.displayName}</p>
+                  )}
+
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
+                    <Input
+                      type="email"
+                      placeholder={t("Email")}
+                      value={signupEmail}
+                      onChange={(e) => {
+                        setSignupEmail(e.target.value);
+                        setErrors((prev) => ({ ...prev, signupEmail: undefined }));
+                      }}
+                      className={`pl-12 h-12 rounded-xl ${errors.signupEmail ? "border-destructive" : "border-border"}`}
+                    />
+                  </div>
+                  {errors.signupEmail && (
+                    <p className="text-destructive text-xs mt-1 ml-1">{errors.signupEmail}</p>
+                  )}
+
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder={t("Legal Name")}
+                      value={legalName}
+                      onChange={(e) => {
+                        setLegalName(e.target.value);
+                        setErrors((prev) => ({ ...prev, legalName: undefined }));
+                      }}
+                      className={`pl-12 h-12 rounded-xl ${errors.legalName ? "border-destructive" : "border-border"}`}
+                    />
+                  </div>
+                  {errors.legalName && (
+                    <p className="text-destructive text-xs mt-1 ml-1">{errors.legalName}</p>
+                  )}
+
+                  <PhoneInput
+                    international
+                    defaultCountry="HK"
+                    value={signupPhone}
+                    onChange={(value) => {
+                      setSignupPhone(value || "");
+                      setErrors((prev) => ({ ...prev, phone: undefined }));
+                    }}
+                    className={`phone-input-auth h-12 rounded-xl ${errors.phone ? "border-destructive" : "border-border"}`}
+                    placeholder={t("Phone (+XXX)")}
+                  />
+                  {errors.phone && (
+                    <p className="text-destructive text-xs mt-1 ml-1">{errors.phone}</p>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            <div>
-              <div className="relative">
-                {isEmail(identifier) ? (
-                  <>
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
-                    <Input
-                      type="text"
-                      placeholder={t("Email")}
-                      value={identifier}
-                      onChange={(e) => {
-                        setIdentifier(e.target.value);
-                        setErrors((prev) => ({ ...prev, identifier: undefined }));
+            {isLogin && (
+              <div>
+                <div className="relative">
+                  {loginMethod === "email" ? (
+                    <>
+                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
+                      <Input
+                        type="email"
+                        placeholder={t("Email")}
+                        value={loginEmail}
+                        onChange={(e) => {
+                          setLoginEmail(e.target.value);
+                          setErrors((prev) => ({ ...prev, loginEmail: undefined }));
+                        }}
+                        className={`pl-12 h-12 rounded-xl ${errors.loginEmail ? "border-destructive" : "border-border"}`}
+                      />
+                    </>
+                  ) : (
+                    <PhoneInput
+                      international
+                      defaultCountry="HK"
+                      value={loginPhone}
+                      onChange={(value) => {
+                        setLoginPhone(value || "");
+                        setErrors((prev) => ({ ...prev, loginPhone: undefined }));
                       }}
-                      className={`pl-12 h-12 rounded-xl ${errors.identifier ? "border-destructive" : "border-border"}`}
+                      className={`phone-input-auth h-12 rounded-xl ${errors.loginPhone ? "border-destructive" : "border-border"}`}
+                      placeholder={t("Mobile Number")}
                     />
-                  </>
-                ) : (
-                  <PhoneInput
-                    international
-                    defaultCountry="HK"
-                    value={identifier}
-                    onChange={(value) => {
-                      setIdentifier(value || '');
-                      setErrors((prev) => ({ ...prev, identifier: undefined }));
-                    }}
-                    className={`phone-input-auth h-12 rounded-xl ${errors.identifier ? "border-destructive" : "border-border"}`}
-                    placeholder={t("Mobile Number")}
-                  />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod((prev) => (prev === "email" ? "phone" : "email"));
+                    setErrors((prev) => ({ ...prev, loginEmail: undefined, loginPhone: undefined }));
+                  }}
+                  className="text-xs text-primary mt-1 ml-1 hover:underline"
+                >
+                  {loginMethod === "email" ? t("Use phone instead") : t("Use email instead")}
+                </button>
+                {errors.loginEmail && (
+                  <p className="text-destructive text-xs mt-1 ml-1">{errors.loginEmail}</p>
+                )}
+                {errors.loginPhone && (
+                  <p className="text-destructive text-xs mt-1 ml-1">{errors.loginPhone}</p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setIdentifier('')}
-                className="text-xs text-primary mt-1 ml-1 hover:underline"
-              >
-                {isEmail(identifier) ? t("auth.use_phone") : t("auth.use_email")}
-              </button>
-              {errors.identifier && (
-                <p className="text-destructive text-xs mt-1 ml-1">{errors.identifier}</p>
-              )}
-            </div>
+            )}
 
             <div>
               <div className="relative">
@@ -380,11 +479,11 @@ const Auth = () => {
             <button
               className="w-full text-center text-sm text-primary mt-4 hover:underline"
               onClick={async () => {
-                if (!identifier || !identifier.includes("@")) {
+                if (!loginEmail || !loginEmail.includes("@")) {
                   toast.error(t("auth.reset_enter_email"));
                   return;
                 }
-                const { error } = await supabase.auth.resetPasswordForEmail(identifier, {
+                const { error } = await supabase.auth.resetPasswordForEmail(loginEmail, {
                   redirectTo: `${window.location.origin}/auth`,
                 });
                 toast[error ? "error" : "success"](

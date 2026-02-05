@@ -8,7 +8,8 @@ import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
-import huddleLogo from "@/assets/huddle-logo.jpg";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface SecurityIdentityStepProps {
   legalName: string;
@@ -28,23 +29,64 @@ export const SecurityIdentityStep = ({
   onContinue,
 }: SecurityIdentityStepProps) => {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
+  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idUploading, setIdUploading] = useState(false);
 
-  const handleStartVerification = () => {
+  const handleStartVerification = async () => {
     if (!legalName.trim() || !phone.trim()) {
       toast.error(t("Please fill in your legal name and phone number first"));
       return;
     }
 
+    if (!idFile) {
+      toast.error(t("Please upload a valid ID or passport"));
+      return;
+    }
+
+    if (!user) {
+      toast.error(t("auth.errors.session_expired"));
+      return;
+    }
+
     setVerificationStatus("verifying");
-    
-    // Mock verification submission (pending review)
-    setTimeout(() => {
+    setIdUploading(true);
+
+    try {
+      const fileExt = idFile.name.split(".").pop() || "jpg";
+      const fileName = `${user.id}/id-${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("verification")
+        .upload(fileName, idFile);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("verification")
+        .getPublicUrl(fileName);
+
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({
+          verification_document_url: publicUrl,
+          verification_status: "pending",
+        })
+        .eq("id", user.id);
+
+      if (updateError) throw updateError;
+
       setVerificationStatus("pending");
       onVerificationStatusChange("pending");
       toast.success(t("Verification submitted for review"));
-    }, 2500);
+    } catch (error: any) {
+      setVerificationStatus("idle");
+      toast.error(error.message || t("Upload failed"));
+    } finally {
+      setIdUploading(false);
+    }
   };
 
   const handleSkip = () => {
@@ -63,9 +105,6 @@ export const SecurityIdentityStep = ({
     <div className="space-y-6">
       {/* Header */}
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-white shadow-elevated mb-2 overflow-hidden">
-          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
-        </div>
         <h2 className="text-2xl font-bold text-foreground">{t("Security & Identity")}</h2>
         <p className="text-muted-foreground text-sm">
           {t("Verify your identity to unlock full community features")}
@@ -126,12 +165,26 @@ export const SecurityIdentityStep = ({
             <p className="text-sm text-muted-foreground mb-4">
               {t("Submit your ID for review to earn a verified badge")}
             </p>
+            <label className="block cursor-pointer mb-4">
+              <div className="border-2 border-dashed border-border rounded-xl p-5 text-center hover:border-primary/50 transition-colors">
+                <p className="text-sm font-medium mb-1">
+                  {idFile ? idFile.name : t("Click to upload ID/Passport")}
+                </p>
+                <p className="text-xs text-muted-foreground">{t("PNG, JPG, PDF up to 10MB")}</p>
+              </div>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={(e) => setIdFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+            </label>
             <Button
               onClick={handleStartVerification}
               className="w-full h-11 rounded-xl"
-              disabled={!legalName.trim() || !phone.trim()}
+              disabled={!legalName.trim() || !phone.trim() || !idFile || idUploading}
             >
-              {t("Start Verification")}
+              {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Start Verification")}
             </Button>
           </>
         )}
