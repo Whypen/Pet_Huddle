@@ -52,3 +52,8 @@
 - **DB migration impact:** Added `20260205213000_profiles_contract_columns.sql` and `20260205220000_verification_status_enum.sql`.
 - **Rollback plan:** Revert migration files and corresponding UI changes in `src/App.tsx`, `src/pages/Social.tsx`, `src/pages/Chats.tsx`, `src/pages/EditPetProfile.tsx`.
 - **Verification steps:** `npm run build`, `node scripts/backend-wiring-v21.mjs`, and `node scripts/uat-role-pass.mjs`.
+
+## v1.2.0 (upgrade-v1.2)
+- Massive structural overhaul: UI/UX consistency, KYC/age gating, social/chats restructure, subscription algo, family invites, pet/user profile enhancements, real AI Vet via Gemini, escrow bookings, threads system, map refinements.
+- Impact: heavy Supabase (new buckets, columns, RLS, triggers), Stripe Connect/escrow, Gemini API.
+- Rollback: revert to v1.1.1 backup if UAT fails >20% scenarios.
