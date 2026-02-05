@@ -1,0 +1,118 @@
+name: CI
+# Traceability:
+# - APP_MASTER_SPEC.md#10-testing-strategy
+# - APP_MASTER_SPEC.md#11-cicd--deployment
+# - APP_MASTER_SPEC.md#13-release-verification-gate-all-yes-required
+# - TRACEABILITY_MAP.md
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (if script exists)
+        run: npm run typecheck --if-present
+
+      - name: Lint (if script exists)
+        run: npm run lint --if-present
+
+      - name: Unit/Integration tests (if script exists)
+        run: npm run test --if-present
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload build artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+          if-no-files-found: ignore
+
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build-test
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers (if needed)
+        run: npx playwright install --with-deps
+        continue-on-error: true
+
+      - name: E2E tests (if script exists)
+        run: npm run test:e2e --if-present
+
+  migration-sanity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate migration filename pattern
+        run: |
+          set -e
+          if [ -d "supabase/migrations" ]; then
+            find supabase/migrations -type f -name "*.sql" | while read -r file; do
+              base=$(basename "$file")
+              echo "$base" | grep -Eq '^[0-9]{14}_.+\.sql$'
+            done
+          fi
+
+      - name: Verify no local API hardcodes in src
+        run: |
+          set -e
+          if grep -R "http://localhost:3000\|ws://localhost:3000" -n src; then
+            echo "Found forbidden localhost hardcoded API/WS URLs in src"
+            exit 1
+          fi
+
+      - name: Guardrail: block production bypass flags
+        run: |
+          set -e
+          for f in .env.production Backend.env.md; do
+            if [ -f "$f" ]; then
+              if grep -E 'ALLOW_STRIPE_FALLBACK\s*=\s*"?true"?|ALLOW_WEBHOOK_TEST_BYPASS\s*=\s*"?true"?' "$f"; then
+                echo "Bypass flags enabled in $f. This is not allowed for protected branches."
+                exit 1
+              fi
+            fi
+          done

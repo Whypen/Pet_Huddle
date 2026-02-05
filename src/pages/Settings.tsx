@@ -27,7 +27,6 @@ import {
 } from "lucide-react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { LegalModal } from "@/components/modals/LegalModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage, Language } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -53,8 +52,6 @@ const Settings = () => {
   const { upsellModal, closeUpsellModal, buyAddOn, checkFamilySlotsAvailable } = useUpsell();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [showPrivacy, setShowPrivacy] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showBugReport, setShowBugReport] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -228,10 +225,10 @@ const Settings = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold">{t("Account Settings")}</h1>
+        <h1 className="text-xl font-bold">{t("settings.account_settings")}</h1>
       </header>
 
-      <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
+      <div className="overflow-y-auto scrollbar-visible" style={{ maxHeight: "calc(100vh - 140px)" }}>
         {/* User Header in Settings */}
         <section className="p-4 border-b border-border">
           <div className="flex items-center gap-4">
@@ -284,6 +281,14 @@ const Settings = () => {
               >
                 {isPremium ? (isGold ? t("Gold") : t("Premium")) : t("Free")}
               </span>
+              {!isVerified && (
+                <button
+                  onClick={() => navigate("/verify-identity")}
+                  className="mt-2 inline-flex items-center rounded-full bg-[#3283ff] px-3 py-1 text-xs font-semibold text-white hover:opacity-90"
+                >
+                  {t("Verify Identity")}
+                </button>
+              )}
             </div>
             <button
               onClick={() => navigate("/edit-profile")}
@@ -321,6 +326,19 @@ const Settings = () => {
               {t("Invite")}
             </Button>
           </div>
+          {!isGold && (
+            <div className="mt-3 rounded-xl border border-amber-300/60 bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-100 p-4 text-center">
+              <p className="text-sm font-semibold text-amber-800">{t("Upgrade to Gold for Family Sharing.")}</p>
+              <p className="text-xs text-amber-700 mt-1">{t("family.upsell_body")}</p>
+              <Button
+                onClick={() => navigate("/manage-subscription")}
+                size="sm"
+                className="mt-3 h-8 px-3 bg-[#3283ff] hover:bg-[#3283ff]/90"
+              >
+                {t("Upgrade to Gold")}
+              </Button>
+            </div>
+          )}
         </section>
 
         {/* Account & Security */}
@@ -368,8 +386,16 @@ const Settings = () => {
                       <Check className="w-3 h-3" /> {t("Verified")}
                     </span>
                   )}
+                  {profile?.verification_status === 'rejected' && (
+                    <span className="text-xs text-destructive">{t("Verification Rejected")}</span>
+                  )}
                   {(!profile?.verification_status || profile?.verification_status === 'not_submitted') && (
                     <span className="text-xs text-muted-foreground">{t("Upload ID/Passport")}</span>
+                  )}
+                  {profile?.verification_status === 'rejected' && profile?.verification_comment && (
+                    <span className="text-[11px] text-muted-foreground block">
+                      {t("Review Note")}: {profile.verification_comment}
+                    </span>
                   )}
                 </div>
               </div>
@@ -509,7 +535,7 @@ const Settings = () => {
         {/* Manage Subscription - moved out of settings */}
         <section className="p-4 border-b border-border">
           <button
-            onClick={() => navigate("/subscription")}
+            onClick={() => navigate("/premium")}
             className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
           >
             <div className="flex items-center gap-3">
@@ -520,8 +546,11 @@ const Settings = () => {
           </button>
         </section>
 
-        {/* Report Bug, Privacy Policy, Terms - In main menu */}
+        {/* Help & Support */}
         <section className="p-4 border-b border-border">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+            {t("settings.help_support")}
+          </h3>
           <div className="space-y-1">
             <button
               onClick={() => setShowBugReport(true)}
@@ -535,7 +564,7 @@ const Settings = () => {
             </button>
 
             <button
-              onClick={() => setShowPrivacy(true)}
+              onClick={() => navigate("/privacy")}
               className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -546,7 +575,7 @@ const Settings = () => {
             </button>
 
             <button
-              onClick={() => setShowTerms(true)}
+              onClick={() => navigate("/terms")}
               className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
             >
               <div className="flex items-center gap-3">
@@ -602,9 +631,6 @@ const Settings = () => {
         onClose={closeUpsellModal}
         onBuy={() => buyAddOn(upsellModal.type)}
       />
-      <LegalModal isOpen={showPrivacy} onClose={() => setShowPrivacy(false)} type="privacy" />
-      <LegalModal isOpen={showTerms} onClose={() => setShowTerms(false)} type="terms" />
-
       {/* Invite Modal */}
       <AnimatePresence>
         {showInviteModal && (
@@ -623,7 +649,7 @@ const Settings = () => {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
-              <p className="text-xs text-muted-foreground mb-4">
+              <p className="text-xs text-muted-foreground mb-4 font-huddle">
                 {t("Share this link to invite a family member to your huddle.")}
               </p>
               <Input

@@ -351,6 +351,7 @@ export type Database = {
         Row: {
           bio: string | null
           breed: string | null
+          clinic_name: string | null
           created_at: string | null
           dob: string | null
           gender: string | null
@@ -360,6 +361,8 @@ export type Database = {
           medications: Json | null
           microchip_id: string | null
           name: string
+          neutered_spayed: boolean | null
+          next_vaccination_reminder: string | null
           owner_id: string
           photo_url: string | null
           routine: string | null
@@ -367,6 +370,8 @@ export type Database = {
           temperament: string[] | null
           updated_at: string | null
           vaccinations: Json | null
+          preferred_vet: string | null
+          phone_no: string | null
           vet_contact: string | null
           weight: number | null
           weight_unit: string | null
@@ -374,6 +379,7 @@ export type Database = {
         Insert: {
           bio?: string | null
           breed?: string | null
+          clinic_name?: string | null
           created_at?: string | null
           dob?: string | null
           gender?: string | null
@@ -383,6 +389,8 @@ export type Database = {
           medications?: Json | null
           microchip_id?: string | null
           name: string
+          neutered_spayed?: boolean | null
+          next_vaccination_reminder?: string | null
           owner_id: string
           photo_url?: string | null
           routine?: string | null
@@ -390,6 +398,8 @@ export type Database = {
           temperament?: string[] | null
           updated_at?: string | null
           vaccinations?: Json | null
+          preferred_vet?: string | null
+          phone_no?: string | null
           vet_contact?: string | null
           weight?: number | null
           weight_unit?: string | null
@@ -397,6 +407,7 @@ export type Database = {
         Update: {
           bio?: string | null
           breed?: string | null
+          clinic_name?: string | null
           created_at?: string | null
           dob?: string | null
           gender?: string | null
@@ -406,6 +417,8 @@ export type Database = {
           medications?: Json | null
           microchip_id?: string | null
           name?: string
+          neutered_spayed?: boolean | null
+          next_vaccination_reminder?: string | null
           owner_id?: string
           photo_url?: string | null
           routine?: string | null
@@ -413,6 +426,8 @@ export type Database = {
           temperament?: string[] | null
           updated_at?: string | null
           vaccinations?: Json | null
+          preferred_vet?: string | null
+          phone_no?: string | null
           vet_contact?: string | null
           weight?: number | null
           weight_unit?: string | null
@@ -451,6 +466,9 @@ export type Database = {
           id: string
           is_verified: boolean | null
           verified: boolean | null
+          verification_status: string | null
+          verification_comment: string | null
+          verification_document_url: string | null
           languages: string[] | null
           legal_name: string | null
           location_name: string | null
@@ -502,6 +520,9 @@ export type Database = {
           id: string
           is_verified?: boolean | null
           verified?: boolean | null
+          verification_status?: string | null
+          verification_comment?: string | null
+          verification_document_url?: string | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
@@ -553,6 +574,9 @@ export type Database = {
           id?: string
           is_verified?: boolean | null
           verified?: boolean | null
+          verification_status?: string | null
+          verification_comment?: string | null
+          verification_document_url?: string | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null

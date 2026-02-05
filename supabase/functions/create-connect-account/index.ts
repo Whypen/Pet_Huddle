@@ -15,6 +15,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const allowStripeFallback = Deno.env.get("ALLOW_STRIPE_FALLBACK") === "true";
 
 serve(async (req: Request) => {
   try {
@@ -36,42 +37,62 @@ serve(async (req: Request) => {
 
     let accountId = existingSitter?.stripe_connect_account_id;
 
-    // Create Connect account if doesn't exist
-    if (!accountId) {
-      const account = await stripe.accounts.create({
-        type: "express",
-        email,
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-        metadata: { user_id: userId },
+    try {
+      // Create Connect account if doesn't exist
+      if (!accountId) {
+        const account = await stripe.accounts.create({
+          type: "express",
+          email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+          metadata: { user_id: userId },
+        });
+
+        accountId = account.id;
+
+        // Create sitter profile in database
+        await supabase.from("sitter_profiles").insert({
+          user_id: userId,
+          stripe_connect_account_id: accountId,
+          onboarding_complete: false,
+          payouts_enabled: false,
+          charges_enabled: false,
+        });
+      }
+
+      // Create account link for onboarding
+      const accountLink = await stripe.accountLinks.create({
+        account: accountId,
+        refresh_url: refreshUrl || `${Deno.env.get("PUBLIC_URL")}/become-sitter`,
+        return_url: returnUrl || `${Deno.env.get("PUBLIC_URL")}/become-sitter?success=true`,
+        type: "account_onboarding",
       });
 
-      accountId = account.id;
+      return new Response(
+        JSON.stringify({ url: accountLink.url, accountId }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    } catch (stripeError: any) {
+      if (!allowStripeFallback) throw stripeError;
 
-      // Create sitter profile in database
-      await supabase.from("sitter_profiles").insert({
+      // Localhost/testing fallback while Stripe live activation is pending.
+      const fallbackAccountId = accountId || `acct_local_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
+      await supabase.from("sitter_profiles").upsert({
         user_id: userId,
-        stripe_connect_account_id: accountId,
-        onboarding_complete: false,
-        payouts_enabled: false,
-        charges_enabled: false,
+        stripe_connect_account_id: fallbackAccountId,
+        onboarding_complete: true,
+        payouts_enabled: true,
+        charges_enabled: true,
       });
+
+      const fallbackUrl = `${returnUrl || Deno.env.get("PUBLIC_URL") || "http://localhost:8080"}/become-sitter?mock_connect=true`;
+      return new Response(
+        JSON.stringify({ url: fallbackUrl, accountId: fallbackAccountId, mock: true, reason: stripeError.message }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
     }
-
-    // Create account link for onboarding
-    const accountLink = await stripe.accountLinks.create({
-      account: accountId,
-      refresh_url: refreshUrl || `${Deno.env.get("PUBLIC_URL")}/become-sitter`,
-      return_url: returnUrl || `${Deno.env.get("PUBLIC_URL")}/become-sitter?success=true`,
-      type: "account_onboarding",
-    });
-
-    return new Response(
-      JSON.stringify({ url: accountLink.url, accountId }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
   } catch (error: any) {
     console.error("Connect account error:", error);
     return new Response(

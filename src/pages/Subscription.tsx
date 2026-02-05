@@ -125,7 +125,7 @@ const Subscription = () => {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
+            <h2 className="text-2xl font-bold text-white mb-1 font-huddle">{t("huddle Premium")}</h2>
             <p className="text-white/90 text-sm">{t("Unlock all features")}</p>
           </div>
         </div>

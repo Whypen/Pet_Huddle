@@ -27,6 +27,8 @@ interface Pet {
   species: string;
   breed: string | null;
   dob: string | null;
+  weight: number | null;
+  weight_unit: string | null;
 }
 
 const AIVet = () => {
@@ -79,7 +81,7 @@ const AIVet = () => {
     try {
       const { data, error } = await supabase
         .from("pets")
-        .select("id, name, species, breed, dob")
+        .select("id, name, species, breed, dob, weight, weight_unit")
         .eq("owner_id", user!.id)
         .eq("is_active", true);
 
@@ -144,7 +146,16 @@ const AIVet = () => {
       }
 
       // Send message to backend
-      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id);
+      const petProfile = selectedPet
+        ? {
+            name: selectedPet.name,
+            species: selectedPet.species,
+            breed: selectedPet.breed,
+            weight: selectedPet.weight,
+            weight_unit: selectedPet.weight_unit,
+          }
+        : undefined;
+      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile);
 
       if (result.success && result.data) {
         const aiMessage: Message = {
@@ -209,7 +220,7 @@ const AIVet = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pb-nav">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
@@ -280,7 +291,7 @@ const AIVet = () => {
       </div>
 
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4" style={{ paddingBottom: "180px" }}>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-[calc(var(--nav-height)+120px)]">
         {messages.map((message, index) => (
           <motion.div
             key={message.id}

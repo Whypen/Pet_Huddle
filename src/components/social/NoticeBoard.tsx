@@ -343,7 +343,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                           </span>
                           {notice.author?.is_verified && (
                             <span className="w-4 h-4 rounded-full bg-warning flex items-center justify-center flex-shrink-0">
-                              <span className="text-[10px]">✓</span>
+                              <span className="text-[10px]">{t("✓")}</span>
                             </span>
                           )}
                           <span className={cn(

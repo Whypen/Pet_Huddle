@@ -71,7 +71,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
                 >
                   <Crown className="w-10 h-10 text-white" />
                 </motion.div>
-                <h2 className="text-2xl font-bold text-white mb-1">{t("Huddle Premium")}</h2>
+                <h2 className="text-2xl font-bold text-white mb-1 font-huddle">{t("Huddle Premium")}</h2>
                 <p className="text-white/80 text-sm">{t("Unlock the full experience")}</p>
               </div>
             </div>
@@ -98,7 +98,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
               {/* Pricing */}
               <div className="text-center mb-5">
                 <div className="flex items-baseline justify-center gap-1">
-                  <span className="text-3xl font-bold">$9.99</span>
+              <span className="text-3xl font-bold">{t("$9.99")}</span>
                   <span className="text-muted-foreground">{t("/month")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{t("Cancel anytime")}</p>

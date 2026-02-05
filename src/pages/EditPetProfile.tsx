@@ -14,6 +14,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 
 // Species options matching database
 const speciesOptions = [
@@ -26,6 +28,29 @@ const speciesOptions = [
   { id: "farm_animal", label: "Farm Animals" },
   { id: "others", label: "Others" },
 ];
+
+const catBreeds = [
+  "Siamese",
+  "Persian",
+  "Maine Coon",
+  "Ragdoll",
+  "Bengal",
+  "British Shorthair",
+  "Sphynx",
+  "Scottish Fold",
+  "Abyssinian",
+  "Other",
+];
+
+const speciesBreeds: Record<string, string[]> = {
+  dog: ["Labrador Retriever", "Golden Retriever", "French Bulldog", "Poodle", "Corgi", "Shiba Inu", "Other"],
+  cat: catBreeds,
+  bird: ["Budgie", "Cockatiel", "Canary", "Parrot", "Other"],
+  fish: ["Betta", "Goldfish", "Guppy", "Tetra", "Other"],
+  reptile: ["Gecko", "Bearded Dragon", "Turtle", "Snake", "Other"],
+  small_mammal: ["Hamster", "Rabbit", "Guinea Pig", "Ferret", "Other"],
+  farm_animal: ["Goat", "Pig", "Chicken", "Duck", "Other"],
+};
 
 const genderOptions = ["Male", "Female"];
 
@@ -54,7 +79,9 @@ const EditPetProfile = () => {
     weight_unit: "kg",
     bio: "",
     routine: "",
-    vet_contact: "",
+    clinic_name: "",
+    preferred_vet: "",
+    phone_no: "",
     microchip_id: "",
     temperament: [] as string[],
     vaccinations: [] as { name: string; date: string }[],
@@ -66,7 +93,6 @@ const EditPetProfile = () => {
   });
 
   const [vaccinationInput, setVaccinationInput] = useState({ name: "", date: "" });
-  const [nextVaccinationReminder, setNextVaccinationReminder] = useState("");
   const [medicationInput, setMedicationInput] = useState({ name: "", dosage: "", frequency: "" });
 
   useEffect(() => {
@@ -101,7 +127,9 @@ const EditPetProfile = () => {
           weight_unit: data.weight_unit || "kg",
           bio: data.bio || "",
           routine: data.routine || "",
-          vet_contact: data.vet_contact || "",
+          clinic_name: data.clinic_name || "",
+          preferred_vet: data.preferred_vet || "",
+          phone_no: data.phone_no || "",
           microchip_id: data.microchip_id || "",
           temperament: data.temperament || [],
           vaccinations: Array.isArray(data.vaccinations) ? data.vaccinations : [],
@@ -111,7 +139,6 @@ const EditPetProfile = () => {
           is_active: data.is_active ?? true,
           is_public: data.is_public ?? true,
         });
-        setNextVaccinationReminder(data.next_vaccination_reminder || "");
         if (data.photo_url) {
           setPhotoPreview(data.photo_url);
         }
@@ -197,6 +224,16 @@ const EditPetProfile = () => {
       return;
     }
 
+    if (formData.next_vaccination_reminder) {
+      const reminderDate = new Date(formData.next_vaccination_reminder);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (reminderDate <= today) {
+        toast.error(t("Next vaccination reminder must be a future date"));
+        return;
+      }
+    }
+
     setSaving(true);
 
     try {
@@ -231,7 +268,13 @@ const EditPetProfile = () => {
         weight_unit: formData.weight_unit,
         bio: formData.bio || null,
         routine: formData.routine || null,
-        vet_contact: formData.vet_contact || null,
+        clinic_name: formData.clinic_name || null,
+        preferred_vet: formData.preferred_vet || null,
+        phone_no: formData.phone_no || null,
+        vet_contact:
+          [formData.clinic_name, formData.preferred_vet, formData.phone_no]
+            .filter(Boolean)
+            .join(" | ") || null,
         microchip_id: formData.microchip_id || null,
         temperament: formData.temperament.length > 0 ? formData.temperament : null,
         vaccinations: formData.vaccinations.length > 0 ? formData.vaccinations : null,
@@ -335,7 +378,11 @@ const EditPetProfile = () => {
               {speciesOptions.map((species) => (
                 <button
                   key={species.id}
-                  onClick={() => setFormData(prev => ({ ...prev, species: species.id }))}
+                  onClick={() => setFormData(prev => ({
+                    ...prev,
+                    species: species.id,
+                    breed: species.id === "others" ? "" : prev.breed,
+                  }))}
                   className={cn(
                     "px-4 py-2 rounded-full text-sm font-medium transition-all",
                     formData.species === species.id
@@ -358,15 +405,23 @@ const EditPetProfile = () => {
           </div>
 
           {/* Breed */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
-            <Input
-              value={formData.breed}
-              onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
-              placeholder={t("Breed")}
-              className="h-12 rounded-xl"
-            />
-          </div>
+          {formData.species !== "others" && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
+              <select
+                value={formData.breed}
+                onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
+                className="h-12 w-full rounded-xl border border-border bg-background px-3 text-sm"
+              >
+                <option value="">{t("Select breed")}</option>
+                {(speciesBreeds[formData.species] || ["Other"]).map((breed) => (
+                  <option key={breed} value={breed}>
+                    {t(breed)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Gender & Neutered/Spayed */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -436,10 +491,10 @@ const EditPetProfile = () => {
             </div>
           </div>
 
-          {/* Vaccinations - MM/YYYY Format */}
+          {/* Vaccinations */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
             <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
-            <p className="text-xs text-muted-foreground">{t("Enter vaccination dates in MM-YYYY format")}</p>
+            <p className="text-xs text-muted-foreground">{t("Use exact vaccination dates for better reminders")}</p>
             {formData.vaccinations.map((vax, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -463,10 +518,10 @@ const EditPetProfile = () => {
                 ))}
               </select>
               <Input
-                type="month"
+                type="date"
                 value={vaccinationInput.date}
                 onChange={(e) => setVaccinationInput(prev => ({ ...prev, date: e.target.value }))}
-                placeholder={t("MM-YYYY")}
+                placeholder={t("Select date")}
                 className="h-10 rounded-lg w-36"
               />
               <Button onClick={addVaccination} size="sm" variant="secondary">
@@ -551,13 +606,27 @@ const EditPetProfile = () => {
           </div>
 
           {/* Vet Contact */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">{t("Vet Contact")}</label>
+          <div className="space-y-3">
+            <label className="text-sm font-medium block">{t("Vet Contact")}</label>
             <Input
-              value={formData.vet_contact}
-              onChange={(e) => setFormData(prev => ({ ...prev, vet_contact: e.target.value }))}
-              placeholder={t("Vet name / phone")}
+              value={formData.clinic_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
+              placeholder={t("Clinic name")}
               className="h-12 rounded-xl"
+            />
+            <Input
+              value={formData.preferred_vet}
+              onChange={(e) => setFormData(prev => ({ ...prev, preferred_vet: e.target.value }))}
+              placeholder={t("Preferred vet")}
+              className="h-12 rounded-xl"
+            />
+            <PhoneInput
+              international
+              defaultCountry="HK"
+              value={formData.phone_no}
+              onChange={(value) => setFormData(prev => ({ ...prev, phone_no: value || "" }))}
+              className="phone-input-auth h-12 rounded-xl border border-border px-3"
+              placeholder={t("Clinic phone (+XXX)")}
             />
           </div>
 

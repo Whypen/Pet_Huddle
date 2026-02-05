@@ -223,7 +223,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
       
       if (error) throw error;
       
-      toast.success(`${formData.name} ${t("has been added to your Huddle! 🎉")}`);
+      toast.success(`${formData.name} ${t("has been added to your huddle! 🎉")}`);
       onComplete();
       onClose();
     } catch (error: any) {

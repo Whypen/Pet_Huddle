@@ -16,8 +16,12 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 
-type MainTab = "Chats" | "Groups";
-const filterTabs = ["Nannies", "Playdates", "Animal Lovers"];
+type MainTab = "chats" | "groups";
+const filterTabs = [
+  { id: "nannies", labelKey: "social.nannies" },
+  { id: "playdates", labelKey: "social.playdates" },
+  { id: "animal-lovers", labelKey: "social.animal_lovers" },
+];
 
 interface ChatUser {
   id: string;
@@ -172,8 +176,8 @@ const Chats = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("Chats");
-  const [activeFilterTab, setActiveFilterTab] = useState("Nannies");
+  const [mainTab, setMainTab] = useState<MainTab>("chats");
+  const [activeFilterTab, setActiveFilterTab] = useState("nannies");
   const [chats, setChats] = useState<ChatUser[]>(mockChats);
   const [groups, setGroups] = useState<Group[]>(mockGroups);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
@@ -195,12 +199,21 @@ const Chats = () => {
   const [sitterHourlyRate, setSitterHourlyRate] = useState<number | null>(null);
 
   const isVerified = profile?.is_verified;
+  const userAge = profile?.dob
+    ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+    : null;
+  const isUnder16 = userAge !== null && userAge < 16;
 
   // Fetch user pets when the nanny booking modal opens
   useEffect(() => {
     if (nannyBookingOpen && profile?.id) {
       supabase.from("pets").select("id, name, species").eq("owner_id", profile.id).then(({ data }) => {
-        if (data) setUserPets(data);
+        if (data) {
+          setUserPets(data);
+          if (data.length > 0) {
+            setSelectedPet(data[0].id);
+          }
+        }
       });
       if (selectedNanny?.id) {
         supabase
@@ -215,7 +228,6 @@ const Chats = () => {
       setServiceDate("");
       setStartTime("09:00");
       setEndTime("17:00");
-      setSelectedPet("");
       if (sitterHourlyRate) {
         const start = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${startTime}`);
         const end = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${endTime}`);
@@ -286,11 +298,10 @@ const Chats = () => {
 
   // Filter chats based on active tab and search
   const filteredChats = chats.filter(chat => {
-    const tabKey = activeFilterTab.toLowerCase().replace(" ", "-");
     const matchesTab =
-      tabKey === "nannies" ? chat.type === "nannies" :
-      tabKey === "playdates" ? chat.type === "playdates" :
-      tabKey === "animal-lovers" ? chat.type === "animal-lovers" : true;
+      activeFilterTab === "nannies" ? chat.type === "nannies" :
+      activeFilterTab === "playdates" ? chat.type === "playdates" :
+      activeFilterTab === "animal-lovers" ? chat.type === "animal-lovers" : true;
 
     const matchesSearch = !searchQuery ||
       chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -393,18 +404,28 @@ const Chats = () => {
         window.location.href = data.url;
       }
     } catch (err: any) {
-      toast.error(err.message || "Failed to initiate booking payment");
+      toast.error(err.message || t("booking.payment_failed"));
     } finally {
       setBookingProcessing(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
+    <div className="min-h-screen bg-background pb-nav relative">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
+
+      {isUnder16 && (
+        <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
+          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
+            {t("Social features restricted for users under 16.")}
+          </div>
+        </div>
+      )}
+
+      <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2">
@@ -468,46 +489,45 @@ const Chats = () => {
       {/* Main Tabs - Chats / Groups */}
       <section className="px-5 py-2">
         <div className="flex gap-2 p-1 bg-muted rounded-xl">
-          {(["Chats", "Groups"] as MainTab[]).map((tab) => (
+          {[
+            { id: "chats" as MainTab, labelKey: "chats.tab.chats", icon: MessageSquare },
+            { id: "groups" as MainTab, labelKey: "chats.tab.groups", icon: Users },
+          ].map((tab) => (
             <button
-              key={tab}
-              onClick={() => setMainTab(tab)}
+              key={tab.id}
+              onClick={() => setMainTab(tab.id)}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all",
-                mainTab === tab
+                mainTab === tab.id
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {tab === "Chats" ? (
-                <MessageSquare className="w-4 h-4" />
-              ) : (
-                <Users className="w-4 h-4" />
-              )}
-              {tab}
+              <tab.icon className="w-4 h-4" />
+              {t(tab.labelKey)}
             </button>
           ))}
         </div>
       </section>
 
       {/* Chats View */}
-      {mainTab === "Chats" && (
+      {mainTab === "chats" && (
         <>
           {/* Filter Tabs */}
           <section className="px-5 py-2">
             <div className="flex gap-2 overflow-x-auto scrollbar-hide">
               {filterTabs.map((tab) => (
                 <button
-                  key={tab}
-                  onClick={() => setActiveFilterTab(tab)}
+                  key={tab.id}
+                  onClick={() => setActiveFilterTab(tab.id)}
                   className={cn(
                     "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
-                    activeFilterTab === tab
+                    activeFilterTab === tab.id
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   )}
                 >
-                  {tab}
+                  {t(tab.labelKey)}
                 </button>
               ))}
             </div>
@@ -515,7 +535,9 @@ const Chats = () => {
 
           {/* New Huddles */}
           <section className="px-5 py-4">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("New Huddles")}</h3>
+            <h3 className="text-sm font-semibold text-muted-foreground mb-3 font-huddle">
+              {t("chats.new_huddles")}
+            </h3>
             <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
               {newHuddles.map((huddle, index) => (
                 <motion.button
@@ -543,7 +565,7 @@ const Chats = () => {
                       />
                     </div>
                   </div>
-                  <span className="text-xs font-medium">{huddle.name}</span>
+                  <span className="text-xs font-medium">{t(huddle.name)}</span>
                 </motion.button>
               ))}
             </div>
@@ -584,10 +606,10 @@ const Chats = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-semibold">{chat.name}</h4>
-                        <span className="text-xs text-muted-foreground">{chat.time}</span>
+                        <h4 className="font-semibold">{t(chat.name)}</h4>
+                        <span className="text-xs text-muted-foreground">{t(chat.time)}</span>
                       </div>
-                      <p className="text-sm text-muted-foreground truncate mt-1">{chat.lastMessage}</p>
+                      <p className="text-sm text-muted-foreground truncate mt-1">{t(chat.lastMessage)}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {/* Blue $ icon for nanny-type chats — opens booking modal */}
@@ -617,7 +639,7 @@ const Chats = () => {
                   className="text-sm text-primary hover:underline"
                   onClick={() => setChatVisibleCount((c) => c + 10)}
                 >
-                  Load more
+                  {t("Load more")}
                 </button>
               </div>
             )}
@@ -626,7 +648,7 @@ const Chats = () => {
       )}
 
       {/* Groups View */}
-      {mainTab === "Groups" && (
+      {mainTab === "groups" && (
         <section className="px-5 pt-2">
           <div className="space-y-2">
             {filteredGroups.length === 0 ? (
@@ -634,7 +656,7 @@ const Chats = () => {
                 <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
                 <p className="text-muted-foreground">{t("No groups found")}</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {isVerified ? "Create a group to start chatting!" : "Get verified to create groups"}
+                  {isVerified ? t("chats.create_group_prompt") : t("chats.verify_to_create")}
                 </p>
               </div>
             ) : (
@@ -655,15 +677,15 @@ const Chats = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <h4 className="font-semibold">{group.name}</h4>
+                        <h4 className="font-semibold">{t(group.name)}</h4>
                         <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                           {group.memberCount} members
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">{group.time}</span>
+                      <span className="text-xs text-muted-foreground">{t(group.time)}</span>
                     </div>
                     <p className="text-sm text-muted-foreground truncate mt-1">
-                      <span className="font-medium">{group.lastMessageSender}:</span> {group.lastMessage}
+                      <span className="font-medium">{t(group.lastMessageSender)}:</span> {t(group.lastMessage)}
                     </p>
                   </div>
 
@@ -682,7 +704,7 @@ const Chats = () => {
                 className="text-sm text-primary hover:underline"
                 onClick={() => setGroupVisibleCount((c) => c + 10)}
               >
-                Load more
+                {t("Load more")}
               </button>
             </div>
           )}
@@ -692,7 +714,7 @@ const Chats = () => {
       {/* Connection Status */}
       {!isConnected && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-500/90 text-yellow-900 text-xs font-medium rounded-full shadow-lg">
-          Connecting to chat server...
+          {t("chats.connecting")}
         </div>
       )}
 
@@ -703,6 +725,7 @@ const Chats = () => {
         onClose={() => setIsCreateGroupOpen(false)}
         onCreateGroup={handleGroupCreated}
       />
+      </div>
 
       {/* Nanny Booking Modal */}
       <AnimatePresence>
@@ -805,7 +828,7 @@ const Chats = () => {
               <div className="mb-4">
                 <label className="text-sm font-medium mb-2 block">{t("booking.amount")}</label>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold" style={{ color: "#A6D539" }}>$</span>
+              <span className="text-lg font-bold" style={{ color: "#A6D539" }}>{t("$")}</span>
                   <input
                     type="number"
                     value={bookingAmount}

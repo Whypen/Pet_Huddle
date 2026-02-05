@@ -95,7 +95,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
             className="h-8 w-8 object-cover rounded-lg"
           />
           <div className="hidden sm:flex flex-col">
-            <span className="text-base font-bold lowercase leading-tight">{t("huddle")}</span>
+            <span className="text-base font-bold lowercase leading-tight font-huddle">{t("huddle")}</span>
           </div>
         </button>
 

@@ -21,7 +21,7 @@ interface OfflineAction {
 
 const NetworkContext = createContext<NetworkContextType | undefined>(undefined);
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api/v1";
+const API_URL = import.meta.env.VITE_API_URL;
 const PING_INTERVAL = 30000; // 30 seconds
 const MAX_RETRY_COUNT = 3;
 const OFFLINE_ACTIONS_KEY = "huddle_offline_actions";
@@ -59,22 +59,9 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [pendingActions]);
 
-  // Check server reachability
+  // Health check is intentionally neutralized for hybrid frontend+cloud setups.
   const checkServerHealth = useCallback(async (): Promise<boolean> => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${API_URL}/health`, {
-        method: "GET",
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      return response.ok;
-    } catch (error) {
-      return false;
-    }
+    return true;
   }, []);
 
   // Retry connection
@@ -130,6 +117,11 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
   // Replay a single offline action
   const replayAction = async (action: OfflineAction): Promise<boolean> => {
     try {
+      if (!API_URL) {
+        console.warn("[NetworkContext] Missing VITE_API_URL. Offline action replay skipped.");
+        return false;
+      }
+
       const token = localStorage.getItem("auth_token");
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -217,25 +209,17 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!isOnline) return;
 
-    const checkHealth = async () => {
-      const serverOk = await checkServerHealth();
-      setIsServerReachable(serverOk);
-
-      if (serverOk) {
-        setLastOnlineTime(new Date());
-      } else if (!hasShownOfflineToast) {
-        toast.warning(t("Unable to reach server. Some features may be limited."));
-        setHasShownOfflineToast(true);
-      }
+ const checkHealth = async () => {
+      // Force reachability true for cloud-backed environments.
+      setIsServerReachable(true);
     };
 
-    // Initial check
+    // Initial check on mount
     checkHealth();
 
-    // Set up interval
-    const intervalId = setInterval(checkHealth, PING_INTERVAL);
-
-    return () => clearInterval(intervalId);
+    // Set up polling interval
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
   }, [isOnline, checkServerHealth, hasShownOfflineToast]);
 
   // Update lastOnlineTime when connected

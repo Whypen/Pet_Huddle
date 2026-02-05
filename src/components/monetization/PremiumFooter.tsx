@@ -84,7 +84,7 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
                 <div className="flex items-center gap-2">
                   <Crown className="w-5 h-5 text-white" />
                   <span className="text-sm font-bold text-white uppercase tracking-wide">
-                    {t("huddle Premium")}
+                    <span className="font-huddle">{t("huddle Premium")}</span>
                   </span>
                 </div>
                 <button
@@ -96,8 +96,8 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
               </div>
 
               {/* Contextual trigger message */}
-              <h3 className="text-lg font-bold text-white mb-1">{t(msg.title)}</h3>
-              <p className="text-sm text-white/90 mb-3">{t(msg.body)}</p>
+              <h3 className="text-lg font-bold text-white mb-1 font-huddle">{t(msg.title)}</h3>
+              <p className="text-sm text-white/90 mb-3 font-huddle">{t(msg.body)}</p>
 
               {/* Feature checklist — always visible */}
               <div className="flex flex-wrap gap-x-3 gap-y-1.5 mb-4">

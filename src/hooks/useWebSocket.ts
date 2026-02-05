@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
+console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
+
 interface Message {
   id: string;
   chatId: string;
@@ -34,6 +36,7 @@ interface UseWebSocketReturn {
 
 export const useWebSocket = (): UseWebSocketReturn => {
   const { session } = useAuth();
+  const wsUrl = import.meta.env.VITE_WS_URL;
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const messageCallbackRef = useRef<((message: Message) => void) | null>(null);
@@ -43,8 +46,10 @@ export const useWebSocket = (): UseWebSocketReturn => {
 
   const connect = useCallback(() => {
     if (!session?.access_token) return;
-
-    const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:3000";
+    if (!wsUrl) {
+      console.warn("[useWebSocket] Missing VITE_WS_URL. WebSocket connection was skipped.");
+      return;
+    }
 
     try {
       wsRef.current = new WebSocket(`${wsUrl}?token=${session.access_token}`);
@@ -105,7 +110,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
     } catch (error) {
       console.error("Error creating WebSocket:", error);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, wsUrl]);
 
   useEffect(() => {
     connect();

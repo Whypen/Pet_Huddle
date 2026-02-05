@@ -13,15 +13,29 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 
 // Option constants matching database schema
 const genderOptions = ["Male", "Female", "Non-binary", "PNA"];
 const orientationOptions = ["Straight", "Gay/Lesbian", "Bisexual", "Queer", "PNA"];
 const degreeOptions = ["College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD", "PNA"];
 const relationshipOptions = ["Single", "In a relationship", "Open relationship", "Married", "Divorced", "PNA"];
-const petExperienceOptions = ["Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals", "Others"];
+const petExperienceOptions = ["Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals", "Others", "None"];
 const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French", "Japanese", "Korean", "German", "Portuguese", "Italian"];
 const availabilityOptions = ["Pet Parents", "Pet Nanny", "Animal Friend (no pet)"];
+const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+const NUMERIC_ONLY_REGEX = /^\d+$/;
+
+const countryDisplayNames = new Intl.DisplayNames(["en"], { type: "region" });
+const countryOptions = Array.from({ length: 26 * 26 }, (_, idx) => {
+  const a = String.fromCharCode(65 + Math.floor(idx / 26));
+  const b = String.fromCharCode(65 + (idx % 26));
+  const code = `${a}${b}`;
+  const label = countryDisplayNames.of(code);
+  return label && label !== code && !label.toLowerCase().includes("unknown") ? { code, label } : null;
+}).filter((item): item is { code: string; label: string } => Boolean(item))
+  .sort((a, b) => a.label.localeCompare(b.label));
 
 const EditProfile = () => {
   const { t } = useLanguage();
@@ -32,10 +46,15 @@ const EditProfile = () => {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [customLanguage, setCustomLanguage] = useState("");
+  const [petsProfileCount, setPetsProfileCount] = useState(0);
+  const [selectedCountry, setSelectedCountry] = useState("");
+  const [detectingLocation, setDetectingLocation] = useState(false);
+  const isIdentityLocked = profile?.verification_status === "approved" || profile?.is_verified;
 
   const [formData, setFormData] = useState({
     // Basic Info
     display_name: "",
+    legal_name: "",
     phone: "",
     dob: "",
     bio: "",
@@ -85,8 +104,14 @@ const EditProfile = () => {
 
   useEffect(() => {
     if (profile) {
+      const parsedCountry = (profile.location_name || "").split(",").map((part) => part.trim()).filter(Boolean).pop();
+      const matchedCountry = parsedCountry
+        ? countryOptions.find((country) => country.label.toLowerCase() === parsedCountry.toLowerCase())
+        : null;
+
       setFormData({
         display_name: profile.display_name || "",
+        legal_name: profile.legal_name || "",
         phone: profile.phone || "",
         dob: profile.dob || "",
         bio: profile.bio || "",
@@ -119,11 +144,66 @@ const EditProfile = () => {
         show_occupation: profile.show_occupation ?? false,
         show_bio: profile.show_bio ?? true,
       });
+      setSelectedCountry(matchedCountry?.code || "");
       if (profile.avatar_url) {
         setPhotoPreview(profile.avatar_url);
       }
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from("pets")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", user.id)
+      .then(({ count }) => {
+        const petCount = count || 0;
+        setPetsProfileCount(petCount);
+        setFormData((prev) => ({
+          ...prev,
+          owns_pets: petCount > 0,
+          availability_status:
+            petCount > 0
+              ? prev.availability_status.filter((status) => status !== "Animal Friend (no pet)")
+              : prev.availability_status,
+        }));
+      });
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (formData.pet_experience.includes("None")) {
+      setFormData((prev) => ({ ...prev, experience_years: "" }));
+    }
+  }, [formData.pet_experience]);
+
+  const useCurrentLocation = async () => {
+    if (!navigator.geolocation) {
+      toast.error(t("Geolocation is not supported on this device"));
+      return;
+    }
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const locale = new Intl.Locale(navigator.language || "en");
+        const region = locale.region
+          ? countryOptions.find((country) => country.code === locale.region)
+          : null;
+        setSelectedCountry(region?.code || "");
+        setFormData((prev) => ({
+          ...prev,
+          location_name: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}${region ? `, ${region.label}` : ""}`,
+        }));
+        setDetectingLocation(false);
+      },
+      () => {
+        toast.error(t("Unable to detect current location"));
+        setDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -166,17 +246,51 @@ const EditProfile = () => {
   const handleSave = async () => {
     if (!user) return;
 
-    if (!formData.display_name.trim()) {
+    if (!formData.legal_name.trim()) {
       toast.error(t("Legal name is required"));
+      return;
+    }
+    if (!formData.display_name.trim()) {
+      toast.error(t("Display name is required"));
       return;
     }
     if (!formData.phone.trim()) {
       toast.error(t("Phone number is required"));
       return;
     }
+    if (!E164_PHONE_REGEX.test(formData.phone.trim())) {
+      toast.error(t("Phone number must include country code, e.g. +85212345678"));
+      return;
+    }
     if (!formData.dob) {
       toast.error(t("Date of birth is required"));
       return;
+    }
+    if (formData.height && (!NUMERIC_ONLY_REGEX.test(formData.height) || Number(formData.height) > 300)) {
+      toast.error(t("Height must be a number up to 300"));
+      return;
+    }
+    if (formData.weight && (!NUMERIC_ONLY_REGEX.test(formData.weight) || Number(formData.weight) > 700)) {
+      toast.error(t("Weight must be a number up to 700"));
+      return;
+    }
+    if (NUMERIC_ONLY_REGEX.test(formData.school.trim()) && formData.school.trim().length > 0) {
+      toast.error(t("School cannot be numbers only"));
+      return;
+    }
+    if (NUMERIC_ONLY_REGEX.test(formData.major.trim()) && formData.major.trim().length > 0) {
+      toast.error(t("Major cannot be numbers only"));
+      return;
+    }
+    if (NUMERIC_ONLY_REGEX.test(formData.occupation.trim()) && formData.occupation.trim().length > 0) {
+      toast.error(t("Occupation cannot be numbers only"));
+      return;
+    }
+    if (formData.pet_experience.length > 0 && !formData.pet_experience.includes("None")) {
+      if (!formData.experience_years || !NUMERIC_ONLY_REGEX.test(formData.experience_years)) {
+        toast.error(t("Years of experience must be numeric"));
+        return;
+      }
     }
 
     setLoading(true);
@@ -204,8 +318,9 @@ const EditProfile = () => {
       const { error } = await supabase
         .from("profiles")
         .update({
-          display_name: formData.display_name,
-          phone: formData.phone || null,
+          display_name: isIdentityLocked ? profile?.display_name || formData.display_name : formData.display_name,
+          legal_name: isIdentityLocked ? profile?.legal_name || formData.legal_name : formData.legal_name,
+          phone: isIdentityLocked ? profile?.phone || formData.phone : (formData.phone || null),
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
           orientation: formData.orientation || null,
@@ -223,10 +338,16 @@ const EditProfile = () => {
           languages: formData.languages.length > 0 ? formData.languages : null,
           location_name: formData.location_name || null,
           pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
-          experience_years: formData.experience_years ? parseInt(formData.experience_years) : null,
-          owns_pets: formData.owns_pets,
+          experience_years:
+            formData.pet_experience.includes("None") || !formData.experience_years
+              ? null
+              : parseInt(formData.experience_years),
+          owns_pets: petsProfileCount > 0 ? true : formData.owns_pets,
           social_availability: formData.social_availability,
-          availability_status: formData.availability_status,
+          availability_status:
+            petsProfileCount > 0
+              ? formData.availability_status.filter((status) => status !== "Animal Friend (no pet)")
+              : formData.availability_status,
           show_gender: formData.show_gender,
           show_orientation: formData.show_orientation,
           show_age: formData.show_age,
@@ -265,7 +386,7 @@ const EditProfile = () => {
         <h1 className="text-xl font-bold flex-1">{t("Edit Profile")}</h1>
         <Button onClick={handleSave} disabled={loading} size="sm" className="gap-2">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          Save
+          {t("Save")}
         </Button>
       </header>
 
@@ -296,24 +417,39 @@ const EditProfile = () => {
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Legal Name")}</label>
               <Input
-                value={formData.display_name}
-                onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
+                value={formData.legal_name}
+                onChange={(e) => setFormData(prev => ({ ...prev, legal_name: e.target.value }))}
                 placeholder={t("Your legal name")}
                 className="h-12 rounded-xl"
                 required
+                disabled={isIdentityLocked}
+              />
+            </div>
+
+            {/* Display Name */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">{t("Display Name")}</label>
+              <Input
+                value={formData.display_name}
+                onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
+                placeholder={t("Your display name")}
+                className="h-12 rounded-xl"
+                required
+                disabled={isIdentityLocked}
               />
             </div>
 
             {/* Phone */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Phone")}</label>
-              <Input
-                type="tel"
+              <PhoneInput
+                international
+                defaultCountry="HK"
                 value={formData.phone}
-                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder={t("+1 234 567 8900")}
-                className="h-12 rounded-xl"
-                required
+                onChange={(value) => setFormData((prev) => ({ ...prev, phone: value || "" }))}
+                className="phone-input-auth h-12 rounded-xl border border-border px-3"
+                placeholder={t("Phone (+XXX)")}
+                disabled={isIdentityLocked}
               />
             </div>
 
@@ -446,6 +582,9 @@ const EditProfile = () => {
                 onChange={(e) => setFormData(prev => ({ ...prev, height: e.target.value }))}
                 placeholder={t("Height in cm")}
                 className="h-12 rounded-xl"
+                min={0}
+                max={300}
+                inputMode="numeric"
               />
             </div>
 
@@ -468,6 +607,9 @@ const EditProfile = () => {
                   onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
                   placeholder={t("0")}
                   className="h-12 rounded-xl flex-1"
+                  min={0}
+                  max={700}
+                  inputMode="numeric"
                 />
                 <select
                   value={formData.weight_unit}
@@ -646,10 +788,43 @@ const EditProfile = () => {
             {/* Location */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Location")}</label>
+              <div className="flex gap-2 mb-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={useCurrentLocation}
+                  disabled={detectingLocation}
+                >
+                  {detectingLocation ? t("Detecting...") : t("Use Current Location")}
+                </Button>
+                <select
+                  value={selectedCountry}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    setSelectedCountry(code);
+                    const countryLabel = countryOptions.find((country) => country.code === code)?.label || "";
+                    setFormData((prev) => ({
+                      ...prev,
+                      location_name: prev.location_name.includes(",")
+                        ? `${prev.location_name.split(",")[0].trim()}, ${countryLabel}`
+                        : countryLabel,
+                    }));
+                  }}
+                  className="h-9 rounded-lg bg-muted border border-border px-3 text-sm flex-1"
+                >
+                  <option value="">{t("Select country")}</option>
+                  {countryOptions.map((country) => (
+                    <option key={country.code} value={country.code}>
+                      {country.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <Input
                 value={formData.location_name}
                 onChange={(e) => setFormData(prev => ({ ...prev, location_name: e.target.value }))}
-                placeholder={t("City / Area")}
+                placeholder={t("City / Area, Country")}
                 className="h-12 rounded-xl"
               />
             </div>
@@ -666,7 +841,23 @@ const EditProfile = () => {
                 {petExperienceOptions.map((exp) => (
                   <button
                     key={exp}
-                    onClick={() => toggleArrayItem("pet_experience", exp)}
+                    onClick={() => {
+                      if (exp === "None") {
+                        setFormData((prev) => ({
+                          ...prev,
+                          pet_experience: prev.pet_experience.includes("None") ? [] : ["None"],
+                          experience_years: "",
+                        }));
+                        return;
+                      }
+                      setFormData((prev) => {
+                        const withoutNone = prev.pet_experience.filter((item) => item !== "None");
+                        const next = withoutNone.includes(exp)
+                          ? withoutNone.filter((item) => item !== exp)
+                          : [...withoutNone, exp];
+                        return { ...prev, pet_experience: next };
+                      });
+                    }}
                     className={cn(
                       "px-3 py-2 rounded-full text-sm font-medium transition-all",
                       formData.pet_experience.includes(exp)
@@ -681,26 +872,33 @@ const EditProfile = () => {
             </div>
 
             {/* Years of Experience */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">{t("Years of Experience")}</label>
-              <Input
-                type="number"
-                min="0"
-                max="50"
-                value={formData.experience_years}
-                onChange={(e) => setFormData(prev => ({ ...prev, experience_years: e.target.value }))}
-                placeholder={t("0")}
-                className="h-12 rounded-xl w-24"
-              />
-            </div>
+            {formData.pet_experience.length > 0 && !formData.pet_experience.includes("None") && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">{t("Years of Experience")}</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={formData.experience_years}
+                  onChange={(e) => setFormData(prev => ({ ...prev, experience_years: e.target.value.replace(/[^\d]/g, "") }))}
+                  placeholder={t("0")}
+                  className="h-12 rounded-xl w-28"
+                  inputMode="numeric"
+                />
+                {formData.experience_years === "0" && (
+                  <p className="text-xs text-muted-foreground mt-1">{t("Less than 1 year")}</p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Pet Ownership */}
           <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
             <span className="text-sm font-medium">{t("Currently own pets?")}</span>
             <Switch
-              checked={formData.owns_pets}
+              checked={petsProfileCount > 0 ? true : formData.owns_pets}
               onCheckedChange={(checked) => setFormData(prev => ({ ...prev, owns_pets: checked }))}
+              disabled={petsProfileCount > 0}
             />
           </div>
 
@@ -718,12 +916,20 @@ const EditProfile = () => {
                 {availabilityOptions.map((status) => (
                   <button
                     key={status}
-                    onClick={() => toggleArrayItem("availability_status", status)}
+                    onClick={() => {
+                      if (petsProfileCount > 0 && status === "Animal Friend (no pet)") {
+                        toast.error(t("Animal Friend (no pet) is unavailable when you already have pet profiles"));
+                        return;
+                      }
+                      toggleArrayItem("availability_status", status);
+                    }}
+                    disabled={petsProfileCount > 0 && status === "Animal Friend (no pet)"}
                     className={cn(
                       "px-3 py-2 rounded-full text-sm font-medium transition-all",
                       formData.availability_status.includes(status)
                         ? "bg-accent text-accent-foreground"
-                        : "bg-card text-muted-foreground border border-border"
+                        : "bg-card text-muted-foreground border border-border",
+                      petsProfileCount > 0 && status === "Animal Friend (no pet)" && "opacity-40 cursor-not-allowed"
                     )}
                   >
                     {status}

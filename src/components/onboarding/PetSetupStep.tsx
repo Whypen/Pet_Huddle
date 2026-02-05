@@ -195,7 +195,11 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         throw error;
       }
 
-      toast.success(`${formData.name} ${t("has been added to your huddle!")}`);
+      toast.success(
+        <span className="font-huddle">
+          {formData.name} {t("has been added to your huddle!")}
+        </span>
+      );
       onComplete();
     } catch (error: any) {
       console.error("Error saving pet:", error);

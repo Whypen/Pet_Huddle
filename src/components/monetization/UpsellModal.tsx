@@ -27,23 +27,23 @@ const ICON_MAP = {
 const COLOR_MAP = {
   star: {
     bg: "from-[#3283FF] to-[#1E40AF]",
-    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
-    iconColor: "text-[#3283FF]",
+    iconBg: "bg-primary/10 dark:bg-primary/20",
+    iconColor: "text-primary",
   },
   emergency_alert: {
     bg: "from-[#3283FF] to-[#1E40AF]",
-    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
-    iconColor: "text-[#3283FF]",
+    iconBg: "bg-primary/10 dark:bg-primary/20",
+    iconColor: "text-primary",
   },
   media: {
     bg: "from-[#3283FF] to-[#1E40AF]",
-    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
-    iconColor: "text-[#3283FF]",
+    iconBg: "bg-primary/10 dark:bg-primary/20",
+    iconColor: "text-primary",
   },
   family_slot: {
     bg: "from-[#3283FF] to-[#1E40AF]",
-    iconBg: "bg-[#DBEAFE] dark:bg-blue-900/20",
-    iconColor: "text-[#3283FF]",
+    iconBg: "bg-primary/10 dark:bg-primary/20",
+    iconColor: "text-primary",
   },
 };
 

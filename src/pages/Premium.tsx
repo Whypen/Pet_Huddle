@@ -136,7 +136,7 @@ const Premium = () => {
         if (updatedProfile && (updatedProfile.tier === "premium" || updatedProfile.tier === "gold")) {
           setIsPolling(false);
           clearInterval(pollInterval);
-          toast.success(t("Welcome to huddle Premium!"));
+          toast.success(<span className="font-huddle">{t("Welcome to huddle Premium!")}</span>);
         }
       }, 2000);
 
@@ -248,7 +248,7 @@ const Premium = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold">{t("huddle Premium")}</h1>
+        <h1 className="text-xl font-bold font-huddle">{t("huddle Premium")}</h1>
       </header>
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
@@ -277,8 +277,8 @@ const Premium = () => {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
-            <p className="text-white/90 text-sm">{t("Unlock the full huddle experience")}</p>
+            <h2 className="text-2xl font-bold text-white mb-1 font-huddle">{t("huddle Premium")}</h2>
+            <p className="text-white/90 text-sm font-huddle">{t("Unlock the full huddle experience")}</p>
           </div>
         </motion.div>
 
@@ -422,7 +422,7 @@ const Premium = () => {
                   feature.free ? (
                     <Check className="w-3 h-3 text-accent mx-auto" />
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">{t("—")}</span>
                   )
                 ) : (
                   <span className="text-xs text-muted-foreground">{t(feature.free)}</span>
@@ -433,7 +433,7 @@ const Premium = () => {
                   feature.premium ? (
                     <Check className="w-3 h-3 text-[#3283FF] mx-auto" />
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">{t("—")}</span>
                   )
                 ) : (
                   <span className="text-xs font-medium text-primary">
@@ -446,7 +446,7 @@ const Premium = () => {
                   feature.gold ? (
                     <Check className="w-3 h-3 text-amber-600 mx-auto" />
                   ) : (
-                    <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">{t("—")}</span>
                   )
                 ) : (
                   <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
@@ -551,7 +551,7 @@ const Premium = () => {
                 boxShadow:
                   selectedTier === "gold"
                     ? "0 4px 20px rgba(251, 191, 36, 0.4)"
-                    : "0 4px 20px rgba(37, 99, 235, 0.4)",
+                    : "0 4px 20px rgba(50, 131, 255, 0.4)",
               }}
             >
               {isProcessing ? (
@@ -590,7 +590,7 @@ const Premium = () => {
                       "w-10 h-10 rounded-full flex items-center justify-center",
                       addOn.id === "star_pack" && "bg-amber-100 dark:bg-amber-900/20",
                       addOn.id === "emergency_alert" && "bg-red-100 dark:bg-red-900/20",
-                      addOn.id === "vet_media" && "bg-[#DBEAFE] dark:bg-blue-900/20",
+                      addOn.id === "vet_media" && "bg-primary/10 dark:bg-primary/20",
                       addOn.id === "family_slot" && "bg-[#A6D539]/15 dark:bg-[#A6D539]/20",
                       addOn.id === "verified_badge" && "bg-purple-100 dark:bg-purple-900/20"
                     )}

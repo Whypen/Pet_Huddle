@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000/api/v1";
+console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -12,11 +12,23 @@ interface ApiResponse<T = any> {
 
 export const useApi = () => {
   const { session } = useAuth();
+  const apiUrl = import.meta.env.VITE_API_URL;
 
   const fetchApi = useCallback(async <T = any>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> => {
+    if (!apiUrl) {
+      console.warn("[useApi] Missing VITE_API_URL. API request was skipped.");
+      return {
+        success: false,
+        error: "Missing API URL configuration",
+      };
+    }
+
+    const normalizedBaseUrl = apiUrl.replace(/\/$/, "");
+    const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
     try {
       const headers: HeadersInit = {
         "Content-Type": "application/json",
@@ -26,7 +38,7 @@ export const useApi = () => {
         ...options.headers,
       };
 
-      const response = await fetch(`${API_URL}${endpoint}`, {
+      const response = await fetch(`${normalizedBaseUrl}${normalizedEndpoint}`, {
         ...options,
         headers,
       });
@@ -51,7 +63,7 @@ export const useApi = () => {
         error: error.message || "Network error",
       };
     }
-  }, [session?.access_token]);
+  }, [apiUrl, session?.access_token]);
 
   // Chat API
   const getConversations = useCallback(() => {
@@ -90,10 +102,15 @@ export const useApi = () => {
     return fetchApi(`/ai-vet/conversations/${conversationId}`);
   }, [fetchApi]);
 
-  const sendAiVetMessage = useCallback((conversationId: string, message: string, petId?: string) => {
+  const sendAiVetMessage = useCallback((
+    conversationId: string,
+    message: string,
+    petId?: string,
+    petProfile?: { name: string; species: string; breed?: string | null; weight?: number | null; weight_unit?: string | null }
+  ) => {
     return fetchApi("/ai-vet/chat", {
       method: "POST",
-      body: JSON.stringify({ conversationId, message, petId }),
+      body: JSON.stringify({ conversationId, message, petId, petProfile }),
     });
   }, [fetchApi]);
 

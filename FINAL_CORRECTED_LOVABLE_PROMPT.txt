@@ -1,0 +1,604 @@
+Build a full-stack React web app called "huddle" — a pet care & social super-app. Use TypeScript, Tailwind CSS, Lucide-React icons, React Router, and Supabase for auth/database/storage. This is an existing app with basic login, dashboard, chat UI, user profiles, and map features. Apply the following security fixes, feature enhancements, and backend integration exactly as specified.
+
+CRITICAL: BACKEND INTEGRATION
+- Connect to existing backend API at: http://localhost:3000/api/v1
+- Use WebSocket connection at: ws://localhost:3000
+- All environment variables are already configured in .env file
+- Backend handles: real-time chat, AI Vet (Google Gemini), social matching, payments
+- Frontend should call backend endpoints instead of direct Supabase calls for:
+  * Chat messages (POST /api/v1/chat/*)
+  * AI Vet conversations (POST /api/v1/ai-vet/*)
+  * Social matching/waves (GET /api/v1/social/*)
+  * Founder message (GET /api/v1/founder-message) - display on first app open
+
+═══════════════════════════════════════════════════════════════
+YOUR ACTUAL SUPABASE DATABASE SCHEMA
+═══════════════════════════════════════════════════════════════
+
+PROFILES TABLE - THESE EXACT FIELDS EXIST IN YOUR DATABASE:
+
+display_name (text) - User's visible name
+legal_name (text) - Real name (private)
+phone (text) - Phone number
+gender_genre (text) - Gender identity: "Male", "Female", "Non-binary", "PNA"
+orientation (text) - Sexual orientation: "Straight", "Gay/Lesbian", "Bisexual", "Queer", "PNA"
+dob (date) - Date of birth
+height (int) - Height in cm
+weight (int) - Weight
+weight_unit (text) - "kg" or "lbs"
+degree (text) - Education: "College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD"
+school (text) - School name
+major (text) - Major/field of study
+affiliation (text) - Company/organization
+occupation (text) - Job title/occupation
+pet_experience (text[]) - Array of experience: ["Dogs", "Cats", "Birds", etc.]
+experience_years (int) - Years of pet ownership experience
+relationship_status (text) - "Single", "In a relationship", "Married", "Divorced", "PNA"
+has_car (boolean) - Owns a car (important for pet transport)
+languages (text[]) - Array: ["English", "Cantonese", "Mandarin", "Spanish", etc.]
+location_name (text) - City/area name
+user_role (text) - "free" or "premium"
+is_verified (boolean) - Account verified
+bio (text) - User biography
+avatar_url (text) - Profile photo URL
+onboarding_completed (boolean)
+owns_pets (boolean)
+social_availability (boolean)
+availability_status (text[])
+show_gender (boolean) - Show gender on profile
+show_age (boolean) - Show age on profile
+show_height (boolean)
+show_weight (boolean)
+show_academic (boolean) - Show education
+show_affiliation (boolean)
+show_bio (boolean)
+show_occupation (boolean) - Show occupation on profile
+created_at, updated_at
+
+PETS TABLE - THESE EXACT FIELDS EXIST:
+
+id (uuid)
+owner_id (uuid) - References profiles.id
+photo_url (text)
+name (text) - Pet's name
+species (text) - "dog" or "cat"
+breed (text) - Breed name
+gender (text) - "Male" or "Female"
+neutered_spayed (boolean) - Is pet neutered/spayed
+weight (int)
+weight_unit (text)
+dob (date) - Pet's birthday
+vaccinations (jsonb) - Array of vaccination records
+medications (jsonb) - Array of medications
+routine (text) - Daily routine description
+temperament (text[]) - ["Friendly", "Energetic", "Calm", etc.]
+vet_contact (text) - Vet's contact info
+microchip_id (text)
+bio (text) - Pet's bio
+is_public (boolean) - Show pet publicly
+is_active (boolean) - Pet is active
+created_at, updated_at
+
+IMPORTANT: All these fields ALREADY EXIST in Supabase. Do NOT create them again. USE them in your forms and components.
+
+═══════════════════════════════════════════════════════════════
+CONSTRAINTS & RULES
+═══════════════════════════════════════════════════════════════
+
+MUST USE:
+- TypeScript (strict mode)
+- Tailwind CSS ONLY (no CSS files, no inline styles except className)
+- Lucide-React for ALL icons
+- React Router v6+
+- Functional components + hooks only
+- Mobile-first responsive design
+
+DO NOT:
+- Remove existing logic unless explicitly stated
+- Use class components
+- Add new dependencies without confirming they're needed
+- Modify database schema (it's already correct)
+- Create duplicate fields
+
+CODING STANDARDS:
+- async/await (not .then())
+- try/catch for all API calls
+- Show loading states
+- User-friendly error messages
+- Validate all inputs
+- Sanitize user content (use DOMPurify where needed)
+
+═══════════════════════════════════════════════════════════════
+1. BRANDING & AUTHENTICATION
+═══════════════════════════════════════════════════════════════
+
+BRANDING:
+✅ Replace ALL logos with logo.svg file
+✅ App name: "huddle" (lowercase everywhere)
+✅ Tagline: "Pet care & social"
+✅ Use logo in: login page, header, favicon
+
+LOGIN PAGE:
+✅ Identifier field accepts EMAIL or MOBILE NUMBER
+✅ "Remember Me" checkbox - stores identifier (NOT password) in localStorage
+✅ On load: pre-fill identifier from localStorage if exists
+✅ Dual authentication: support both email and phone login with same password
+
+Implementation:
+```typescript
+const handleLogin = async (identifier: string, password: string, rememberMe: boolean) => {
+  const isEmail = identifier.includes('@');
+  
+  const { data, error } = await supabase.auth.signInWithPassword({
+    [isEmail ? 'email' : 'phone']: identifier,
+    password
+  });
+  
+  if (!error && rememberMe) {
+    localStorage.setItem('rememberedIdentifier', identifier);
+  }
+  
+  if (!error) navigate('/dashboard');
+};
+```
+
+═══════════════════════════════════════════════════════════════
+2. HEADER & NAVIGATION
+═══════════════════════════════════════════════════════════════
+
+HEADER:
+✅ Logo + "huddle" text clickable → routes to /dashboard
+✅ REMOVE: User icon, "Free" badge
+✅ KEEP: Notifications, Menu
+
+PET ICON:
+✅ Shows pet icon in header/nav if user has pets
+✅ onClick → navigate('/edit-pet-profile')
+✅ If no pets → show "Add Pet" with <Plus /> icon
+
+═══════════════════════════════════════════════════════════════
+3. USER PROFILE FORM - CRITICAL FIELD MAPPING
+═══════════════════════════════════════════════════════════════
+
+These fields MUST appear in profile edit form and use EXACT database field names:
+
+BASIC INFO:
+- Display Name → display_name
+- Phone → phone
+- Date of Birth → dob
+- Bio → bio (with show_bio toggle)
+
+DEMOGRAPHICS (SPLIT INTO TWO SEPARATE FIELDS):
+- Gender → gender_genre 
+  Dropdown: "Male", "Female", "Non-binary", "PNA"
+  Toggle: show_gender
+  
+- Sexual Orientation → orientation
+  Dropdown: "Straight", "Gay/Lesbian", "Bisexual", "Queer", "PNA"
+  Toggle: show_orientation (ADD THIS TOGGLE)
+
+PHYSICAL:
+- Height → height (show_height toggle)
+- Weight → weight + weight_unit (show_weight toggle)
+
+EDUCATION & CAREER:
+- Highest Degree → degree
+  Dropdown (EXACT order): "College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD"
+  Toggle: show_academic
+  
+- School → school (show_academic toggle)
+- Major → major (show_academic toggle)
+- Affiliation → affiliation (show_affiliation toggle)
+- Occupation → occupation (show_occupation toggle)
+
+SOCIAL & LIFESTYLE:
+- Relationship Status → relationship_status
+  Dropdown: "Single", "In a relationship", "Married", "Divorced", "PNA"
+  
+- Own Car? → has_car
+  Toggle switch with car icon
+  Label: "Own a Car?"
+  Subtitle: "Important for pet-friendly travel"
+  NO privacy toggle (always visible)
+  
+- Languages → languages
+  Multi-select chips/tags
+  Common options: "English", "Cantonese", "Mandarin", "Spanish", "French", etc.
+  Allow custom input
+  
+- Location → location_name
+  Text input or location picker
+  Shows city/area
+
+PET EXPERIENCE:
+- Pet Experience Types → pet_experience
+  Multi-select checkboxes:
+  Options: "Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals"
+  
+- Years of Experience → experience_years
+  Number input (0-50)
+
+Implementation example:
+```typescript
+const ProfileEditForm = () => {
+  const [formData, setFormData] = useState({
+    display_name: profile.display_name || '',
+    gender_genre: profile.gender_genre || '',
+    orientation: profile.orientation || '',
+    dob: profile.dob || '',
+    height: profile.height || '',
+    weight: profile.weight || '',
+    degree: profile.degree || '',
+    occupation: profile.occupation || '',
+    relationship_status: profile.relationship_status || '',
+    has_car: profile.has_car || false,
+    languages: profile.languages || [],
+    location_name: profile.location_name || '',
+    pet_experience: profile.pet_experience || [],
+    experience_years: profile.experience_years || 0,
+    // ... other fields
+  });
+  
+  // ... form implementation
+};
+```
+
+═══════════════════════════════════════════════════════════════
+4. PET PROFILE FORM - CRITICAL FIELD MAPPING
+═══════════════════════════════════════════════════════════════
+
+ADD PET / EDIT PET PAGE:
+✅ Use SAME single-page vertical scroll layout as Edit Profile
+✅ NO tabs, NO steps - everything on one scrollable page
+
+Fields in order (use EXACT database names):
+
+1. Photo → photo_url (circular upload, 100px)
+2. Name → name (text, required)
+3. Species → species (dropdown: "dog", "cat")
+4. Breed → breed (text or searchable dropdown)
+5. Gender → gender (dropdown: "Male", "Female")
+6. Neutered/Spayed → neutered_spayed (toggle switch) ← IMPORTANT!
+7. Date of Birth → dob (date picker)
+8. Weight → weight + weight_unit (number + dropdown: "kg"/"lbs")
+9. Vaccinations → vaccinations (dynamic list, add/remove items)
+10. Medications → medications (dynamic list)
+11. Temperament → temperament (multi-select chips)
+12. Vet Contact → vet_contact (text)
+13. Microchip ID → microchip_id (text)
+14. Bio → bio (textarea)
+15. Public Profile → is_public (toggle)
+
+Implementation:
+```typescript
+<div className="space-y-6">
+  {/* ... other fields ... */}
+  
+  <div className="flex items-center justify-between">
+    <div>
+      <label className="font-medium">Neutered/Spayed</label>
+      <p className="text-sm text-gray-500">Has your pet been neutered or spayed?</p>
+    </div>
+    <input
+      type="checkbox"
+      checked={formData.neutered_spayed}
+      onChange={(e) => setFormData({...formData, neutered_spayed: e.target.checked})}
+      className="toggle"
+    />
+  </div>
+  
+  {/* ... other fields ... */}
+</div>
+```
+
+═══════════════════════════════════════════════════════════════
+5. HUDDLE WISDOM - BREED-SPECIFIC TIPS
+═══════════════════════════════════════════════════════════════
+
+On dashboard, show wisdom tips filtered by user's pet breed:
+
+```typescript
+const filteredWisdom = WISDOM_DATA.filter(tip => {
+  return userPets.some(pet => 
+    tip.species === pet.species && 
+    (tip.breed === pet.breed || tip.breed === 'All Breeds')
+  );
+});
+```
+
+If user has Golden Retriever → show ONLY Golden Retriever tips
+If user has Persian cat → show ONLY cat/Persian tips
+
+═══════════════════════════════════════════════════════════════
+6. SOCIAL UI - BADGE SYSTEM
+═══════════════════════════════════════════════════════════════
+
+CRITICAL CHANGES:
+✅ REMOVE all green checkmark icons (✓)
+✅ REMOVE text like "Verified"
+✅ IMPLEMENT badge overlay system on ALL avatars
+
+Badge Component:
+```typescript
+const UserAvatar = ({ user }: { user: Profile }) => {
+  return (
+    <div className="relative inline-block">
+      <img 
+        src={user.avatar_url || '/default-avatar.png'} 
+        className="h-12 w-12 rounded-full object-cover"
+      />
+      
+      {/* Verification Badge - bottom right */}
+      <div className={cn(
+        "absolute -bottom-1 -right-1 rounded-full p-1 ring-2 ring-white",
+        user.is_verified ? "bg-yellow-500" : "bg-gray-400"
+      )}>
+        <Shield className="h-3 w-3 text-white" />
+      </div>
+      
+      {/* Car Icon - top right (if has car) */}
+      {user.has_car && (
+        <div className="absolute -top-1 -right-1 bg-blue-500 rounded-full p-1 ring-2 ring-white">
+          <Car className="h-3 w-3 text-white" />
+        </div>
+      )}
+    </div>
+  );
+};
+```
+
+Use this component EVERYWHERE:
+- Chat list
+- Notice board
+- Social feed
+- Match cards
+- Profile views
+- Group members
+- Search results
+
+NOTICE BOARD INTERACTION:
+✅ Click user avatar/name → open profile pop-up with:
+  - Full profile (respecting privacy toggles)
+  - Pet grid
+  - "Send Wave" button
+  - "Message on Notice Board" button
+
+═══════════════════════════════════════════════════════════════
+7. CHAT & WEBSOCKET INTEGRATION
+═══════════════════════════════════════════════════════════════
+
+INSTALL: socket.io-client
+npm install socket.io-client
+
+WebSocket Hook:
+```typescript
+import { io } from 'socket.io-client';
+
+export const useWebSocket = () => {
+  const socketRef = useRef<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  
+  useEffect(() => {
+    const session = await supabase.auth.getSession();
+    if (!session?.data?.session) return;
+    
+    socketRef.current = io(import.meta.env.VITE_WS_URL, {
+      auth: { token: session.data.session.access_token }
+    });
+    
+    socketRef.current.on('connect', () => setIsConnected(true));
+    socketRef.current.on('disconnect', () => setIsConnected(false));
+    
+    socketRef.current.on('new_message', (msg) => {
+      // Handle incoming message
+    });
+    
+    return () => socketRef.current?.disconnect();
+  }, []);
+  
+  const sendMessage = (chatId: string, content: string) => {
+    socketRef.current?.emit('send_message', { chatId, content, messageType: 'text' });
+  };
+  
+  return { socket: socketRef.current, isConnected, sendMessage };
+};
+```
+
+CHAT UI:
+✅ Show UserAvatar component with badge + car icon
+✅ REMOVE "Book Now" button
+✅ Add "Groups" tab next to "Chats"
+
+GROUPS:
+✅ "Create Group" button opens full-screen drawer
+✅ Fixed header with title and close button
+✅ Group photo upload (circular)
+✅ Group name input
+✅ Member selection (scrollable with checkboxes)
+✅ Selected members show avatars with badges
+
+═══════════════════════════════════════════════════════════════
+8. AI VET (DR. HUDDLE) - BACKEND INTEGRATION
+═══════════════════════════════════════════════════════════════
+
+Exact implementation:
+```typescript
+const sendToAiVet = async (message: string) => {
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/ai-vet/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`
+    },
+    body: JSON.stringify({
+      conversationId,
+      message,
+      petId: selectedPet?.id
+    })
+  });
+  
+  const data = await response.json();
+  
+  if (data.success) {
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: data.data.message
+    }]);
+    
+    // Show remaining count for free users
+    if (user.user_role !== 'premium') {
+      setRemaining(data.data.remaining);
+    }
+  } else if (data.error === 'rate_limit_exceeded') {
+    // Show upgrade modal
+    setShowUpgradeModal(true);
+  }
+};
+```
+
+PREMIUM LOCKS:
+✅ Photo upload icon: disabled for free users, shows lock overlay
+✅ Voice upload icon: disabled for free users, shows lock overlay
+✅ Click locked → tooltip: "Premium feature"
+
+═══════════════════════════════════════════════════════════════
+9. MAP - TAP TO DROP PIN
+═══════════════════════════════════════════════════════════════
+
+"Broadcast Alert" flow:
+1. Click button → show message "Tap map to select location"
+2. Change cursor to crosshair
+3. User taps map → drop red marker
+4. Get coordinates
+5. Show "Continue" button
+6. Click Continue → open alert details form with location pre-filled
+
+═══════════════════════════════════════════════════════════════
+10. PREMIUM FEATURES
+═══════════════════════════════════════════════════════════════
+
+NAMING:
+✅ "AI Chat" → "All Chats"
+✅ "Limited" (free), "All Access" (premium) in filters
+✅ "Featured Posting" → "Notice Board Posting"
+
+PREMIUM PAGE:
+✅ Two pricing cards: Monthly ($9.99 HKD), Yearly ($99 HKD)
+✅ Feature list for both
+✅ Payment method selector (Apple Pay, Credit Card, PayPal)
+✅ MOCK payment flow (2 second delay → success)
+✅ Update user_role to 'premium' in database
+✅ Create subscription record
+
+TRANSACTION HISTORY:
+✅ Route: /premium/transactions
+✅ Show last 3 months from payments table
+✅ Display: date, amount, currency, status
+
+═══════════════════════════════════════════════════════════════
+11. SETTINGS MENU
+═══════════════════════════════════════════════════════════════
+
+RENAMING:
+✅ "Settings" → "Account Settings"
+✅ "Huddle Premium" → "Manage Subscription"
+✅ "Private Account" → "Non-Social"
+✅ "Map Visibility" → "Hide from Map"
+
+MOVE TO MAIN MENU (out of settings):
+✅ Report a Bug
+✅ Privacy Policy
+✅ Terms of Service
+
+BIOMETRICS:
+✅ Mock setup flow with 3-step stepper
+✅ Show progress: "Place finger" → "Scanning" → "Success"
+✅ 2 second delay between steps
+✅ Save biometrics_enabled to database
+
+CHANGE PASSWORD:
+✅ Step 1: Verify current password (attempt sign in)
+✅ Step 2: Only if verified, show new password fields
+✅ Validate: min 8 chars, passwords match
+
+NOTIFICATIONS:
+✅ "Pause All" toggle at top
+✅ When ON → turn OFF all other toggles programmatically
+
+═══════════════════════════════════════════════════════════════
+12. DEMO USERS - 10 USERS FOR TESTING
+═══════════════════════════════════════════════════════════════
+
+Create src/data/demoUsers.ts with 10 users:
+- At least 2 verified
+- At least 3 with has_car: true
+- Mix of genders, orientations, degrees
+- At least 4 with pets (different breeds)
+- At least 2 premium users
+- Use in Social feed and Animal Lovers filter
+
+[Use the 10 demo users from earlier in this conversation]
+
+═══════════════════════════════════════════════════════════════
+13. SECURITY FIXES
+═══════════════════════════════════════════════════════════════
+
+1. Install DOMPurify: npm install dompurify @types/dompurify
+2. Use profiles_public view for public queries
+3. Sanitize all innerHTML
+4. Use map_alerts_public (without creator_id)
+5. Verify Mapbox token is from env: import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+6. Storage buckets are private (backend handles RLS)
+7. Premium checks enforced server-side
+
+═══════════════════════════════════════════════════════════════
+14. FOUNDER MESSAGE
+═══════════════════════════════════════════════════════════════
+
+On first app open:
+```typescript
+useEffect(() => {
+  const hasShown = localStorage.getItem('founder_message_shown');
+  if (hasShown) return;
+  
+  fetch(`${import.meta.env.VITE_API_URL}/founder-message`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.show) {
+        setShowFounderModal(true);
+        setFounderMessage(data.message);
+      }
+    });
+}, []);
+
+const handleCloseFounder = () => {
+  localStorage.setItem('founder_message_shown', 'true');
+  setShowFounderModal(false);
+};
+```
+
+═══════════════════════════════════════════════════════════════
+15. ERROR HANDLING
+═══════════════════════════════════════════════════════════════
+
+✅ Detect offline: navigator.onLine
+✅ Show banner: "Looks like you're offline..."
+✅ Cache last viewed data in localStorage
+✅ Auto-retry failed uploads (3 attempts)
+✅ Friendly error messages
+
+═══════════════════════════════════════════════════════════════
+DELIVERABLES
+═══════════════════════════════════════════════════════════════
+
+After implementing:
+1. Commit message summary
+2. File structure
+3. Next steps (deployment checklist)
+4. Testing checklist
+
+If anything is unclear, ASK before proceeding.
+
+═══════════════════════════════════════════════════════════════
+END
+═══════════════════════════════════════════════════════════════

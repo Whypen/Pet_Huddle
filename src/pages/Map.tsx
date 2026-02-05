@@ -33,18 +33,22 @@ import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { demoUsers, demoAlerts, DemoUser, DemoAlert } from "@/lib/demoData";
 import { useUpsell } from "@/hooks/useUpsell";
+import { useSearchParams } from "react-router-dom";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
 const alertTypeColors: Record<string, string> = {
-  Stray: "#FBBF24",
+  Stray: "#3283FF",
   Lost: "#EF4444",
-  Found: "#A6D539",
-  Others: "#6B7280",
-  stray: "#FBBF24",
+  Found: "#A1A4A9",
+  Friends: "#A6D539",
+  Others: "#A1A4A9",
+  stray: "#3283FF",
   lost: "#EF4444",
-  others: "#6B7280",
+  found: "#A1A4A9",
+  friends: "#A6D539",
+  others: "#A1A4A9",
 };
 
 const MAX_ALERT_WORDS = 20;
@@ -78,6 +82,7 @@ interface VetClinic {
 const Map = () => {
   const { user, profile } = useAuth();
   const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
@@ -110,6 +115,12 @@ const Map = () => {
 
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
   const broadcastRange = isPremium ? 5 : 1;
+
+  useEffect(() => {
+    if (searchParams.get("mode") === "broadcast") {
+      setIsCreateOpen(true);
+    }
+  }, [searchParams]);
 
   // Default center (Hong Kong)
   const defaultCenter: [number, number] = [114.1583, 22.2828];
@@ -270,11 +281,18 @@ const Map = () => {
 
     // Persist user location to Supabase profiles
     if (user && (!userLocationAccuracy || userLocationAccuracy <= 500)) {
-      supabase
-        .from("profiles")
-        .update({ last_lat: userLocation.lat, last_lng: userLocation.lng })
-        .eq("id", user.id)
-        .catch((err: any) => console.warn("Could not persist location:", err));
+      const persistLocation = async () => {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ last_lat: userLocation.lat, last_lng: userLocation.lng })
+          .eq("id", user.id);
+
+        if (error) {
+          console.warn("Could not persist location:", error);
+        }
+      };
+
+      persistLocation();
     }
 
     return () => marker.remove();
@@ -313,7 +331,7 @@ const Map = () => {
             cursor: pointer;
             position: relative;
           ">
-            <span style="font-size: 18px;">🏥</span>
+            <span style="font-size: 18px;">${t("🏥")}</span>
             ${vet.is24h ? `<span style="position: absolute; top: -8px; right: -8px; background: #A6D539; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">${t("24h")}</span>` : ''}
           </div>
         `;
@@ -343,7 +361,7 @@ const Map = () => {
           <div style="
             width: 40px;
             height: 40px;
-            background: linear-gradient(135deg, #3283FF, #8B5CF6);
+            background-color: #A6D539;
             border-radius: 50%;
             border: 3px solid white;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
@@ -380,7 +398,7 @@ const Map = () => {
         return;
       }
 
-      const color = alertTypeColors[alert.type] || "#6B7280";
+      const color = alertTypeColors[alert.type] || "#a1a4a9";
       const el = document.createElement("div");
       el.className = "demo-alert-marker";
       el.innerHTML = `
@@ -428,7 +446,7 @@ const Map = () => {
         <div style="
           width: 36px;
           height: 36px;
-          background-color: ${alertTypeColors[alert.alert_type] || "#3283FF"};
+          background-color: ${alertTypeColors[alert.alert_type] || "#a1a4a9"};
           border-radius: 50%;
           border: 3px solid white;
           box-shadow: 0 4px 12px rgba(0,0,0,0.4);

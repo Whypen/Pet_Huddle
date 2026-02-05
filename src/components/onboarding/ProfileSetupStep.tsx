@@ -319,7 +319,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       {/* Display Name, Phone & Bio */}
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label><span className="text-destructive">*</span> {t("Display Name")}</Label>
+          <Label><span className="text-destructive">{t("*")}</span> {t("Display Name")}</Label>
           <Input
             value={formData.displayName}
             onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
@@ -343,7 +343,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Bio")}</Label>
             <PrivacyToggle
-              label="Bio"
+              label={t("Bio")}
               checked={formData.showBio}
               onChange={(checked) => setFormData(prev => ({ ...prev, showBio: checked }))}
             />
@@ -367,7 +367,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Gender")}</Label>
             <PrivacyToggle
-              label="Gender"
+              label={t("Gender")}
               checked={formData.showGender}
               onChange={(checked) => setFormData(prev => ({ ...prev, showGender: checked }))}
             />
@@ -384,7 +384,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 )}
               >
-                {option}
+                {t(option)}
               </button>
             ))}
           </div>
@@ -395,7 +395,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Sexual Orientation")}</Label>
             <PrivacyToggle
-              label="Orientation"
+              label={t("Orientation")}
               checked={formData.showOrientation}
               onChange={(checked) => setFormData(prev => ({ ...prev, showOrientation: checked }))}
             />
@@ -412,7 +412,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 )}
               >
-                {option}
+                {t(option)}
               </button>
             ))}
           </div>
@@ -422,12 +422,12 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       {/* Date of Birth */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label><span className="text-destructive">*</span> {t("Date of Birth")}</Label>
-          <PrivacyToggle
-            label="Age"
-            checked={formData.showAge}
-            onChange={(checked) => setFormData(prev => ({ ...prev, showAge: checked }))}
-          />
+        <Label><span className="text-destructive">{t("*")}</span> {t("Date of Birth")}</Label>
+        <PrivacyToggle
+          label={t("Age")}
+          checked={formData.showAge}
+          onChange={(checked) => setFormData(prev => ({ ...prev, showAge: checked }))}
+        />
         </div>
         <Input
           type="date"
@@ -441,7 +441,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       <div className="space-y-2">
         <Label className="flex items-center gap-2">
           <MapPin className="w-4 h-4" />
-          <span className="text-destructive">*</span> Location
+          <span className="text-destructive">{t("*")}</span> {t("Location")}
         </Label>
         <div className="relative">
           <Input
@@ -467,7 +467,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               className="cursor-pointer px-3 py-1.5 text-sm"
               onClick={() => togglePetExperience(exp)}
             >
-              {exp}
+              {t(exp)}
               {formData.petExperience.includes(exp) && (
                 <X className="w-3 h-3 ml-1" />
               )}
@@ -515,7 +515,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               className="cursor-pointer px-3 py-1.5 text-sm"
               onClick={() => toggleLanguage(lang)}
             >
-              {lang}
+              {t(lang)}
               {formData.languages.includes(lang) && (
                 <X className="w-3 h-3 ml-1" />
               )}
@@ -528,7 +528,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       <div className="space-y-4 pt-4 border-t border-border">
         <h3 className="font-semibold text-foreground flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-warning" />
-          Social Level Boosters
+          {t("Social Level Boosters")}
         </h3>
 
         {/* Height */}
@@ -536,7 +536,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Height (cm)")}</Label>
             <PrivacyToggle
-              label="Height"
+              label={t("Height")}
               checked={formData.showHeight}
               onChange={(checked) => setFormData(prev => ({ ...prev, showHeight: checked }))}
             />
@@ -557,7 +557,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Weight")}</Label>
             <PrivacyToggle
-              label="Weight"
+              label={t("Weight")}
               checked={formData.showWeight}
               onChange={(checked) => setFormData(prev => ({ ...prev, showWeight: checked }))}
             />
@@ -592,7 +592,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           >
             <option value="">{t("Select...")}</option>
             {RELATIONSHIP_OPTIONS.map(r => (
-              <option key={r} value={r}>{r}</option>
+              <option key={r} value={r}>{t(r)}</option>
             ))}
           </select>
         </div>
@@ -602,7 +602,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Academic & Skills")}</Label>
             <PrivacyToggle
-              label="Academic"
+              label={t("Academic")}
               checked={formData.showAcademic}
               onChange={(checked) => setFormData(prev => ({ ...prev, showAcademic: checked }))}
             />
@@ -614,7 +614,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           >
             <option value="">{t("Select degree...")}</option>
             {DEGREE_OPTIONS.map(d => (
-              <option key={d} value={d}>{d}</option>
+              <option key={d} value={d}>{t(d)}</option>
             ))}
           </select>
           <div className="grid grid-cols-2 gap-2">
@@ -638,7 +638,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Occupation")}</Label>
             <PrivacyToggle
-              label="Occupation"
+              label={t("Occupation")}
               checked={formData.showOccupation}
               onChange={(checked) => setFormData(prev => ({ ...prev, showOccupation: checked }))}
             />
@@ -656,7 +656,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="flex items-center justify-between">
             <Label>{t("Affiliation")}</Label>
             <PrivacyToggle
-              label="Affiliation"
+              label={t("Affiliation")}
               checked={formData.showAffiliation}
               onChange={(checked) => setFormData(prev => ({ ...prev, showAffiliation: checked }))}
             />
@@ -686,7 +686,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <div className="space-y-3 p-4 rounded-xl bg-muted/50">
           <div className="flex items-center justify-between">
             <div>
-              <Label><span className="text-destructive">*</span> {t("Social Availability")}</Label>
+              <Label><span className="text-destructive">{t("*")}</span> {t("Social Availability")}</Label>
               <p className="text-xs text-muted-foreground">{t("Are you open to connecting?")}</p>
             </div>
             <Switch
@@ -701,7 +701,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               animate={{ opacity: 1, height: "auto" }}
               className="pt-3 space-y-2"
             >
-              <Label className="text-sm"><span className="text-destructive">*</span> {t("I identify as:")}</Label>
+              <Label className="text-sm"><span className="text-destructive">{t("*")}</span> {t("I identify as:")}</Label>
               <div className="flex flex-wrap gap-2">
                 {AVAILABILITY_STATUS_OPTIONS.map(status => (
                   <Badge
@@ -710,7 +710,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
                     className="cursor-pointer px-3 py-1.5 text-sm"
                     onClick={() => toggleAvailabilityStatus(status)}
                   >
-                    {status}
+                    {t(status)}
                   </Badge>
                 ))}
               </div>
@@ -729,7 +729,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Loader2 className="w-5 h-5 animate-spin" />
         ) : (
           <>
-            {formData.ownsPets ? "Continue to Pet Setup" : "Complete Setup"}
+            {formData.ownsPets ? t("Continue to Pet Setup") : t("Complete Setup")}
             <ChevronRight className="w-5 h-5 ml-2" />
           </>
         )}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2 } from "lucide-react";
+import { Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -33,46 +33,46 @@ const quickActions = [
 // SPRINT 2: Species-specific huddle Wisdom tips
 const wisdomTips: Record<string, string[]> = {
   Dog: [
-    "Dogs need 1-2 hours of exercise daily. Consider adding an extra evening walk!",
-    "Regular brushing helps reduce shedding and keeps your dog's coat healthy.",
-    "Mental stimulation is just as important as physical exercise for dogs.",
-    "Dental health matters! Brush your dog's teeth 2-3 times per week to prevent disease.",
+    "home.wisdom.dog.1",
+    "home.wisdom.dog.2",
+    "home.wisdom.dog.3",
+    "home.wisdom.dog.4",
   ],
   Cat: [
-    "Cats need fresh water daily. Consider a cat fountain to encourage hydration.",
-    "Provide scratching posts to keep your cat's claws healthy and save your furniture.",
-    "Cats are crepuscular - most active at dawn and dusk. Plan playtime accordingly!",
-    "Regular vet checkups are crucial - cats hide illness well until it's serious.",
+    "home.wisdom.cat.1",
+    "home.wisdom.cat.2",
+    "home.wisdom.cat.3",
+    "home.wisdom.cat.4",
   ],
   Bird: [
-    "Birds need 10-12 hours of sleep. Cover their cage at night for quality rest.",
-    "Fresh fruits and vegetables should be part of your bird's daily diet.",
-    "Birds are social creatures and need daily interaction and mental stimulation.",
-    "Rotate toys weekly to prevent boredom and encourage natural foraging behaviors.",
+    "home.wisdom.bird.1",
+    "home.wisdom.bird.2",
+    "home.wisdom.bird.3",
+    "home.wisdom.bird.4",
   ],
   Rabbit: [
-    "Rabbits need unlimited hay for healthy digestion and dental wear.",
-    "Provide a safe space for your rabbit to run and binky - they need daily exercise!",
-    "Regular grooming prevents hairballs, especially during shedding season.",
-    "Rabbits are social - consider bonding with another rabbit for companionship.",
+    "home.wisdom.rabbit.1",
+    "home.wisdom.rabbit.2",
+    "home.wisdom.rabbit.3",
+    "home.wisdom.rabbit.4",
   ],
   Reptile: [
-    "UV lighting and proper temperatures are crucial for reptile health.",
-    "Research your reptile's specific humidity needs - it varies greatly by species.",
-    "Calcium and vitamin D3 supplements prevent metabolic bone disease.",
-    "Regular fecal checks help detect parasites common in captive reptiles.",
+    "home.wisdom.reptile.1",
+    "home.wisdom.reptile.2",
+    "home.wisdom.reptile.3",
+    "home.wisdom.reptile.4",
   ],
   Hamster: [
-    "Hamsters are nocturnal - expect nighttime wheel running and activity!",
-    "Provide a large cage (450+ sq inches) with deep bedding for burrowing.",
-    "Fresh vegetables in small amounts make great healthy treats.",
-    "Syrian hamsters must live alone, but dwarf species can sometimes cohabitate.",
+    "home.wisdom.hamster.1",
+    "home.wisdom.hamster.2",
+    "home.wisdom.hamster.3",
+    "home.wisdom.hamster.4",
   ],
   Others: [
-    "Research your pet's specific care needs - every species is unique!",
-    "Find a veterinarian experienced with your type of pet.",
-    "Join online communities to learn from other owners' experiences.",
-    "Proper diet and habitat setup are the foundation of exotic pet care.",
+    "home.wisdom.other.1",
+    "home.wisdom.other.2",
+    "home.wisdom.other.3",
+    "home.wisdom.other.4",
   ],
 };
 
@@ -182,8 +182,7 @@ const Index = () => {
                 <motion.button
                   key={pet.id}
                   onClick={() => {
-                    // SPRINT 3: Clicking pet icon navigates to Edit Pet
-                    navigate(`/edit-pet-profile?id=${pet.id}`);
+                    setSelectedPet(pet);
                   }}
                   whileTap={{ scale: 0.95 }}
                   className="relative flex-shrink-0 p-1" // Added padding to prevent border clipping
@@ -229,6 +228,16 @@ const Index = () => {
                 onClick={() => navigate(`/pet-details?id=${selectedPet.id}`)}
                 className="relative rounded-2xl overflow-hidden shadow-card cursor-pointer hover:shadow-lg transition-shadow"
               >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/edit-pet-profile?id=${selectedPet.id}`);
+                  }}
+                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center shadow-sm"
+                  aria-label={t("Edit Pet")}
+                >
+                  <Settings className="w-4 h-4 text-muted-foreground" />
+                </button>
                 <div className="absolute inset-0">
                   {selectedPet.photo_url ? (
                     <img
@@ -257,13 +266,13 @@ const Index = () => {
                       {selectedPet.weight && (
                         <>
                           <span>{t("Weight")}: {selectedPet.weight}{selectedPet.weight_unit}</span>
-                          <span>•</span>
+                <span>{t("•")}</span>
                         </>
                       )}
                       <span className="capitalize">{selectedPet.species}</span>
                       {selectedPet.breed && (
                         <>
-                          <span>•</span>
+                <span>{t("•")}</span>
                           <span>{selectedPet.breed}</span>
                         </>
                       )}
@@ -295,7 +304,7 @@ const Index = () => {
                     <Lightbulb className="w-5 h-5 text-primary-foreground" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-primary-foreground mb-1">{t("home.wisdom")}</h4>
+                    <h4 className="font-semibold text-primary-foreground mb-1 font-huddle">{t("home.wisdom")}</h4>
                     <p className="text-sm text-primary-foreground/90">
                       {t(getRandomTip(selectedPet.species))}
                     </p>

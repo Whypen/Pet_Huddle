@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, ChangeEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Send, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -32,6 +32,7 @@ const ChatDialogue = () => {
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -43,10 +44,17 @@ const ChatDialogue = () => {
 
     // Ensure current user is a member of the room (required for RLS)
     if (user?.id) {
-      supabase
-        .from("chat_room_members")
-        .upsert({ room_id: chatId, user_id: user.id })
-        .catch((err: any) => console.warn("Failed to join chat room:", err));
+      const ensureMembership = async () => {
+        const { error } = await supabase
+          .from("chat_room_members")
+          .upsert({ room_id: chatId, user_id: user.id });
+
+        if (error) {
+          console.warn("Failed to join chat room:", error);
+        }
+      };
+
+      ensureMembership();
     }
 
     const channel = supabase
@@ -141,8 +149,45 @@ const ChatDialogue = () => {
     }
   };
 
+  const handleMediaSelected = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !chatId || !user?.id) return;
+
+    setIsLoading(true);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `${user.id}/chat/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("notices").upload(path, file);
+      if (uploadError) throw uploadError;
+
+      const { data: pub } = supabase.storage.from("notices").getPublicUrl(path);
+      const mediaUrl = pub.publicUrl;
+
+      const optimisticMessage: Message = {
+        id: `media-${Date.now()}`,
+        content: mediaUrl,
+        senderId: user.id,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, optimisticMessage]);
+
+      const { error } = await supabase.from("chat_messages").insert({
+        room_id: chatId,
+        sender_id: user.id,
+        content: mediaUrl,
+      });
+      if (error) throw error;
+    } catch (err) {
+      console.error("Media send failed:", err);
+      toast.error(t("Failed to send message"));
+    } finally {
+      e.target.value = "";
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pb-nav">
       <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
 
       {/* Chat Header */}
@@ -185,7 +230,11 @@ const ChatDialogue = () => {
                   : "bg-accent-soft text-foreground rounded-bl-sm"
               )}
             >
-              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              {/^https?:\/\/.+\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(message.content) ? (
+                <img src={message.content} alt={t("Chat media")} className="max-w-full rounded-lg mb-1" />
+              ) : (
+                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+              )}
               <span
                 className={cn(
                   "text-xs mt-1 block",
@@ -231,12 +280,19 @@ const ChatDialogue = () => {
                 setIsPremiumFooterOpen(true);
                 return;
               }
-              // TODO: open media picker
+              mediaInputRef.current?.click();
             }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
             <ImageIcon className="w-5 h-5 text-primary" />
           </button>
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleMediaSelected}
+          />
 
           <input
             type="text"

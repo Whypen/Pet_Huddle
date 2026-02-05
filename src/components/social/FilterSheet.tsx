@@ -56,6 +56,9 @@ const roles = [
   { id: "animal-lovers", labelKey: "social.animal_lovers" },
 ] as const;
 
+const BASE_DISTANCE_MAX = 150;
+const SEE_FURTHER_INCREMENT = 5;
+
 // Species options from master list with icons
 const getSpeciesIcon = (species: string) => {
   switch (species) {
@@ -236,8 +239,12 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   <input
                     type="range"
                     min="1"
-                    max={localFilters.seeFurther ? "500" : "150"}
-                    value={localFilters.distance > 150 && !localFilters.seeFurther ? 150 : localFilters.distance}
+                    max={localFilters.seeFurther ? String(BASE_DISTANCE_MAX + SEE_FURTHER_INCREMENT) : String(BASE_DISTANCE_MAX)}
+                    value={
+                      localFilters.distance > BASE_DISTANCE_MAX && !localFilters.seeFurther
+                        ? BASE_DISTANCE_MAX
+                        : localFilters.distance
+                    }
                     onChange={(e) => setLocalFilters(prev => ({ ...prev, distance: parseInt(e.target.value) }))}
                     className="w-full h-2 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
                   />
@@ -245,15 +252,17 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     <span>{t("map.distance_km").replace("{count}", "1")}</span>
                     <span>
                       {localFilters.seeFurther
-                        ? t("map.distance_km").replace("{count}", "500")
-                        : t("map.distance_km_max").replace("{count}", "150")}
+                        ? t("map.distance_km").replace("{count}", String(BASE_DISTANCE_MAX + SEE_FURTHER_INCREMENT))
+                        : t("map.distance_km_max").replace("{count}", String(BASE_DISTANCE_MAX))}
                     </span>
                   </div>
                   {/* See Further Toggle */}
                   <div className="mt-3 flex items-center justify-between p-3 rounded-xl bg-muted/50">
                     <div>
                       <label className="text-sm font-medium">{t("See Further")}</label>
-                      <p className="text-xs text-muted-foreground">{t("Extend search beyond 150km")}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t("Extend search by +5km")}
+                      </p>
                     </div>
                     <input
                       type="checkbox"
@@ -477,8 +486,8 @@ const PremiumToggle = ({ icon: Icon, label, description, checked, onToggle }: Pr
     className="w-full flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border hover:border-primary/30 transition-all"
   >
     <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-full bg-[#DBEAFE] flex items-center justify-center">
-        <Icon className="w-5 h-5 text-[#3283FF]" />
+      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+        <Icon className="w-5 h-5 text-primary" />
       </div>
       <div className="text-left">
         <div className="flex items-center gap-2">

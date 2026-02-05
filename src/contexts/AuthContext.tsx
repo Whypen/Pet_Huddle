@@ -7,6 +7,8 @@ export interface Profile {
   display_name: string | null;
   legal_name: string | null;
   phone: string | null;
+  verification_status?: string | null;
+  verification_comment?: string | null;
   avatar_url: string | null;
   bio: string | null;
   gender_genre: string | null;
@@ -57,7 +59,13 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
-  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    displayName: string,
+    legalName: string,
+    phone: string
+  ) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string, phone?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -94,7 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         social_availability, availability_status,
         show_gender, show_orientation, show_age, show_height, show_weight,
         show_academic, show_affiliation, show_occupation, show_bio,
-        last_lat, last_lng, care_circle
+        last_lat, last_lng, care_circle, verification_status, verification_comment
       `)
       .eq("id", userId)
       .maybeSingle();
@@ -139,19 +147,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    displayName: string,
+    legalName: string,
+    phone: string
+  ) => {
     const redirectUrl = `${window.location.origin}/`;
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: redirectUrl,
         data: {
           display_name: displayName || email.split("@")[0],
+          legal_name: legalName,
+          phone,
         },
       },
     });
+
+    if (!error && data?.user?.id) {
+      await supabase
+        .from("profiles")
+        .upsert({
+          id: data.user.id,
+          display_name: displayName || email.split("@")[0],
+          legal_name: legalName,
+          phone,
+        });
+    }
 
     return { error: error as Error | null };
   };

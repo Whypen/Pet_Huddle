@@ -50,7 +50,7 @@ export const useUpsell = () => {
         isOpen: true,
         type: "star",
         title: t("Out of Stars!"),
-        description: t("Buy a Star Pack to boost your profile visibility and get more matches."),
+        description: t("social.star_prompt"),
         price: 4.99,
       });
       return false;

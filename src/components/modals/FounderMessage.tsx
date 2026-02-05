@@ -26,7 +26,7 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
           // Default message if API fails
           setMessage(
             t(
-              "Welcome to huddle! 🐾\n\nI built this app because I believe every pet deserves the best care, and every pet parent deserves a supportive community.\n\nWhether you're looking for a trusted pet sitter, seeking advice from Dr. Huddle, or just want to connect with fellow animal lovers in your area - we're here for you.\n\nThank you for joining our pack. Together, we're making pet care social.\n\nWith love,\nThe huddle Team"
+              "Welcome to huddle! 🐾\n\nI built this app because I believe every pet deserves the best care, and every pet parent deserves a supportive community.\n\nWhether you're looking for a trusted pet sitter, seeking advice from Dr. huddle, or just want to connect with fellow animal lovers in your area - we're here for you.\n\nThank you for joining our pack. Together, we're making pet care social.\n\nWith love,\nThe huddle Team"
             )
           );
         }
@@ -81,13 +81,13 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
               <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-cover" />
             </div>
 
-            <h2 className="text-xl font-bold text-white mb-1">{t("Welcome to huddle")}</h2>
+            <h2 className="text-xl font-bold text-white mb-1 font-huddle">{t("Welcome to huddle")}</h2>
             <p className="text-white/80 text-sm">{t("Family mesh for pets")}</p>
           </div>
 
           {/* Message content */}
           <div className="p-6">
-            <div className="text-sm text-foreground whitespace-pre-line leading-relaxed">
+            <div className="text-sm text-foreground whitespace-pre-line leading-relaxed font-huddle">
               {message}
             </div>
           </div>
@@ -99,7 +99,7 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
               className="w-full gap-2 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
             >
               <Heart className="w-4 h-4" />
-              Let's Get Started
+              {t("Let's Get Started")}
             </Button>
           </div>
         </motion.div>

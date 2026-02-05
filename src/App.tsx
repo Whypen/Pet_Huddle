@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
@@ -22,9 +22,12 @@ import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
 import PetDetails from "./pages/PetDetails";
 import Settings from "./pages/Settings";
-import Subscription from "./pages/Subscription";
 import Premium from "./pages/Premium";
 import NotFound from "./pages/NotFound";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import Admin from "./pages/Admin";
+import VerifyIdentity from "./pages/VerifyIdentity";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,7 +47,12 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <Sonner />
-            <BrowserRouter>
+            <BrowserRouter
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
+            >
               <AuthProvider>
                 <OfflineBanner />
                 <Routes>
@@ -168,7 +176,7 @@ const App = () => (
                     path="/subscription"
                     element={
                       <ProtectedRoute>
-                        <Subscription />
+                        <Navigate to="/premium" replace />
                       </ProtectedRoute>
                     }
                   />
@@ -177,6 +185,46 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <Premium />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/manage-subscription"
+                    element={
+                      <ProtectedRoute>
+                        <Navigate to="/premium" replace />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/verify-identity"
+                    element={
+                      <ProtectedRoute>
+                        <VerifyIdentity />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/privacy"
+                    element={
+                      <ProtectedRoute>
+                        <Privacy />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/terms"
+                    element={
+                      <ProtectedRoute>
+                        <Terms />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin"
+                    element={
+                      <ProtectedRoute>
+                        <Admin />
                       </ProtectedRoute>
                     }
                   />

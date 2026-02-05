@@ -15,6 +15,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const allowStripeFallback = Deno.env.get("ALLOW_STRIPE_FALLBACK") === "true";
 
 serve(async (req: Request) => {
   try {
@@ -40,7 +41,7 @@ serve(async (req: Request) => {
     // Get sitter's Stripe Connect account
     const { data: sitter } = await supabase
       .from("sitter_profiles")
-      .select("stripe_connect_account_id, payouts_enabled, charges_enabled")
+      .select("stripe_connect_account_id, payouts_enabled, charges_enabled, hourly_rate")
       .eq("user_id", sitterId)
       .single();
 
@@ -93,50 +94,63 @@ serve(async (req: Request) => {
     // Generate idempotency key
     const idempotencyKey = `booking-${clientId}-${sitterId}-${Date.now()}`;
 
-    // Create Checkout Session with destination charge
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: {
-                name: "Pet Sitting Service",
-                description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()}`,
+    let checkoutUrl: string | null = null;
+    let paymentIntentId: string;
+    let usingFallback = false;
+
+    try {
+      // Create Checkout Session with destination charge
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: "payment",
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: "Pet Sitting Service",
+                  description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()}`,
+                },
+                unit_amount: amount,
               },
-              unit_amount: amount,
+              quantity: 1,
             },
-            quantity: 1,
-          },
-        ],
-        payment_intent_data: {
-          application_fee_amount: platformFee,
-          transfer_data: {
-            destination: sitter.stripe_connect_account_id,
+          ],
+          payment_intent_data: {
+            application_fee_amount: platformFee,
+            transfer_data: {
+              destination: sitter.stripe_connect_account_id,
+            },
+            metadata: {
+              client_id: clientId,
+              sitter_id: sitterId,
+              service_start_date: serviceStartDate,
+              service_end_date: serviceEndDate,
+              pet_id: petId || "",
+              location_name: locationName || "",
+            },
           },
           metadata: {
+            type: "marketplace_booking",
             client_id: clientId,
             sitter_id: sitterId,
-            service_start_date: serviceStartDate,
-            service_end_date: serviceEndDate,
             pet_id: petId || "",
             location_name: locationName || "",
           },
+          success_url: successUrl,
+          cancel_url: cancelUrl,
         },
-        metadata: {
-          type: "marketplace_booking",
-          client_id: clientId,
-          sitter_id: sitterId,
-          pet_id: petId || "",
-          location_name: locationName || "",
-        },
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-      },
-      { idempotencyKey }
-    );
+        { idempotencyKey }
+      );
+      checkoutUrl = session.url;
+      paymentIntentId = session.payment_intent as string;
+    } catch (stripeError: any) {
+      if (!allowStripeFallback) throw stripeError;
+      usingFallback = true;
+      paymentIntentId = `pi_local_${crypto.randomUUID().replaceAll("-", "")}`;
+      checkoutUrl = `${successUrl}?mock_checkout=true&booking_intent=${paymentIntentId}`;
+    }
 
     // Create booking record in database (pending payment)
     const escrowReleaseDate = new Date(serviceEndDate);
@@ -147,7 +161,7 @@ serve(async (req: Request) => {
       .insert({
         client_id: clientId,
         sitter_id: sitterId,
-        stripe_payment_intent_id: session.payment_intent as string,
+        stripe_payment_intent_id: paymentIntentId,
         amount,
         platform_fee: platformFee,
         sitter_payout: sitterPayout,
@@ -166,9 +180,10 @@ serve(async (req: Request) => {
 
     return new Response(
       JSON.stringify({
-        url: session.url,
+        url: checkoutUrl,
         bookingId: booking.id,
         escrowReleaseDate: escrowReleaseDate.toISOString(),
+        mock: usingFallback,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );

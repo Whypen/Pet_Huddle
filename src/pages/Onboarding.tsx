@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { PawPrint } from "lucide-react";
+import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -101,7 +101,7 @@ const Onboarding = () => {
         setPhase("pet");
       } else {
         await refreshProfile();
-        toast.success(t("Welcome to Huddle! 🎉"));
+        toast.success(<span className="font-huddle">{t("Welcome to Huddle! 🎉")}</span>);
         navigate("/", { replace: true });
       }
     } catch (error: any) {
@@ -124,7 +124,7 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success(t("Welcome to Huddle! 🎉"));
+      toast.success(<span className="font-huddle">{t("Welcome to Huddle! 🎉")}</span>);
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
@@ -145,7 +145,7 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success(t("Welcome to Huddle! You can add pets later."));
+      toast.success(<span className="font-huddle">{t("Welcome to Huddle! You can add pets later.")}</span>);
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
@@ -162,10 +162,10 @@ const Onboarding = () => {
       <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="px-6 py-4">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-              <PawPrint className="w-4 h-4 text-primary-foreground" />
+            <div className="w-8 h-8 rounded-full overflow-hidden">
+              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-cover" />
             </div>
-            <span className="font-bold text-lg text-foreground">{t("Huddle")}</span>
+            <span className="font-bold text-lg text-foreground lowercase font-huddle">{t("huddle")}</span>
           </div>
           
           {/* Progress Indicator */}
