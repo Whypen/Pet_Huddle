@@ -78,6 +78,9 @@ const VerifyIdentity = () => {
 
       {step === 1 && (
         <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            {t("We collect your selfie and ID document image to verify your age and identity.")}
+          </p>
           <Select value={country} onValueChange={setCountry}>
             <SelectTrigger><SelectValue placeholder={t("Select country")} /></SelectTrigger>
             <SelectContent>
@@ -110,7 +113,15 @@ const VerifyIdentity = () => {
       {step === 3 && (
         <div className="space-y-2">
           <p>{t("Selfie capture")}</p>
-          <input type="file" accept="image/*" capture="environment" onChange={(e) => setSelfie(e.target.files?.[0] || null)} />
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) setSelfie(await compressImage(f));
+            }}
+          />
           <p className="text-xs text-muted-foreground">{t("Tap I am ready to continue")}</p>
         </div>
       )}
@@ -118,7 +129,15 @@ const VerifyIdentity = () => {
       {step === 4 && (
         <div className="space-y-2">
           <p>{t("ID document capture")}</p>
-          <input type="file" accept="image/*" capture="user" onChange={(e) => setIdDoc(e.target.files?.[0] || null)} />
+          <input
+            type="file"
+            accept="image/*"
+            capture="user"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) setIdDoc(await compressImage(f));
+            }}
+          />
           <p className="text-xs text-muted-foreground">{t("Tap I am ready to submit")}</p>
         </div>
       )}
@@ -152,3 +171,33 @@ const VerifyIdentity = () => {
 };
 
 export default VerifyIdentity;
+  const compressImage = async (file: File) => {
+    const img = document.createElement("img");
+    const reader = new FileReader();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    img.src = dataUrl;
+    await new Promise((resolve) => (img.onload = resolve));
+
+    const maxWidth = 1024;
+    const scale = Math.min(1, maxWidth / img.width);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    let quality = 0.8;
+    let blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    while (blob && blob.size > 500 * 1024 && quality > 0.5) {
+      quality -= 0.1;
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    }
+
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: "image/jpeg" });
+  };
