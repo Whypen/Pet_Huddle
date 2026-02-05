@@ -57,3 +57,13 @@
 - Massive structural overhaul: UI/UX consistency, KYC/age gating, social/chats restructure, subscription algo, family invites, pet/user profile enhancements, real AI Vet via Gemini, escrow bookings, threads system, map refinements.
 - Impact: heavy Supabase (new buckets, columns, RLS, triggers), Stripe Connect/escrow, Gemini API.
 - Rollback: revert to v1.1.1 backup if UAT fails >20% scenarios.
+
+## [v1.2.1-profiles-rls-recursion-fix] - 2026-02-05
+- **Author:** Codex + Hyphen
+- **Summary:** Replaced legacy/duplicated `profiles` RLS policies with a minimal non-recursive policy set.
+- **Why change was needed:** Eliminate recursion risk and enforce authenticated-only profile access while preserving admin updates.
+- **Sections changed:** APP_MASTER_SPEC 4.4, 7, Protocols & Execution (SecOps RLS check).
+- **Behavioral impact:** Unauthenticated reads of `profiles` are blocked; admins can update profiles via JWT claim; service role retains full access.
+- **DB migration impact:** Added `20260206093000_fix_profiles_rls.sql`.
+- **Rollback plan:** Drop new policies and restore previous policy set from `pg_policies` dump or prior migrations.
+- **Verification steps:** `npx supabase db push`; attempt anon `select * from profiles` (should fail); verify admin update in `/admin` UI.

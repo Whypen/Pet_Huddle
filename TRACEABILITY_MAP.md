@@ -15,17 +15,21 @@
 - `APP_MASTER_SPEC.md#11-cicd--deployment`
 - `APP_MASTER_SPEC.md#12-operations--maintenance`
 - `APP_MASTER_SPEC.md#13-release-verification-gate-all-yes-required`
+- `APP_MASTER_SPEC.md#protocols--execution-mandatory`
+- `APP_MASTER_SPEC.md#algorithms--logics-mandatory`
+- `APP_MASTER_SPEC.md#post-enhancement-checklist-after-uat`
 
 ## RUNBOOK Mapping
 | RUNBOOK Section | APP_MASTER_SPEC Section |
 |---|---|
-| 1 Quick Start, 2 Environment Baseline | 1, 3.1, 3.2 |
+| 1 Quick Start, 2 Environment Baseline | 1, 3.1, 3.2, 3.3 |
 | 3 Supabase Operations | 2.4, 3.1, 12.2 |
 | 4 Local QA + UAT Commands | 10, 10.2, 10.3 |
 | 5 Deployment | 11.1, 11.2 |
 | 6 Monitoring and Alerting | 11.3 |
 | 7 Incident Response, 8 Rollback | 12.1, 12.2 |
 | 9 Release Gate | 13 |
+| Backup/rollback protocol | Protocols & Execution |
 
 ## SECURITY Mapping
 | SECURITY Section | APP_MASTER_SPEC Section |
@@ -37,6 +41,7 @@
 | 5 Security Testing | 10, 10.3 |
 | 6 Incident Response | 12 |
 | 7 Compliance/Data Governance | 1.3, 7, 9 |
+| RLS proof and SecOps checks | Protocols & Execution |
 
 ## TEST_PLAN Mapping
 | TEST_PLAN Section | APP_MASTER_SPEC Section |
@@ -46,7 +51,7 @@
 | 4 Mandatory Functional Scenarios | 5.1–5.10, 4, 6 |
 | 5 Non-Functional Requirements | 8, 9, 2.5 |
 | 6 CI Gates | 11.1 |
-| 7 Evidence Requirements | 13 |
+| 7 Evidence Requirements | 13, Post-Enhancement |
 | 8 Exit Criteria | 13 |
 
 ## BRANCH_PROTECTION Mapping
@@ -65,6 +70,8 @@
 | `e2e-smoke` | 10.2, 10.3, 13 |
 | `migration-sanity` | 12.2, 13 |
 | localhost hardcode guard | 3.2 |
+| bypass-flag guard | 3.3 |
+| design token lint | 1.2 (Design Tokens) |
 
 ## Change Control
 - Any mapping change must update:
