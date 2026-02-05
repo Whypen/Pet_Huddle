@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, User, Settings, Shield, HelpCircle, LogOut, Crown, Bug, FileText, Scale } from "lucide-react";
+import { X, User, Settings, Shield, LogOut, Crown, Bug, FileText, Scale } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -22,7 +22,6 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
     { icon: Settings, label: t("settings.title"), href: "/settings" },
     { icon: Crown, label: t("premium.title"), href: "/premium" },
-    { icon: HelpCircle, label: t("settings.help_support"), href: "/settings" },
     { icon: Bug, label: t("settings.report_bug"), href: "/settings?section=bug-report" },
     { icon: FileText, label: t("Privacy & Safety Policy"), href: "/privacy" },
     { icon: Scale, label: t("settings.terms"), href: "/terms" },

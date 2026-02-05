@@ -93,6 +93,17 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/threads"
+                    element={
+                      <ProtectedRoute>
+                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                          <Social />
+                          <BottomNav />
+                        </div>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/chats"
                     element={
                       <ProtectedRoute>
