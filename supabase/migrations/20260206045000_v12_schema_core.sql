@@ -92,14 +92,30 @@ do $$ begin
 end $$;
 
 -- vaccination_dates <= current_date for each element (if array exists)
+create or replace function public.validate_vaccination_dates()
+returns trigger
+language plpgsql
+as $$
+declare
+  d date;
+begin
+  if new.vaccination_dates is not null then
+    foreach d in array new.vaccination_dates loop
+      if d > current_date then
+        raise exception 'Vaccination dates must be <= current date';
+      end if;
+    end loop;
+  end if;
+  return new;
+end;
+$$;
+
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'pets_vaccination_dates_past') then
-    alter table public.pets add constraint pets_vaccination_dates_past
-      check (
-        vaccination_dates is null
-        or array_length(vaccination_dates, 1) is null
-        or (select bool_and(d <= current_date) from unnest(vaccination_dates) d)
-      );
+  if not exists (select 1 from pg_trigger where tgname = 'trg_validate_vaccination_dates') then
+    create trigger trg_validate_vaccination_dates
+    before insert or update on public.pets
+    for each row
+    execute function public.validate_vaccination_dates();
   end if;
 end $$;
 
@@ -202,29 +218,57 @@ where not exists (
   select 1 from storage.buckets where id = 'identity_verification'
 );
 
--- RLS policies for identity_verification objects
-alter table storage.objects enable row level security;
+-- RLS policies for identity_verification objects (guarded for privilege)
+do $$ begin
+  begin
+    alter table storage.objects enable row level security;
+  exception when insufficient_privilege then
+    raise notice 'Insufficient privilege to alter storage.objects RLS';
+  end;
+end $$;
 
--- Owner can insert/select their own identity files
-create policy identity_verification_owner_select
-on storage.objects for select
-using (
-  bucket_id = 'identity_verification'
-  and auth.uid() = owner
-);
+do $$ begin
+  begin
+    create policy identity_verification_owner_select
+    on storage.objects for select
+    using (
+      bucket_id = 'identity_verification'
+      and auth.uid() = owner
+    );
+  exception when duplicate_object then
+    raise notice 'Policy identity_verification_owner_select already exists';
+  when insufficient_privilege then
+    raise notice 'Insufficient privilege to create identity_verification_owner_select';
+  end;
+end $$;
 
-create policy identity_verification_owner_insert
-on storage.objects for insert
-with check (
-  bucket_id = 'identity_verification'
-  and auth.uid() = owner
-);
+do $$ begin
+  begin
+    create policy identity_verification_owner_insert
+    on storage.objects for insert
+    with check (
+      bucket_id = 'identity_verification'
+      and auth.uid() = owner
+    );
+  exception when duplicate_object then
+    raise notice 'Policy identity_verification_owner_insert already exists';
+  when insufficient_privilege then
+    raise notice 'Insufficient privilege to create identity_verification_owner_insert';
+  end;
+end $$;
 
--- Admin/service role can manage
-create policy identity_verification_admin_all
-on storage.objects for all
-using (bucket_id = 'identity_verification' and auth.role() = 'service_role')
-with check (bucket_id = 'identity_verification' and auth.role() = 'service_role');
+do $$ begin
+  begin
+    create policy identity_verification_admin_all
+    on storage.objects for all
+    using (bucket_id = 'identity_verification' and auth.role() = 'service_role')
+    with check (bucket_id = 'identity_verification' and auth.role() = 'service_role');
+  exception when duplicate_object then
+    raise notice 'Policy identity_verification_admin_all already exists';
+  when insufficient_privilege then
+    raise notice 'Insufficient privilege to create identity_verification_admin_all';
+  end;
+end $$;
 
 -- Auto-delete identity files 7 days after verification_status change (cron)
 create table if not exists public.identity_verification_cleanup_queue (
