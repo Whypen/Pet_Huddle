@@ -66,6 +66,21 @@
     --radius: 1rem;
     --radius-sm: 0.75rem;
     --radius-lg: 1.25rem;
+
+    /* Typography Tokens (pt) */
+    --font-pt14: 14px;
+    --font-pt12: 12px;
+
+    /* Spacing Tokens */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+    --space-8: 32px;
+
+    /* Border Tokens */
+    --border-thin: 1px;
     
     /* Shadows */
     --shadow-card: 0 2px 12px -2px hsl(220 20% 20% / 0.06);
@@ -93,6 +108,10 @@
 
   .font-huddle {
     font-family: Calibri, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  body {
+    font-size: var(--font-pt14);
   }
 
   .dark {
