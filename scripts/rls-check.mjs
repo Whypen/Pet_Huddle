@@ -7,12 +7,12 @@ for(const p of envFiles){if(!fs.existsSync(p)) continue;for(const line of fs.rea
 const url=env.SUPABASE_URL||env.VITE_SUPABASE_URL;
 const anon=env.SUPABASE_ANON_KEY||env.VITE_SUPABASE_ANON_KEY;
 
-const headers={ apikey: anon, Authorization: `Bearer ${anon}` };
+const headers={ apikey: anon, Authorization: `Bearer ${anon}`, "Content-Type": "application/json" };
 
 const storageUrl = `${url}/storage/v1/object/list/identity_verification`;
 const profilesUrl = `${url}/rest/v1/profiles?select=id&limit=1`;
 
-const storageRes = await fetch(storageUrl, { method: 'POST', headers, body: JSON.stringify({}) });
+const storageRes = await fetch(storageUrl, { method: 'POST', headers, body: JSON.stringify({ prefix: '' }) });
 let storageBody='';
 try{ storageBody=await storageRes.text(); }catch(e){}
 
