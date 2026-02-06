@@ -28,7 +28,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 const tags = [
   { id: "Dog", labelKey: "threads.tag.dog", icon: MessageSquare, color: "bg-primary" },
   { id: "Cat", labelKey: "threads.tag.cat", icon: Heart, color: "bg-accent" },
-  { id: "Pet News", labelKey: "threads.tag.pet_news", icon: Megaphone, color: "bg-warning" },
+  { id: "News", labelKey: "threads.tag.pet_news", icon: Megaphone, color: "bg-warning" },
   { id: "Social", labelKey: "threads.tag.social", icon: ThumbsUp, color: "bg-accent" },
   { id: "Others", labelKey: "threads.tag.others", icon: Flag, color: "bg-muted" },
 ];
@@ -53,6 +53,7 @@ interface ThreadComment {
   id: string;
   thread_id: string;
   content: string;
+  images?: string[] | null;
   created_at: string;
   user_id: string;
   author: {
@@ -67,22 +68,7 @@ interface NoticeBoardProps {
 export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user, profile } = useAuth();
-  const dummyCatPost: Thread = {
-    id: "dummy-cat",
-    title: t("threads.dummy_title"),
-    content: t("notice.dummy_content"),
-    tags: ["Social"],
-    hashtags: ["#huddle"],
-    images: null,
-    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-    user_id: "cat-lover-123",
-    author: {
-      display_name: t("notice.dummy_author"),
-      avatar_url: null,
-      is_verified: true,
-    },
-  };
-  const [notices, setNotices] = useState<Thread[]>([dummyCatPost]); // Initialize with dummy cat post
+  const [notices, setNotices] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -93,7 +79,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Social");
-  const [hashtags, setHashtags] = useState("");
+  const [hashtagInput, setHashtagInput] = useState("");
+  const [hashtags, setHashtags] = useState<string[]>([]);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -103,15 +90,26 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
+  const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
+  const [replyImagePreview, setReplyImagePreview] = useState<string | null>(null);
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
   const remainingChars = useMemo(() => 1000 - content.length, [content]);
-  const remainingReplyChars = useMemo(() => 1000 - replyContent.length, [replyContent]);
+  const remainingReplyChars = useMemo(() => 200 - replyContent.length, [replyContent]);
+  const [keyword, setKeyword] = useState("");
+  const [topicFilter, setTopicFilter] = useState<string>("All");
+  const [sortMode, setSortMode] = useState<"Trending" | "Latest">("Trending");
 
   useEffect(() => {
     fetchNotices(true);
   }, []);
+
+  // Re-run query when filters change.
+  useEffect(() => {
+    fetchNotices(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyword, topicFilter, sortMode]);
 
   useEffect(() => {
     if (replyFor) {
@@ -145,9 +143,17 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
             is_verified
           )
         `)
-        .order("score", { ascending: false })
+        .order(sortMode === "Trending" ? "score" : "created_at", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(20);
+
+      if (keyword.trim()) {
+        const k = keyword.trim().replace(/%/g, "");
+        query = query.or(`title.ilike.%${k}%,content.ilike.%${k}%`);
+      }
+      if (topicFilter !== "All") {
+        query = query.contains("tags", [topicFilter]);
+      }
 
       if (!reset && lastCreatedAt) {
         query = query.lt("created_at", lastCreatedAt);
@@ -158,7 +164,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       if (error) throw error;
       const newNotices = data || [];
       if (reset) {
-        setNotices([dummyCatPost, ...newNotices]);
+        setNotices(newNotices);
       } else {
         setNotices(prev => [...prev, ...newNotices]);
       }
@@ -170,6 +176,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
             id,
             thread_id,
             content,
+            images,
             created_at,
             user_id,
             author:profiles!thread_comments_user_id_fkey(display_name)
@@ -235,9 +242,21 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       toast.error(t("Reply cannot be empty"));
       return;
     }
-    if (replyContent.length > 1000) {
+    if (replyContent.length > 200) {
       toast.error(t("Reply is too long"));
       return;
+    }
+    let uploadedUrl: string | null = null;
+    if (replyImageFile) {
+      const fileExt = replyImageFile.name.split(".").pop();
+      const fileName = `${user.id}/${Date.now()}-reply.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, replyImageFile);
+      if (uploadError) {
+        toast.error(uploadError.message);
+        return;
+      }
+      const { data: { publicUrl } } = supabase.storage.from("notices").getPublicUrl(fileName);
+      uploadedUrl = publicUrl;
     }
     const { error } = await supabase
       .from("thread_comments")
@@ -245,6 +264,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         thread_id: thread.id,
         user_id: user.id,
         content: replyContent.trim(),
+        images: uploadedUrl ? [uploadedUrl] : [],
       });
     if (error) {
       toast.error(error.message);
@@ -252,6 +272,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     }
     setReplyContent("");
     setReplyFor(null);
+    setReplyImageFile(null);
+    setReplyImagePreview(null);
     fetchNotices(true);
   };
 
@@ -321,11 +343,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         imageUrl = publicUrl;
       }
 
-      const hashtagList = hashtags
-        .split(",")
-        .map((h) => h.trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      const hashtagList = hashtags.slice(0, 3);
 
       const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
         action_type: "thread_post",
@@ -339,7 +357,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         .from("threads")
         .insert({
           user_id: user.id,
-          title: title.trim().slice(0, 20),
+          title: title.trim(),
           content: content.trim(),
           tags: [category],
           hashtags: hashtagList,
@@ -352,7 +370,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       setTitle("");
       setContent("");
       setCategory("Social");
-      setHashtags("");
+      setHashtags([]);
+      setHashtagInput("");
       setImageFile(null);
       setImagePreview(null);
       setIsCreateOpen(false);
@@ -415,6 +434,37 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
   return (
     <div className="space-y-4">
+      {/* Filters + Sorting */}
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          placeholder={t("Search")}
+          className="flex-1 h-10 rounded-xl border border-border bg-muted px-3 text-sm"
+        />
+        <select
+          value={topicFilter}
+          onChange={(e) => setTopicFilter(e.target.value)}
+          className="h-10 rounded-xl border border-border bg-muted px-2 text-sm"
+        >
+          <option value="All">{t("All")}</option>
+          {tags.map((tg) => (
+            <option key={tg.id} value={tg.id}>
+              {tg.id}
+            </option>
+          ))}
+        </select>
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as "Trending" | "Latest")}
+          className="h-10 rounded-xl border border-border bg-muted px-2 text-sm"
+        >
+          <option value="Trending">{t("Trending")}</option>
+          <option value="Latest">{t("Latest")}</option>
+        </select>
+      </div>
+
       {/* Header with Expand/Collapse */}
       <div className="flex items-center justify-between">
         <button
@@ -587,10 +637,15 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                           <button
                             className="text-xs text-primary"
                             onClick={() => {
+                              if (replyFor === notice.id) {
+                                setReplyFor(null);
+                                setReplyContent("");
+                                setReplyImageFile(null);
+                                setReplyImagePreview(null);
+                                return;
+                              }
                               setReplyFor(notice.id);
-                              const snippet = notice.content.slice(0, 20).replace(/\s+/g, " ").trim();
-                              const quote = `> @${notice.author?.display_name || "user"}: "${snippet}..."\\n\\n`;
-                              setReplyContent(quote);
+                              setReplyContent(`@${notice.author?.display_name || "user"} `);
                             }}
                           >
                             {t("Reply")}
@@ -600,6 +655,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             <div key={c.id} className="text-xs text-muted-foreground border-l pl-2">
                               <span className="font-medium">{c.author?.display_name || t("Anonymous")}:</span>{" "}
                               <span dangerouslySetInnerHTML={{ __html: renderMarkdown(c.content) }} />
+                              {c.images && c.images.length > 0 && (
+                                <img
+                                  src={c.images[0]}
+                                  alt=""
+                                  className="mt-2 rounded-lg max-h-40 object-cover aspect-video w-full"
+                                />
+                              )}
                             </div>
                           ))}
 
@@ -610,15 +672,41 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                 value={replyContent}
                                 onChange={(e) => setReplyContent(e.target.value)}
                                 className="rounded-xl min-h-[80px]"
-                                maxLength={1000}
+                                maxLength={200}
                               />
                               <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
-                                <span>{t("Max 1000 chars")}</span>
+                                <span>{t("Max 200 chars")}</span>
                                 <span>{remainingReplyChars}</span>
+                              </div>
+                              <div className="mt-2">
+                                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                                  <Image className="w-4 h-4" />
+                                  {t("Add image")}
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (!file) return;
+                                      setReplyImageFile(file);
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => setReplyImagePreview(reader.result as string);
+                                      reader.readAsDataURL(file);
+                                    }}
+                                  />
+                                </label>
+                                {replyImagePreview && (
+                                  <img
+                                    src={replyImagePreview}
+                                    alt=""
+                                    className="mt-2 rounded-lg max-h-40 object-cover aspect-video w-full"
+                                  />
+                                )}
                               </div>
                               <div className="flex justify-end mt-2">
                                 <Button size="sm" onClick={() => handleReply(notice)}>
-                                  {t("Post Reply")}
+                                  {t("Send")}
                                 </Button>
                               </div>
                             </div>
@@ -661,7 +749,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-card rounded-t-3xl p-6"
+              className="w-full bg-card rounded-t-3xl p-6 pb-[calc(env(safe-area-inset-bottom)+96px)]"
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold">{t("Create Thread")}</h3>
@@ -692,21 +780,49 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               {/* Title */}
               <input
                 type="text"
-                maxLength={20}
-                placeholder={t("Thread title (max 20 chars)")}
+                placeholder={t("Title")}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-3"
               />
 
               {/* Hashtags */}
-              <input
-                type="text"
-                placeholder={t("Hashtags (comma separated, max 3)")}
-                value={hashtags}
-                onChange={(e) => setHashtags(e.target.value)}
-                className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-3"
-              />
+              <div className="mb-3">
+                <input
+                  type="text"
+                  placeholder={t("Up to 3 #Hashtags")}
+                  value={hashtagInput}
+                  onChange={(e) => setHashtagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== " ") return;
+                    const word = hashtagInput.trim().replace(/^#/, "");
+                    if (!word) return;
+                    e.preventDefault();
+                    setHashtags((prev) => {
+                      if (prev.length >= 3) return prev;
+                      const next = `#${word}`;
+                      if (prev.includes(next)) return prev;
+                      return [...prev, next];
+                    });
+                    setHashtagInput("");
+                  }}
+                  className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm"
+                />
+                {hashtags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {hashtags.map((h) => (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() => setHashtags((prev) => prev.filter((x) => x !== h))}
+                        className="text-xs px-2 py-1 rounded-full bg-muted text-muted-foreground"
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Content */}
               <Textarea
