@@ -22,6 +22,8 @@ interface ProfileData {
   orientation: string;
   dob: string;
   locationName: string;
+  locationCountry: string;
+  locationDistrict: string;
   petExperience: string[];
   experienceYears: number;
   height: number | null;
@@ -77,13 +79,30 @@ const PET_EXPERIENCE_OPTIONS = [
 ];
 
 const AVAILABILITY_STATUS_OPTIONS = [
-  "Pet Parents", "Pet Nanny", "Animal Friend (no pet)"
+  "Pet Parent", "Pet Nanny", "Animal Friend (No Pet)"
 ];
 
 const LANGUAGE_OPTIONS = [
   "English", "Cantonese", "Mandarin", "Spanish", "French",
   "Japanese", "Korean", "German", "Portuguese", "Italian"
 ];
+
+const COUNTRY_OPTIONS = [
+  "Hong Kong",
+  "United States",
+  "United Kingdom",
+  "Canada",
+  "Australia",
+  "Singapore",
+  "Taiwan",
+  "China",
+  "Japan",
+  "South Korea",
+];
+
+const DISTRICT_MAP: Record<string, string[]> = {
+  "Hong Kong": ["Hong Kong Island", "Kowloon", "New Territories"],
+};
 
 export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSetupStepProps) => {
   const { t } = useLanguage();
@@ -101,6 +120,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     orientation: initialData?.orientation || "",
     dob: initialData?.dob || "",
     locationName: initialData?.locationName || "",
+    locationCountry: initialData?.locationCountry || "",
+    locationDistrict: initialData?.locationDistrict || "",
     petExperience: initialData?.petExperience || [],
     experienceYears: initialData?.experienceYears || 0,
     height: initialData?.height || null,
@@ -130,7 +151,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
   // Detect location when DOB changes
   useEffect(() => {
-    if (formData.dob && !formData.locationName) {
+    if (formData.dob && !formData.locationName && !formData.locationCountry) {
       detectLocation();
     }
   }, [formData.dob]);
@@ -143,6 +164,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       if (data.city && data.country_name) {
         setFormData(prev => ({
           ...prev,
+          locationCountry: data.country_name,
+          locationDistrict: data.city,
           locationName: `${data.city}, ${data.country_name}`
         }));
       }
@@ -201,7 +224,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     return (
       formData.displayName.trim().length > 0 &&
       formData.dob.length > 0 &&
-      formData.locationName.trim().length > 0 &&
+      formData.locationCountry.trim().length > 0 &&
+      formData.locationDistrict.trim().length > 0 &&
       formData.socialAvailability === true &&
       formData.availabilityStatus.length > 0
     );
@@ -212,13 +236,17 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       toast.error(t("Please enter a display name"));
       return;
     }
+    if (/\d/.test(formData.displayName)) {
+      toast.error(t("Name cannot contain numbers"));
+      return;
+    }
 
     if (!formData.dob) {
       toast.error(t("Please enter your date of birth"));
       return;
     }
 
-    if (!formData.locationName.trim()) {
+    if (!formData.locationCountry.trim() || !formData.locationDistrict.trim()) {
       toast.error(t("Please enter your location"));
       return;
     }
@@ -259,8 +287,12 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         avatarUrl = publicUrl;
       }
 
+      const locationName = formData.locationDistrict && formData.locationCountry
+        ? `${formData.locationDistrict}, ${formData.locationCountry}`
+        : formData.locationName;
+
       // Call onComplete which will save to database in Onboarding.tsx
-      onComplete({ ...formData, avatarUrl });
+      onComplete({ ...formData, avatarUrl, locationName });
       toast.success(t("Profile information saved!"));
     } catch (error: any) {
       console.error("Error in profile setup:", error);
@@ -316,25 +348,14 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         </label>
       </div>
 
-      {/* Display Name, Phone & Bio */}
+      {/* Display/User Name & Bio */}
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label><span className="text-destructive">{t("*")}</span> {t("Display Name")}</Label>
+          <Label><span className="text-destructive">{t("*")}</span> {t("Display/User Name")}</Label>
           <Input
             value={formData.displayName}
             onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
             placeholder={t("How should others call you?")}
-            className="h-12 rounded-xl"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>{t("Phone (Optional)")}</Label>
-          <Input
-            type="tel"
-            value={formData.phone}
-            onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-            placeholder={t("+1 234 567 8900")}
             className="h-12 rounded-xl"
           />
         </div>
@@ -438,22 +459,67 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       </div>
 
       {/* Location */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <Label className="flex items-center gap-2">
           <MapPin className="w-4 h-4" />
           <span className="text-destructive">{t("*")}</span> {t("Location")}
         </Label>
-        <div className="relative">
-          <Input
-            value={formData.locationName}
-            onChange={(e) => setFormData(prev => ({ ...prev, locationName: e.target.value }))}
-            placeholder={t("Your city")}
-            className="h-12 rounded-xl pr-10"
-          />
-          {detectingLocation && (
-            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 animate-spin text-muted-foreground" />
-          )}
-        </div>
+        <Select
+          value={formData.locationCountry}
+          onValueChange={(value) =>
+            setFormData((prev) => ({
+              ...prev,
+              locationCountry: value,
+              locationDistrict: "",
+            }))
+          }
+        >
+          <SelectTrigger className="h-12 rounded-xl">
+            <SelectValue placeholder={t("Select country")} />
+          </SelectTrigger>
+          <SelectContent>
+            {COUNTRY_OPTIONS.map((c) => (
+              <SelectItem key={c} value={c}>
+                {t(c)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {DISTRICT_MAP[formData.locationCountry] ? (
+          <Select
+            value={formData.locationDistrict}
+            onValueChange={(value) =>
+              setFormData((prev) => ({
+                ...prev,
+                locationDistrict: value,
+              }))
+            }
+          >
+            <SelectTrigger className="h-12 rounded-xl">
+              <SelectValue placeholder={t("Select district")} />
+            </SelectTrigger>
+            <SelectContent>
+              {DISTRICT_MAP[formData.locationCountry].map((d) => (
+                <SelectItem key={d} value={d}>
+                  {t(d)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="relative">
+            <Input
+              value={formData.locationDistrict}
+              onChange={(e) => setFormData((prev) => ({ ...prev, locationDistrict: e.target.value }))}
+              placeholder={t("Your district")}
+              className="h-12 rounded-xl pr-10"
+            />
+            {detectingLocation && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 animate-spin text-muted-foreground" />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Pet Experience */}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Stethoscope, MapPin, Users, MessageCircle, Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
+import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -22,13 +22,6 @@ interface Pet {
   dob: string | null;
   photo_url: string | null;
 }
-
-const quickActions = [
-  { icon: Stethoscope, labelKey: "nav.ai_vet", path: "/ai-vet", color: "bg-primary" },
-  { icon: MapPin, labelKey: "nav.map", path: "/map", color: "bg-primary" },
-  { icon: Users, labelKey: "nav.social", path: "/social", color: "bg-primary" },
-  { icon: MessageCircle, labelKey: "nav.chats", path: "/chats", color: "bg-primary" },
-];
 
 // SPRINT 2: Species-specific huddle Wisdom tips
 const wisdomTips: Record<string, string[]> = {
@@ -88,6 +81,23 @@ const Index = () => {
 
   useEffect(() => {
     fetchPets();
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("pets-home-refresh")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pets" },
+        () => {
+          fetchPets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchPets = async () => {
@@ -315,31 +325,6 @@ const Index = () => {
           )}
         </>
       )}
-
-      {/* Quick Actions */}
-      <section className="px-5 py-4 pb-8">
-        <div className="flex justify-around">
-          {quickActions.map((action, index) => (
-            <motion.a
-              key={action.labelKey}
-              href={action.path}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.1 }}
-              whileTap={{ scale: 0.9 }}
-              className="flex flex-col items-center gap-2"
-            >
-              <div className={cn(
-                "w-14 h-14 rounded-full flex items-center justify-center shadow-card",
-                action.color
-              )}>
-                <action.icon className="w-6 h-6 text-primary-foreground" />
-              </div>
-              <span className="text-xs font-medium text-muted-foreground">{t(action.labelKey)}</span>
-            </motion.a>
-          ))}
-        </div>
-      </section>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />

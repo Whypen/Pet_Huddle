@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+Platform Keys.rtf
+Backend.env.md
+supabase/config.toml.bak

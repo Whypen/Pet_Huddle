@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2 } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -15,6 +15,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { useUpsell } from "@/hooks/useUpsell";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type MainTab = "chats" | "groups";
 const filterTabs = [
@@ -172,6 +174,7 @@ const Chats = () => {
   const { t } = useLanguage();
   const { isConnected, onNewMessage, onOnlineStatus } = useWebSocket();
   const { getConversations } = useApi();
+  const { checkStarsAvailable } = useUpsell();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -185,13 +188,23 @@ const Chats = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [discoveryProfiles, setDiscoveryProfiles] = useState<any[]>([]);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryRole, setDiscoveryRole] = useState("playdates");
+  const [discoveryDistance, setDiscoveryDistance] = useState(10);
+  const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
+  const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
   const [selectedNanny, setSelectedNanny] = useState<ChatUser | null>(null);
   const [bookingAmount, setBookingAmount] = useState("50");
+  const [bookingCurrency, setBookingCurrency] = useState("USD");
   const [bookingProcessing, setBookingProcessing] = useState(false);
+  const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
+  const [showSafeHarborModal, setShowSafeHarborModal] = useState(false);
   const [serviceDate, setServiceDate] = useState("");
+  const [serviceEndDate, setServiceEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
   const [selectedPet, setSelectedPet] = useState("");
@@ -203,6 +216,7 @@ const Chats = () => {
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
   const isUnder16 = userAge !== null && userAge < 16;
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user pets when the nanny booking modal opens
   useEffect(() => {
@@ -226,11 +240,15 @@ const Chats = () => {
           });
       }
       setServiceDate("");
+      setServiceEndDate("");
       setStartTime("09:00");
       setEndTime("17:00");
+      setSafeHarborAccepted(false);
       if (sitterHourlyRate) {
-        const start = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${startTime}`);
-        const end = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${endTime}`);
+        const baseDate = serviceDate || new Date().toISOString().split("T")[0];
+        const endDate = serviceEndDate || baseDate;
+        const start = new Date(`${baseDate}T${startTime}`);
+        const end = new Date(`${endDate}T${endTime}`);
         const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
         const expected = Math.round((sitterHourlyRate * hours) / 100);
         if (expected > 0) setBookingAmount(expected.toString());
@@ -239,14 +257,20 @@ const Chats = () => {
   }, [nannyBookingOpen, profile?.id, selectedNanny?.id]);
 
   useEffect(() => {
-    if (!sitterHourlyRate || !serviceDate) return;
+    if (!sitterHourlyRate || !serviceDate || !serviceEndDate) return;
     const start = new Date(`${serviceDate}T${startTime}`);
-    const end = new Date(`${serviceDate}T${endTime}`);
+    const end = new Date(`${serviceEndDate}T${endTime}`);
     const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
     if (!hours) return;
     const expected = Math.round((sitterHourlyRate * hours) / 100);
     if (expected > 0) setBookingAmount(expected.toString());
-  }, [sitterHourlyRate, serviceDate, startTime, endTime]);
+  }, [sitterHourlyRate, serviceDate, serviceEndDate, startTime, endTime]);
+
+  useEffect(() => {
+    if (serviceDate && !serviceEndDate) {
+      setServiceEndDate(serviceDate);
+    }
+  }, [serviceDate]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -263,6 +287,34 @@ const Chats = () => {
     };
     loadConversations();
   }, []);
+
+  // Discovery cards (embedded in Chats)
+  useEffect(() => {
+    const runDiscovery = async () => {
+      if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
+      setDiscoveryLoading(true);
+      try {
+        const payload = {
+          userId: profile.id,
+          lat: profile.last_lat,
+          lng: profile.last_lng,
+          radiusKm: discoveryDistance,
+          role: discoveryRole,
+          petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
+          // Premium/Gold get advanced filters; free uses basic only
+          advanced: isPremium,
+        };
+        const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
+        if (error) throw error;
+        setDiscoveryProfiles(data?.profiles || []);
+      } catch (err) {
+        console.warn("[Chats] Discovery failed", err);
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    };
+    runDiscovery();
+  }, [profile?.id, profile?.last_lat, profile?.last_lng, discoveryDistance, discoveryRole, discoveryPetSize, isPremium]);
 
   // Listen for new messages
   useEffect(() => {
@@ -364,27 +416,38 @@ const Chats = () => {
   const handleNannyBookClick = (e: React.MouseEvent, chat: ChatUser) => {
     e.stopPropagation(); // Don't navigate to chat
     setSelectedNanny(chat);
-    setNannyBookingOpen(true);
+    setShowSafeHarborModal(true);
   };
 
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
   const handleBookingCheckout = async () => {
     if (!profile?.id || !selectedNanny) return;
-    if (!serviceDate || !selectedPet || !startTime || !endTime) {
+    if (!serviceDate || !serviceEndDate || !selectedPet || !startTime || !endTime) {
       toast.error(t("Please complete all booking details"));
+      return;
+    }
+    if (new Date(`${serviceEndDate}T${endTime}`).getTime() <= new Date(`${serviceDate}T${startTime}`).getTime()) {
+      toast.error(t("booking.invalid_date_range"));
+      return;
+    }
+    if (!safeHarborAccepted) {
+      toast.error(t("You must accept the Safe Harbor terms"));
       return;
     }
     setBookingProcessing(true);
 
     try {
       const startIso = new Date(`${serviceDate}T${startTime}`).toISOString();
-      const endIso = new Date(`${serviceDate}T${endTime}`).toISOString();
+      const endIso = new Date(`${serviceEndDate}T${endTime}`).toISOString();
 
+      const idempotencyKey = `booking_${profile.id}_${Date.now()}`;
       const { data, error } = await supabase.functions.invoke("create-marketplace-booking", {
+        headers: { "idempotency-key": idempotencyKey },
         body: {
           clientId: profile.id,
           sitterId: selectedNanny.id,
           amount: Math.round(parseFloat(bookingAmount) * 100), // cents
+          currency: bookingCurrency,
           serviceStartDate: startIso,
           serviceEndDate: endIso,
           petId: selectedPet,
@@ -395,6 +458,7 @@ const Chats = () => {
               : ""),
           successUrl: `${window.location.origin}/chats?booking_success=true`,
           cancelUrl: `${window.location.origin}/chats`,
+          safeHarborAccepted: true,
         },
       });
 
@@ -454,6 +518,106 @@ const Chats = () => {
           </motion.button>
         </div>
       </header>
+
+        {/* Discovery Cards (embedded in Chats) */}
+      <section className="px-5 pb-4">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
+          <select
+            value={discoveryRole}
+            onChange={(e) => setDiscoveryRole(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            <option value="playdates">{t("Playdates")}</option>
+            <option value="nannies">{t("Nannies")}</option>
+            <option value="animal-lovers">{t("Animal Lovers")}</option>
+          </select>
+          <select
+            value={String(discoveryDistance)}
+            onChange={(e) => setDiscoveryDistance(Number(e.target.value))}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            {[5, 10, 20, 50, 100, 150].map((km) => (
+              <option key={km} value={km}>{km}km</option>
+            ))}
+          </select>
+          <select
+            value={discoveryPetSize}
+            onChange={(e) => setDiscoveryPetSize(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            {["Any", "Small", "Medium", "Large"].map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
+          {discoveryLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {t("Loading discovery...")}
+            </div>
+          )}
+          {discoveryProfiles.filter((p) => !hiddenDiscoveryIds.has(p.id)).map((p) => {
+            const age = p?.dob ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : "";
+            const petSpecies = Array.isArray(p?.pets) && p.pets.length > 0 ? p.pets[0].species : "—";
+            return (
+              <div key={p.id} className="min-w-[220px] rounded-2xl border border-border bg-card p-3 shadow-card relative">
+                <div className="text-sm font-semibold">{p.display_name}</div>
+                <div className="text-xs text-muted-foreground">{age ? `${age} • ${p.relationship_status || "—"}` : p.relationship_status || "—"}</div>
+                <div className="text-xs text-muted-foreground mt-1">{t("Pet")}: {petSpecies}</div>
+
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <button
+                    onClick={() => {
+                      toast.success(t("Wave sent"));
+                    }}
+                    className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+                  >
+                    <HandMetal className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = await checkStarsAvailable();
+                      if (!ok) {
+                        toast.error(t("Buy a star pack to immediately chat with the user"));
+                        return;
+                      }
+                      navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
+                    }}
+                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                  >
+                    <Star className="w-4 h-4 text-[#3283FF]" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
+                    }}
+                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                  >
+                    <X className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {discoveryProfiles.length > 0 &&
+          discoveryProfiles.filter((p) => !hiddenDiscoveryIds.has(p.id)).length === 0 && (
+            <div className="mt-2">
+              <button
+                onClick={() => {
+                  setDiscoveryDistance((prev) => Math.min(150, prev + 15));
+                  setHiddenDiscoveryIds(new Set());
+                }}
+                className="text-xs font-medium text-[#3283ff] underline"
+              >
+                {t("Run out of huddlers? Expand search.")}
+              </button>
+            </div>
+          )}
+      </section>
 
       {/* Search Bar */}
       <AnimatePresence>
@@ -727,6 +891,34 @@ const Chats = () => {
       />
       </div>
 
+      <Dialog open={showSafeHarborModal} onOpenChange={setShowSafeHarborModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Safe Harbor Agreement</DialogTitle>
+          </DialogHeader>
+          <label className="text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={safeHarborAccepted}
+              onChange={(e) => setSafeHarborAccepted(e.target.checked)}
+              className="mr-2 align-middle"
+            />
+            I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+          </label>
+          <DialogFooter>
+            <Button
+              disabled={!safeHarborAccepted}
+              onClick={() => {
+                setShowSafeHarborModal(false);
+                setNannyBookingOpen(true);
+              }}
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Nanny Booking Modal */}
       <AnimatePresence>
         {nannyBookingOpen && selectedNanny && (
@@ -761,7 +953,7 @@ const Chats = () => {
                 </div>
               </div>
 
-              {/* Service Date */}
+              {/* Service Start Date */}
               <div className="mb-3">
                 <label className="text-sm font-medium mb-1.5 block">{t("booking.service_date")}</label>
                 <input
@@ -769,6 +961,18 @@ const Chats = () => {
                   value={serviceDate}
                   onChange={(e) => setServiceDate(e.target.value)}
                   min={new Date().toISOString().split("T")[0]}
+                  className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+
+              {/* Service End Date */}
+              <div className="mb-3">
+                <label className="text-sm font-medium mb-1.5 block">{t("booking.end_date")}</label>
+                <input
+                  type="date"
+                  value={serviceEndDate}
+                  onChange={(e) => setServiceEndDate(e.target.value)}
+                  min={serviceDate || new Date().toISOString().split("T")[0]}
                   className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
                 />
               </div>
@@ -828,7 +1032,15 @@ const Chats = () => {
               <div className="mb-4">
                 <label className="text-sm font-medium mb-2 block">{t("booking.amount")}</label>
                 <div className="flex items-center gap-2">
-              <span className="text-lg font-bold" style={{ color: "#A6D539" }}>{t("$")}</span>
+                  <select
+                    value={bookingCurrency}
+                    onChange={(e) => setBookingCurrency(e.target.value)}
+                    className="h-12 rounded-xl bg-muted border border-border px-2 text-sm"
+                  >
+                    <option value="USD">USD</option>
+                    <option value="HKD">HKD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
                   <input
                     type="number"
                     value={bookingAmount}
@@ -842,6 +1054,15 @@ const Chats = () => {
                 <p className="text-xs text-muted-foreground mt-1">
                   {sitterHourlyRate ? t("booking.amount_calculated") : t("booking.amount_note")}
                 </p>
+                <label className="text-xs text-muted-foreground mt-3 block">
+                  <input
+                    type="checkbox"
+                    checked={safeHarborAccepted}
+                    onChange={(e) => setSafeHarborAccepted(e.target.checked)}
+                    className="mr-2 align-middle"
+                  />
+                  I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+                </label>
               </div>
 
               <div className="flex gap-3">
@@ -857,9 +1078,11 @@ const Chats = () => {
                     bookingProcessing ||
                     parseFloat(bookingAmount) < 10 ||
                     !serviceDate ||
+                    !serviceEndDate ||
                     !startTime ||
                     !endTime ||
-                    !selectedPet
+                    !selectedPet ||
+                    !safeHarborAccepted
                   }
                   className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
                   style={{ backgroundColor: "#A6D539" }}
@@ -869,7 +1092,7 @@ const Chats = () => {
                   ) : (
                     <>
                       <DollarSign className="w-4 h-4" />
-                      {t("booking.pay")} ${bookingAmount}
+                      {t("Proceed Booking Payment")}
                     </>
                   )}
                 </button>

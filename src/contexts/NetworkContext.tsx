@@ -59,9 +59,18 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [pendingActions]);
 
-  // Health check is intentionally neutralized for hybrid frontend+cloud setups.
+  // Health check: uses /health-check endpoint when API URL is set.
   const checkServerHealth = useCallback(async (): Promise<boolean> => {
-    return true;
+    if (!API_URL) {
+      console.warn("[NetworkContext] Missing VITE_API_URL. Health check skipped.");
+      return true;
+    }
+    try {
+      const res = await fetch(`${API_URL}/health-check`, { method: "GET" });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }, []);
 
   // Retry connection

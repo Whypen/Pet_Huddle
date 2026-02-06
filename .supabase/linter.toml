@@ -1,0 +1,16 @@
+[lint]
+exclude_schemas = ["extensions"]
+exclude = [
+  "function.public.st_findextent",
+  "function.public.populate_geometry_columns",
+  "function.public.addgeometrycolumn",
+  "function.public.dropgeometrycolumn",
+  "function.public.dropgeometrytable",
+  "function.public.updategeometrysrid",
+  "function.public.postgis_full_version",
+  "function.public.st_letters",
+  "function.public.lockrow",
+  "function.public.addauth",
+  "function.public.enablelongtransactions",
+  "function.public.longtransactionsenabled"
+]

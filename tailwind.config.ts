@@ -17,6 +17,10 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
+      fontSize: {
+        base: ["var(--font-pt14)", { lineHeight: "1.5" }],
+        sub: ["var(--font-pt12)", { lineHeight: "1.4" }],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -125,6 +129,15 @@ export default {
       spacing: {
         "nav": "var(--nav-height)",
         "safe": "env(safe-area-inset-bottom, 0px)",
+        "token-1": "var(--space-1)",
+        "token-2": "var(--space-2)",
+        "token-3": "var(--space-3)",
+        "token-4": "var(--space-4)",
+        "token-6": "var(--space-6)",
+        "token-8": "var(--space-8)",
+      },
+      borderWidth: {
+        token: "var(--border-thin)",
       },
     },
   },

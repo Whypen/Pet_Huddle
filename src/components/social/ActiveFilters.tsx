@@ -37,9 +37,9 @@ export const ActiveFilters = ({ filters, onRemove }: ActiveFiltersProps) => {
     activeFilterChips.push({ key: "gender", label: filters.gender });
   }
 
-  // Pet Height
+  // Pet Size
   if (filters.petHeight) {
-    activeFilterChips.push({ key: "petHeight", label: `${filters.petHeight} pets` });
+    activeFilterChips.push({ key: "petHeight", label: `${filters.petHeight} size` });
   }
 
   if (activeFilterChips.length === 0) return null;

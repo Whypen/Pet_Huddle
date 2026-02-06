@@ -19,16 +19,19 @@ const allowStripeFallback = Deno.env.get("ALLOW_STRIPE_FALLBACK") === "true";
 
 serve(async (req: Request) => {
   try {
+    const clientIdempotencyKey = req.headers.get("idempotency-key") || "";
     const {
       clientId,
       sitterId,
       amount, // In cents
+      currency,
       serviceStartDate,
       serviceEndDate,
       successUrl,
       cancelUrl,
       petId,
       locationName,
+      safeHarborAccepted,
     } = await req.json();
 
     if (!clientId || !sitterId || !amount || !serviceStartDate || !serviceEndDate) {
@@ -37,6 +40,15 @@ serve(async (req: Request) => {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+    if (!safeHarborAccepted) {
+      return new Response(
+        JSON.stringify({ error: "Safe Harbor terms not accepted" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Quota check (no-op for booking but enforces centralized QMS gate)
+    await supabase.rpc("check_and_increment_quota", { action_type: "booking" });
 
     // Get sitter's Stripe Connect account
     const { data: sitter } = await supabase
@@ -91,12 +103,23 @@ serve(async (req: Request) => {
     const platformFee = Math.round(amount * 0.1); // 10% platform fee
     const sitterPayout = amount - platformFee;
 
-    // Generate idempotency key
-    const idempotencyKey = `booking-${clientId}-${sitterId}-${Date.now()}`;
+    // Generate idempotency key (required format)
+    if (!clientIdempotencyKey) {
+      return new Response(
+        JSON.stringify({ error: "Missing idempotency-key header" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const idempotencyKey = clientIdempotencyKey;
 
     let checkoutUrl: string | null = null;
     let paymentIntentId: string;
     let usingFallback = false;
+
+    const normalizedCurrency = typeof currency === "string" && currency.length === 3
+      ? currency.toLowerCase()
+      : "usd";
 
     try {
       // Create Checkout Session with destination charge
@@ -107,7 +130,7 @@ serve(async (req: Request) => {
           line_items: [
             {
               price_data: {
-                currency: "usd",
+                currency: normalizedCurrency,
                 product_data: {
                   name: "Pet Sitting Service",
                   description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()}`,
@@ -129,6 +152,7 @@ serve(async (req: Request) => {
               service_end_date: serviceEndDate,
               pet_id: petId || "",
               location_name: locationName || "",
+              safe_harbor_accepted: "true",
             },
           },
           metadata: {
@@ -137,6 +161,7 @@ serve(async (req: Request) => {
             sitter_id: sitterId,
             pet_id: petId || "",
             location_name: locationName || "",
+            safe_harbor_accepted: "true",
           },
           success_url: successUrl,
           cancel_url: cancelUrl,
@@ -189,6 +214,13 @@ serve(async (req: Request) => {
     );
   } catch (error: any) {
     console.error("Marketplace booking error:", error);
+    const message = `${error?.message || ""}`.toLowerCase();
+    if (message.includes("quota") || message.includes("rate limit")) {
+      return new Response(
+        JSON.stringify({ error: "Quota Exceeded" }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      );
+    }
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json" } }

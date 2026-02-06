@@ -170,7 +170,7 @@ const AIVet = () => {
         if (!isPremium && result.data.remaining !== undefined) {
           setRemaining(result.data.remaining);
         }
-      } else if (result.error === "rate_limit_exceeded") {
+      } else if (result.error === "rate_limit_exceeded" || result.error === "quota_exceeded") {
         setShowUpgradeModal(true);
         setIsPremiumOpen(true);
         toast.error(t("ai.errors.free_limit"));
@@ -345,8 +345,8 @@ const AIVet = () => {
 
       {/* Safety Disclaimer */}
       <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90 backdrop-blur-sm px-4 py-2 border-t border-border">
-        <p className="text-xs text-muted-foreground text-center max-w-md mx-auto">
-          {t("ai.disclaimer")}
+        <p className="text-[10px] text-muted-foreground text-center max-w-md mx-auto">
+          huddle AI provides informational content, not veterinary diagnosis. In emergencies, seek professional care immediately.
         </p>
       </div>
 

@@ -155,6 +155,15 @@ const ChatDialogue = () => {
 
     setIsLoading(true);
     try {
+      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+        action_type: "chat_image",
+      });
+      if (allowed === false) {
+        toast.error(t("Quota Exceeded"));
+        setIsLoading(false);
+        e.target.value = "";
+        return;
+      }
       const ext = file.name.split(".").pop() || "jpg";
       const path = `${user.id}/chat/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("notices").upload(path, file);

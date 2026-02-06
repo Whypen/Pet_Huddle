@@ -52,9 +52,11 @@
    - `npx supabase functions deploy create-portal-session --project-ref <ref>`
    - `npx supabase functions deploy create-connect-account --project-ref <ref>`
    - `npx supabase functions deploy create-marketplace-booking --project-ref <ref>`
+   - `npx supabase functions deploy social-discovery --project-ref <ref>`
    - `npx supabase functions deploy stripe-webhook --project-ref <ref>`
    - `npx supabase functions deploy hazard-scan --project-ref <ref>`
    - `npx supabase functions deploy mesh-alert --project-ref <ref>`
+   - `npx supabase functions deploy ai-vet --project-ref <ref>`
 6. Sync secrets: `npx supabase secrets set --env-file Backend.env.md --project-ref <ref>`
 7. Verify:
    - `npx supabase migration list --linked`

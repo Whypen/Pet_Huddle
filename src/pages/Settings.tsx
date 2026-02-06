@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, useIsAdmin } from "@/contexts/AuthContext";
 import { useLanguage, Language } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Switch } from "@/components/ui/switch";
@@ -48,6 +48,7 @@ const languageOptions: { value: Language; labelKey: string }[] = [
 const Settings = () => {
   const navigate = useNavigate();
   const { user, profile, signOut, refreshProfile } = useAuth();
+  const isAdmin = useIsAdmin();
   const { t, language, setLanguage } = useLanguage();
   const { upsellModal, closeUpsellModal, buyAddOn, checkFamilySlotsAvailable } = useUpsell();
 
@@ -58,6 +59,7 @@ const Settings = () => {
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [bugDescription, setBugDescription] = useState("");
+  const [pressTimer, setPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -107,6 +109,31 @@ const Settings = () => {
   const handleLogout = async () => {
     await signOut();
     navigate("/auth");
+  };
+
+  const handleVersionPressStart = () => {
+    if (pressTimer) return;
+    const timer = setTimeout(async () => {
+      if (isAdmin) {
+        navigate("/admin/control-center");
+        return;
+      }
+      const versionText = "huddle v1.5";
+      try {
+        await navigator.clipboard.writeText(versionText);
+        toast.success(t("Version copied to clipboard"));
+      } catch {
+        toast.success(t("Version copied to clipboard"));
+      }
+    }, 3000);
+    setPressTimer(timer);
+  };
+
+  const handleVersionPressEnd = () => {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      setPressTimer(null);
+    }
   };
 
   const handleInvite = async () => {
@@ -546,47 +573,6 @@ const Settings = () => {
           </button>
         </section>
 
-        {/* Help & Support */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.help_support")}
-          </h3>
-          <div className="space-y-1">
-            <button
-              onClick={() => setShowBugReport(true)}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Bug className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.report_bug")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <button
-              onClick={() => navigate("/privacy")}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.privacy_policy")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <button
-              onClick={() => navigate("/terms")}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Scale className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.terms")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-          </div>
-        </section>
-
         {/* Danger Zone */}
         <section className="p-4 border-b border-border">
           <div className="space-y-2">
@@ -1014,6 +1000,18 @@ const Settings = () => {
           </>
         )}
       </AnimatePresence>
+      <div className="px-4 py-6 text-center text-xs text-muted-foreground select-none">
+        <span
+          onMouseDown={handleVersionPressStart}
+          onMouseUp={handleVersionPressEnd}
+          onMouseLeave={handleVersionPressEnd}
+          onTouchStart={handleVersionPressStart}
+          onTouchEnd={handleVersionPressEnd}
+          className="inline-block"
+        >
+          huddle v1.5
+        </span>
+      </div>
     </div>
   );
 };

@@ -9,6 +9,7 @@ import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,7 @@ const degreeOptions = ["College", "Associate Degree", "Bachelor", "Master", "Doc
 const relationshipOptions = ["Single", "In a relationship", "Open relationship", "Married", "Divorced", "PNA"];
 const petExperienceOptions = ["Dogs", "Cats", "Birds", "Fish", "Reptiles", "Small Mammals", "Farm Animals", "Others", "None"];
 const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French", "Japanese", "Korean", "German", "Portuguese", "Italian"];
-const availabilityOptions = ["Pet Parents", "Pet Nanny", "Animal Friend (no pet)"];
+const availabilityOptions = ["Pet Parent", "Pet Nanny", "Animal Friend (No Pet)"];
 const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const NUMERIC_ONLY_REGEX = /^\d+$/;
 
@@ -50,6 +51,9 @@ const EditProfile = () => {
   const [selectedCountry, setSelectedCountry] = useState("");
   const [detectingLocation, setDetectingLocation] = useState(false);
   const isIdentityLocked = profile?.verification_status === "approved" || profile?.is_verified;
+  const [fieldErrors, setFieldErrors] = useState({
+    humanDob: "",
+  });
 
   const [formData, setFormData] = useState({
     // Basic Info
@@ -58,6 +62,7 @@ const EditProfile = () => {
     phone: "",
     dob: "",
     bio: "",
+    user_id: "",
 
     // Demographics
     gender_genre: "",
@@ -80,6 +85,8 @@ const EditProfile = () => {
     has_car: false,
     languages: [] as string[],
     location_name: "",
+    location_country: "",
+    location_district: "",
 
     // Pet Experience
     pet_experience: [] as string[],
@@ -104,7 +111,7 @@ const EditProfile = () => {
 
   useEffect(() => {
     if (profile) {
-      const parsedCountry = (profile.location_name || "").split(",").map((part) => part.trim()).filter(Boolean).pop();
+      const parsedCountry = profile.location_country || (profile.location_name || "").split(",").map((part) => part.trim()).filter(Boolean).pop();
       const matchedCountry = parsedCountry
         ? countryOptions.find((country) => country.label.toLowerCase() === parsedCountry.toLowerCase())
         : null;
@@ -115,6 +122,7 @@ const EditProfile = () => {
         phone: profile.phone || "",
         dob: profile.dob || "",
         bio: profile.bio || "",
+        user_id: profile.user_id || "",
         gender_genre: profile.gender_genre || "",
         orientation: profile.orientation || "",
         height: profile.height?.toString() || "",
@@ -129,6 +137,8 @@ const EditProfile = () => {
         has_car: profile.has_car || false,
         languages: profile.languages || [],
         location_name: profile.location_name || "",
+        location_country: profile.location_country || "",
+        location_district: profile.location_district || "",
         pet_experience: profile.pet_experience || [],
         experience_years: profile.experience_years?.toString() || "",
         owns_pets: profile.owns_pets || false,
@@ -165,7 +175,7 @@ const EditProfile = () => {
           owns_pets: petCount > 0,
           availability_status:
             petCount > 0
-              ? prev.availability_status.filter((status) => status !== "Animal Friend (no pet)")
+              ? prev.availability_status.filter((status) => status !== "Animal Friend (No Pet)")
               : prev.availability_status,
         }));
       });
@@ -193,7 +203,9 @@ const EditProfile = () => {
         setSelectedCountry(region?.code || "");
         setFormData((prev) => ({
           ...prev,
-          location_name: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}${region ? `, ${region.label}` : ""}`,
+          location_country: region?.label || "",
+          location_district: "Current Location",
+          location_name: `${"Current Location"}${region ? `, ${region.label}` : ""}`,
         }));
         setDetectingLocation(false);
       },
@@ -337,6 +349,8 @@ const EditProfile = () => {
           has_car: formData.has_car,
           languages: formData.languages.length > 0 ? formData.languages : null,
           location_name: formData.location_name || null,
+          location_country: formData.location_country || null,
+          location_district: formData.location_district || null,
           pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
           experience_years:
             formData.pet_experience.includes("None") || !formData.experience_years
@@ -346,7 +360,7 @@ const EditProfile = () => {
           social_availability: formData.social_availability,
           availability_status:
             petsProfileCount > 0
-              ? formData.availability_status.filter((status) => status !== "Animal Friend (no pet)")
+              ? formData.availability_status.filter((status) => status !== "Animal Friend (No Pet)")
               : formData.availability_status,
           show_gender: formData.show_gender,
           show_orientation: formData.show_orientation,
@@ -428,7 +442,7 @@ const EditProfile = () => {
 
             {/* Display Name */}
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("Display Name")}</label>
+              <label className="text-sm font-medium mb-2 block">{t("Display/User Name")}</label>
               <Input
                 value={formData.display_name}
                 onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
@@ -436,6 +450,17 @@ const EditProfile = () => {
                 className="h-12 rounded-xl"
                 required
                 disabled={isIdentityLocked}
+              />
+            </div>
+
+            {/* User ID */}
+            <div>
+              <label className="text-sm font-medium mb-2 block">{t("User ID")}</label>
+              <Input
+                value={formData.user_id || ""}
+                placeholder={t("User ID")}
+                className="h-12 rounded-xl bg-muted"
+                readOnly
               />
             </div>
 
@@ -469,9 +494,22 @@ const EditProfile = () => {
                 type="date"
                 value={formData.dob}
                 onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+                onBlur={() => {
+                  if (!formData.dob) return;
+                  const dob = new Date(formData.dob);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    humanDob: dob > today ? t("Human DOB cannot be in the future") : "",
+                  }));
+                }}
                 className="h-12 rounded-xl"
                 required
               />
+              {fieldErrors.humanDob && (
+                <ErrorLabel message={fieldErrors.humanDob} />
+              )}
             </div>
 
             {/* Bio */}
@@ -806,9 +844,8 @@ const EditProfile = () => {
                     const countryLabel = countryOptions.find((country) => country.code === code)?.label || "";
                     setFormData((prev) => ({
                       ...prev,
-                      location_name: prev.location_name.includes(",")
-                        ? `${prev.location_name.split(",")[0].trim()}, ${countryLabel}`
-                        : countryLabel,
+                      location_country: countryLabel,
+                      location_name: `${prev.location_district || ""}${countryLabel ? `, ${countryLabel}` : ""}`.trim(),
                     }));
                   }}
                   className="h-9 rounded-lg bg-muted border border-border px-3 text-sm flex-1"
@@ -822,9 +859,15 @@ const EditProfile = () => {
                 </select>
               </div>
               <Input
-                value={formData.location_name}
-                onChange={(e) => setFormData(prev => ({ ...prev, location_name: e.target.value }))}
-                placeholder={t("City / Area, Country")}
+                value={formData.location_district}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    location_district: e.target.value,
+                    location_name: `${e.target.value}${prev.location_country ? `, ${prev.location_country}` : ""}`.trim(),
+                  }))
+                }
+                placeholder={t("Your district")}
                 className="h-12 rounded-xl"
               />
             </div>
@@ -917,19 +960,19 @@ const EditProfile = () => {
                   <button
                     key={status}
                     onClick={() => {
-                      if (petsProfileCount > 0 && status === "Animal Friend (no pet)") {
-                        toast.error(t("Animal Friend (no pet) is unavailable when you already have pet profiles"));
+                      if (petsProfileCount > 0 && status === "Animal Friend (No Pet)") {
+                        toast.error(t("Animal Friend (No Pet) is unavailable when you already have pet profiles"));
                         return;
                       }
                       toggleArrayItem("availability_status", status);
                     }}
-                    disabled={petsProfileCount > 0 && status === "Animal Friend (no pet)"}
+                    disabled={petsProfileCount > 0 && status === "Animal Friend (No Pet)"}
                     className={cn(
                       "px-3 py-2 rounded-full text-sm font-medium transition-all",
                       formData.availability_status.includes(status)
                         ? "bg-accent text-accent-foreground"
                         : "bg-card text-muted-foreground border border-border",
-                      petsProfileCount > 0 && status === "Animal Friend (no pet)" && "opacity-40 cursor-not-allowed"
+                      petsProfileCount > 0 && status === "Animal Friend (No Pet)" && "opacity-40 cursor-not-allowed"
                     )}
                   >
                     {status}
