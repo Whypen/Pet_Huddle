@@ -22,7 +22,6 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
     { icon: Settings, label: t("settings.title"), href: "/settings" },
     { icon: Crown, label: t("premium.title"), href: "/premium" },
-    { icon: Bug, label: t("settings.report_bug"), href: "/settings?section=bug-report" },
     { icon: FileText, label: t("Privacy & Safety Policy"), href: "/privacy" },
     { icon: Scale, label: t("settings.terms"), href: "/terms" },
   ];
