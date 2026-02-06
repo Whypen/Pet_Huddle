@@ -1,4 +1,4 @@
-# MASTER_SPEC.md — huddle v1.6 (Definitive, Single Source of Truth)
+# MASTER_SPEC.md — huddle v1.7 (Definitive, Single Source of Truth)
 
 **Audience:** New full‑stack developer rebuilding from scratch.
 
@@ -391,4 +391,221 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ---
 
-**End of MASTER_SPEC v1.6**
+---
+
+## 11. Contract Requirements (Verbatim, UAT One-Shot Upgrade)
+
+This section is incorporated word-for-word from the final one-shot upgrade prompt. It is a legal-style contract between spec and implementation. If any item below is present in code, it must be documented here. If it is documented here, it must exist in code. Expand only for technical clarity and never shorten or delete the original content.
+
+Before you touch any code:
+1. Review the full SPEC five separate times and confirm in your reply that nothing is missing (especially social_album bucket, family quota sharing/inheritance, KYC close button, dynamic Stripe pricing, weighted Threads scoring, Gemini rate limiting, idempotency/webhooks, GIST index on location, red error remarks for validations, subtext for vaccinations, pet add dashboard refresh, upsell banner positioning, Home icons removal, Discovery UIUX details, User Profile mandatory fields and toggles, Threads UI/algorithm/filtering/sorting, Identity Verification flow details, Discover filters and profile view, Nanny Marketplace escrow and Stripe reliability, Revenue table/algo, Invite Family, AI Vet details, Map updates, Always go to top on new page, align colour/border/text, disable notification, Add Pet exactly match Edit Pet Profile). If anything is missing from the SPEC, add it explicitly before proceeding.
+2. Plan ahead on how to do this by phase and one-shot with the least chance to forget or miss any point.
+3. Self-audit checklist before push: "social_album bucket & compression", "family quota sharing/inheritance", "KYC close button", "dynamic Stripe pricing", "weighted Threads scoring", "Gemini rate limiting", "idempotency/webhooks", "GIST index on location", "mandatory fields enforcement", "red error remarks for validations", "subtext for vaccinations", "pet add dashboard refresh", "upsell banner positioning", "Home icons removal", "Discovery UIUX details", "User Profile mandatory fields and toggles", "Threads UI/algorithm/filtering/sorting", "Identity Verification flow details", "Discover filters and profile view", "Nanny Marketplace escrow and Stripe reliability", "Revenue table/algo", "Invite Family", "AI Vet details", "Map updates", "Always go to top on new page", "align colour/border/text", "disable notification", "Add Pet exactly match Edit Pet Profile" — confirm all are in SPEC.
+
+Now implement every single item below
+
+I. Global UX/UI & Validation Infrastructure
+[ ] 1. UX: Always go to top when entering new page;
+
+Enhancement: Use window.scrollTo(0, 0) or useNavigate with { replace: true, state: { scrollToTop: true } } in React Router hooks on every page componentDidMount/lifecycle. Enforce in global layout component.
+
+[ ] 2. All validation failures must immediately show red error text below the field as well as change the border colour of that info in RED and block submit.
+
+Enhancement: Use React Hook Form with resolver (e.g., Zod schema), on error set border-color: red; position absolute red text pt12 below field, disable submit button until isValid = true.
+
+[ ] 3. UI: Align use of colour, border and text style as much as possible. Disable notification function.
+
+Enhancement: Use Tailwind classes consistently (e.g., border-gray-300 rounded-md text-gray-700 pt14), disable all notification functions by commenting out FCM/Push code, remove from SPEC routes.
+
+II. Pet Profile & Dashboard Management
+[ ] 4. - Add a Pet page should exactly match Edit Pet Profile
+
+Enhancement: Use same JSX component for both (AddPet/EditPet), pass mode prop ('add'/'edit'), reuse form fields/validation schema.
+
+[ ] 5. - Vaccination inputs must show: "Input last vaccination dates for better tracking" in pt12 grey right below 'Vaccination'
+
+Enhancement: Add "Input last vaccination dates for better tracking" directly under vaccination input JSX.
+
+[ ] 6. - Unable to add pet profile under home dashboard
+
+Enhancement: Fix insert mutation in Edge Function (INSERT INTO pets (...) VALUES (...) RETURNING *), refresh dashboard with useQuery invalidate on success, check RLS allows auth.uid() = owner_id.
+
+[ ] 7. - Many fake pet profile existed in my account (which should be error, no pre-load pet profiles)
+
+Enhancement: On onboarding/profile load, SELECT FROM pets WHERE owner_id = auth.uid() LIMIT 0 (no pre-load), delete any fake rows via migration TRUNCATE pets, enforce no default/fake inserts.
+
+III. Onboarding & Identity Verification (KYC)
+[ ] 8. On-Boarding: Missing whole KYC slows under the Identity Verification under /onboarding
+
+Enhancement: Add /onboarding route with KYC flow trigger on image submit, use React Router Maps to /verify-identity.
+
+[ ] 9. Identity Verification + Admin Review (Update Full Flow): New /verify-identity route. Header "Identity Verification", with close button at top right corner to allow exit anytime. Screen 1: Country is pre-selected with the user's location selected during registration & blocked for adjustment, only upload Doc Type (ID, Passport, Driver's License) with subtext “We collect your selfie and ID document image to verify your age and identity and to protect our users from fraud and underage access. We generate biometric templates or age estimates from these images solely for this verification. We do not use your biometric data for general facial recognition or any purpose other than verification. Images are deleted after the check; we keep only the outcome (e.g. ‘age verified 18+’) and minimal metadata.” Screen 2: Legal Disclaimer (Biometric data usage/deletion policy). "Agree & Continue" button. Screen 3 (Selfie): Trigger rear camera. Capture image on "I am ready." Screen 4 (ID Doc): Trigger main camera. Capture image on "I am ready." Screen 5: Success page with "Social access granted pending review" notice: "Thanks for completing verification. You can use the Social features for now while we finish our checks. If we later find that you are below the minimum age required for our Social or Chat features, your account may be blocked from these features or from the app entirely, in line with our Terms and Safety Policy." Storage: Save images to new Supabase bucket identity_verification. Fix "bucket not found" error. Admin: Create an admin flag in Supabase to toggle verification_status (Approved/Rejected) (expand: route with 5 screens, close button z-index 9999, pre-selected country from profiles.location_country blocked, rear camera for selfie, main for ID, delete images post-check, bucket create with private RLS, admin UI with toggle button + comment field, RLS admin only).
+
+Enhancement: Use react-webcam for camera, Supabase storage.upload for bucket, admin route /admin/verifications with toggle onClick update verification_status trigger email notification.
+
+IV. User Profile & Social Settings
+[ ] 10. - User Profile: Relationship Status: Missing visible toggle
+
+Enhancement: Add <Toggle name="show_relationship_status" label="Visible to others" /> in profile JSX, update profiles table with show_relationship_status BOOLEAN DEFAULT true.
+
+[ ] 11. Edit Profile: Location format align with onboarding page, which is auto-filled by loading on-boarding data
+
+Enhancement: Fetch location_country/district from profiles on load, use same dropdown component as onboarding.
+
+[ ] 12. - All previously filled data should be auto filled under edit profile
+
+Enhancement: useEffect fetch profiles data by auth.uid(), setValue in React Hook Form for all fields.
+
+[ ] 13. - User ID not generated and shown on profile
+
+Enhancement: Trigger CREATE TRIGGER gen_user_id BEFORE INSERT ON profiles FOR EACH ROW EXECUTE FUNCTION generate_uid(10), show User ID: {user_id} below BASIC INFO.
+
+[ ] 14. - → Add social_album ARRAY[TEXT] column + bucket + upload UI (max 5, <500KB compression) (expand: migration ADD COLUMN social_album TEXT[] DEFAULT '{}', bucket 'social_album' with RLS, browser-image-compression lib client-side)
+
+Enhancement: Upload handler with compression.reduceSize({ maxSizeMB: 0.5 }), Supabase storage.upload to 'social_album', limit array length <=5.
+
+[ ] 15. - → Location: dropdown country + district only (pre-fill from onboarding), no geolocation tag (expand: no navigator.geolocation calls)
+
+Enhancement: Remove any geolocation code, use dropdown from onboarding data fetch.
+
+V. Threads & Community Social
+[ ] 16. Threads: Reply: no need to quote > @XX: "Just adopted this ad..."\n\n, but tag (autocomplete) the user name "@XXX" is enough. Reply allows max 200 chars, and insert image.
+
+Enhancement: Reply form with @ autocomplete from user names, maxLength=200, image upload deduct quota.
+
+[ ] 17. - cannot post reply "could not find the content column of thread comment in the schema cache"
+
+Enhancement: Migration ADD COLUMN content TEXT NOT NULL to thread_comments, fix schema cache refresh.
+
+[ ] 18. - "Post Reply" change to "Send"
+
+Enhancement: Find/replace button text in JSX.
+
+[ ] 19. - If reply is clicked open, click again to close/ collapse
+
+Enhancement: Use state toggle for reply form visibility on click.
+
+[ ] 20. - Create Threads > Topic should be "Dog" "Cat" "News" "Social" "Others" with relevant icons
+
+Enhancement: Dropdown with values + icons (SVG or emoji).
+
+[ ] 21. - (Thread title) change to (Title) with Max. characters within the width of the box, no hard number limits.
+
+Enhancement: Input maxLength auto based on width calc, no hard limit.
+
+[ ] 22. - (Hastags (comma seperated, max 3)) change (Up to 3 #Hashtags), change to auto generate create #Hashtag after user "input word and press space", max. allow 3 hashtags
+
+Enhancement: Input onKeyDown detect space → prepend #, limit array length <=3.
+
+[ ] 23. - The "Create Thread" bottom part is blocked by navigation bar, It is never duplicated or overlapped with the expanded box. It should be expanded from navigation bar
+
+Enhancement: Position fixed bottom above nav bar, z-index 9999, no duplicate (single instance).
+
+[ ] 24. - Filtering (Keyword search by text input and topic models are used to match text to a query or user interest) & Sorting (Allow "Trending" "Latest") not available and not found in MASTER SPEC
+
+Enhancement: Add search input + topic models (simple ILIKE for now), sorting dropdown "Trending" score DESC, "Latest" created_at DESC.
+
+VI. Algorithms & Logic (Backend Engine)
+[ ] 25. - → Algorithm: COUNT(*) FROM threads WHERE user_id = auth.uid() AND created_at > NOW() - '30 days'::interval < tier_limit, link quota from profiles (expand: frontend fetch quota from profiles, show "Quota: X remaining")
+
+Enhancement: Edge Function query COUNT, frontend Quota: {quota_remaining} remaining.
+
+[ ] 26. - → Weighted Scoring: score = time (NOW() - created_at) / '1 day'::interval * 10 + relationship (if in family/care_circle +20) + badge (verified +50, gold +30) + engagement (replies * 5 + likes * 3 + clicks * 1) - decay (log(age_days + 1) * 5) (expand: threads column score FLOAT, pg_cron hourly update)
+
+Enhancement: Migration ADD COLUMN score FLOAT DEFAULT 0, cron job UPDATE threads SET score = ....
+
+[ ] 27. - → Update frequency: cache score, recompute cron (expand: pg_cron job CALL update_threads_scores())
+
+Enhancement: Install pg_cron extension, CREATE FUNCTION update_threads_scores().
+
+[ ] 28. - → Filtering: keyword ILIKE title/content, topic IN selected (expand: WHERE clause in Edge)
+
+Enhancement: Edge WHERE title ILIKE '%' || keyword || '%'.
+
+[ ] 29. - → Sorting: Trending = score DESC, Latest = created_at DESC (expand: ORDER BY in Edge)
+
+Enhancement: Edge ORDER BY CASE WHEN sort = 'Trending' THEN score DESC ELSE created_at DESC END.
+
+[ ] 30. - → 1. Search input + topic dropdown + sorting select at top (expand: flex row JSX)
+
+Enhancement: <select /> <select /> <select />.
+
+VII. Under Chats & Discovery
+[ ] Warning: Button is not defined
+
+Enhancement: Fix undefined button reference in JSX, add if (!button) return null.
+
+[ ] Bug footer: If this issue persists, please contact help & support through the Settings page.
+
+Enhancement: Remove bug footer, replace with standard error handler.
+
+[ ] Stationed within Chat session without having to click further to Discovery page. Filtering choice condensed in one row. Profile preview: Profiles show Name, age, social status and owned pet species; with action icons: Wave , Star (Direct Conversation), X (Not Interested) appear overlay profile preview. Tapping lets you scroll through details without leaving the swipe flow. Tapping the profile on the swipe stack expands it into a full‑screen view with multiple photos (swipeable carousel) the users uploaded on the album, name, age, location, bio, pet info and job/school info (which users have chose to display). Discover: Filters apply real-time (fix non-application). Pet Height → Pet Size. Distance: ranging from 0-150km (max). Lazy Loading required for all album images, 2-hour pinned location map. Simulate fake users for real-life. Remove Huddle Nearby. Chats: Fail-safe messaging.
+
+Enhancement: Chats tab embed Discovery top, filters row, profile card with overlay icons, tap modal scroll, full-screen carousel with lazy [image], filters mutate query, Pet Size dropdown, distance slider, album lazy, 2h pin map, 20 fake users insert, remove Huddle Nearby JSX, chats try/catch messaging.
+
+VIII. Nanny Marketplace & Escrow
+[ ] Nanny remarks always top: "Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses." Nanny view pin: "A verified badge increases trust and helps secure more bookings.” Media send deducts quota (Mandatory Compression <500KB). Swipe left delete: Unmatch, remove convo (except transactions). Verified badge only on head icon. Groups: Verified premium only create, all join. Book Nanny: Multi-day dates (start/end), pet dropdown, district input, currency select next to amount, button "Proceed Booking Payment". Escrow: Hold full amount, release post-48h confirmation/no dispute ($90 to provider, $10 platform via separate charges/transfers). Dispute: Admin review, hold/release/refund.
+
+Enhancement: Remarks pinned div top, media compression, swipe delete trigger unmatch delete, badge overlay, groups gate tier verified, book form date-range, dropdown, input, select, button, escrow Stripe hold webhook release, admin UI toggle hold/refund.
+
+[ ] Nanny Marketplace + Escrow (Update): As above escrow logic. STRIPE RELIABILITY: All Stripe API calls (PaymentIntent, Transfer) must include an Idempotency-Key (e.g., UUID v4) in the header to prevent duplicate charges on network retries. Implement Stripe Webhooks (listening for payment_intent.succeeded) to update the database state reliably, rather than relying solely on client-side success callbacks.
+
+Enhancement: Stripe calls with idempotency-key UUID, webhooks endpoint update status.
+
+[ ] 3.1. "Booking.end_date" change to "Service End Date"
+
+[ ] 3.2. Service location allows user input, remove the minimun $10 in subtext, while input 0 dollar is not allowed.
+
+[ ] 3.3. Cannot proceed payment - unable to verify Stripe
+
+Enhancement: Fix end_date to service_end_date, location input, remove $10 subtext, validate amount >0, fix Stripe verification test keys.
+
+IX. AI Vet Assistant
+[ ] Under AI Vet: It's now sending default reply - whatever i type it answered the same shit, please make sure it connected to real AI. No default answer. Replace dummy with real Gemini API integration. IMPLEMENTATION DETAIL: Use Gemini 1.5 Flash for text queries. Use Gemini 1.5 Pro only if an image is attached. Rate Limiting: Implement a Token Bucket algorithm in Supabase Edge Functions to cap requests based on their quota and return HTTP 429 "Quota Exceeded" if breached. Contextual: Read pet data (breed/age/weight/history). Multi-modal: Text/symptoms + photo/video analysis. Empathetic/calm/jargon-free/pet-centric/actionable. Emergency triage: Keywords trigger map.
+
+Enhancement: Remove default reply, connect Gemini API keys, Flash for text, Pro for image, token bucket rate_limits table refill cron, context from pets, multi-modal prompt, empathetic template, keywords 'emergency' trigger map link.
+
+X. Sidebar, Settings & Maps
+[ ] Setting side bar: Logout always pinned above navigation bar; Add "Help & Support" which links to a form to submit enquiries to admin (= send email to kuriocollectives)
+
+Enhancement: Logout fixed above nav, "Help & Support" link to form submit Edge email to kuriocollectives.
+
+[ ] Map Set up. Simply not updated and completely missing from MASTER SPEC. Remove search/visible toggle → "Pin my Location" subtext "Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings." Auto-load real HK vets: Address, hours, mobile; white icon with green/red dot (open/closed); subtext "Timely reflection of any changes of operations of the Vet Clinic is not guaranteed". 5-star rating (base from Google Maps, verified users only; non-verified popup "Available to verified users only"). Stray blue, lost red. Friends pin: Open profile (cross close top-right). Tap map/manual input for location (fix localhost). PERFORMANCE UPDATE: Migrate all radius queries to PostGIS. Use ST_DWithin(geography, geography, meters) for lightning-fast queries. Create a GIST index on the location column.
+
+Enhancement: Remove search/toggle, "Pin my Location" button with subtext, Google Places API for HK vets, icon with dot, subtext, rating gate popup, pin colors, friend pin modal cross, tap/manual fix, PostGIS ST_DWithin, GIST index migration.
+
+XI. Premium Tier & Family Logic
+[ ] "/Premium" is not reflected/ updated and missing from master spec: VERY IMPORTANT Strictly follow this as it always go back to the entitled functionality/features of the users, and split bewteen Family account; the exact no. of quota refreshed on the 1st day of the subscription cycle) Revenue & Upsells (Update Table/Algo): Sequence: Family Slot (Free/Prem "-", Gold "1 Extra Member"), Thread (Free 1, Prem 5, Gold 30; algo: Count starts per 30-day cycle). Discovery Filters (Free Basic, Prem/Gold Advanced). Visibility (Free "-", Prem/Gold Priority; algo: Prioritize in social queue). Star (Free/Prem "-", Gold 3; algo: Trigger chat without mutual wave). Media (Free "-", Prem 10, Gold 50). Alert (Free 5, Prem 20, Gold Unlimited). Broadcast Range (Free 1km, Prem 5km, Gold 20km; algo: Geofence queries expand by membership). Ad-free (Free/Prem "-", Gold tick). Add-ons: 3 Star Pack "Superpower to trigger chats immediately", Broadcast Alert "Additional broadcast alert", Additional 10 media "Additional 10 media usage across Social, Chats and AI Vet." Remove verified badge purchase. Dynamic pricing from Stripe (US$X.XX default). Add-on cart below buttons, Payment to Stripe, past transactions demo.
+
+Enhancement: /premium page table sequence, family split quota for extra member, pg_cron refresh quotas on 1st day, priority ORDER BY tier DESC, star chat insert, media/alert decrement, broadcast ST_DWithin by tier, ad-free hide, add-ons cart Stripe, remove verified, dynamic Stripe prices fetch, past transactions view.
+
+[ ] FAMILY IS not updated and missing from MASTER SPEC: Invite Family in Setting Side Bar, under User Profile: Grey/blocked for non-Gold. Gold: Green Invite, popup for 10-digit user_id input + Invite. Error if invalid. Receiver: Notification popup "(Display/User Name fetched from user_id) has invited you to join their family!" with accept/decline. Accept: Add to sender's collapsible/expandable Family session.
+
+Enhancement: Settings sidebar under Profile, gate tier, popup input validation, error popup, receiver notification with fetch display, accept insert family_members, sender accordion with names.
+
+XII. Discovery & Membership Algorithms
+[ ] Algorithms & Logics - not implemented and not found in MASTER SPEC. Discovery Filter/Prioritization: Basic (Free): Age/Gender/Height/Distance/Species/Role (critical/high weights: +100 for species). Advanced (Prem/Gold): +Verification (+50), Compatibility (+30), Logistics/Skills (+30), Activity (+20), Connection (+20). Algo: Score = sum(weights), sort descending. Prioritize Prem/Gold in queue (top 20% slots). Code: In Edge Function social_discovery: Query profiles with geofence (PostGIS ST_DWithin), apply filters as WHERE clauses, ORDER BY score DESC + membership_priority (1 for Free, 2 for Prem/Gold).
+
+[ ] Membership Perks: Quota checks in triggers/Edge: e.g., threads: SELECT COUNT(*) FROM threads WHERE user_id = $1 AND created_at > NOW() - '30 days'::interval < limit (1 Free,5 Prem,30 Gold). Media/Alert: Similar counter decrement on use, upsell if 0. Star: Deduct on use, trigger chat without mutual.
+
+[ ] Broadcast Range/Filtering by Membership: Range: Geofence query radius = 1km Free,5km Prem,20km Gold (Use ST_DWithin(location, user_location, radius_in_meters)). Filtering: Basic/Advanced as above, strict gate: If !premium, exclude advanced clauses. Code: In mesh_alert: Filter recipients by membership_radius.
+
+[ ] Under profile set up, if user toggled owned pets, "Animal Friend (No Pet)" will be blocked; If user did not toggle / not having pets, "Pet Parent" is blocked; If Pet Parent is choen, Animal Friend (No Pet) is blocked, vice versa.
+
+Enhancement: social_discovery logic, quota check logic, mesh_alert radius logic, owned_pets onChange mutual exclusive checkboxes.
+
+Safeguards & Enforcement
+
+- Review the updated SPEC five separate times for completeness before coding anything.
+- Self-audit checklist before push: "social_album bucket & compression", "family quota sharing/inheritance", "KYC close button", "dynamic Stripe pricing", "weighted Threads scoring", "Gemini rate limiting", "idempotency/webhooks", "GIST index on location", "mandatory fields enforcement", "red error remarks for validations", "subtext for vaccinations", "pet add dashboard refresh", "upsell banner positioning", "Home icons removal", "Discovery UIUX details", "User Profile mandatory fields and toggles", "Threads UI/algorithm/filtering/sorting", "Identity Verification flow details", "Discover filters and profile view", "Nanny Marketplace escrow and Stripe reliability", "Revenue table/algo", "Invite Family", "AI Vet details", "Map updates", "Always go to top on new page", "align colour/border/text", "disable notification", "Add Pet exactly match Edit Pet Profile" — confirm all are in SPEC.
+- Five self-check per phase: backend wiring test (e.g., curl Edge Functions, unit tests for quotas/escrow), UI verification (screenshots, manual clicks, console logs, Postman API calls).
+- Do not push to GitHub / live host / Supabase until all items pass 100% on the fifth check.
+- Before final push, run:
+  - Full backend wiring test (curl / unit tests for quotas, escrow, scoring, filters)
+  - UI smoke test (manual clicks on localhost:8080)
+  - Verify live UI (screenshots of every flow, console no errors)
+- Confirm in reply: "All items implemented. Five-checked. No missing pieces. Ready for your final UAT round."
+
+---
+
+**End of MASTER_SPEC v1.7**
