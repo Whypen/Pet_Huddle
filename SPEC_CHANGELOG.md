@@ -67,3 +67,13 @@
 - **DB migration impact:** Added `20260206093000_fix_profiles_rls.sql`.
 - **Rollback plan:** Drop new policies and restore previous policy set from `pg_policies` dump or prior migrations.
 - **Verification steps:** `npx supabase db push`; attempt anon `select * from profiles` (should fail); verify admin update in `/admin` UI.
+
+
+## [v1.2.2-profiles-anon-revoke] - 2026-02-05
+- **Author:** Codex + Hyphen
+- **Summary:** Explicitly revoked `anon` SELECT on `public.profiles` to force unauth access denial.
+- **Why change was needed:** SecOps requirement mandates a visible RLS policy violation for unauthenticated access.
+- **Sections changed:** APP_MASTER_SPEC 4.4; Protocols & Execution (SecOps).
+- **DB migration impact:** Added `20260206094500_profiles_revoke_anon.sql`.
+- **Rollback plan:** `GRANT SELECT ON public.profiles TO anon;` (only if public profiles are intentionally exposed).
+- **Verification steps:** `npx supabase db push` then anon request should return 401/403.

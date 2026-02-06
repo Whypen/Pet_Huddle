@@ -41,7 +41,7 @@
 | 5 Security Testing | 10, 10.3 |
 | 6 Incident Response | 12 |
 | 7 Compliance/Data Governance | 1.3, 7, 9 |
-| RLS proof and SecOps checks | Protocols & Execution |
+| RLS proof and SecOps checks | Protocols & Execution, 4.4 |
 
 ## TEST_PLAN Mapping
 | TEST_PLAN Section | APP_MASTER_SPEC Section |

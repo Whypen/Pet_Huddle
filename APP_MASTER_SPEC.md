@@ -288,7 +288,7 @@ Manages:
 - Chat visibility only for room members
 - Unique constraint for Stripe webhook idempotency
 - Trigger/protection for monetized fields (client cannot tamper)
-
+- Explicit unauthenticated denial: `REVOKE SELECT ON public.profiles FROM anon;` (forces 403 on unauth SELECT)
 ## 4.5 Schema Alignment (Mandatory)
 - `public.profiles` must include (at minimum) the 49 canonical profile fields listed in section 4.1.
 - Explicit required profile columns for schema-cache stability:
