@@ -43,6 +43,21 @@ const VerifyIdentity = () => {
     try {
       const selfieUrl = await upload(selfie, "selfie");
       const idUrl = await upload(idDoc, "id");
+
+      const mappedDocType =
+        docType === "id" ? "id_card" : docType === "drivers_license" ? "drivers_license" : docType;
+
+      const { error: uploadRowError } = await supabase
+        .from("verification_uploads")
+        .insert({
+          user_id: user.id,
+          document_type: mappedDocType,
+          document_url: idUrl,
+          selfie_url: selfieUrl,
+          country,
+          status: "pending",
+        });
+      if (uploadRowError) throw uploadRowError;
       const { error } = await supabase
         .from("profiles")
         .update({
@@ -116,7 +131,7 @@ const VerifyIdentity = () => {
           <input
             type="file"
             accept="image/*"
-            capture="environment"
+            capture="user"
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (f) setSelfie(await compressImage(f));
@@ -132,7 +147,7 @@ const VerifyIdentity = () => {
           <input
             type="file"
             accept="image/*"
-            capture="user"
+            capture="environment"
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (f) setIdDoc(await compressImage(f));

@@ -23,6 +23,7 @@ serve(async (req: Request) => {
       clientId,
       sitterId,
       amount, // In cents
+      currency,
       serviceStartDate,
       serviceEndDate,
       successUrl,
@@ -98,6 +99,10 @@ serve(async (req: Request) => {
     let paymentIntentId: string;
     let usingFallback = false;
 
+    const normalizedCurrency = typeof currency === "string" && currency.length === 3
+      ? currency.toLowerCase()
+      : "usd";
+
     try {
       // Create Checkout Session with destination charge
       const session = await stripe.checkout.sessions.create(
@@ -107,7 +112,7 @@ serve(async (req: Request) => {
           line_items: [
             {
               price_data: {
-                currency: "usd",
+                currency: normalizedCurrency,
                 product_data: {
                   name: "Pet Sitting Service",
                   description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()}`,

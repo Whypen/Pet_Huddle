@@ -190,8 +190,10 @@ const Chats = () => {
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
   const [selectedNanny, setSelectedNanny] = useState<ChatUser | null>(null);
   const [bookingAmount, setBookingAmount] = useState("50");
+  const [bookingCurrency, setBookingCurrency] = useState("USD");
   const [bookingProcessing, setBookingProcessing] = useState(false);
   const [serviceDate, setServiceDate] = useState("");
+  const [serviceEndDate, setServiceEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
   const [selectedPet, setSelectedPet] = useState("");
@@ -226,11 +228,14 @@ const Chats = () => {
           });
       }
       setServiceDate("");
+      setServiceEndDate("");
       setStartTime("09:00");
       setEndTime("17:00");
       if (sitterHourlyRate) {
-        const start = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${startTime}`);
-        const end = new Date(`${serviceDate || new Date().toISOString().split("T")[0]}T${endTime}`);
+        const baseDate = serviceDate || new Date().toISOString().split("T")[0];
+        const endDate = serviceEndDate || baseDate;
+        const start = new Date(`${baseDate}T${startTime}`);
+        const end = new Date(`${endDate}T${endTime}`);
         const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
         const expected = Math.round((sitterHourlyRate * hours) / 100);
         if (expected > 0) setBookingAmount(expected.toString());
@@ -239,14 +244,20 @@ const Chats = () => {
   }, [nannyBookingOpen, profile?.id, selectedNanny?.id]);
 
   useEffect(() => {
-    if (!sitterHourlyRate || !serviceDate) return;
+    if (!sitterHourlyRate || !serviceDate || !serviceEndDate) return;
     const start = new Date(`${serviceDate}T${startTime}`);
-    const end = new Date(`${serviceDate}T${endTime}`);
+    const end = new Date(`${serviceEndDate}T${endTime}`);
     const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
     if (!hours) return;
     const expected = Math.round((sitterHourlyRate * hours) / 100);
     if (expected > 0) setBookingAmount(expected.toString());
-  }, [sitterHourlyRate, serviceDate, startTime, endTime]);
+  }, [sitterHourlyRate, serviceDate, serviceEndDate, startTime, endTime]);
+
+  useEffect(() => {
+    if (serviceDate && !serviceEndDate) {
+      setServiceEndDate(serviceDate);
+    }
+  }, [serviceDate]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -370,21 +381,26 @@ const Chats = () => {
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
   const handleBookingCheckout = async () => {
     if (!profile?.id || !selectedNanny) return;
-    if (!serviceDate || !selectedPet || !startTime || !endTime) {
+    if (!serviceDate || !serviceEndDate || !selectedPet || !startTime || !endTime) {
       toast.error(t("Please complete all booking details"));
+      return;
+    }
+    if (new Date(`${serviceEndDate}T${endTime}`).getTime() <= new Date(`${serviceDate}T${startTime}`).getTime()) {
+      toast.error(t("booking.invalid_date_range"));
       return;
     }
     setBookingProcessing(true);
 
     try {
       const startIso = new Date(`${serviceDate}T${startTime}`).toISOString();
-      const endIso = new Date(`${serviceDate}T${endTime}`).toISOString();
+      const endIso = new Date(`${serviceEndDate}T${endTime}`).toISOString();
 
       const { data, error } = await supabase.functions.invoke("create-marketplace-booking", {
         body: {
           clientId: profile.id,
           sitterId: selectedNanny.id,
           amount: Math.round(parseFloat(bookingAmount) * 100), // cents
+          currency: bookingCurrency,
           serviceStartDate: startIso,
           serviceEndDate: endIso,
           petId: selectedPet,
@@ -780,7 +796,7 @@ const Chats = () => {
                 </div>
               </div>
 
-              {/* Service Date */}
+              {/* Service Start Date */}
               <div className="mb-3">
                 <label className="text-sm font-medium mb-1.5 block">{t("booking.service_date")}</label>
                 <input
@@ -788,6 +804,18 @@ const Chats = () => {
                   value={serviceDate}
                   onChange={(e) => setServiceDate(e.target.value)}
                   min={new Date().toISOString().split("T")[0]}
+                  className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                />
+              </div>
+
+              {/* Service End Date */}
+              <div className="mb-3">
+                <label className="text-sm font-medium mb-1.5 block">{t("booking.end_date")}</label>
+                <input
+                  type="date"
+                  value={serviceEndDate}
+                  onChange={(e) => setServiceEndDate(e.target.value)}
+                  min={serviceDate || new Date().toISOString().split("T")[0]}
                   className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
                 />
               </div>
@@ -847,7 +875,15 @@ const Chats = () => {
               <div className="mb-4">
                 <label className="text-sm font-medium mb-2 block">{t("booking.amount")}</label>
                 <div className="flex items-center gap-2">
-              <span className="text-lg font-bold" style={{ color: "#A6D539" }}>{t("$")}</span>
+                  <select
+                    value={bookingCurrency}
+                    onChange={(e) => setBookingCurrency(e.target.value)}
+                    className="h-12 rounded-xl bg-muted border border-border px-2 text-sm"
+                  >
+                    <option value="USD">USD</option>
+                    <option value="HKD">HKD</option>
+                    <option value="EUR">EUR</option>
+                  </select>
                   <input
                     type="number"
                     value={bookingAmount}
@@ -876,6 +912,7 @@ const Chats = () => {
                     bookingProcessing ||
                     parseFloat(bookingAmount) < 10 ||
                     !serviceDate ||
+                    !serviceEndDate ||
                     !startTime ||
                     !endTime ||
                     !selectedPet
@@ -888,7 +925,7 @@ const Chats = () => {
                   ) : (
                     <>
                       <DollarSign className="w-4 h-4" />
-                      {t("booking.pay")} ${bookingAmount}
+                      {t("Proceed Booking Payment")}
                     </>
                   )}
                 </button>

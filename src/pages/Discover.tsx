@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Star, SlidersHorizontal, HandMetal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -11,6 +11,7 @@ import { ActiveFilters } from "@/components/social/ActiveFilters";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 import { useUpsell } from "@/hooks/useUpsell";
@@ -42,6 +43,8 @@ const Discover = () => {
     { id: 2, name: "social.user.emma.name", location: "social.location.dog_run", isVerified: false, hasCar: true },
     { id: 3, name: "social.user.james.name", location: "social.location.pet_cafe", isVerified: true, hasCar: true },
   ];
+  const [discoveryProfiles, setDiscoveryProfiles] = useState<any[]>([]);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
 
   // SPRINT 3: Initialize age filter to ±3 years from user's age
   const getUserAge = () => {
@@ -77,11 +80,50 @@ const Discover = () => {
     title: "social.profile.sarah.title",
     photoAlt: "social.profile.sarah.photo_alt",
   };
+  const activeProfile = discoveryProfiles[0]
+    ? {
+        id: discoveryProfiles[0].id,
+        name: discoveryProfiles[0].display_name || "social.profile.sarah.name",
+        location: "social.profile.sarah.location",
+        isVerified: discoveryProfiles[0].is_verified,
+        hasCar: discoveryProfiles[0].has_car,
+        bio: discoveryProfiles[0].bio || "social.profile.sarah.bio",
+        title: "social.profile.sarah.title",
+        photoAlt: "social.profile.sarah.photo_alt",
+      }
+    : mainProfile;
 
   const openProfileModal = (profileData: typeof mainProfile) => {
     setSelectedProfile(profileData);
     setShowProfileModal(true);
   };
+
+  useEffect(() => {
+    const runDiscovery = async () => {
+      if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
+      setDiscoveryLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("social-discovery", {
+          body: {
+            userId: profile.id,
+            lat: profile.last_lat,
+            lng: profile.last_lng,
+            radiusKm: filters.distance,
+            minAge: filters.ageRange[0],
+            maxAge: filters.ageRange[1],
+          },
+        });
+        if (error) throw error;
+        setDiscoveryProfiles(data?.profiles || []);
+      } catch (err) {
+        console.warn("[Discover] Discovery failed", err);
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    };
+
+    runDiscovery();
+  }, [profile?.id, profile?.last_lat, profile?.last_lng, filters.distance, filters.ageRange]);
 
   const handleSwipe = (direction: "left" | "right") => {
     const xMove = direction === "right" ? 500 : -500;
@@ -210,12 +252,12 @@ const Discover = () => {
                     handleSwipe(info.offset.x > 0 ? "right" : "left");
                   }
                 }}
-                onClick={() => openProfileModal(mainProfile)}
+                onClick={() => openProfileModal(activeProfile)}
                 className="absolute inset-0 rounded-2xl overflow-hidden shadow-elevated cursor-grab active:cursor-grabbing"
               >
                 <img 
                   src={sarahBella} 
-                  alt={t(mainProfile.photoAlt)} 
+                  alt={t(activeProfile.photoAlt)} 
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-foreground/90 via-foreground/30 to-transparent" />
@@ -228,7 +270,7 @@ const Discover = () => {
                     </span>
                     <ProfileBadges isVerified={true} hasCar={true} />
                   </div>
-                  <h3 className="text-2xl font-bold text-primary-foreground">{t(mainProfile.title)}</h3>
+                  <h3 className="text-2xl font-bold text-primary-foreground">{t(activeProfile.title)}</h3>
                   <div className="flex gap-2 mt-2 flex-wrap">
                     <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
                       {t("social.profile.tag.trail_hiker")}
@@ -238,7 +280,7 @@ const Discover = () => {
                     </span>
                   </div>
                   <p className="text-primary-foreground/90 text-sm mt-3">
-                    {t(mainProfile.bio)}
+                    {t(activeProfile.bio)}
                   </p>
                 </div>
               </motion.div>
@@ -368,7 +410,7 @@ const Discover = () => {
               <Button
                 onClick={() => {
                   setShowMatchModal(false);
-                  navigate(`/chat-dialogue?id=${mainProfile.id}&name=${encodeURIComponent(t(mainProfile.name))}`);
+                  navigate(`/chat-dialogue?id=${activeProfile.id}&name=${encodeURIComponent(t(activeProfile.name))}`);
                 }}
                 className="w-full"
               >

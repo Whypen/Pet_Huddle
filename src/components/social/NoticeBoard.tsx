@@ -26,19 +26,23 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 
-const categories = [
-  { id: "Social", labelKey: "notice.category.social", icon: MessageSquare, color: "bg-primary" },
-  { id: "Charity", labelKey: "notice.category.charity", icon: Heart, color: "bg-accent" },
-  { id: "News", labelKey: "notice.category.news", icon: Megaphone, color: "bg-warning" },
+const tags = [
+  { id: "Dog", labelKey: "threads.tag.dog", icon: MessageSquare, color: "bg-primary" },
+  { id: "Cat", labelKey: "threads.tag.cat", icon: Heart, color: "bg-accent" },
+  { id: "Pet News", labelKey: "threads.tag.pet_news", icon: Megaphone, color: "bg-warning" },
+  { id: "Social", labelKey: "threads.tag.social", icon: ThumbsUp, color: "bg-accent" },
+  { id: "Others", labelKey: "threads.tag.others", icon: Flag, color: "bg-muted" },
 ];
 
-interface Notice {
+interface Thread {
   id: string;
+  title: string;
   content: string;
-  category: string;
-  image_url: string | null;
+  tags: string[] | null;
+  hashtags: string[] | null;
+  images: string[] | null;
   created_at: string;
-  author_id: string;
+  user_id: string;
   author: {
     display_name: string | null;
     avatar_url: string | null;
@@ -54,20 +58,22 @@ interface NoticeBoardProps {
 export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user } = useAuth();
-  const dummyCatPost: Notice = {
+  const dummyCatPost: Thread = {
     id: "dummy-cat",
+    title: t("threads.dummy_title"),
     content: t("notice.dummy_content"),
-    category: "Social",
-    image_url: null,
+    tags: ["Social"],
+    hashtags: ["#huddle"],
+    images: null,
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
-    author_id: "cat-lover-123",
+    user_id: "cat-lover-123",
     author: {
       display_name: t("notice.dummy_author"),
       avatar_url: null,
       is_verified: true,
     },
   };
-  const [notices, setNotices] = useState<Notice[]>([dummyCatPost]); // Initialize with dummy cat post
+  const [notices, setNotices] = useState<Thread[]>([dummyCatPost]); // Initialize with dummy cat post
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -75,8 +81,10 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [category, setCategory] = useState("Social");
+  const [hashtags, setHashtags] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -98,15 +106,17 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
       }
 
       let query = supabase
-        .from("notice_board")
+        .from("threads")
         .select(`
           id,
+          title,
           content,
-          category,
-          image_url,
+          tags,
+          hashtags,
+          images,
           created_at,
-          author_id,
-          author:profiles!notice_board_author_id_fkey(
+          user_id,
+          author:profiles!threads_user_id_fkey(
             display_name,
             avatar_url,
             is_verified
@@ -154,7 +164,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   };
 
   const handleCreateNotice = async () => {
-    if (!user || !content.trim()) {
+    if (!user || !content.trim() || !title.trim()) {
       toast.error(t("Please enter some content"));
       return;
     }
@@ -181,20 +191,30 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
         imageUrl = publicUrl;
       }
 
+      const hashtagList = hashtags
+        .split(",")
+        .map((h) => h.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
       const { error } = await supabase
-        .from("notice_board")
+        .from("threads")
         .insert({
-          author_id: user.id,
+          user_id: user.id,
+          title: title.trim().slice(0, 20),
           content: content.trim(),
-          category,
-          image_url: imageUrl,
+          tags: [category],
+          hashtags: hashtagList,
+          images: imageUrl ? [imageUrl] : [],
         });
 
       if (error) throw error;
 
-      toast.success(t("Notice posted!"));
+      toast.success(t("Thread posted!"));
+      setTitle("");
       setContent("");
       setCategory("Social");
+      setHashtags("");
       setImageFile(null);
       setImagePreview(null);
       setIsCreateOpen(false);
@@ -222,12 +242,12 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   };
 
   const handleReport = (noticeId: string) => {
-    toast.success(t("Notice reported - our team will review it"));
+    toast.success(t("Thread reported - our team will review it"));
   };
 
   const handleHide = (noticeId: string) => {
     setHiddenNotices(prev => new Set([...prev, noticeId]));
-    toast.success(t("Notice hidden"));
+    toast.success(t("Thread hidden"));
   };
 
   const handleBlockUser = (authorId: string) => {
@@ -235,8 +255,8 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     toast.success(t("You won't see posts from this user"));
   };
 
-  const getCategoryStyle = (cat: string) => {
-    const found = categories.find(c => c.id === cat);
+  const getTagStyle = (tag: string) => {
+    const found = tags.find(c => c.id === tag);
     return found?.color || "bg-muted";
   };
 
@@ -251,8 +271,8 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     return `${days}${t("d ago")}`;
   };
 
-  const visibleNotices = notices.filter(notice => 
-    !hiddenNotices.has(notice.id) && !blockedUsers.has(notice.author_id)
+  const visibleNotices = notices.filter(notice =>
+    !hiddenNotices.has(notice.id) && !blockedUsers.has(notice.user_id)
   );
 
   return (
@@ -263,7 +283,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 group"
         >
-          <h3 className="text-lg font-semibold">{t("Notice Board")}</h3>
+          <h3 className="text-lg font-semibold">{t("Threads")}</h3>
           <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
             {t("Premium")}
           </span>
@@ -311,7 +331,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
             ) : visibleNotices.length === 0 ? (
               <div className="bg-muted/50 rounded-xl p-6 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">{t("No notices yet")}</p>
+                <p className="text-sm text-muted-foreground">{t("No threads yet")}</p>
               </div>
             ) : (
               <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-visible pr-1">
@@ -346,17 +366,28 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                               <span className="text-[10px]">{t("✓")}</span>
                             </span>
                           )}
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
-                            getCategoryStyle(notice.category)
-                          )}>
-                            {t(notice.category)}
-                          </span>
+                          {(notice.tags || []).slice(0, 1).map((tag) => (
+                            <span
+                              key={tag}
+                              className={cn(
+                                "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
+                                getTagStyle(tag)
+                              )}
+                            >
+                              {t(tag)}
+                            </span>
+                          ))}
                         </div>
+                        <p className="text-sm font-semibold">{notice.title}</p>
                         <p className="text-sm text-foreground">{notice.content}</p>
-                        {notice.image_url && (
+                        {(notice.hashtags || []).length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
+                          </p>
+                        )}
+                        {notice.images && notice.images.length > 0 && (
                           <img 
-                            src={notice.image_url} 
+                            src={notice.images[0]} 
                             alt="" 
                             className="mt-2 rounded-lg max-h-40 object-cover" 
                           />
@@ -403,7 +434,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                                   {t("Hide")}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
-                                  onClick={() => handleBlockUser(notice.author_id)}
+                                  onClick={() => handleBlockUser(notice.user_id)}
                                   className="text-destructive"
                                 >
                                   <Ban className="w-4 h-4 mr-2" />
@@ -453,7 +484,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
               className="w-full bg-card rounded-t-3xl p-6"
             >
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">{t("Create Notice")}</h3>
+                <h3 className="text-lg font-semibold">{t("Create Thread")}</h3>
                 <button onClick={() => setIsCreateOpen(false)}>
                   <X className="w-6 h-6" />
                 </button>
@@ -461,7 +492,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
 
               {/* Category Selector */}
               <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-                {categories.map((cat) => (
+                {tags.map((cat) => (
                   <button
                     key={cat.id}
                     onClick={() => setCategory(cat.id)}
@@ -477,6 +508,25 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
                   </button>
                 ))}
               </div>
+
+              {/* Title */}
+              <input
+                type="text"
+                maxLength={20}
+                placeholder={t("Thread title (max 20 chars)")}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-3"
+              />
+
+              {/* Hashtags */}
+              <input
+                type="text"
+                placeholder={t("Hashtags (comma separated, max 3)")}
+                value={hashtags}
+                onChange={(e) => setHashtags(e.target.value)}
+                className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-3"
+              />
 
               {/* Content */}
               <Textarea
@@ -520,13 +570,13 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
 
                 <Button
                   onClick={handleCreateNotice}
-                  disabled={creating || !content.trim()}
+                  disabled={creating || !content.trim() || !title.trim()}
                   className="flex-1 h-12 rounded-xl bg-primary hover:bg-primary/90 text-white"
                 >
                   {creating ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
                   ) : (
-                    t("Post Notice")
+                    t("Post Thread")
                   )}
                 </Button>
               </div>
