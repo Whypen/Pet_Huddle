@@ -119,7 +119,8 @@ CREATE POLICY "Users can unlike posts"
   USING (auth.uid() = user_id);
 
 -- Break-Glass Privacy: Location visibility based on emergency mode
-CREATE OR REPLACE POLICY "location_private_by_default"
+DROP POLICY IF EXISTS "location_private_by_default" ON profiles;
+CREATE POLICY "location_private_by_default"
   ON profiles
   FOR SELECT
   USING (
