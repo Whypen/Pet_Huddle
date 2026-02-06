@@ -773,6 +773,7 @@ Admin: toggle verification_status Approved/Rejected.
 - Distance: “See further” subtext:
   - “Extend search if run out of profiles” with +5km increments.
 - Profile View: onClick/onPress opens full view with scroll, social album previews (lazy load), 2-hour pinned location map.
+- Discover backend: must use Edge Function `social-discovery` + PostGIS RPC (`social_discovery`) for filtering/ordering.
 - Remove Huddle Nearby.
 - Chats: Fail-safe messaging; nanny remark always top:
   - “Book verified Pet Nannies for safety...”
@@ -788,6 +789,7 @@ Admin: toggle verification_status Approved/Rejected.
 ### 5.5 Nanny Marketplace + Escrow (Update)
 - All Stripe API calls must include **Idempotency-Key** (UUID v4).
 - Webhooks on `payment_intent.succeeded` to update DB (do not rely on client-only success).
+- Booking UI must include **currency selector** next to amount and **multi-day range** (start date/time + end date/time).
 
 ### 5.6 Revenue & Upsells (Update Table/Algo)
 Sequence + limits:

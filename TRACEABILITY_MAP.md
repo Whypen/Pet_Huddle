@@ -73,6 +73,14 @@
 | bypass-flag guard | 3.3 |
 | design token lint | 1.2 (Design Tokens) |
 
+## Feature Wiring (Critical Paths)
+| Feature | UI Entry | Backend | Data Tables | APP_MASTER_SPEC Section |
+|---|---|---|---|---|
+| Threads | `/social`, `/threads` → `Social.tsx` + `NoticeBoard.tsx` | Supabase `threads` table | `threads`, `thread_comments` | 5.4 |
+| Discover | `/discover` → `Discover.tsx` | Edge `social-discovery` + RPC `social_discovery` | `profiles` + PostGIS | 5.4, Algorithms |
+| KYC | `/verify-identity` → `VerifyIdentity.tsx` | Storage bucket `identity_verification` + `verification_uploads` | `profiles`, `verification_uploads` | 5.2 |
+| Booking | `/chats` → `Chats.tsx` | Edge `create-marketplace-booking` + Stripe | `marketplace_bookings`, `transactions` | 5.5 |
+
 ## Change Control
 - Any mapping change must update:
   - `SPEC_CHANGELOG.md`

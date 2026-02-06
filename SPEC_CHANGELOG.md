@@ -77,3 +77,13 @@
 - **DB migration impact:** Added `20260206094500_profiles_revoke_anon.sql`.
 - **Rollback plan:** `GRANT SELECT ON public.profiles TO anon;` (only if public profiles are intentionally exposed).
 - **Verification steps:** `npx supabase db push` then anon request should return 401/403.
+
+## [v1.2.3-threads-discover-kyc-booking-wiring] - 2026-02-05
+- **Author:** Codex + Hyphen
+- **Summary:** Wired Threads to `threads` table, added Discover backend via `social-discovery`, polished KYC flow (camera direction + uploads), and upgraded booking UX (currency + multi-day range + button copy).
+- **Why change was needed:** Close critical blockers on Threads/Discover/KYC/Booking before upgrade approval.
+- **Sections changed:** APP_MASTER_SPEC 5.2, 5.4, 5.5, 5.6; Protocols & Execution (UAT).
+- **DB migration impact:** Added `20260206101000_verification_uploads_selfie.sql`, `20260206102000_marketplace_bookings_grants.sql`, `20260206103000_social_discovery_fn.sql`, `20260206104000_admin_select_verification_uploads.sql`.
+- **Edge functions:** Added `social-discovery`; updated `create-marketplace-booking` to accept `currency`.
+- **Rollback plan:** Revert migrations, restore `NoticeBoard` to `notice_board`, revert `Discover` to static data, and roll back `Chats` booking modal changes.
+- **Verification steps:** `node scripts/uat-role-pass.mjs`, `node scripts/backend-wiring-v21.mjs`, and verify `marketplace_bookings` grants in DB dump.
