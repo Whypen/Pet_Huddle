@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -49,6 +49,17 @@ interface Thread {
   } | null;
 }
 
+interface ThreadComment {
+  id: string;
+  thread_id: string;
+  content: string;
+  created_at: string;
+  user_id: string;
+  author: {
+    display_name: string | null;
+  } | null;
+}
+
 interface NoticeBoardProps {
   onPremiumClick: () => void;
 }
@@ -89,8 +100,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
   const [threadsRemaining, setThreadsRemaining] = useState<number | null>(null);
+  const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
+  const [replyFor, setReplyFor] = useState<string | null>(null);
+  const [replyContent, setReplyContent] = useState("");
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
+  const remainingChars = useMemo(() => 1000 - content.length, [content]);
+  const remainingReplyChars = useMemo(() => 1000 - replyContent.length, [replyContent]);
 
   useEffect(() => {
     fetchNotices(true);
@@ -139,6 +155,26 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       } else {
         setNotices(prev => [...prev, ...newNotices]);
       }
+      const ids = newNotices.map((n) => n.id);
+      if (ids.length > 0) {
+        const { data: comments } = await supabase
+          .from("thread_comments")
+          .select(`
+            id,
+            thread_id,
+            content,
+            created_at,
+            user_id,
+            author:profiles!thread_comments_user_id_fkey(display_name)
+          `)
+          .in("thread_id", ids)
+          .order("created_at", { ascending: true });
+        const grouped: Record<string, ThreadComment[]> = {};
+        (comments || []).forEach((c) => {
+          grouped[c.thread_id] = [...(grouped[c.thread_id] || []), c];
+        });
+        setCommentsByThread((prev) => ({ ...prev, ...grouped }));
+      }
       const last = newNotices[newNotices.length - 1];
       if (last?.created_at) {
         setLastCreatedAt(last.created_at);
@@ -186,9 +222,56 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     }
   };
 
+  const handleReply = async (thread: Thread) => {
+    if (!user) return;
+    if (!replyContent.trim()) {
+      toast.error(t("Reply cannot be empty"));
+      return;
+    }
+    if (replyContent.length > 1000) {
+      toast.error(t("Reply is too long"));
+      return;
+    }
+    const { error } = await supabase
+      .from("thread_comments")
+      .insert({
+        thread_id: thread.id,
+        user_id: user.id,
+        content: replyContent.trim(),
+      });
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setReplyContent("");
+    setReplyFor(null);
+    fetchNotices(true);
+  };
+
+  const renderMarkdown = (text: string) => {
+    const escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const withBold = escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const withItalic = withBold.replace(/\*(.+?)\*/g, "<em>$1</em>");
+    const lines = withItalic.split("\n");
+    const listItems = lines.filter((l) => l.trim().startsWith("- "));
+    if (listItems.length > 0) {
+      const list = listItems.map((l) => `<li>${l.replace(/^- /, "")}</li>`).join("");
+      const rest = lines.filter((l) => !l.trim().startsWith("- ")).join("<br />");
+      return `${rest}<ul>${list}</ul>`;
+    }
+    return lines.join("<br />");
+  };
+
   const handleCreateNotice = async () => {
     if (!user || !content.trim() || !title.trim()) {
       toast.error(t("Please enter some content"));
+      return;
+    }
+    if (content.length > 1000) {
+      toast.error(t("Thread content is too long"));
       return;
     }
 
@@ -416,17 +499,20 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                           ))}
                         </div>
                         <p className="text-sm font-semibold">{notice.title}</p>
-                        <p className="text-sm text-foreground">{notice.content}</p>
+                        <div
+                          className="text-sm text-foreground"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(notice.content) }}
+                        />
                         {(notice.hashtags || []).length > 0 && (
                           <p className="text-xs text-muted-foreground mt-1">
                             {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
                           </p>
                         )}
                         {notice.images && notice.images.length > 0 && (
-                          <img 
-                            src={notice.images[0]} 
-                            alt="" 
-                            className="mt-2 rounded-lg max-h-40 object-cover" 
+                          <img
+                            src={notice.images[0]}
+                            alt=""
+                            className="mt-2 rounded-lg max-h-40 object-cover aspect-video w-full"
                           />
                         )}
                         
@@ -480,6 +566,46 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          <button
+                            className="text-xs text-primary"
+                            onClick={() => {
+                              setReplyFor(notice.id);
+                              const quote = `> @${notice.author?.display_name || "user"}: "${notice.content.slice(0, 50)}..."`;
+                              setReplyContent(quote);
+                            }}
+                          >
+                            {t("Reply")}
+                          </button>
+
+                          {(commentsByThread[notice.id] || []).map((c) => (
+                            <div key={c.id} className="text-xs text-muted-foreground border-l pl-2">
+                              <span className="font-medium">{c.author?.display_name || t("Anonymous")}:</span>{" "}
+                              <span dangerouslySetInnerHTML={{ __html: renderMarkdown(c.content) }} />
+                            </div>
+                          ))}
+
+                          {replyFor === notice.id && (
+                            <div className="mt-2">
+                              <Textarea
+                                value={replyContent}
+                                onChange={(e) => setReplyContent(e.target.value)}
+                                className="rounded-xl min-h-[80px]"
+                                maxLength={1000}
+                              />
+                              <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
+                                <span>{t("Max 1000 chars")}</span>
+                                <span>{remainingReplyChars}</span>
+                              </div>
+                              <div className="flex justify-end mt-2">
+                                <Button size="sm" onClick={() => handleReply(notice)}>
+                                  {t("Post Reply")}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -571,7 +697,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className="rounded-xl min-h-[100px] mb-4"
+                maxLength={1000}
               />
+              <div className="flex items-center justify-between text-xs text-muted-foreground mb-4">
+                <span>{t("Max 1000 chars")}</span>
+                <span>{remainingChars}</span>
+              </div>
 
               {/* Image Preview */}
               {imagePreview && (

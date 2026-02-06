@@ -28,6 +28,7 @@ import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/VerifyIdentity";
+import AdminDisputes from "./screens/AdminDisputes";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -236,6 +237,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <Admin />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/control-center"
+                    element={
+                      <ProtectedRoute>
+                        <AdminDisputes />
                       </ProtectedRoute>
                     }
                   />
