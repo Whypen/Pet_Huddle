@@ -1,0 +1,5 @@
+[lint.extension-schema-mismatch]
+severity = "ignore"
+
+[lint.unresolved-index]
+severity = "ignore"
