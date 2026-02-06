@@ -86,12 +86,8 @@ const Social = () => {
         )}
 
         <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
-          <header className="flex items-center justify-between px-5 pt-4 pb-4">
-            <h1 className="text-2xl font-bold">{t("Threads")}</h1>
-          </header>
           <section className="px-5 py-2 pb-8">
             <NoticeBoard
-              isPremium={isPremium}
               onPremiumClick={() => setIsPremiumOpen(true)}
             />
           </section>
@@ -367,7 +363,6 @@ const Social = () => {
         {/* Notice Board */}
         <section className="px-5 py-4 pb-8">
         <NoticeBoard 
-          isPremium={isPremium} 
           onPremiumClick={() => setIsPremiumOpen(true)} 
         />
         </section>

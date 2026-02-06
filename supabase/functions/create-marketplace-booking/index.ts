@@ -19,6 +19,7 @@ const allowStripeFallback = Deno.env.get("ALLOW_STRIPE_FALLBACK") === "true";
 
 serve(async (req: Request) => {
   try {
+    const clientIdempotencyKey = req.headers.get("idempotency-key") || "";
     const {
       clientId,
       sitterId,
@@ -92,8 +93,8 @@ serve(async (req: Request) => {
     const platformFee = Math.round(amount * 0.1); // 10% platform fee
     const sitterPayout = amount - platformFee;
 
-    // Generate idempotency key
-    const idempotencyKey = `booking-${clientId}-${sitterId}-${Date.now()}`;
+    // Generate idempotency key (required format)
+    const idempotencyKey = clientIdempotencyKey || `booking_${clientId}_${Date.now()}`;
 
     let checkoutUrl: string | null = null;
     let paymentIntentId: string;

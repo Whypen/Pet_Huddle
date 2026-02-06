@@ -68,7 +68,7 @@ async function callGemini({ message, petProfile, imageBase64 }: { message: strin
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
   const prompt = petProfile
-    ? `Pet Profile:\nName: ${petProfile.name}\nSpecies: ${petProfile.species}\nBreed: ${petProfile.breed || ""}\nWeight: ${petProfile.weight || ""} ${petProfile.weight_unit || ""}\n\nUser Question: ${message}`
+    ? `Pet Profile:\nName: ${petProfile.name}\nSpecies: ${petProfile.species}\nBreed: ${petProfile.breed || ""}\nAge: ${petProfile.age || ""}\nWeight: ${petProfile.weight || ""} ${petProfile.weight_unit || ""}\nHistory: ${petProfile.history || ""}\n\nUser Question: ${message}`
     : message;
 
   const contents: any[] = [{ parts: [{ text: prompt }] }];

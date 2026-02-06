@@ -16,6 +16,7 @@ import { VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
+import { useQueryClient } from "@tanstack/react-query";
 
 // Species options matching database
 const speciesOptions = [
@@ -60,6 +61,7 @@ const EditPetProfile = () => {
   const [searchParams] = useSearchParams();
   const petId = searchParams.get("id");
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(!!petId);
   const [saving, setSaving] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -94,6 +96,13 @@ const EditPetProfile = () => {
 
   const [vaccinationInput, setVaccinationInput] = useState({ name: "", date: "" });
   const [medicationInput, setMedicationInput] = useState({ name: "", dosage: "", frequency: "" });
+  const [fieldErrors, setFieldErrors] = useState({
+    petDob: "",
+    weight: "",
+    vaccinationDate: "",
+    nextVaccination: "",
+    microchipId: "",
+  });
 
   useEffect(() => {
     if (petId) {
@@ -173,7 +182,20 @@ const EditPetProfile = () => {
   };
 
   const addVaccination = () => {
+    if (vaccinationInput.date) {
+      const vaxDate = new Date(vaccinationInput.date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (vaxDate > today) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          vaccinationDate: t("Vaccination date cannot be in the future"),
+        }));
+        return;
+      }
+    }
     if (vaccinationInput.name && vaccinationInput.date) {
+      setFieldErrors((prev) => ({ ...prev, vaccinationDate: "" }));
       setFormData(prev => ({
         ...prev,
         vaccinations: [...prev.vaccinations, vaccinationInput]
@@ -213,6 +235,46 @@ const EditPetProfile = () => {
 
   const handleSave = async () => {
     if (!user) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (formData.dob) {
+      const petDob = new Date(formData.dob);
+      if (petDob > today) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          petDob: t("Pet DOB cannot be in the future"),
+        }));
+        return;
+      }
+    }
+
+    if (formData.weight && (formData.weight.length > 4 || Number(formData.weight) > 9999)) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        weight: t("Pet weight must be 4 digits or less"),
+      }));
+      return;
+    }
+
+    if (formData.next_vaccination_reminder) {
+      const reminderDate = new Date(formData.next_vaccination_reminder);
+      if (reminderDate <= today) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          nextVaccination: t("Next vaccination must be in the future"),
+        }));
+        return;
+      }
+    }
+
+    if (formData.microchip_id && formData.microchip_id.length !== 15) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        microchipId: t("Microchip ID must be 15 digits"),
+      }));
+      return;
+    }
 
     if (!formData.name) {
       toast.error(t("Pet name is required"));
@@ -229,7 +291,10 @@ const EditPetProfile = () => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (reminderDate <= today) {
-        toast.error(t("Next vaccination reminder must be a future date"));
+        setFieldErrors((prev) => ({
+          ...prev,
+          nextVaccination: t("Next vaccination must be in the future"),
+        }));
         return;
       }
     }
@@ -299,6 +364,7 @@ const EditPetProfile = () => {
 
         if (error) throw error;
         toast.success(t("Pet added!"));
+        await queryClient.invalidateQueries({ queryKey: ["pets"] });
       } else {
         const { error } = await supabase
           .from("pets")
@@ -307,6 +373,7 @@ const EditPetProfile = () => {
 
         if (error) throw error;
         toast.success(t("Pet profile updated!"));
+        await queryClient.invalidateQueries({ queryKey: ["pets"] });
       }
 
       navigate(-1);
@@ -465,8 +532,21 @@ const EditPetProfile = () => {
               type="date"
               value={formData.dob}
               onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+              onBlur={() => {
+                if (!formData.dob) return;
+                const petDob = new Date(formData.dob);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  petDob: petDob > today ? t("Pet DOB cannot be in the future") : "",
+                }));
+              }}
               className="h-12 rounded-xl"
             />
+            {fieldErrors.petDob && (
+              <p className="text-xs text-red-500 mt-1">{fieldErrors.petDob}</p>
+            )}
           </div>
 
           {/* Weight */}
@@ -476,7 +556,18 @@ const EditPetProfile = () => {
               <Input
                 type="number"
                 value={formData.weight}
-                onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setFormData(prev => ({ ...prev, weight: next }));
+                  if (next && (next.length > 4 || Number(next) > 9999)) {
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      weight: t("Pet weight must be 4 digits or less"),
+                    }));
+                  } else {
+                    setFieldErrors((prev) => ({ ...prev, weight: "" }));
+                  }
+                }}
                 placeholder={t("0")}
                 className="h-12 rounded-xl flex-1"
               />
@@ -489,12 +580,14 @@ const EditPetProfile = () => {
                 <option value="lbs">{t("lbs")}</option>
               </select>
             </div>
+            {fieldErrors.weight && (
+              <p className="text-xs text-red-500 mt-1">{fieldErrors.weight}</p>
+            )}
           </div>
 
           {/* Vaccinations */}
           <div className="p-4 rounded-xl bg-muted/50 space-y-4">
             <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
-            <p className="text-xs text-muted-foreground">{t("Use exact vaccination dates for better reminders")}</p>
             {formData.vaccinations.map((vax, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -506,27 +599,47 @@ const EditPetProfile = () => {
                 </button>
               </div>
             ))}
-            <div className="flex gap-2">
-              <select
-                value={vaccinationInput.name}
-                onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
-                className="flex-1 h-10 rounded-lg bg-card border border-border px-3 text-sm"
-              >
-                <option value="">{t("Select vaccine...")}</option>
-                {VACCINATION_OPTIONS.map(v => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-              <Input
-                type="date"
-                value={vaccinationInput.date}
-                onChange={(e) => setVaccinationInput(prev => ({ ...prev, date: e.target.value }))}
-                placeholder={t("Select date")}
-                className="h-10 rounded-lg w-36"
-              />
-              <Button onClick={addVaccination} size="sm" variant="secondary">
-                <Plus className="w-4 h-4" />
-              </Button>
+            <div className="relative pb-6">
+              <div className="flex gap-2">
+                <select
+                  value={vaccinationInput.name}
+                  onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
+                  className="flex-1 h-10 rounded-lg bg-card border border-border px-3 text-sm"
+                >
+                  <option value="">{t("Select vaccine...")}</option>
+                  {VACCINATION_OPTIONS.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                <Input
+                  type="date"
+                  value={vaccinationInput.date}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setVaccinationInput(prev => ({ ...prev, date: next }));
+                    if (next) {
+                      const vaxDate = new Date(next);
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        vaccinationDate: vaxDate > today ? t("Vaccination date cannot be in the future") : "",
+                      }));
+                    }
+                  }}
+                  placeholder={t("Select date")}
+                  className="h-10 rounded-lg w-36"
+                />
+                <Button onClick={addVaccination} size="sm" variant="secondary">
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+              <p className="absolute left-0 -bottom-1 text-xs text-muted-foreground">
+                {t("Input last vaccination dates for better tracking")}
+              </p>
+              {fieldErrors.vaccinationDate && (
+                <p className="text-xs text-red-500 mt-1">{fieldErrors.vaccinationDate}</p>
+              )}
             </div>
 
             {/* Next Vaccination Reminder */}
@@ -535,9 +648,24 @@ const EditPetProfile = () => {
               <Input
                 type="date"
                 value={formData.next_vaccination_reminder}
-                onChange={(e) => setFormData(prev => ({ ...prev, next_vaccination_reminder: e.target.value }))}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setFormData(prev => ({ ...prev, next_vaccination_reminder: next }));
+                  if (next) {
+                    const reminderDate = new Date(next);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      nextVaccination: reminderDate <= today ? t("Next vaccination must be in the future") : "",
+                    }));
+                  }
+                }}
                 className="h-10 rounded-lg"
               />
+              {fieldErrors.nextVaccination && (
+                <p className="text-xs text-red-500 mt-1">{fieldErrors.nextVaccination}</p>
+              )}
             </div>
           </div>
 
@@ -636,11 +764,22 @@ const EditPetProfile = () => {
             <Input
               value={formData.microchip_id}
               onChange={(e) => setFormData(prev => ({ ...prev, microchip_id: validateMicrochip(e.target.value) }))}
+              onBlur={() => {
+                if (!formData.microchip_id) return;
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  microchipId: formData.microchip_id.length !== 15 ? t("Microchip ID must be 15 digits") : "",
+                }));
+              }}
               placeholder={t("000000000000000")}
               className="h-12 rounded-xl font-mono"
               maxLength={15}
             />
-            <p className="text-xs text-muted-foreground mt-1">{formData.microchip_id.length}/15 digits</p>
+            {fieldErrors.microchipId ? (
+              <p className="text-xs text-red-500 mt-1">{fieldErrors.microchipId}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">{formData.microchip_id.length}/15 digits</p>
+            )}
           </div>
 
           {/* Bio */}

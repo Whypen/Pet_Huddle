@@ -50,6 +50,9 @@ const EditProfile = () => {
   const [selectedCountry, setSelectedCountry] = useState("");
   const [detectingLocation, setDetectingLocation] = useState(false);
   const isIdentityLocked = profile?.verification_status === "approved" || profile?.is_verified;
+  const [fieldErrors, setFieldErrors] = useState({
+    humanDob: "",
+  });
 
   const [formData, setFormData] = useState({
     // Basic Info
@@ -490,9 +493,22 @@ const EditProfile = () => {
                 type="date"
                 value={formData.dob}
                 onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+                onBlur={() => {
+                  if (!formData.dob) return;
+                  const dob = new Date(formData.dob);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    humanDob: dob > today ? t("Human DOB cannot be in the future") : "",
+                  }));
+                }}
                 className="h-12 rounded-xl"
                 required
               />
+              {fieldErrors.humanDob && (
+                <p className="text-xs text-red-500 mt-1">{fieldErrors.humanDob}</p>
+              )}
             </div>
 
             {/* Bio */}

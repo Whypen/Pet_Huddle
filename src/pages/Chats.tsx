@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2, ChevronRight } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { useUpsell } from "@/hooks/useUpsell";
 
 type MainTab = "chats" | "groups";
 const filterTabs = [
@@ -172,6 +173,7 @@ const Chats = () => {
   const { t } = useLanguage();
   const { isConnected, onNewMessage, onOnlineStatus } = useWebSocket();
   const { getConversations } = useApi();
+  const { checkStarsAvailable } = useUpsell();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -185,6 +187,11 @@ const Chats = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [discoveryProfiles, setDiscoveryProfiles] = useState<any[]>([]);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryRole, setDiscoveryRole] = useState("playdates");
+  const [discoveryDistance, setDiscoveryDistance] = useState(10);
+  const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -205,6 +212,7 @@ const Chats = () => {
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
   const isUnder16 = userAge !== null && userAge < 16;
+  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user pets when the nanny booking modal opens
   useEffect(() => {
@@ -274,6 +282,34 @@ const Chats = () => {
     };
     loadConversations();
   }, []);
+
+  // Discovery cards (embedded in Chats)
+  useEffect(() => {
+    const runDiscovery = async () => {
+      if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
+      setDiscoveryLoading(true);
+      try {
+        const payload = {
+          userId: profile.id,
+          lat: profile.last_lat,
+          lng: profile.last_lng,
+          radiusKm: discoveryDistance,
+          role: discoveryRole,
+          petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
+          // Premium/Gold get advanced filters; free uses basic only
+          advanced: isPremium,
+        };
+        const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
+        if (error) throw error;
+        setDiscoveryProfiles(data?.profiles || []);
+      } catch (err) {
+        console.warn("[Chats] Discovery failed", err);
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    };
+    runDiscovery();
+  }, [profile?.id, profile?.last_lat, profile?.last_lng, discoveryDistance, discoveryRole, discoveryPetSize, isPremium]);
 
   // Listen for new messages
   useEffect(() => {
@@ -471,23 +507,89 @@ const Chats = () => {
         </div>
       </header>
 
-      {/* Discover Section */}
-      <section className="px-5 pb-3">
-        <button
-          onClick={() => navigate("/discover")}
-          className="w-full rounded-2xl border border-border bg-card p-4 text-left shadow-card hover:bg-muted transition-colors"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">{t("Discover")}</p>
-              <p className="text-base font-semibold">{t("Find new huddlers nearby")}</p>
+      {/* Discovery Cards (embedded in Chats) */}
+      <section className="px-5 pb-4">
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
+          <select
+            value={discoveryRole}
+            onChange={(e) => setDiscoveryRole(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            <option value="playdates">{t("Playdates")}</option>
+            <option value="nannies">{t("Nannies")}</option>
+            <option value="animal-lovers">{t("Animal Lovers")}</option>
+          </select>
+          <select
+            value={String(discoveryDistance)}
+            onChange={(e) => setDiscoveryDistance(Number(e.target.value))}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            {[5, 10, 20, 50, 100, 150].map((km) => (
+              <option key={km} value={km}>{km}km</option>
+            ))}
+          </select>
+          <select
+            value={discoveryPetSize}
+            onChange={(e) => setDiscoveryPetSize(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+          >
+            {["Any", "Small", "Medium", "Large"].map((size) => (
+              <option key={size} value={size}>{size}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
+          {discoveryLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              {t("Loading discovery...")}
             </div>
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t("Extend search if run out of profiles")}
-          </p>
-        </button>
+          )}
+          {discoveryProfiles.map((p) => {
+            const age = p?.dob ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : "";
+            const petSpecies = Array.isArray(p?.pets) && p.pets.length > 0 ? p.pets[0].species : "—";
+            return (
+              <div key={p.id} className="min-w-[220px] rounded-2xl border border-border bg-card p-3 shadow-card relative">
+                <div className="text-sm font-semibold">{p.display_name}</div>
+                <div className="text-xs text-muted-foreground">{age ? `${age} • ${p.relationship_status || "—"}` : p.relationship_status || "—"}</div>
+                <div className="text-xs text-muted-foreground mt-1">{t("Pet")}: {petSpecies}</div>
+
+                <div className="absolute top-2 right-2 flex gap-1">
+                  <button
+                    onClick={() => {
+                      toast.success(t("Wave sent"));
+                    }}
+                    className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+                  >
+                    <HandMetal className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const ok = await checkStarsAvailable();
+                      if (!ok) {
+                        toast.error(t("Buy a star pack to immediately chat with the user"));
+                        return;
+                      }
+                      navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
+                    }}
+                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                  >
+                    <Star className="w-4 h-4 text-[#3283FF]" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDiscoveryProfiles((prev) => prev.filter((x) => x.id !== p.id));
+                    }}
+                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                  >
+                    <X className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       {/* Search Bar */}

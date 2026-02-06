@@ -4,7 +4,6 @@ import {
   X,
   Image,
   Loader2,
-  Lock,
   MessageSquare,
   Heart,
   Megaphone,
@@ -51,13 +50,12 @@ interface Thread {
 }
 
 interface NoticeBoardProps {
-  isPremium: boolean;
   onPremiumClick: () => void;
 }
 
-export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => {
+export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const dummyCatPost: Thread = {
     id: "dummy-cat",
     title: t("threads.dummy_title"),
@@ -90,6 +88,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
   const [isExpanded, setIsExpanded] = useState(true);
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+  const [threadsRemaining, setThreadsRemaining] = useState<number | null>(null);
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
 
@@ -114,6 +113,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
           tags,
           hashtags,
           images,
+          score,
           created_at,
           user_id,
           author:profiles!threads_user_id_fkey(
@@ -122,6 +122,7 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
             is_verified
           )
         `)
+        .order("score", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(20);
 
@@ -151,6 +152,28 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     }
   };
 
+  const getThreadLimit = () => {
+    if (profile?.tier === "gold") return 30;
+    if (profile?.tier === "premium") return 5;
+    return 1;
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadRemaining = async () => {
+      const limit = getThreadLimit();
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabase
+        .from("threads")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", since);
+      const remaining = Math.max(0, limit - (count || 0));
+      setThreadsRemaining(remaining);
+    };
+    loadRemaining();
+  }, [user?.id, profile?.tier]);
+
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -169,9 +192,26 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
       return;
     }
 
+    if ((threadsRemaining ?? 0) <= 0) {
+      setIsPremiumFooterOpen(true);
+      return;
+    }
+
     setCreating(true);
 
     try {
+      const limit = getThreadLimit();
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { count } = await supabase
+        .from("threads")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gte("created_at", since);
+      if ((count || 0) >= limit) {
+        setIsPremiumFooterOpen(true);
+        return;
+      }
+
       let imageUrl = null;
 
       if (imageFile) {
@@ -279,40 +319,37 @@ export const NoticeBoard = ({ isPremium, onPremiumClick }: NoticeBoardProps) => 
     <div className="space-y-4">
       {/* Header with Expand/Collapse */}
       <div className="flex items-center justify-between">
-        <button 
+        <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 group"
         >
-          <h3 className="text-lg font-semibold">{t("Threads")}</h3>
-          <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
-            {t("Premium")}
-          </span>
           {isExpanded ? (
             <ChevronUp className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           ) : (
             <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           )}
         </button>
-        
-        {isPremium ? (
+
+        <div className="flex items-center gap-3">
+          {threadsRemaining !== null && (
+            <span className="text-xs text-muted-foreground">
+              {t("Quota")}: {threadsRemaining}
+            </span>
+          )}
           <Button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => {
+              if ((threadsRemaining ?? 0) <= 0) {
+                setIsPremiumFooterOpen(true);
+                return;
+              }
+              setIsCreateOpen(true);
+            }}
             size="sm"
             className="rounded-full bg-primary hover:bg-primary/90 text-white"
           >
             {t("Post")}
           </Button>
-        ) : (
-          <Button
-            onClick={() => setIsPremiumFooterOpen(true)}
-            size="sm"
-            variant="outline"
-            className="rounded-full"
-          >
-            <Lock className="w-4 h-4 mr-1" />
-            {t("Unlock")}
-          </Button>
-        )}
+        </div>
       </div>
 
       <AnimatePresence>
