@@ -60,7 +60,7 @@ const Discover = () => {
   };
 
   const userAge = getUserAge();
-  const isUnder16 = userAge < 16;
+  const isMinor = userAge >= 13 && userAge < 16;
   const [filters, setFilters] = useState<FilterState>({
     ...defaultFilters,
     ageRange: [Math.max(18, userAge - 3), Math.min(99, userAge + 3)]
@@ -180,7 +180,7 @@ const Discover = () => {
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
-      {isUnder16 && (
+      {isMinor && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
           <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
             {t("Social features restricted for users under 16.")}
@@ -188,7 +188,7 @@ const Discover = () => {
         </div>
       )}
 
-      <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
+      <div className={cn(isMinor && "pointer-events-none opacity-70")}>
         {/* Header */}
         <header className="flex items-center justify-between px-5 pt-4 pb-4">
           <h1 className="text-2xl font-bold">{t("social.discovery")}</h1>

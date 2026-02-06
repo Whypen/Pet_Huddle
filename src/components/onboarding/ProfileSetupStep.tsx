@@ -110,6 +110,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string>(initialData?.avatarUrl || "");
+  const [ageError, setAgeError] = useState<string>("");
   
   const [formData, setFormData] = useState<ProfileData>({
     avatarUrl: initialData?.avatarUrl || "",
@@ -244,6 +245,20 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     if (!formData.dob) {
       toast.error(t("Please enter your date of birth"));
       return;
+    }
+    const dobDate = new Date(formData.dob);
+    if (!Number.isNaN(dobDate.getTime())) {
+      const today = new Date();
+      let age = today.getFullYear() - dobDate.getFullYear();
+      const monthDiff = today.getMonth() - dobDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dobDate.getDate())) {
+        age--;
+      }
+      if (age < 13) {
+        setAgeError(t("You must be at least 13 years old to create a huddle account."));
+        toast.error(t("You must be at least 13 years old to create a huddle account."));
+        return;
+      }
     }
 
     if (!formData.locationCountry.trim() || !formData.locationDistrict.trim()) {
@@ -453,9 +468,35 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         <Input
           type="date"
           value={formData.dob}
-          onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+          onChange={(e) => {
+            const nextDob = e.target.value;
+            setFormData(prev => ({ ...prev, dob: nextDob }));
+            if (!nextDob) {
+              setAgeError("");
+              return;
+            }
+            const dobDate = new Date(nextDob);
+            if (Number.isNaN(dobDate.getTime())) {
+              setAgeError("");
+              return;
+            }
+            const today = new Date();
+            let age = today.getFullYear() - dobDate.getFullYear();
+            const monthDiff = today.getMonth() - dobDate.getMonth();
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dobDate.getDate())) {
+              age--;
+            }
+            if (age < 13) {
+              setAgeError(t("You must be at least 13 years old to create a huddle account."));
+            } else {
+              setAgeError("");
+            }
+          }}
           className="h-12 rounded-xl"
         />
+        {ageError && (
+          <div className="text-xs text-destructive">{ageError}</div>
+        )}
       </div>
 
       {/* Location */}

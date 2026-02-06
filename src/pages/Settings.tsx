@@ -89,6 +89,10 @@ const Settings = () => {
   const [emailNotif, setEmailNotif] = useState(true);
 
   const isVerified = profile?.is_verified;
+  const profileAge = profile?.dob
+    ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+    : null;
+  const isMinor = profileAge !== null && profileAge >= 13 && profileAge < 16;
   const isGold = profile?.tier === "gold";
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
   const currentFamilyCount = profile?.care_circle?.length || 0;
@@ -405,6 +409,9 @@ const Settings = () => {
                 <Shield className="w-5 h-5 text-muted-foreground" />
                 <div className="text-left">
                   <span className="font-medium block">{t("Identity Verification")}</span>
+                  {isMinor && (
+                    <span className="text-xs text-muted-foreground">{t("Verified as Minor")}</span>
+                  )}
                   {profile?.verification_status === 'pending' && (
                     <span className="text-xs text-warning">{t("Waiting for Approval")}</span>
                   )}

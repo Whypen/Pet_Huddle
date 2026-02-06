@@ -1,8 +1,9 @@
 # Privacy & Safety Policy — huddle
 
 ## 1. Eligibility and Age Requirements
+- Users must be at least **13** to register.
 - Users must be **18+** for full legal standing and marketplace/legal actions.
-- Users aged **16+** may access social features where permitted by local law.
+- Social and Community features are strictly reserved for users **16 and older**.
 - Users under 16 are restricted from Social/Chat interactions.
 - Users must provide truthful DOB and identity information.
 

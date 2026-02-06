@@ -215,7 +215,7 @@ const Chats = () => {
   const userAge = profile?.dob
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
-  const isUnder16 = userAge !== null && userAge < 16;
+  const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user pets when the nanny booking modal opens
@@ -481,7 +481,7 @@ const Chats = () => {
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
-      {isUnder16 && (
+      {isMinor && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
           <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
             {t("Social features restricted for users under 16.")}
@@ -489,7 +489,7 @@ const Chats = () => {
         </div>
       )}
 
-      <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
+      <div className={cn(isMinor && "pointer-events-none opacity-70")}>
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-4 pb-2">
