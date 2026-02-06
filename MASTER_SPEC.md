@@ -161,7 +161,7 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ### 5.5 Legal Guardrails
 - **AI Vet Footer:** pt10 grey disclaimer: “huddle AI provides informational content, not veterinary diagnosis. In emergencies, seek professional care immediately.”
-- **KYC Safe Harbor Checkbox:** required in `/verify-identity` step 2.
+- **KYC Safe Harbor Checkbox:** required in `/verify-identity` step 2, includes: “I am 18+ and agree to the Terms of Service and Privacy Policy.”
 - **Booking Safe Harbor Checkbox:** required before booking checkout.
 
 ---

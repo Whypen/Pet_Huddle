@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { useUpsell } from "@/hooks/useUpsell";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type MainTab = "chats" | "groups";
 const filterTabs = [
@@ -201,6 +202,7 @@ const Chats = () => {
   const [bookingCurrency, setBookingCurrency] = useState("USD");
   const [bookingProcessing, setBookingProcessing] = useState(false);
   const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
+  const [showSafeHarborModal, setShowSafeHarborModal] = useState(false);
   const [serviceDate, setServiceDate] = useState("");
   const [serviceEndDate, setServiceEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
@@ -414,7 +416,7 @@ const Chats = () => {
   const handleNannyBookClick = (e: React.MouseEvent, chat: ChatUser) => {
     e.stopPropagation(); // Don't navigate to chat
     setSelectedNanny(chat);
-    setNannyBookingOpen(true);
+    setShowSafeHarborModal(true);
   };
 
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
@@ -517,7 +519,7 @@ const Chats = () => {
         </div>
       </header>
 
-      {/* Discovery Cards (embedded in Chats) */}
+        {/* Discovery Cards (embedded in Chats) */}
       <section className="px-5 pb-4">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
           <select
@@ -888,6 +890,34 @@ const Chats = () => {
         onCreateGroup={handleGroupCreated}
       />
       </div>
+
+      <Dialog open={showSafeHarborModal} onOpenChange={setShowSafeHarborModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Safe Harbor Agreement</DialogTitle>
+          </DialogHeader>
+          <label className="text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={safeHarborAccepted}
+              onChange={(e) => setSafeHarborAccepted(e.target.checked)}
+              className="mr-2 align-middle"
+            />
+            I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+          </label>
+          <DialogFooter>
+            <Button
+              disabled={!safeHarborAccepted}
+              onClick={() => {
+                setShowSafeHarborModal(false);
+                setNannyBookingOpen(true);
+              }}
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Nanny Booking Modal */}
       <AnimatePresence>

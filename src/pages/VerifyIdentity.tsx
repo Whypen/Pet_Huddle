@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { X } from "lucide-react";
 
@@ -51,6 +52,7 @@ const VerifyIdentity = () => {
   const [docType, setDocType] = useState<DocType | "">("");
   const [agreed, setAgreed] = useState(false);
   const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
+  const [showSafeHarborModal, setShowSafeHarborModal] = useState(false);
   const [selfie, setSelfie] = useState<File | null>(null);
   const [idDoc, setIdDoc] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -76,6 +78,12 @@ const VerifyIdentity = () => {
     };
     loadCountry();
   }, [user?.id]);
+
+  useEffect(() => {
+    if (step === 2) {
+      setShowSafeHarborModal(true);
+    }
+  }, [step]);
 
   const upload = async (file: File, label: string) => {
     if (!user) throw new Error("No user");
@@ -243,6 +251,31 @@ const VerifyIdentity = () => {
           </div>
         </div>
       )}
+
+      <Dialog open={showSafeHarborModal} onOpenChange={setShowSafeHarborModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Safe Harbor Agreement</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+          </p>
+          <label className="text-xs text-muted-foreground mt-2 block">
+            <input
+              type="checkbox"
+              checked={safeHarborAccepted}
+              onChange={(e) => setSafeHarborAccepted(e.target.checked)}
+              className="mr-2 align-middle"
+            />
+            I am 18+ and agree to the Terms of Service and Privacy Policy.
+          </label>
+          <DialogFooter>
+            <Button disabled={!safeHarborAccepted} onClick={() => setShowSafeHarborModal(false)}>
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {step < 5 && (
         <div className="flex gap-2">

@@ -77,10 +77,6 @@ begin
 end;
 $$;
 
--- Identity verification bucket restrictive policies
--- enforce restrictive: owner insert, admin read
-alter table storage.objects enable row level security;
-
 do $$
 begin
   if not exists (
@@ -88,7 +84,6 @@ begin
     where schemaname = 'storage' and tablename = 'objects' and policyname = 'identity_verification_owner_insert_restrictive'
   ) then
     create policy identity_verification_owner_insert_restrictive
-    as restrictive
     on storage.objects for insert
     with check (bucket_id = 'identity_verification' and auth.uid() = owner);
   end if;
@@ -101,7 +96,6 @@ begin
     where schemaname = 'storage' and tablename = 'objects' and policyname = 'identity_verification_admin_read_restrictive'
   ) then
     create policy identity_verification_admin_read_restrictive
-    as restrictive
     on storage.objects for select
     using (bucket_id = 'identity_verification' and (auth.jwt() ->> 'role') = 'admin');
   end if;
