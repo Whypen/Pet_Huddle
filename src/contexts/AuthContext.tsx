@@ -157,19 +157,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     displayName: string,
     phone: string
   ) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
+    console.log("Attempting Signup to:", supabaseUrl);
     const redirectUrl = `${window.location.origin}/`;
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          display_name: displayName || email.split("@")[0],
-          phone,
+    let data: any;
+    let error: any;
+    try {
+      const res = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: redirectUrl,
+          data: {
+            display_name: displayName || email.split("@")[0],
+            phone,
+          },
         },
-      },
-    });
+      });
+      data = res.data;
+      error = res.error;
+    } catch (e: any) {
+      console.error("[AuthContext] signUp network error", e);
+      return { error: e as Error };
+    }
 
     if (!error && data?.user?.id) {
       await supabase
@@ -185,21 +196,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string, phone?: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
+    console.log("Attempting Login to:", supabaseUrl);
     // Support both email and phone login
-    if (phone) {
+    try {
+      if (phone) {
+        const { error } = await supabase.auth.signInWithPassword({
+          phone,
+          password,
+        });
+        return { error: error as Error | null };
+      }
+
       const { error } = await supabase.auth.signInWithPassword({
-        phone,
+        email,
         password,
       });
+
       return { error: error as Error | null };
+    } catch (e: any) {
+      console.error("[AuthContext] signIn network error", e);
+      return { error: e as Error };
     }
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    return { error: error as Error | null };
   };
 
   const signOut = async () => {
