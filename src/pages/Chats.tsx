@@ -192,6 +192,7 @@ const Chats = () => {
   const [discoveryRole, setDiscoveryRole] = useState("playdates");
   const [discoveryDistance, setDiscoveryDistance] = useState(10);
   const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
+  const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -546,7 +547,7 @@ const Chats = () => {
               {t("Loading discovery...")}
             </div>
           )}
-          {discoveryProfiles.map((p) => {
+          {discoveryProfiles.filter((p) => !hiddenDiscoveryIds.has(p.id)).map((p) => {
             const age = p?.dob ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : "";
             const petSpecies = Array.isArray(p?.pets) && p.pets.length > 0 ? p.pets[0].species : "—";
             return (
@@ -579,7 +580,7 @@ const Chats = () => {
                   </button>
                   <button
                     onClick={() => {
-                      setDiscoveryProfiles((prev) => prev.filter((x) => x.id !== p.id));
+                      setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
                     }}
                     className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
                   >
@@ -590,6 +591,21 @@ const Chats = () => {
             );
           })}
         </div>
+
+        {discoveryProfiles.length > 0 &&
+          discoveryProfiles.filter((p) => !hiddenDiscoveryIds.has(p.id)).length === 0 && (
+            <div className="mt-2">
+              <button
+                onClick={() => {
+                  setDiscoveryDistance((prev) => Math.min(150, prev + 15));
+                  setHiddenDiscoveryIds(new Set());
+                }}
+                className="text-xs font-medium text-[#3283ff] underline"
+              >
+                {t("Run out of huddlers? Expand search.")}
+              </button>
+            </div>
+          )}
       </section>
 
       {/* Search Bar */}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -7,12 +7,44 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 
 type DocType = "id" | "passport" | "drivers_license";
 
+const compressImage = async (file: File) => {
+  const img = document.createElement("img");
+  const reader = new FileReader();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  img.src = dataUrl;
+  await new Promise((resolve) => (img.onload = resolve));
+
+  const maxWidth = 1024;
+  const scale = Math.min(1, maxWidth / img.width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  let quality = 0.8;
+  let blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  while (blob && blob.size > 500 * 1024 && quality > 0.5) {
+    quality -= 0.1;
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  }
+
+  if (!blob) return file;
+  return new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: "image/jpeg" });
+};
+
 const VerifyIdentity = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const { t } = useLanguage();
   const [step, setStep] = useState(1);
   const [country, setCountry] = useState("");
@@ -21,12 +53,28 @@ const VerifyIdentity = () => {
   const [selfie, setSelfie] = useState<File | null>(null);
   const [idDoc, setIdDoc] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const canNext =
     (step === 1 && country && docType) ||
     (step === 2 && agreed) ||
     (step === 3 && selfie) ||
     (step === 4 && idDoc);
+
+  useEffect(() => {
+    const loadCountry = async () => {
+      if (!user?.id) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("location_country")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (data?.location_country) {
+        setCountry(data.location_country);
+      }
+    };
+    loadCountry();
+  }, [user?.id]);
 
   const upload = async (file: File, label: string) => {
     if (!user) throw new Error("No user");
@@ -79,6 +127,12 @@ const VerifyIdentity = () => {
         console.warn("[VerifyIdentity] Failed to write admin audit log:", auditError.message);
       }
 
+      await refreshProfile();
+      setShowSuccess(true);
+      setTimeout(() => {
+        setShowSuccess(false);
+        navigate("/chats");
+      }, 1200);
       setStep(5);
     } catch (e: any) {
       toast.error(e.message || t("Verification upload failed"));
@@ -88,7 +142,14 @@ const VerifyIdentity = () => {
   };
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-4">
+    <div className="max-w-md mx-auto p-4 space-y-4 relative">
+      <button
+        onClick={() => navigate(-1)}
+        className="absolute right-5 top-[50px] z-[9999] w-10 h-10 rounded-full bg-background/80 border border-border flex items-center justify-center"
+        aria-label={t("Close")}
+      >
+        <X className="w-5 h-5" />
+      </button>
       <h1 className="text-2xl font-bold lowercase font-huddle">{t("verify.title") || "verify identity"}</h1>
 
       {step === 1 && (
@@ -96,14 +157,14 @@ const VerifyIdentity = () => {
           <p className="text-xs text-muted-foreground">
             {t("We collect your selfie and ID document image to verify your age and identity.")}
           </p>
-          <Select value={country} onValueChange={setCountry}>
-            <SelectTrigger><SelectValue placeholder={t("Select country")} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="HK">Hong Kong</SelectItem>
-              <SelectItem value="US">United States</SelectItem>
-              <SelectItem value="UK">United Kingdom</SelectItem>
-            </SelectContent>
-          </Select>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">{t("Country")}</label>
+            <input
+              value={country}
+              disabled
+              className="mt-1 h-11 w-full rounded-lg border border-border bg-muted px-3 text-sm"
+            />
+          </div>
           <Select value={docType} onValueChange={(v) => setDocType(v as DocType)}>
             <SelectTrigger><SelectValue placeholder={t("Select document type")} /></SelectTrigger>
             <SelectContent>
@@ -160,9 +221,19 @@ const VerifyIdentity = () => {
       {step === 5 && (
         <div className="space-y-3">
           <p className="text-[#3283ff] font-medium">{t("Social access granted pending review")}</p>
-          <Button className="bg-[#3283ff]" onClick={() => navigate("/settings")}>
-            {t("Back to Settings")}
+          <Button className="bg-[#3283ff]" onClick={() => navigate("/chats")}>
+            {t("Back to Chats")}
           </Button>
+        </div>
+      )}
+
+      {showSuccess && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30">
+          <div className="w-20 h-20 rounded-full bg-white shadow-lg flex items-center justify-center">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
         </div>
       )}
 
@@ -186,33 +257,3 @@ const VerifyIdentity = () => {
 };
 
 export default VerifyIdentity;
-  const compressImage = async (file: File) => {
-    const img = document.createElement("img");
-    const reader = new FileReader();
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    img.src = dataUrl;
-    await new Promise((resolve) => (img.onload = resolve));
-
-    const maxWidth = 1024;
-    const scale = Math.min(1, maxWidth / img.width);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    let quality = 0.8;
-    let blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-    while (blob && blob.size > 500 * 1024 && quality > 0.5) {
-      quality -= 0.1;
-      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-    }
-
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: "image/jpeg" });
-  };
