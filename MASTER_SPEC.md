@@ -44,6 +44,13 @@ huddle is a mobile‑first pet‑care super‑app blending family mesh safety (e
 - **Expansion:** UI button expands radius by **+15km** per click up to 150km max.
 - **Discovery Hidden IDs:** stored in local state `hiddenDiscoveryIds` in `src/pages/Chats.tsx` (cleared when **Expand Search** triggers).
 
+### 2.5 Post‑Identity Flow (KYC Submit Wiring)
+When the user taps **Submit** in `/verify-identity`:
+1. **Status → Pending:** `profiles.verification_status` is set to `pending`.
+2. **Image → Bucket:** selfie + ID are uploaded to `identity_verification` bucket (owner = auth.uid()).
+3. **Badge → Show:** UI updates avatar badge to **Pending (grey)** via local profile refresh.
+4. **Redirect:** Success animation → redirect to `/chats`.
+
 ### 2.4 RLS Policies (Explicit)
 - **Profiles:** owner read/write only
 - **Pets:** owner read/write only
@@ -68,6 +75,12 @@ huddle is a mobile‑first pet‑care super‑app blending family mesh safety (e
 - **Split:** 90% sitter payout, 10% platform fee.
 - **Dispute Resolution:** admin-only release/refund via `process-dispute-resolution`.
 - **Rule:** Platform fee is deducted **only** when sitter is paid (release action). Refund action sets platform fee to 0.
+- **Hidden Wiring (Frontend → Edge → Stripe → DB):**
+  - Frontend `Chats.tsx` invokes `create-marketplace-booking` with `idempotency-key` header.
+  - Edge Function calls Stripe Checkout Session → creates `payment_intent`.
+  - Stripe metadata includes: `client_id`, `sitter_id`, `service_start_date`, `service_end_date`, `pet_id`, `location_name`.
+  - Edge Function inserts `marketplace_bookings` row as `pending`.
+  - `stripe-webhook` updates booking status on `payment_intent.succeeded`.
 
 ---
 
@@ -78,6 +91,11 @@ huddle is a mobile‑first pet‑care super‑app blending family mesh safety (e
 - Horizontal cards show Name, Age, Status, Pet Species.
 - Overlay icons: Wave (match), Star (direct chat + quota), X (skip).
 - Expand Search: shows button when stack ends → adds +15km, clears local `hiddenDiscoveryIds`.
+
+**Discovery State Machine (Invisible Logic):**
+- `hiddenDiscoveryIds` is a Set in `Chats.tsx` storing skipped IDs.
+- Wave/Star/X updates this set on interaction.
+- When stack is empty, **Expand Search** increases radius +15km and clears the set to re-surface profiles.
 
 ### 4.2 Weighted Threads
 - Score = Time + Relationship + Badge + Engagement − Decay.
@@ -98,6 +116,8 @@ score = (
 )
 ```
 
+**Algorithm Math Summary:** Engagement (replies * 5, likes * 3, clicks * 1) + Relationship (+20 if in care_circle) + Badge (+50 verified, +30 gold) − Decay (log(age_days+1)*5) with time boost (age in days * 10).
+
 ### 4.3 Rich Social
 - Thread replies support Markdown (bold, italic, lists).
 - Inline quote format: `> @user: "First 50 chars..."` (pre-populated on Reply).
@@ -109,6 +129,18 @@ score = (
 
 ### 5.1 Red Error Rule
 All validation failures must show **red error text below the field** and block submit. **Current implementation is inline red text in `EditPetProfile.tsx` and `EditProfile.tsx` (no shared ErrorLabel component yet).** Validations covered: DOB (human/pet), pet weight length, vaccination dates, microchip ID.
+
+### 5.4 UI Bible — Red Errors & Grey Subtext
+**Red Error Validations (must render below field):**
+- Human DOB → “Human DOB cannot be in the future”
+- Pet DOB → “Pet DOB cannot be in the future”
+- Pet weight > 4 digits → “Pet weight must be 4 digits or less”
+- Vaccination date in future → “Vaccination date cannot be in the future”
+- Next vaccination reminder in past → “Next vaccination must be in the future”
+- Microchip ID not 15 digits → “Microchip ID must be 15 digits”
+
+**Grey Subtext (pt12, below field):**
+- Vaccination input: “Input last vaccination dates for better tracking”
 
 ### 5.2 Grey Subtext Rule
 Vaccination inputs must show: **"Input last vaccination dates for better tracking"** in pt12 grey.
@@ -131,6 +163,7 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - **Role Check:** `auth.jwt() ->> 'role' = 'admin'`
 - **Dispute Workflow:** Admin opens `/admin/control-center` → selects booking → release/refund.
 - **Manual Resolution:** Uses Edge Function `process-dispute-resolution`.
+ - **UI Gate:** Admin buttons render only when `profile.user_role === 'admin'`.
 
 ---
 
