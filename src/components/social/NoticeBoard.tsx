@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -103,6 +103,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
+  const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
   const remainingChars = useMemo(() => 1000 - content.length, [content]);
@@ -111,6 +112,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   useEffect(() => {
     fetchNotices(true);
   }, []);
+
+  useEffect(() => {
+    if (replyFor) {
+      setTimeout(() => replyInputRef.current?.focus(), 0);
+    }
+  }, [replyFor]);
 
   const fetchNotices = async (reset: boolean = false) => {
     try {
@@ -573,7 +580,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             className="text-xs text-primary"
                             onClick={() => {
                               setReplyFor(notice.id);
-                              const quote = `> @${notice.author?.display_name || "user"}: "${notice.content.slice(0, 50)}..."`;
+                              const snippet = notice.content.slice(0, 20).replace(/\s+/g, " ").trim();
+                              const quote = `> @${notice.author?.display_name || "user"}: "${snippet}..."\\n\\n`;
                               setReplyContent(quote);
                             }}
                           >
@@ -590,6 +598,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                           {replyFor === notice.id && (
                             <div className="mt-2">
                               <Textarea
+                                ref={replyInputRef}
                                 value={replyContent}
                                 onChange={(e) => setReplyContent(e.target.value)}
                                 className="rounded-xl min-h-[80px]"

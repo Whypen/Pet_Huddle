@@ -9,6 +9,7 @@ import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -507,7 +508,7 @@ const EditProfile = () => {
                 required
               />
               {fieldErrors.humanDob && (
-                <p className="text-xs text-red-500 mt-1">{fieldErrors.humanDob}</p>
+                <ErrorLabel message={fieldErrors.humanDob} />
               )}
             </div>
 

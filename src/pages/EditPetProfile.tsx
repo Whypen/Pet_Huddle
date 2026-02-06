@@ -9,6 +9,7 @@ import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -545,7 +546,7 @@ const EditPetProfile = () => {
               className="h-12 rounded-xl"
             />
             {fieldErrors.petDob && (
-              <p className="text-xs text-red-500 mt-1">{fieldErrors.petDob}</p>
+              <ErrorLabel message={fieldErrors.petDob} />
             )}
           </div>
 
@@ -581,7 +582,7 @@ const EditPetProfile = () => {
               </select>
             </div>
             {fieldErrors.weight && (
-              <p className="text-xs text-red-500 mt-1">{fieldErrors.weight}</p>
+              <ErrorLabel message={fieldErrors.weight} />
             )}
           </div>
 
@@ -638,7 +639,7 @@ const EditPetProfile = () => {
                 {t("Input last vaccination dates for better tracking")}
               </p>
               {fieldErrors.vaccinationDate && (
-                <p className="text-xs text-red-500 mt-1">{fieldErrors.vaccinationDate}</p>
+                <ErrorLabel message={fieldErrors.vaccinationDate} />
               )}
             </div>
 
@@ -664,7 +665,7 @@ const EditPetProfile = () => {
                 className="h-10 rounded-lg"
               />
               {fieldErrors.nextVaccination && (
-                <p className="text-xs text-red-500 mt-1">{fieldErrors.nextVaccination}</p>
+                <ErrorLabel message={fieldErrors.nextVaccination} />
               )}
             </div>
           </div>
@@ -776,7 +777,7 @@ const EditPetProfile = () => {
               maxLength={15}
             />
             {fieldErrors.microchipId ? (
-              <p className="text-xs text-red-500 mt-1">{fieldErrors.microchipId}</p>
+              <ErrorLabel message={fieldErrors.microchipId} />
             ) : (
               <p className="text-xs text-muted-foreground mt-1">{formData.microchip_id.length}/15 digits</p>
             )}

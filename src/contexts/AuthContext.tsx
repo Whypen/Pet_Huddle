@@ -80,6 +80,11 @@ export const useAuth = () => {
   return context;
 };
 
+export const useIsAdmin = () => {
+  const { profile } = useAuth();
+  return profile?.user_role === "admin";
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
