@@ -50,6 +50,7 @@ const VerifyIdentity = () => {
   const [country, setCountry] = useState("");
   const [docType, setDocType] = useState<DocType | "">("");
   const [agreed, setAgreed] = useState(false);
+  const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
   const [selfie, setSelfie] = useState<File | null>(null);
   const [idDoc, setIdDoc] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,7 +58,7 @@ const VerifyIdentity = () => {
 
   const canNext =
     (step === 1 && country && docType) ||
-    (step === 2 && agreed) ||
+    (step === 2 && agreed && safeHarborAccepted) ||
     (step === 3 && selfie) ||
     (step === 4 && idDoc);
 
@@ -182,6 +183,12 @@ const VerifyIdentity = () => {
           <div className="flex items-center gap-2">
             <Checkbox checked={agreed} onCheckedChange={(v) => setAgreed(Boolean(v))} />
             <span>{t("I agree & continue")}</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <Checkbox checked={safeHarborAccepted} onCheckedChange={(v) => setSafeHarborAccepted(Boolean(v))} />
+            <span className="text-xs text-muted-foreground">
+              I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+            </span>
           </div>
         </div>
       )}

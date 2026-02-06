@@ -327,6 +327,14 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         .filter(Boolean)
         .slice(0, 3);
 
+      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+        action_type: "thread_post",
+      });
+      if (allowed === false) {
+        setIsPremiumFooterOpen(true);
+        return;
+      }
+
       const { error } = await supabase
         .from("threads")
         .insert({

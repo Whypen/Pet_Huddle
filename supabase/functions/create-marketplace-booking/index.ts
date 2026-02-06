@@ -31,6 +31,7 @@ serve(async (req: Request) => {
       cancelUrl,
       petId,
       locationName,
+      safeHarborAccepted,
     } = await req.json();
 
     if (!clientId || !sitterId || !amount || !serviceStartDate || !serviceEndDate) {
@@ -39,6 +40,15 @@ serve(async (req: Request) => {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+    if (!safeHarborAccepted) {
+      return new Response(
+        JSON.stringify({ error: "Safe Harbor terms not accepted" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Quota check (no-op for booking but enforces centralized QMS gate)
+    await supabase.rpc("check_and_increment_quota", { action_type: "booking" });
 
     // Get sitter's Stripe Connect account
     const { data: sitter } = await supabase
@@ -142,6 +152,7 @@ serve(async (req: Request) => {
               service_end_date: serviceEndDate,
               pet_id: petId || "",
               location_name: locationName || "",
+              safe_harbor_accepted: "true",
             },
           },
           metadata: {
@@ -150,6 +161,7 @@ serve(async (req: Request) => {
             sitter_id: sitterId,
             pet_id: petId || "",
             location_name: locationName || "",
+            safe_harbor_accepted: "true",
           },
           success_url: successUrl,
           cancel_url: cancelUrl,

@@ -200,6 +200,7 @@ const Chats = () => {
   const [bookingAmount, setBookingAmount] = useState("50");
   const [bookingCurrency, setBookingCurrency] = useState("USD");
   const [bookingProcessing, setBookingProcessing] = useState(false);
+  const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
   const [serviceDate, setServiceDate] = useState("");
   const [serviceEndDate, setServiceEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
@@ -240,6 +241,7 @@ const Chats = () => {
       setServiceEndDate("");
       setStartTime("09:00");
       setEndTime("17:00");
+      setSafeHarborAccepted(false);
       if (sitterHourlyRate) {
         const baseDate = serviceDate || new Date().toISOString().split("T")[0];
         const endDate = serviceEndDate || baseDate;
@@ -426,6 +428,10 @@ const Chats = () => {
       toast.error(t("booking.invalid_date_range"));
       return;
     }
+    if (!safeHarborAccepted) {
+      toast.error(t("You must accept the Safe Harbor terms"));
+      return;
+    }
     setBookingProcessing(true);
 
     try {
@@ -450,6 +456,7 @@ const Chats = () => {
               : ""),
           successUrl: `${window.location.origin}/chats?booking_success=true`,
           cancelUrl: `${window.location.origin}/chats`,
+          safeHarborAccepted: true,
         },
       });
 
@@ -1017,6 +1024,15 @@ const Chats = () => {
                 <p className="text-xs text-muted-foreground mt-1">
                   {sitterHourlyRate ? t("booking.amount_calculated") : t("booking.amount_note")}
                 </p>
+                <label className="text-xs text-muted-foreground mt-3 block">
+                  <input
+                    type="checkbox"
+                    checked={safeHarborAccepted}
+                    onChange={(e) => setSafeHarborAccepted(e.target.checked)}
+                    className="mr-2 align-middle"
+                  />
+                  I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
+                </label>
               </div>
 
               <div className="flex gap-3">
@@ -1035,7 +1051,8 @@ const Chats = () => {
                     !serviceEndDate ||
                     !startTime ||
                     !endTime ||
-                    !selectedPet
+                    !selectedPet ||
+                    !safeHarborAccepted
                   }
                   className="flex-1 py-3 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md"
                   style={{ backgroundColor: "#A6D539" }}

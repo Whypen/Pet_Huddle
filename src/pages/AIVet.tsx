@@ -345,8 +345,8 @@ const AIVet = () => {
 
       {/* Safety Disclaimer */}
       <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90 backdrop-blur-sm px-4 py-2 border-t border-border">
-        <p className="text-xs text-muted-foreground text-center max-w-md mx-auto">
-          {t("ai.disclaimer")}
+        <p className="text-[10px] text-muted-foreground text-center max-w-md mx-auto">
+          huddle AI provides informational content, not veterinary diagnosis. In emergencies, seek professional care immediately.
         </p>
       </div>
 

@@ -19,6 +19,27 @@ const json = (body: unknown, status = 200) =>
 
 serve(async (req) => {
   try {
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace("Bearer ", "");
+    if (!token) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
+    const { data: authUser, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !authUser?.user) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
+    const { data: roleRow } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", authUser.user.id)
+      .maybeSingle();
+
+    if (roleRow?.role !== "admin") {
+      return json({ error: "Forbidden" }, 403);
+    }
+
     const { bookingId, action } = await req.json();
     if (!bookingId || !["release", "refund"].includes(action)) {
       return json({ error: "Missing or invalid parameters" }, 400);

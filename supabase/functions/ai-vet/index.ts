@@ -24,43 +24,14 @@ async function getTier(userId: string) {
   return data?.tier || "free";
 }
 
-async function consumeToken(userId: string) {
-  const tier = await getTier(userId);
-  if (tier === "premium" || tier === "gold") {
+async function consumeToken(userId: string, actionType: string) {
+  const { data, error } = await supabase.rpc("check_and_increment_quota", {
+    action_type: actionType,
+  });
+  if (error) {
     return { allowed: true, remaining: null };
   }
-
-  const { data: existing } = await supabase
-    .from("ai_vet_rate_limits")
-    .select("tokens,last_refill")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  const now = new Date();
-  const refillWindowMs = 24 * 60 * 60 * 1000;
-
-  if (!existing) {
-    await supabase.from("ai_vet_rate_limits").insert({ user_id: userId, tokens: 49, last_refill: now.toISOString() });
-    return { allowed: true, remaining: 49 };
-  }
-
-  const lastRefill = new Date(existing.last_refill);
-  let tokens = existing.tokens;
-  if (now.getTime() - lastRefill.getTime() >= refillWindowMs) {
-    tokens = 50;
-  }
-
-  if (tokens <= 0) {
-    return { allowed: false, remaining: 0 };
-  }
-
-  const newTokens = tokens - 1;
-  await supabase
-    .from("ai_vet_rate_limits")
-    .update({ tokens: newTokens, last_refill: now.toISOString() })
-    .eq("user_id", userId);
-
-  return { allowed: true, remaining: newTokens };
+  return { allowed: data === true, remaining: null };
 }
 
 async function callGemini({ message, petProfile, imageBase64 }: { message: string; petProfile?: any; imageBase64?: string }) {
@@ -145,7 +116,9 @@ serve(async (req: Request) => {
     const { conversationId, message, petProfile, userId, imageBase64 } = await req.json();
     if (!userId || !message) return json({ error: "Missing userId or message" }, 400);
 
-    const bucket = await consumeToken(userId);
+    const bucket = imageBase64
+      ? await consumeToken(userId, "ai_vision")
+      : { allowed: true, remaining: null };
     if (!bucket.allowed) return json({ error: "Quota Exceeded" }, 429);
 
     try {

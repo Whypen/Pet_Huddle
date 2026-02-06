@@ -27,6 +27,11 @@ const FCM_BATCH_SIZE = 500; // Firebase allows up to 500 tokens per batch
 const BATCH_DELAY_MS = 100; // Small delay between batches to prevent rate limiting
 
 serve(async (req) => {
+  return new Response(
+    JSON.stringify({ error: "Notifications disabled" }),
+    { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
