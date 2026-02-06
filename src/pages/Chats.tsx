@@ -432,7 +432,9 @@ const Chats = () => {
       const startIso = new Date(`${serviceDate}T${startTime}`).toISOString();
       const endIso = new Date(`${serviceEndDate}T${endTime}`).toISOString();
 
+      const idempotencyKey = `booking_${profile.id}_${Date.now()}`;
       const { data, error } = await supabase.functions.invoke("create-marketplace-booking", {
+        headers: { "idempotency-key": idempotencyKey },
         body: {
           clientId: profile.id,
           sitterId: selectedNanny.id,

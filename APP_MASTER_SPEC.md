@@ -1234,3 +1234,11 @@ Updated MASTER SPEC UAT section
 Confirmation table of every point (Done + proof type)
 "All checks passed. Awaiting your final UAT round."
 
+
+# MASTER SPEC LOG (v1.2.4)
+- Discovery-in-Chat Merger: Discovery lives inside Chats as the top embedded section, no standalone tab. Cards show Name/Age/Status/Pet Species with Wave/Star/X overlay. Filters condensed in one row.
+- Weighted Scoring Algorithm (SQL): Threads score computed by update_threads_scores() and ORDER BY score DESC with hourly cron refresh.
+- PII 7-day Auto-Delete (pg_cron): identity_verification bucket images must be deleted 7 days after verification_status becomes approved/rejected.
+- Gemini 1.5 Flash/Pro Routing: ai-vet uses Flash for text-only and Pro for multimodal; quota errors map to HTTP 429.
+- KYC Exit Hatch & Country Lock: Verify Identity has top-right X button (goBack) and country locked to profiles.location_country.
+- Scrubbing: No dummy/mock logic allowed in production; any placeholder data must be removed before release.

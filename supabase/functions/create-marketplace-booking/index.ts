@@ -94,7 +94,14 @@ serve(async (req: Request) => {
     const sitterPayout = amount - platformFee;
 
     // Generate idempotency key (required format)
-    const idempotencyKey = clientIdempotencyKey || `booking_${clientId}_${Date.now()}`;
+    if (!clientIdempotencyKey) {
+      return new Response(
+        JSON.stringify({ error: "Missing idempotency-key header" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const idempotencyKey = clientIdempotencyKey;
 
     let checkoutUrl: string | null = null;
     let paymentIntentId: string;

@@ -87,3 +87,13 @@
 - **Edge functions:** Added `social-discovery`; updated `create-marketplace-booking` to accept `currency`.
 - **Rollback plan:** Revert migrations, restore `NoticeBoard` to `notice_board`, revert `Discover` to static data, and roll back `Chats` booking modal changes.
 - **Verification steps:** `node scripts/uat-role-pass.mjs`, `node scripts/backend-wiring-v21.mjs`, and verify `marketplace_bookings` grants in DB dump.
+
+## [v1.2.4-integrity-audit] - 2026-02-06
+- **Author:** Codex + Hyphen
+- **Summary:** Added Master Spec log entries for Discovery-in-Chat, threads scoring SQL, PII auto-delete, Gemini routing, and KYC exit/country lock. Removed mock logic from spec guidance.
+- **Why change was needed:** Enforce post-upgrade integrity audit requirements and align spec with latest architecture.
+- **Sections changed:** APP_MASTER_SPEC Master Spec Log, KYC flow, AI Vet routing, PII retention, Discovery-in-Chat merger.
+- **Behavioral impact:** Specification now mandates removal of mock/dummy data and formalizes cron-based PII deletion and thread scoring.
+- **DB migration impact:** Added `20260206133000_fix_admin_review_verification_enum.sql` (enum-safe admin review).
+- **Rollback plan:** Remove v1.2.4 log block and revert migration.
+- **Verification steps:** `npx supabase db lint`, `npx supabase migration list`, `npm run build`.
