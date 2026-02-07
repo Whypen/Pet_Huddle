@@ -162,7 +162,7 @@ const Admin = () => {
 
   return (
     <div className="p-4 space-y-4 max-w-md mx-auto">
-      <h1 className="text-xl font-bold lowercase font-huddle">{t("admin.title") || "admin"}</h1>
+      <h1 className="text-xl font-bold lowercase">{t("admin.title") || "admin"}</h1>
       {rows.length === 0 && <p className="text-muted-foreground">{t("No pending verifications")}</p>}
       {rows.map((row) => (
         <div key={row.id} className="border rounded-xl p-3 space-y-2">

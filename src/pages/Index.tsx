@@ -319,7 +319,7 @@ const Index = () => {
                     <Lightbulb className="w-5 h-5 text-primary-foreground" />
                   </div>
                   <div>
-                    <h4 className="font-semibold text-primary-foreground mb-1 font-huddle">{t("home.wisdom")}</h4>
+                    <h4 className="font-semibold text-primary-foreground mb-1">{t("home.wisdom")}</h4>
                     <p className="text-sm text-primary-foreground/90">
                       {t(getRandomTip(selectedPet.species))}
                     </p>

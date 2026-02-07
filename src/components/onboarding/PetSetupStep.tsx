@@ -204,9 +204,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
       }
 
       toast.success(
-        <span className="font-huddle">
-          {formData.name} {t("has been added to your huddle!")}
-        </span>
+        `${formData.name} ${t("has been added to your huddle!")}`
       );
       onComplete();
     } catch (error: unknown) {

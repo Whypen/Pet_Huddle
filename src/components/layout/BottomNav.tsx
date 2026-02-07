@@ -17,29 +17,29 @@ export const BottomNav = () => {
   const { t } = useLanguage();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border shadow-elevated">
-      <div className="flex items-center justify-around h-nav max-w-md mx-auto px-2 pb-safe">
+    <nav className="fixed z-50 left-1/2 -translate-x-1/2 bottom-[calc(env(safe-area-inset-bottom,0px)+1rem)]">
+      <div className="flex items-center gap-1 bg-white/90 backdrop-blur-md border border-border shadow-elevated rounded-full px-2 py-2">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
-          const activeColor = "text-[#3283FF]";
-          const activeBg = "bg-[#3283FF]/10";
+          const activeColor = "text-brandBlue";
+          const activeBg = "bg-brandBlue/10";
 
           return (
             <motion.button
               key={item.path}
               onClick={() => navigate(item.path)}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-xl transition-colors relative",
+                "flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-full transition-colors relative min-w-[72px]",
                 isActive
                   ? activeColor
-                  : "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground hover:text-brandText"
               )}
               whileTap={{ scale: 0.9 }}
             >
               {isActive && (
                 <motion.div
                   layoutId="activeTab"
-                  className={cn("absolute inset-0 rounded-xl", activeBg)}
+                  className={cn("absolute inset-0 rounded-full", activeBg)}
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                 />
               )}

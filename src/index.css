@@ -1,67 +1,62 @@
 /* ============================================
-   1. Google Fonts — MUST BE FIRST
-   ============================================ */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
-/* ============================================
-   2. Tailwind base layer (resets & preflight)
+   1. Tailwind base layer (resets & preflight)
    ============================================ */
 @tailwind base;
 
 /* ============================================
-   3. Tailwind components layer
+   2. Tailwind components layer
    ============================================ */
 @tailwind components;
 
 /* ============================================
-   4. Your custom design system variables
+   3. Your custom design system variables
    ============================================ */
 @layer base {
   :root {
-    /* Warm Community Theme - Soft Creams, Slate Greys, Accent Gold */
-    
+    /* Branded Design System (ui_design_system.md) */
+
     /* Core Palette */
-    --background: 40 30% 98%;
-    --foreground: 220 20% 20%;
-    
-    /* Primary - Huddle Blue #3283FF (Action Color) */
-    --primary: 216 100% 60%;
+    --background: 0 0% 100%;
+    --foreground: 228 21% 33%; /* #424965 */
+
+    /* Primary - Huddle Blue #2145CF */
+    --primary: 228 73% 47%;
     --primary-foreground: 0 0% 100%;
-    --primary-soft: 216 100% 95%;
-    
-    /* Accent - Huddle Green */
-    --accent: 78 65% 53%;
+    --primary-soft: 228 73% 95%;
+
+    /* Accent - subtle brand tint */
+    --accent: 228 73% 47%;
     --accent-foreground: 0 0% 100%;
-    --accent-soft: 78 65% 92%;
-    
-    /* Warning/Gold Badge */
-    --warning: 45 93% 47%;
-    --warning-foreground: 0 0% 10%;
-    
-    /* Surface Colors - Soft Cream */
-    --card: 40 25% 99%;
-    --card-foreground: 220 20% 20%;
+    --accent-soft: 228 73% 95%;
+
+    /* Warning/Gold Badge - Premium Gold #CFAB21 */
+    --warning: 48 73% 47%;
+    --warning-foreground: 228 21% 33%;
+
+    /* Surface Colors */
+    --card: 0 0% 100%;
+    --card-foreground: 228 21% 33%;
     --card-elevated: 0 0% 100%;
-    
-    /* Muted/Secondary - Warm Grey */
-    --secondary: 40 10% 94%;
-    --secondary-foreground: 220 20% 25%;
-    --muted: 40 10% 94%;
-    --muted-foreground: 217 4% 65%;
-    
+
+    /* Muted/Secondary */
+    --secondary: 220 20% 97%;
+    --secondary-foreground: 228 21% 33%;
+    --muted: 220 20% 97%;
+    --muted-foreground: 0 0% 29%; /* #4a4a4a */
+
     /* Popover */
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 20%;
-    
-    /* Destructive */
-    --destructive: 0 84% 60%;
+    --popover-foreground: 228 21% 33%;
+
+    /* Destructive - Validation/Error #EF4444 */
+    --destructive: 0 84% 60%; /* #EF4444 */
     --destructive-foreground: 0 0% 100%;
-    
+
     /* Borders & Input */
-    --border: 40 15% 88%;
-    --input: 40 10% 94%;
-    --ring: 216 100% 60%;
-    
+    --border: 220 13% 90%;
+    --input: 0 0% 100%;
+    --ring: 228 73% 47%;
+
     /* Radius */
     --radius: 1rem;
     --radius-sm: 0.75rem;
@@ -89,29 +84,30 @@
     
     /* Navigation */
     --nav-height: 5rem;
-    --nav-background: 40 25% 99%;
-    
-    /* Sidebar */
-    --sidebar-background: 40 20% 97%;
-    --sidebar-foreground: 220 20% 20%;
-    --sidebar-primary: 216 100% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 40 15% 95%;
-    --sidebar-accent-foreground: 220 20% 20%;
-    --sidebar-border: 40 15% 88%;
-    --sidebar-ring: 216 100% 60%;
-    
-    /* Status Colors */
-    --success: 78 65% 53%; /* Green #A6D539 */
-    --info: 216 100% 60%; /* Blue #3283FF */
-  }
+    --nav-background: 0 0% 100%;
 
-  .font-huddle {
-    font-family: Calibri, "Helvetica Neue", Arial, sans-serif;
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 228 21% 33%;
+    --sidebar-primary: 228 73% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 97%;
+    --sidebar-accent-foreground: 228 21% 33%;
+    --sidebar-border: 220 13% 90%;
+    --sidebar-ring: 228 73% 47%;
+
+    /* Status Colors */
+    --success: 142 71% 45%;
+    --info: 228 73% 47%;
   }
 
   body {
     font-size: var(--font-pt14);
+    @apply font-sans text-brandText bg-background;
+  }
+
+  h1, h2, h3 {
+    @apply text-brandText;
   }
 
   .dark {
@@ -122,7 +118,7 @@
 }
 
 /* ============================================
-   5. Tailwind utilities layer — MUST BE LAST
+   4. Tailwind utilities layer — MUST BE LAST
    ============================================ */
 @tailwind utilities;
 

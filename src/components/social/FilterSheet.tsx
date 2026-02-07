@@ -375,7 +375,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     {t("Premium Filters")}
                   </h3>
-                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-[#3283FF] to-[#1E40AF] text-xs font-semibold text-white">
+                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-brandBlue to-[#1B39AA] text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
                     {t("PRO")}
                   </div>

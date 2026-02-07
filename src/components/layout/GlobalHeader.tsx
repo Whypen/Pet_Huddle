@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import huddleLogo from "@/assets/huddle-logo.jpg";
+import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -80,10 +80,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
           <img
             src={huddleLogo}
             alt={t("huddle")}
-            className="h-8 w-8 object-cover rounded-lg"
+            className="h-8 w-8 object-contain rounded-lg"
           />
           <div className="hidden sm:flex flex-col">
-            <span className="text-base font-bold lowercase leading-tight font-huddle">{t("huddle")}</span>
+            <span className="text-base font-bold lowercase leading-tight text-brandText">{t("huddle")}</span>
           </div>
         </button>
 

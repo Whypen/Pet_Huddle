@@ -936,7 +936,7 @@ const EditProfile = () => {
             {/* Has Car */}
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div className="flex items-center gap-3">
-                <Car className="w-5 h-5" style={{ color: "#3283FF" }} />
+                <Car className="w-5 h-5 text-brandBlue" />
                 <div>
                   <span className="text-sm font-medium">{t("Pet Driver with Car?")}</span>
                   <p className="text-xs text-muted-foreground">{t("Important for pet transport")}</p>
