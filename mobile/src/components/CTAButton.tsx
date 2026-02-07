@@ -61,11 +61,12 @@ export function CTAButton({ title, disabled, onPress, onInvalidPress }: Props) {
           onPress?.();
         }}
         style={{
-          backgroundColor: disabled ? "rgba(33,69,207,0.35)" : COLORS.brandBlue,
+          backgroundColor: COLORS.brandBlue,
           paddingVertical: 14,
           borderRadius: 12,
           alignItems: "center",
           justifyContent: "center",
+          opacity: disabled ? 0.5 : 1,
         }}
         accessibilityRole="button"
         accessibilityState={{ disabled: !!disabled }}
@@ -75,4 +76,3 @@ export function CTAButton({ title, disabled, onPress, onInvalidPress }: Props) {
     </Animated.View>
   );
 }
-

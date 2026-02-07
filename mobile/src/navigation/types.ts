@@ -1,7 +1,17 @@
 export type RootStackParamList = {
-  RootTabs: undefined;
+  RootTabs:
+    | {
+        screen?: keyof TabsParamList;
+        params?: TabsParamList[keyof TabsParamList];
+      }
+    | undefined;
+  Auth: undefined;
   Terms: undefined;
   Privacy: undefined;
+  AccountSettings: undefined;
+  PetProfile: { mode: "add" | "edit" } | undefined;
+  UserProfile: undefined;
+  CreateThread: undefined;
 };
 
 export type TabsParamList = {
@@ -10,4 +20,3 @@ export type TabsParamList = {
   Premium: undefined;
   Settings: undefined;
 };
-

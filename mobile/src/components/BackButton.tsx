@@ -17,18 +17,16 @@ export function BackButton() {
 
   return (
     <View style={{ position: "absolute", top: 0, left: 0, height: LAYOUT.headerHeight, justifyContent: "center" }}>
-      <Pressable
-        onPress={onPress}
-        hitSlop={4}
-        style={({ pressed }) => ({
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          opacity: pressed ? 0.7 : 1,
-        })}
-      >
-        <Ionicons name="arrow-back" size={24} color={COLORS.brandBlue} />
+      <Pressable onPress={onPress} hitSlop={4} style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+        {({ pressed }) => (
+          <Ionicons
+            name="arrow-back"
+            size={24}
+            // UAT: apply primary tint on press.
+            color={pressed ? COLORS.brandBlue : "rgba(66,73,101,0.75)"}
+          />
+        )}
       </Pressable>
     </View>
   );
 }
-
