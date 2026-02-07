@@ -188,9 +188,10 @@ export const PetProfileForm = ({
       };
 
       onSave(petDataToSave);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving pet:", error);
-      if (!error.message?.includes("Failed to")) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("Failed to")) {
         toast.error(t("Failed to save pet profile"));
       }
     } finally {

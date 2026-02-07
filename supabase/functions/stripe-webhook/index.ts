@@ -25,13 +25,9 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const STRIPE_PRODUCTS: Record<string, string> = {
   premium: "prod_TuEpCL4vGGwUpk",
   gold: "prod_TuF4blxU2yHqBV",
-  verified_badge: "prod_TuFRNkLiOOKuHZ",
   star_pack: "prod_TuFPF3zjXiWiK8",
   emergency_alert: "prod_TuFKa021SiFK58",
   vet_media: "prod_TuFLRWYZGrItCP",
-  family_slot: "prod_TuFNGDVKRYPPsG",
-  "5_media_pack": "prod_TuFQ8x2UN7yYjm",
-  "7_day_extension": "prod_TuFIj3NC2W7TvV",
 };
 
 interface WebhookResponse {
@@ -74,8 +70,9 @@ serve(async (req: Request): Promise<Response> => {
       try {
         event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
         console.log(`[STRIPE WEBHOOK] Verified event: ${event.type} (ID: ${event.id})`);
-      } catch (err: any) {
-        console.error(`[STRIPE WEBHOOK] Signature verification failed: ${err.message}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[STRIPE WEBHOOK] Signature verification failed: ${message}`);
         return new Response(JSON.stringify({ error: "Invalid signature" }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -142,9 +139,10 @@ serve(async (req: Request): Promise<Response> => {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (error: any) {
-    console.error(`[STRIPE WEBHOOK] Error: ${error.message}`);
-    const message = `${error?.message || ""}`.toLowerCase();
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[STRIPE WEBHOOK] Error: ${errMsg}`);
+    const message = errMsg.toLowerCase();
     if (message.includes("quota") || message.includes("rate limit")) {
       return new Response(
         JSON.stringify({ success: false, message: "Quota Exceeded" }),
@@ -152,7 +150,7 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
     return new Response(
-      JSON.stringify({ success: false, message: error.message }),
+      JSON.stringify({ success: false, message: errMsg }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -229,9 +227,7 @@ async function handleCheckoutSessionCompleted(
     const creditsMap: Record<string, { stars?: number; mesh?: number; media?: number; family?: number }> = {
       star_pack: { stars: 3 },
       emergency_alert: { mesh: 1 },
-      "5_media_pack": { media: 5 },
       vet_media: { media: 10 },
-      family_slot: { family: 1 },
     };
 
     const credits = creditsMap[type || ""];
@@ -252,22 +248,12 @@ async function handleCheckoutSessionCompleted(
       console.log(`[CHECKOUT COMPLETED] User ${userId} received credits: ${JSON.stringify(credits)}`);
     }
 
-    // Handle verified badge
-    if (type === "verified_badge") {
-      await supabase
-        .from("profiles")
-        .update({ verified: true })
-        .eq("id", userId);
-
-      console.log(`[CHECKOUT COMPLETED] User ${userId} verified badge granted`);
-    }
-
     // Handle marketplace booking paid state
     if (type === "marketplace_booking" && session.payment_intent) {
       await supabase
         .from("marketplace_bookings")
         .update({
-          status: "paid",
+          status: "confirmed",
           paid_at: new Date().toISOString(),
           escrow_status: "pending",
         })
@@ -430,11 +416,17 @@ async function handlePaymentIntentSucceeded(
 
   // Handle marketplace booking (nanny) payment
   if (meta?.type === "marketplace_booking" || meta?.client_id) {
+    const latestCharge =
+      typeof paymentIntent.latest_charge === "string"
+        ? paymentIntent.latest_charge
+        : paymentIntent.latest_charge?.id;
+
     await supabase
       .from("marketplace_bookings")
       .update({
-        status: "paid",
+        status: "confirmed",
         stripe_payment_intent_id: paymentIntent.id,
+        stripe_charge_id: latestCharge || null,
         paid_at: new Date().toISOString(),
         escrow_status: "pending",
       })
@@ -454,15 +446,19 @@ async function handlePaymentIntentSucceeded(
         client_id: meta["user_id"] || "unknown",
         sitter_id: meta.nanny_id,
         stripe_payment_intent_id: paymentIntent.id,
+        stripe_charge_id: latestCharge || null,
         amount: paymentIntent.amount,
         platform_fee: Math.round(paymentIntent.amount * 0.1),
         sitter_payout: paymentIntent.amount - Math.round(paymentIntent.amount * 0.1),
-        status: "paid",
+        status: "confirmed",
         paid_at: new Date().toISOString(),
         escrow_release_date: escrowRelease.toISOString(),
         escrow_status: "pending",
       })
-      .catch((err: any) => console.warn("[PAYMENT_INTENT] Nanny insert:", err.message));
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn("[PAYMENT_INTENT] Nanny insert:", message);
+      });
 
     console.log(`[PAYMENT_INTENT] Nanny booking recorded: nanny=${meta.nanny_id}`);
   }

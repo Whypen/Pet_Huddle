@@ -58,7 +58,22 @@ const Admin = () => {
       return;
     }
 
-    const mapped = (data || []).map((row: any) => ({
+    const mapped = (data || []).map((row: {
+      id: string;
+      user_id: string;
+      document_url: string | null;
+      selfie_url: string | null;
+      country: string | null;
+      document_type: string | null;
+      profiles?: {
+        id?: string | null;
+        display_name?: string | null;
+        legal_name?: string | null;
+        verification_status?: string | null;
+        verification_comment?: string | null;
+        avatar_url?: string | null;
+      } | null;
+    }) => ({
       upload_id: row.id,
       id: row.profiles?.id ?? row.user_id,
       display_name: row.profiles?.display_name ?? null,
@@ -102,6 +117,7 @@ const Admin = () => {
   }, [profile?.user_role]);
 
   const review = async (id: string, status: "approved" | "rejected", uploadId?: string) => {
+    const target = rows.find((row) => row.id === id);
     await supabase
       .from("profiles")
       .update({
@@ -120,6 +136,23 @@ const Admin = () => {
           rejection_reason: status === "rejected" ? comment[id] || null : null,
         })
         .eq("id", uploadId);
+    }
+    if (target?.selfie_url || target?.document_url) {
+      const paths = [target.selfie_url, target.document_url].filter(Boolean) as string[];
+      if (paths.length > 0) {
+        await supabase.storage.from("identity_verification").remove(paths);
+      }
+    }
+    try {
+      await supabase.functions.invoke("verification-email", {
+        body: {
+          userId: id,
+          status,
+          comment: comment[id] || "",
+        },
+      });
+    } catch (err) {
+      console.warn("[Admin] Failed to send verification email:", err);
     }
     await load();
   };

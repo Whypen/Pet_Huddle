@@ -1,15 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Shield, User, AlertTriangle, Check, Loader2, ChevronRight, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 interface SecurityIdentityStepProps {
   legalName: string;
@@ -30,19 +31,30 @@ export const SecurityIdentityStep = ({
 }: SecurityIdentityStepProps) => {
   const { t } = useLanguage();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
-  const [idFile, setIdFile] = useState<File | null>(null);
-  const [idUploading, setIdUploading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({ legalName: "", phone: "" });
+
+  useEffect(() => {
+    if (!user) return;
+    // If user returns from /verify-identity, allow continue
+    if (verificationStatus === "verifying") {
+      setVerificationStatus("pending");
+      onVerificationStatusChange("pending");
+    }
+  }, [user, verificationStatus, onVerificationStatusChange]);
 
   const handleStartVerification = async () => {
-    if (!legalName.trim() || !phone.trim()) {
-      toast.error(t("Please fill in your legal name and phone number first"));
-      return;
+    const nextErrors = { legalName: "", phone: "" };
+    if (!legalName.trim()) {
+      nextErrors.legalName = t("Legal name is required");
     }
-
-    if (!idFile) {
-      toast.error(t("Please upload a valid ID or passport"));
+    if (!phone.trim()) {
+      nextErrors.phone = t("Phone number is required");
+    }
+    setFieldErrors(nextErrors);
+    if (nextErrors.legalName || nextErrors.phone) {
       return;
     }
 
@@ -52,41 +64,8 @@ export const SecurityIdentityStep = ({
     }
 
     setVerificationStatus("verifying");
-    setIdUploading(true);
-
-    try {
-      const fileExt = idFile.name.split(".").pop() || "jpg";
-      const fileName = `${user.id}/id-${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("verification")
-        .upload(fileName, idFile);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("verification")
-        .getPublicUrl(fileName);
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({
-          verification_document_url: publicUrl,
-          verification_status: "pending",
-        })
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
-
-      setVerificationStatus("pending");
-      onVerificationStatusChange("pending");
-      toast.success(t("Verification submitted for review"));
-    } catch (error: any) {
-      setVerificationStatus("idle");
-      toast.error(error.message || t("Upload failed"));
-    } finally {
-      setIdUploading(false);
-    }
+    onVerificationStatusChange("pending");
+    navigate("/verify-identity");
   };
 
   const handleSkip = () => {
@@ -122,10 +101,17 @@ export const SecurityIdentityStep = ({
             id="legalName"
             placeholder={t("Enter your full legal name")}
             value={legalName}
-            onChange={(e) => onLegalNameChange(e.target.value)}
-            className="h-12 rounded-xl"
+            onChange={(e) => {
+              onLegalNameChange(e.target.value);
+              if (e.target.value.trim()) {
+                setFieldErrors((prev) => ({ ...prev, legalName: "" }));
+              }
+            }}
+            className={`h-12 rounded-xl ${fieldErrors.legalName ? "border-red-500" : ""}`}
+            aria-invalid={Boolean(fieldErrors.legalName)}
             disabled={verificationStatus === "verified"}
           />
+          <ErrorLabel message={fieldErrors.legalName} />
           <p className="text-xs text-muted-foreground">
             {t("This is kept private and used only for verification")}
           </p>
@@ -140,11 +126,17 @@ export const SecurityIdentityStep = ({
             international
             defaultCountry="HK"
             value={phone}
-            onChange={(value) => onPhoneChange(value || '')}
-            className="phone-input-onboarding h-12 rounded-xl border border-border px-3 bg-muted"
+            onChange={(value) => {
+              onPhoneChange(value || '');
+              if (value?.trim()) {
+                setFieldErrors((prev) => ({ ...prev, phone: "" }));
+              }
+            }}
+            className={`phone-input-onboarding h-12 rounded-xl border px-3 bg-muted ${fieldErrors.phone ? "border-red-500" : "border-border"}`}
             placeholder={t("Enter phone number")}
             disabled={verificationStatus === "verified"}
           />
+          <ErrorLabel message={fieldErrors.phone} />
         </div>
       </div>
 
@@ -168,26 +160,12 @@ export const SecurityIdentityStep = ({
             <p className="text-sm text-muted-foreground mb-4">
               {t("Submit your ID for review to earn a verified badge")}
             </p>
-            <label className="block cursor-pointer mb-4">
-              <div className="border-2 border-dashed border-border rounded-xl p-5 text-center hover:border-primary/50 transition-colors">
-                <p className="text-sm font-medium mb-1">
-                  {idFile ? idFile.name : t("Click to upload ID/Passport")}
-                </p>
-                <p className="text-xs text-muted-foreground">{t("PNG, JPG, PDF up to 10MB")}</p>
-              </div>
-              <input
-                type="file"
-                accept="image/*,.pdf"
-                onChange={(e) => setIdFile(e.target.files?.[0] || null)}
-                className="hidden"
-              />
-            </label>
             <Button
               onClick={handleStartVerification}
               className="w-full h-11 rounded-xl"
-              disabled={!legalName.trim() || !phone.trim() || !idFile || idUploading}
+              disabled={!legalName.trim() || !phone.trim()}
             >
-              {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Start Verification")}
+              {verificationStatus === "verifying" ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Start Verification")}
             </Button>
           </>
         )}

@@ -1,54 +1,100 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Star, SlidersHorizontal, HandMetal } from "lucide-react";
+import { HandMetal, Star, X, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import sarahBella from "@/assets/users/sarah-bella.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { FilterSheet, FilterState, defaultFilters } from "@/components/social/FilterSheet";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { ActiveFilters } from "@/components/social/ActiveFilters";
-import { ProfileBadges } from "@/components/ui/ProfileBadges";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { cn } from "@/lib/utils";
 import { useUpsell } from "@/hooks/useUpsell";
+import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
+import { demoUsers } from "@/lib/demoData";
+
+type DiscoveryPet = {
+  species?: string | null;
+  name?: string | null;
+};
+
+type DiscoveryProfile = {
+  id: string;
+  display_name: string | null;
+  avatar_url?: string | null;
+  is_verified?: boolean;
+  has_car?: boolean;
+  bio?: string | null;
+  relationship_status?: string | null;
+  dob?: string | null;
+  location_name?: string | null;
+  occupation?: string | null;
+  school?: string | null;
+  major?: string | null;
+  tier?: string | null;
+  pets?: DiscoveryPet[] | null;
+  pet_species?: string[] | null;
+  pet_size?: string | null;
+  social_album?: string[] | null;
+  show_occupation?: boolean | null;
+  show_academic?: boolean | null;
+  show_bio?: boolean | null;
+  show_relationship_status?: boolean | null;
+  show_age?: boolean | null;
+  show_gender?: boolean | null;
+  show_orientation?: boolean | null;
+  show_height?: boolean | null;
+  show_weight?: boolean | null;
+  gender_genre?: string | null;
+  orientation?: string | null;
+  social_role?: string | null;
+};
+
+const discoverySpeciesOptions = [
+  { value: "Any", label: "Any Species" },
+  { value: "dog", label: "Dog" },
+  { value: "cat", label: "Cat" },
+  { value: "bird", label: "Bird" },
+  { value: "rabbit", label: "Rabbit" },
+  { value: "reptile", label: "Reptile" },
+  { value: "hamster", label: "Hamster" },
+  { value: "others", label: "Others" },
+];
 
 const Discover = () => {
+  const navigate = useNavigate();
   const { profile } = useAuth();
   const { t } = useLanguage();
-  const navigate = useNavigate();
+  const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [showMatchModal, setShowMatchModal] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState<{
-    id: string;
-    name: string;
-    location: string;
-    isVerified: boolean;
-    hasCar: boolean;
-    bio: string;
-  } | null>(null);
-  const [showStarPopup, setShowStarPopup] = useState(false);
-  const [starPopupMessage, setStarPopupMessage] = useState("");
-  const { upsellModal, closeUpsellModal, buyAddOn, checkStarsAvailable } = useUpsell();
-
-  const nearbyUsers = [
-    { id: 1, name: "social.user.marcus.name", location: "social.location.central_park", isVerified: true, hasCar: false },
-    { id: 2, name: "social.user.emma.name", location: "social.location.dog_run", isVerified: false, hasCar: true },
-    { id: 3, name: "social.user.james.name", location: "social.location.pet_cafe", isVerified: true, hasCar: true },
-  ];
-  const [discoveryProfiles, setDiscoveryProfiles] = useState<any[]>([]);
+  const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryRole, setDiscoveryRole] = useState("playdates");
+  const [discoveryDistance, setDiscoveryDistance] = useState(10);
+  const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
+  const [discoveryGender, setDiscoveryGender] = useState("Any");
+  const [discoverySpecies, setDiscoverySpecies] = useState("Any");
+  const [discoveryMinAge, setDiscoveryMinAge] = useState(18);
+  const [discoveryMaxAge, setDiscoveryMaxAge] = useState(99);
+  const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
+  const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryProfile | null>(null);
+  const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
+  const [activeAlbumIndex, setActiveAlbumIndex] = useState(0);
+  const [albumUrls, setAlbumUrls] = useState<Record<string, string[]>>({});
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
-  // SPRINT 3: Initialize age filter to ±3 years from user's age
-  const getUserAge = () => {
-    if (!profile?.dob) return 25; // Default age if not set
+  const userAge = profile?.dob
+    ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+    : null;
+  const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
+  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+
+  useEffect(() => {
+    if (!profile?.dob) return;
     const birthDate = new Date(profile.dob);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
@@ -56,63 +102,31 @@ const Discover = () => {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    return age;
-  };
-
-  const userAge = getUserAge();
-  const isMinor = userAge >= 13 && userAge < 16;
-  const [filters, setFilters] = useState<FilterState>({
-    ...defaultFilters,
-    ageRange: [Math.max(18, userAge - 3), Math.min(99, userAge + 3)]
-  });
-  const [cardPosition, setCardPosition] = useState({ x: 0, y: 0, rotate: 0 });
-  const [showCard, setShowCard] = useState(true);
-
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-
-  const mainProfile = {
-    id: "sarah",
-    name: "social.profile.sarah.name",
-    location: "social.profile.sarah.location",
-    isVerified: true,
-    hasCar: true,
-    bio: "social.profile.sarah.bio",
-    title: "social.profile.sarah.title",
-    photoAlt: "social.profile.sarah.photo_alt",
-  };
-  const activeProfile = discoveryProfiles[0]
-    ? {
-        id: discoveryProfiles[0].id,
-        name: discoveryProfiles[0].display_name || "social.profile.sarah.name",
-        location: "social.profile.sarah.location",
-        isVerified: discoveryProfiles[0].is_verified,
-        hasCar: discoveryProfiles[0].has_car,
-        bio: discoveryProfiles[0].bio || "social.profile.sarah.bio",
-        title: "social.profile.sarah.title",
-        photoAlt: "social.profile.sarah.photo_alt",
-      }
-    : mainProfile;
-
-  const openProfileModal = (profileData: typeof mainProfile) => {
-    setSelectedProfile(profileData);
-    setShowProfileModal(true);
-  };
+    setDiscoveryMinAge(Math.max(18, age - 3));
+    setDiscoveryMaxAge(Math.min(99, age + 3));
+  }, [profile?.dob]);
 
   useEffect(() => {
     const runDiscovery = async () => {
       if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
       setDiscoveryLoading(true);
       try {
-        const { data, error } = await supabase.functions.invoke("social-discovery", {
-          body: {
-            userId: profile.id,
-            lat: profile.last_lat,
-            lng: profile.last_lng,
-            radiusKm: filters.distance,
-            minAge: filters.ageRange[0],
-            maxAge: filters.ageRange[1],
-          },
-        });
+        const minAge = Math.max(16, discoveryMinAge || 16);
+        const maxAge = Math.max(minAge, discoveryMaxAge || 99);
+        const payload = {
+          userId: profile.id,
+          lat: profile.last_lat,
+          lng: profile.last_lng,
+          radiusKm: discoveryDistance,
+          role: discoveryRole,
+          gender: discoveryGender !== "Any" ? discoveryGender : null,
+          species: discoverySpecies !== "Any" ? [discoverySpecies] : null,
+          petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
+          minAge,
+          maxAge,
+          advanced: isPremium,
+        };
+        const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
         if (error) throw error;
         setDiscoveryProfiles(data?.profiles || []);
       } catch (err) {
@@ -121,57 +135,109 @@ const Discover = () => {
         setDiscoveryLoading(false);
       }
     };
-
     runDiscovery();
-  }, [profile?.id, profile?.last_lat, profile?.last_lng, filters.distance, filters.ageRange]);
+  }, [
+    profile?.id,
+    profile?.last_lat,
+    profile?.last_lng,
+    discoveryDistance,
+    discoveryRole,
+    discoveryPetSize,
+    discoveryGender,
+    discoverySpecies,
+    discoveryMinAge,
+    discoveryMaxAge,
+    isPremium,
+  ]);
 
-  const handleSwipe = (direction: "left" | "right") => {
-    const xMove = direction === "right" ? 500 : -500;
-    setCardPosition({ x: xMove, y: 0, rotate: direction === "right" ? 20 : -20 });
-    setTimeout(() => {
-      setShowCard(false);
-      if (direction === "right") {
-        setShowMatchModal(true);
+  useEffect(() => {
+    const loadAlbums = async () => {
+      if (discoveryProfiles.length === 0) return;
+      const next: Record<string, string[]> = {};
+      for (const p of discoveryProfiles) {
+        const album = Array.isArray(p?.social_album) ? p.social_album : [];
+        if (!album.length) continue;
+        const resolved = await Promise.all(
+          album.map(async (path: string) => {
+            if (!path) return "";
+            if (path.startsWith("http")) return path;
+            const { data } = await supabase.storage.from("social_album").createSignedUrl(path, 60 * 60);
+            return data?.signedUrl || "";
+          })
+        );
+        next[p.id] = resolved.filter(Boolean);
       }
-      setTimeout(() => {
-        setCardPosition({ x: 0, y: 0, rotate: 0 });
-        setShowCard(true);
-      }, 300);
-    }, 200);
-  };
-
-  const handleApplyFilters = (newFilters: FilterState) => {
-    setFilters(newFilters);
-  };
-
-  const handleRemoveFilter = (key: keyof FilterState, value?: string) => {
-    if (key === "species" && value) {
-      setFilters(prev => ({
-        ...prev,
-        species: prev.species.filter(s => s !== value)
-      }));
-    } else if (key === "role") {
-      setFilters(prev => ({ ...prev, role: defaultFilters.role }));
-    } else if (key === "distance") {
-      setFilters(prev => ({ ...prev, distance: defaultFilters.distance }));
-    } else if (key === "ageRange") {
-      setFilters(prev => ({ ...prev, ageRange: defaultFilters.ageRange }));
-    } else if (key === "gender") {
-      setFilters(prev => ({ ...prev, gender: "" }));
-    } else if (key === "petHeight") {
-      setFilters(prev => ({ ...prev, petHeight: "" }));
-    }
-  };
-
-  // Get role label for display
-  const getRoleLabel = () => {
-    const labels: Record<string, string> = {
-      playdates: t("social.playdates"),
-      nannies: t("social.nannies"),
-      "animal-lovers": t("social.animal_lovers"),
+      if (Object.keys(next).length > 0) {
+        setAlbumUrls((prev) => ({ ...prev, ...next }));
+      }
     };
-    return labels[filters.role] || t("social.playdates");
+    loadAlbums();
+  }, [discoveryProfiles]);
+
+  const demoProfiles = demoUsers.map((u) => ({
+    id: u.id,
+    display_name: u.name,
+    avatar_url: u.avatarUrl || null,
+    is_verified: u.isVerified,
+    has_car: u.hasCar,
+    bio: u.bio,
+    relationship_status: u.relationshipStatus || null,
+    dob: u.age ? new Date(Date.now() - u.age * 365.25 * 24 * 60 * 60 * 1000).toISOString() : null,
+    location_name: u.locationName,
+    occupation: u.occupation || null,
+    school: u.education || null,
+    major: u.degree || null,
+    tier: u.isPremium ? "premium" : "free",
+    pets: u.pets || [],
+    pet_species: (u.pets || []).map((p) => p.species),
+    pet_size: null,
+    height: u.height || null,
+    social_album: u.avatarUrl ? [u.avatarUrl] : [],
+    show_occupation: true,
+    show_academic: true,
+    show_bio: true,
+    show_relationship_status: true,
+    show_age: true,
+    show_gender: true,
+    show_orientation: true,
+    show_height: true,
+    show_weight: true,
+    social_role: u.role,
+    gender_genre: u.gender || null,
+    orientation: u.orientation || null,
+  }));
+
+  const resolveDemoPetSize = (profileRow: { pet_size?: string | null; pet_species?: string[] | null }) => {
+    if (profileRow?.pet_size) return profileRow.pet_size;
+    const species = (profileRow?.pet_species || []).map((s: string) => s.toLowerCase());
+    if (species.includes("dog")) return "Medium";
+    if (species.includes("cat") || species.includes("rabbit") || species.includes("hamster") || species.includes("bird")) {
+      return "Small";
+    }
+    return null;
   };
+
+  const filteredDemoProfiles = demoProfiles.filter((p) => {
+    if (discoveryRole && p.social_role !== discoveryRole) return false;
+    if (discoverySpecies !== "Any") {
+      const species = (p.pet_species || []).map((s: string) => s.toLowerCase());
+      if (!species.includes(discoverySpecies.toLowerCase())) return false;
+    }
+    if (discoveryGender !== "Any" && p.gender_genre !== discoveryGender) return false;
+    const age = p.dob
+      ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+      : null;
+    if (age !== null && (age < discoveryMinAge || age > discoveryMaxAge)) return false;
+    if (discoveryPetSize !== "Any") {
+      const size = resolveDemoPetSize(p);
+      if (!size || size !== discoveryPetSize) return false;
+    }
+    return true;
+  });
+
+  const discoverySource = (discoveryProfiles.length > 0 ? discoveryProfiles : filteredDemoProfiles).filter(
+    (p) => !hiddenDiscoveryIds.has(p.id)
+  );
 
   return (
     <div className="min-h-screen bg-background pb-nav relative">
@@ -189,194 +255,319 @@ const Discover = () => {
       )}
 
       <div className={cn(isMinor && "pointer-events-none opacity-70")}>
-        {/* Header */}
-        <header className="flex items-center justify-between px-5 pt-4 pb-4">
-          <h1 className="text-2xl font-bold">{t("social.discovery")}</h1>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsFilterOpen(true)}
-              className="p-2 rounded-full hover:bg-muted transition-colors relative"
+        <section className="px-5 pb-4 pt-4">
+          <h1 className="text-2xl font-bold mb-3">{t("social.discovery")}</h1>
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
+            <select
+              value={discoveryRole}
+              onChange={(e) => setDiscoveryRole(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
             >
-              <SlidersHorizontal className="w-6 h-6 text-muted-foreground" />
-              {/* Filter active indicator */}
-              {(filters.species.length > 0 || filters.distance !== defaultFilters.distance || filters.gender || filters.petHeight) && (
-                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent" />
-              )}
-            </button>
+              <option value="playdates">{t("Playdates")}</option>
+              <option value="nannies">{t("Nannies")}</option>
+              <option value="animal-lovers">{t("Animal Lovers")}</option>
+            </select>
+            <select
+              value={discoverySpecies}
+              onChange={(e) => setDiscoverySpecies(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+            >
+              {discoverySpeciesOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {t(opt.label)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={discoveryGender}
+              onChange={(e) => setDiscoveryGender(e.target.value)}
+              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+            >
+              <option value="Any">{t("Any Gender")}</option>
+              {["Male", "Female", "Non-binary", "PNA"].map((gender) => (
+                <option key={gender} value={gender}>{gender}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+              <span className="text-[10px] text-muted-foreground">{t("Age")}</span>
+              <input
+                type="number"
+                min={16}
+                max={99}
+                value={discoveryMinAge}
+                onChange={(e) => setDiscoveryMinAge(Number(e.target.value || 16))}
+                className="w-12 bg-transparent text-[10px] outline-none"
+              />
+              <span className="text-[10px] text-muted-foreground">-</span>
+              <input
+                type="number"
+                min={16}
+                max={99}
+                value={discoveryMaxAge}
+                onChange={(e) => setDiscoveryMaxAge(Number(e.target.value || 99))}
+                className="w-12 bg-transparent text-[10px] outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-9">
+              <span className="text-[10px] text-muted-foreground">{discoveryDistance}km</span>
+              <input
+                type="range"
+                min={0}
+                max={150}
+                value={discoveryDistance}
+                onChange={(e) => setDiscoveryDistance(Number(e.target.value))}
+                className="w-24 accent-primary"
+              />
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+              <span className="text-[10px] text-muted-foreground">{t("Pet Size")}</span>
+              <select
+                value={discoveryPetSize}
+                onChange={(e) => setDiscoveryPetSize(e.target.value)}
+                className="bg-transparent text-xs outline-none"
+                aria-label={t("Pet Size")}
+              >
+                {["Any", "Small", "Medium", "Large"].map((size) => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </header>
+        </section>
 
-      {/* Star Pop-up */}
+        <section className="px-5">
+          <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
+            {discoveryLoading && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t("Loading discovery...")}
+              </div>
+            )}
+            {discoverySource.map((p) => {
+              const age = p?.dob
+                ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+                : "";
+              const petSpeciesList = Array.isArray(p?.pet_species)
+                ? p.pet_species
+                : Array.isArray(p?.pets) && p.pets.length > 0
+              ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
+              : [];
+              const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
+              const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
+                ? albumUrls[p.id]
+                : Array.isArray(p?.social_album) && p.social_album.length > 0
+                ? p.social_album
+                : p.avatar_url
+                ? [p.avatar_url]
+                : [];
+              const cover = album[0];
+
+              return (
+                <div
+                  key={p.id}
+                  className="min-w-[260px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer"
+                  onClick={() => {
+                    setSelectedDiscovery(p);
+                    setActiveAlbumIndex(0);
+                    setShowDiscoveryModal(true);
+                  }}
+                >
+                  {cover ? (
+                    <img src={cover} alt={p.display_name || ""} className="h-44 w-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="h-44 w-full bg-muted" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
+
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toast.success(t("Wave sent"));
+                      }}
+                      className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+                    >
+                      <HandMetal className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const ok = await checkStarsAvailable();
+                        if (!ok) {
+                          toast.error(t("Buy a star pack to immediately chat with the user"));
+                          return;
+                        }
+                        const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+                          action_type: "star",
+                        });
+                        if (allowed === false) {
+                          toast.error(t("No stars remaining"));
+                          return;
+                        }
+                        navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
+                      }}
+                      className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                    >
+                      <Star className="w-4 h-4 text-[#3283FF]" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
+                      }}
+                      className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                    >
+                      <X className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  </div>
+
+                  <div className="absolute bottom-3 left-3 right-3 text-white">
+                    <div className="text-sm font-semibold">{p.display_name}</div>
+                    <div className="text-xs text-white/80">
+                      {age ? `${age} • ${p.relationship_status || "—"}` : p.relationship_status || "—"}
+                    </div>
+                    <div className="text-xs text-white/80 mt-1">{t("Pet")}: {petSpecies}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+
       <AnimatePresence>
-        {showStarPopup && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-card shadow-elevated border border-border rounded-xl px-4 py-2"
-          >
-            <p className="text-sm font-medium">{t(starPopupMessage)}</p>
-          </motion.div>
+        {showDiscoveryModal && selectedDiscovery && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-[2500]"
+              onClick={() => setShowDiscoveryModal(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="fixed inset-x-0 bottom-0 z-[2501] bg-card rounded-t-3xl max-w-md mx-auto overflow-hidden"
+            >
+              <div className="relative">
+                <button
+                  onClick={() => setShowDiscoveryModal(false)}
+                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
+                >
+                  <X className="w-5 h-5 text-white" />
+                </button>
+                {(() => {
+                  const album = (albumUrls[selectedDiscovery.id] && albumUrls[selectedDiscovery.id].length > 0)
+                    ? albumUrls[selectedDiscovery.id]
+                    : Array.isArray(selectedDiscovery.social_album) && selectedDiscovery.social_album.length > 0
+                    ? selectedDiscovery.social_album
+                    : selectedDiscovery.avatar_url
+                    ? [selectedDiscovery.avatar_url]
+                    : [];
+                  const current = album[activeAlbumIndex] || album[0];
+                  return (
+                    <>
+                      {current ? (
+                        <img
+                          src={current}
+                          alt=""
+                          className="w-full h-72 object-cover"
+                          loading="lazy"
+                          onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
+                          onTouchEnd={(e) => {
+                            if (touchStartX == null || album.length <= 1) return;
+                            const delta = touchStartX - e.changedTouches[0].clientX;
+                            if (Math.abs(delta) > 40) {
+                              const nextIndex = delta > 0
+                                ? Math.min(activeAlbumIndex + 1, album.length - 1)
+                                : Math.max(activeAlbumIndex - 1, 0);
+                              setActiveAlbumIndex(nextIndex);
+                            }
+                            setTouchStartX(null);
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-72 bg-muted" />
+                      )}
+                      {album.length > 1 && (
+                        <div className="absolute inset-x-0 bottom-3 flex items-center justify-center gap-1">
+                          {album.map((_: string, idx: number) => (
+                            <button
+                              key={`dot-${idx}`}
+                              onClick={() => setActiveAlbumIndex(idx)}
+                              className={cn(
+                                "w-2 h-2 rounded-full",
+                                idx === activeAlbumIndex ? "bg-white" : "bg-white/40"
+                              )}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              <div className="p-5 max-h-[50vh] overflow-y-auto">
+                {(() => {
+                  const age = selectedDiscovery?.dob
+                    ? Math.floor((Date.now() - new Date(selectedDiscovery.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+                    : null;
+                  const pets = Array.isArray(selectedDiscovery?.pets) ? selectedDiscovery.pets : [];
+                  const petSpecies = Array.isArray(selectedDiscovery?.pet_species)
+                    ? selectedDiscovery.pet_species
+                    : pets.map((pet: { species?: string | null }) => pet.species || "");
+                  return (
+                    <>
+                      <h3 className="text-xl font-bold">{selectedDiscovery.display_name}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {selectedDiscovery.show_age !== false && age ? `${age} • ` : ""}
+                        {selectedDiscovery.show_relationship_status !== false
+                          ? selectedDiscovery.relationship_status || ""
+                          : ""}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{selectedDiscovery.location_name || "—"}</p>
+
+                      {selectedDiscovery.show_bio !== false && selectedDiscovery.bio && (
+                        <div className="mt-3">
+                          <h4 className="text-sm font-semibold">{t("Bio")}</h4>
+                          <p className="text-sm text-muted-foreground">{selectedDiscovery.bio}</p>
+                        </div>
+                      )}
+
+                      <div className="mt-3">
+                        <h4 className="text-sm font-semibold">{t("Pet Info")}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {petSpecies.length > 0 ? petSpecies.join(", ") : t("No pet info")}
+                        </p>
+                      </div>
+
+                      {(selectedDiscovery.show_occupation !== false || selectedDiscovery.show_academic !== false) && (
+                        <div className="mt-3 space-y-1">
+                          {selectedDiscovery.show_occupation !== false && selectedDiscovery.occupation && (
+                            <p className="text-sm text-muted-foreground">
+                              {t("Job")}: {selectedDiscovery.occupation}
+                            </p>
+                          )}
+                          {selectedDiscovery.show_academic !== false && (selectedDiscovery.school || selectedDiscovery.major) && (
+                            <p className="text-sm text-muted-foreground">
+                              {t("School")}: {[selectedDiscovery.school, selectedDiscovery.major].filter(Boolean).join(" • ")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
 
-        {/* Active Filters */}
-        <section className="px-5">
-          <ActiveFilters filters={filters} onRemove={handleRemoveFilter} />
-        </section>
-
-        {/* Current Role Display */}
-        <section className="px-5 py-2">
-          <div className="flex gap-2">
-            <span className="px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-medium">
-              {getRoleLabel()}
-            </span>
-          </div>
-        </section>
-
-        {/* Main Discovery Card */}
-        <section className="px-5 py-4">
-        <div className="relative h-[420px]">
-          <AnimatePresence>
-            {showCard && (
-              <motion.div
-                style={{ x: cardPosition.x, y: cardPosition.y, rotate: cardPosition.rotate }}
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1, x: 0, y: 0, rotate: 0 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                transition={{ type: "spring", damping: 20, stiffness: 300 }}
-                drag="x"
-                dragConstraints={{ left: 0, right: 0 }}
-                onDragEnd={(_, info) => {
-                  if (Math.abs(info.offset.x) > 100) {
-                    handleSwipe(info.offset.x > 0 ? "right" : "left");
-                  }
-                }}
-                onClick={() => openProfileModal(activeProfile)}
-                className="absolute inset-0 rounded-2xl overflow-hidden shadow-elevated cursor-grab active:cursor-grabbing"
-              >
-                <img 
-                  src={sarahBella} 
-                  alt={t(activeProfile.photoAlt)} 
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-foreground/90 via-foreground/30 to-transparent" />
-                
-                {/* Card Content */}
-                <div className="absolute bottom-0 left-0 right-0 p-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-[#3283FF] text-white text-xs font-semibold px-2 py-1 rounded-full">
-                      {t("✓ Verified")}
-                    </span>
-                    <ProfileBadges isVerified={true} hasCar={true} />
-                  </div>
-                  <h3 className="text-2xl font-bold text-primary-foreground">{t(activeProfile.title)}</h3>
-                  <div className="flex gap-2 mt-2 flex-wrap">
-                    <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
-                      {t("social.profile.tag.trail_hiker")}
-                    </span>
-                    <span className="bg-primary-foreground/20 text-primary-foreground text-xs px-3 py-1 rounded-full">
-                      {t("social.profile.tag.dog_friendly")}
-                    </span>
-                  </div>
-                  <p className="text-primary-foreground/90 text-sm mt-3">
-                    {t(activeProfile.bio)}
-                  </p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-center gap-6 mt-4">
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={() => handleSwipe("left")}
-            className="w-14 h-14 rounded-full bg-card shadow-card flex items-center justify-center border border-border"
-          >
-            <X className="w-6 h-6 text-destructive" />
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            onClick={() => handleSwipe("right")}
-            className="w-16 h-16 rounded-full bg-[#3283FF] shadow-card flex items-center justify-center"
-          >
-            <HandMetal className="w-7 h-7 text-accent-foreground" />
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            className="w-14 h-14 rounded-full bg-card shadow-card flex items-center justify-center border border-border"
-              onClick={async () => {
-                const ok = await checkStarsAvailable();
-                if (!ok) {
-                  setStarPopupMessage("Buy a star pack to immediately chat with the user");
-                  setShowStarPopup(true);
-                  setTimeout(() => setShowStarPopup(false), 2500);
-                  return;
-                }
-                setStarPopupMessage("Boost sent");
-                setShowStarPopup(true);
-                setTimeout(() => setShowStarPopup(false), 2000);
-              }}
-          >
-            <Star className="w-6 h-6" style={{ color: "#3283FF" }} />
-          </motion.button>
-        </div>
-        </section>
-
-        {/* Huddle Nearby */}
-        <section className="px-5 py-4">
-        <h3 className="text-lg font-semibold mb-3 font-huddle">{t("social.nearby")}</h3>
-        <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-2">
-          {nearbyUsers.map((user, index) => (
-            <motion.div
-              key={user.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.1 }}
-              className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer"
-              onClick={() => openProfileModal({
-                id: String(user.id),
-                name: user.name,
-                location: user.location,
-                isVerified: user.isVerified,
-                hasCar: user.hasCar,
-                bio: "social.profile.nearby_bio",
-              })}
-            >
-              <div className="relative">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-accent p-0.5">
-                  <div className="w-full h-full rounded-full bg-muted flex items-center justify-center text-lg font-semibold">
-                    {t(user.name).charAt(0)}
-                  </div>
-                </div>
-                <div className="absolute -bottom-1 -right-1">
-                  <ProfileBadges isVerified={user.isVerified} hasCar={user.hasCar} size="sm" />
-                </div>
-              </div>
-              <span className="text-xs font-medium">{t(user.name)}</span>
-              <span className="text-xs text-muted-foreground">{t(user.location)}</span>
-            </motion.div>
-          ))}
-        </div>
-        </section>
-
-        {/* Discovery only */}
-      </div>
-
-      {/* Drawers & Modals */}
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <FilterSheet
-        isOpen={isFilterOpen}
-        onClose={() => setIsFilterOpen(false)}
-        filters={filters}
-        onApply={handleApplyFilters}
-        onPremiumClick={() => {
-          setIsFilterOpen(false);
-          setTimeout(() => setIsPremiumOpen(true), 300);
-        }}
-      />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
       <UpsellModal
         isOpen={upsellModal.isOpen}
@@ -387,93 +578,6 @@ const Discover = () => {
         onClose={closeUpsellModal}
         onBuy={() => buyAddOn(upsellModal.type)}
       />
-      <AnimatePresence>
-        {showMatchModal && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowMatchModal(false)}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="fixed inset-x-6 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated text-center"
-            >
-              <h2 className="text-2xl font-bold mb-2">{t("social.match")}</h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                {t("social.match_message")}
-              </p>
-              <Button
-                onClick={() => {
-                  setShowMatchModal(false);
-                  navigate(`/chat-dialogue?id=${activeProfile.id}&name=${encodeURIComponent(t(activeProfile.name))}`);
-                }}
-                className="w-full"
-              >
-                {t("Start Chat")}
-              </Button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Profile Modal */}
-      <AnimatePresence>
-        {showProfileModal && selectedProfile && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowProfileModal(false)}
-              className="fixed inset-0 bg-foreground/50 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 20 }}
-              className="fixed inset-x-4 top-16 bottom-16 max-w-md mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated flex flex-col"
-            >
-              <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">{t(selectedProfile.name)}</h2>
-                <button onClick={() => setShowProfileModal(false)} className="p-2 rounded-full hover:bg-muted">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="flex items-center gap-2 mb-3">
-                <ProfileBadges isVerified={selectedProfile.isVerified} hasCar={selectedProfile.hasCar} size="md" />
-                <span className="text-sm text-muted-foreground">{t(selectedProfile.location)}</span>
-              </div>
-              <p className="text-sm text-foreground mb-6">{t(selectedProfile.bio)}</p>
-              <div className="mt-auto space-y-2">
-                <Button
-                  onClick={() => {
-                    setShowProfileModal(false);
-                    navigate(`/chat-dialogue?id=${selectedProfile.id}`);
-                  }}
-                  className="w-full"
-                >
-                  {t("Normal Chat")}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowProfileModal(false);
-                    navigate("/map?mode=broadcast");
-                  }}
-                  className="w-full"
-                >
-                  {t("Broadcast Alert")}
-                </Button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

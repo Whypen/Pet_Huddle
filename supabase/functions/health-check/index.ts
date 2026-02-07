@@ -27,7 +27,8 @@ serve(async () => {
       return json({ ok: false, stripeOk, supabaseOk }, 503);
     }
     return json({ ok: true, stripeOk, supabaseOk }, 200);
-  } catch (err: any) {
-    return json({ ok: false, error: err?.message || "health-check failed" }, 503);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return json({ ok: false, error: message || "health-check failed" }, 503);
   }
 });

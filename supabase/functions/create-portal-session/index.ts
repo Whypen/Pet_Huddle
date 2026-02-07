@@ -41,20 +41,26 @@ serve(async (req: Request) => {
       );
     }
 
+    const idempotencyKey = `portal_${userId}_${Date.now()}`;
+
     // Create portal session
-    const session = await stripe.billingPortal.sessions.create({
-      customer: profile.stripe_customer_id,
-      return_url: returnUrl || `${Deno.env.get("PUBLIC_URL")}/premium`,
-    });
+    const session = await stripe.billingPortal.sessions.create(
+      {
+        customer: profile.stripe_customer_id,
+        return_url: returnUrl || `${Deno.env.get("PUBLIC_URL")}/premium`,
+      },
+      { idempotencyKey }
+    );
 
     return new Response(
       JSON.stringify({ url: session.url }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Portal session error:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

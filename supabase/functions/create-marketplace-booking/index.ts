@@ -142,9 +142,6 @@ serve(async (req: Request) => {
           ],
           payment_intent_data: {
             application_fee_amount: platformFee,
-            transfer_data: {
-              destination: sitter.stripe_connect_account_id,
-            },
             metadata: {
               client_id: clientId,
               sitter_id: sitterId,
@@ -153,6 +150,7 @@ serve(async (req: Request) => {
               pet_id: petId || "",
               location_name: locationName || "",
               safe_harbor_accepted: "true",
+              type: "marketplace_booking",
             },
           },
           metadata: {
@@ -170,7 +168,7 @@ serve(async (req: Request) => {
       );
       checkoutUrl = session.url;
       paymentIntentId = session.payment_intent as string;
-    } catch (stripeError: any) {
+    } catch (stripeError: unknown) {
       if (!allowStripeFallback) throw stripeError;
       usingFallback = true;
       paymentIntentId = `pi_local_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -192,8 +190,10 @@ serve(async (req: Request) => {
         sitter_payout: sitterPayout,
         service_start_date: serviceStartDate,
         service_end_date: serviceEndDate,
+        location_name: locationName || null,
         escrow_release_date: escrowReleaseDate.toISOString(),
         status: "pending",
+        escrow_status: "pending",
       })
       .select()
       .single();
@@ -212,9 +212,10 @@ serve(async (req: Request) => {
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Marketplace booking error:", error);
-    const message = `${error?.message || ""}`.toLowerCase();
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const message = errMsg.toLowerCase();
     if (message.includes("quota") || message.includes("rate limit")) {
       return new Response(
         JSON.stringify({ error: "Quota Exceeded" }),
@@ -222,7 +223,7 @@ serve(async (req: Request) => {
       );
     }
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errMsg }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

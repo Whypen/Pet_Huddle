@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -107,10 +108,17 @@ const DISTRICT_MAP: Record<string, string[]> = {
 export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSetupStepProps) => {
   const { t } = useLanguage();
   const [loading, setLoading] = useState(false);
-  const [detectingLocation, setDetectingLocation] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string>(initialData?.avatarUrl || "");
   const [ageError, setAgeError] = useState<string>("");
+  const [fieldErrors, setFieldErrors] = useState({
+    displayName: "",
+    dob: "",
+    locationCountry: "",
+    locationDistrict: "",
+    socialAvailability: "",
+    availabilityStatus: "",
+  });
   
   const [formData, setFormData] = useState<ProfileData>({
     avatarUrl: initialData?.avatarUrl || "",
@@ -150,31 +158,8 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
     showBio: initialData?.showBio ?? true,
   });
 
-  // Detect location when DOB changes
-  useEffect(() => {
-    if (formData.dob && !formData.locationName && !formData.locationCountry) {
-      detectLocation();
-    }
-  }, [formData.dob]);
-
-  const detectLocation = async () => {
-    setDetectingLocation(true);
-    try {
-      const response = await fetch("https://ipapi.co/json/");
-      const data = await response.json();
-      if (data.city && data.country_name) {
-        setFormData(prev => ({
-          ...prev,
-          locationCountry: data.country_name,
-          locationDistrict: data.city,
-          locationName: `${data.city}, ${data.country_name}`
-        }));
-      }
-    } catch (error) {
-      console.error("Location detection failed:", error);
-    } finally {
-      setDetectingLocation(false);
-    }
+  const clearFieldError = (key: keyof typeof fieldErrors) => {
+    setFieldErrors((prev) => ({ ...prev, [key]: "" }));
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,11 +189,32 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
 
   const toggleAvailabilityStatus = (status: string) => {
     setFormData(prev => {
+      const isBlocked = prev.ownsPets
+        ? status === "Animal Friend (No Pet)"
+        : status === "Pet Parent";
+      if (isBlocked) return prev;
+
       if (prev.availabilityStatus.includes(status)) {
         return { ...prev, availabilityStatus: prev.availabilityStatus.filter(s => s !== status) };
       }
+
+      if (status === "Pet Parent") {
+        return {
+          ...prev,
+          ownsPets: true,
+          availabilityStatus: [...prev.availabilityStatus.filter(s => s !== "Animal Friend (No Pet)"), status],
+        };
+      }
+      if (status === "Animal Friend (No Pet)") {
+        return {
+          ...prev,
+          ownsPets: false,
+          availabilityStatus: [...prev.availabilityStatus.filter(s => s !== "Pet Parent"), status],
+        };
+      }
       return { ...prev, availabilityStatus: [...prev.availabilityStatus, status] };
     });
+    clearFieldError("availabilityStatus");
   };
 
   const toggleLanguage = (lang: string) => {
@@ -233,21 +239,26 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
   };
 
   const handleSubmit = async () => {
+    const nextErrors = {
+      displayName: "",
+      dob: "",
+      locationCountry: "",
+      locationDistrict: "",
+      socialAvailability: "",
+      availabilityStatus: "",
+    };
+
     if (!formData.displayName.trim()) {
-      toast.error(t("Please enter a display name"));
-      return;
-    }
-    if (/\d/.test(formData.displayName)) {
-      toast.error(t("Name cannot contain numbers"));
-      return;
+      nextErrors.displayName = t("Please enter a display name");
+    } else if (/\d/.test(formData.displayName)) {
+      nextErrors.displayName = t("Name cannot contain numbers");
     }
 
     if (!formData.dob) {
-      toast.error(t("Please enter your date of birth"));
-      return;
+      nextErrors.dob = t("Please enter your date of birth");
     }
     const dobDate = new Date(formData.dob);
-    if (!Number.isNaN(dobDate.getTime())) {
+    if (formData.dob && !Number.isNaN(dobDate.getTime())) {
       const today = new Date();
       let age = today.getFullYear() - dobDate.getFullYear();
       const monthDiff = today.getMonth() - dobDate.getMonth();
@@ -256,23 +267,27 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       }
       if (age < 13) {
         setAgeError(t("You must be at least 13 years old to create a huddle account."));
-        toast.error(t("You must be at least 13 years old to create a huddle account."));
-        return;
+        nextErrors.dob = t("You must be at least 13 years old to create a huddle account.");
       }
     }
 
-    if (!formData.locationCountry.trim() || !formData.locationDistrict.trim()) {
-      toast.error(t("Please enter your location"));
-      return;
+    if (!formData.locationCountry.trim()) {
+      nextErrors.locationCountry = t("Please select your country");
+    }
+    if (!formData.locationDistrict.trim()) {
+      nextErrors.locationDistrict = t("Please select your district");
     }
 
     if (!formData.socialAvailability) {
-      toast.error(t("Please enable social availability"));
-      return;
+      nextErrors.socialAvailability = t("Please enable social availability");
     }
 
-    if (formData.availabilityStatus.length === 0) {
-      toast.error(t("Please select at least one availability status"));
+    if (formData.socialAvailability && formData.availabilityStatus.length === 0) {
+      nextErrors.availabilityStatus = t("Please select at least one availability status");
+    }
+
+    setFieldErrors(nextErrors);
+    if (Object.values(nextErrors).some(Boolean)) {
       return;
     }
 
@@ -309,9 +324,10 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
       // Call onComplete which will save to database in Onboarding.tsx
       onComplete({ ...formData, avatarUrl, locationName });
       toast.success(t("Profile information saved!"));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error in profile setup:", error);
-      toast.error(error.message || t("Failed to save profile"));
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to save profile"));
     } finally {
       setLoading(false);
     }
@@ -369,10 +385,25 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <Label><span className="text-destructive">{t("*")}</span> {t("Display/User Name")}</Label>
           <Input
             value={formData.displayName}
-            onChange={(e) => setFormData(prev => ({ ...prev, displayName: e.target.value }))}
+            onChange={(e) => {
+              const next = e.target.value;
+              setFormData(prev => ({ ...prev, displayName: next }));
+              if (next.trim() && !/\d/.test(next)) {
+                clearFieldError("displayName");
+              }
+            }}
+            onBlur={() => {
+              if (!formData.displayName.trim()) {
+                setFieldErrors((prev) => ({ ...prev, displayName: t("Please enter a display name") }));
+              } else if (/\d/.test(formData.displayName)) {
+                setFieldErrors((prev) => ({ ...prev, displayName: t("Name cannot contain numbers") }));
+              }
+            }}
             placeholder={t("How should others call you?")}
-            className="h-12 rounded-xl"
+            className={cn("h-12 rounded-xl", fieldErrors.displayName && "border-red-500")}
+            aria-invalid={Boolean(fieldErrors.displayName)}
           />
+          <ErrorLabel message={fieldErrors.displayName} />
         </div>
 
         <div className="space-y-2">
@@ -473,6 +504,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             setFormData(prev => ({ ...prev, dob: nextDob }));
             if (!nextDob) {
               setAgeError("");
+              setFieldErrors((prev) => ({ ...prev, dob: t("Please enter your date of birth") }));
               return;
             }
             const dobDate = new Date(nextDob);
@@ -490,13 +522,13 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
               setAgeError(t("You must be at least 13 years old to create a huddle account."));
             } else {
               setAgeError("");
+              clearFieldError("dob");
             }
           }}
-          className="h-12 rounded-xl"
+          className={cn("h-12 rounded-xl", (fieldErrors.dob || ageError) && "border-red-500")}
+          aria-invalid={Boolean(fieldErrors.dob || ageError)}
         />
-        {ageError && (
-          <div className="text-xs text-destructive">{ageError}</div>
-        )}
+        <ErrorLabel message={fieldErrors.dob || ageError} />
       </div>
 
       {/* Location */}
@@ -507,15 +539,18 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
         </Label>
         <Select
           value={formData.locationCountry}
-          onValueChange={(value) =>
+          onValueChange={(value) => {
             setFormData((prev) => ({
               ...prev,
               locationCountry: value,
               locationDistrict: "",
-            }))
-          }
+            }));
+            if (value) {
+              clearFieldError("locationCountry");
+            }
+          }}
         >
-          <SelectTrigger className="h-12 rounded-xl">
+          <SelectTrigger className={cn("h-12 rounded-xl", fieldErrors.locationCountry && "border-red-500")}>
             <SelectValue placeholder={t("Select country")} />
           </SelectTrigger>
           <SelectContent>
@@ -526,18 +561,22 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             ))}
           </SelectContent>
         </Select>
+        <ErrorLabel message={fieldErrors.locationCountry} />
 
         {DISTRICT_MAP[formData.locationCountry] ? (
           <Select
             value={formData.locationDistrict}
-            onValueChange={(value) =>
+            onValueChange={(value) => {
               setFormData((prev) => ({
                 ...prev,
                 locationDistrict: value,
-              }))
-            }
+              }));
+              if (value) {
+                clearFieldError("locationDistrict");
+              }
+            }}
           >
-            <SelectTrigger className="h-12 rounded-xl">
+            <SelectTrigger className={cn("h-12 rounded-xl", fieldErrors.locationDistrict && "border-red-500")}>
               <SelectValue placeholder={t("Select district")} />
             </SelectTrigger>
             <SelectContent>
@@ -552,15 +591,19 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           <div className="relative">
             <Input
               value={formData.locationDistrict}
-              onChange={(e) => setFormData((prev) => ({ ...prev, locationDistrict: e.target.value }))}
+              onChange={(e) => {
+                setFormData((prev) => ({ ...prev, locationDistrict: e.target.value }));
+                if (e.target.value.trim()) {
+                  clearFieldError("locationDistrict");
+                }
+              }}
               placeholder={t("Your district")}
-              className="h-12 rounded-xl pr-10"
+              className={cn("h-12 rounded-xl pr-10", fieldErrors.locationDistrict && "border-red-500")}
+              aria-invalid={Boolean(fieldErrors.locationDistrict)}
             />
-            {detectingLocation && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 animate-spin text-muted-foreground" />
-            )}
           </div>
         )}
+        <ErrorLabel message={fieldErrors.locationDistrict} />
       </div>
 
       {/* Pet Experience */}
@@ -785,7 +828,15 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
           </div>
           <Switch
             checked={formData.ownsPets}
-            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, ownsPets: checked }))}
+            onCheckedChange={(checked) =>
+              setFormData(prev => ({
+                ...prev,
+                ownsPets: checked,
+                availabilityStatus: checked
+                  ? prev.availabilityStatus.filter((s) => s !== "Animal Friend (No Pet)")
+                  : prev.availabilityStatus.filter((s) => s !== "Pet Parent"),
+              }))
+            }
           />
         </div>
 
@@ -798,9 +849,20 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             </div>
             <Switch
               checked={formData.socialAvailability}
-              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, socialAvailability: checked }))}
+              onCheckedChange={(checked) => {
+                setFormData(prev => ({ ...prev, socialAvailability: checked }));
+                if (checked) {
+                  clearFieldError("socialAvailability");
+                } else {
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    socialAvailability: t("Please enable social availability"),
+                  }));
+                }
+              }}
             />
           </div>
+          <ErrorLabel message={fieldErrors.socialAvailability} />
 
           {formData.socialAvailability && (
             <motion.div
@@ -810,17 +872,29 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
             >
               <Label className="text-sm"><span className="text-destructive">{t("*")}</span> {t("I identify as:")}</Label>
               <div className="flex flex-wrap gap-2">
-                {AVAILABILITY_STATUS_OPTIONS.map(status => (
-                  <Badge
-                    key={status}
-                    variant={formData.availabilityStatus.includes(status) ? "default" : "outline"}
-                    className="cursor-pointer px-3 py-1.5 text-sm"
-                    onClick={() => toggleAvailabilityStatus(status)}
-                  >
-                    {t(status)}
-                  </Badge>
-                ))}
+                {AVAILABILITY_STATUS_OPTIONS.map(status => {
+                  const isBlocked = formData.ownsPets
+                    ? status === "Animal Friend (No Pet)"
+                    : status === "Pet Parent";
+                  return (
+                    <Badge
+                      key={status}
+                      variant={formData.availabilityStatus.includes(status) ? "default" : "outline"}
+                      className={cn(
+                        "px-3 py-1.5 text-sm",
+                        isBlocked ? "cursor-not-allowed opacity-40" : "cursor-pointer"
+                      )}
+                      onClick={() => {
+                        if (isBlocked) return;
+                        toggleAvailabilityStatus(status);
+                      }}
+                    >
+                      {t(status)}
+                    </Badge>
+                  );
+                })}
               </div>
+              <ErrorLabel message={fieldErrors.availabilityStatus} />
             </motion.div>
           )}
         </div>

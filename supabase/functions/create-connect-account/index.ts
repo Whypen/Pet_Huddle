@@ -74,8 +74,9 @@ serve(async (req: Request) => {
         JSON.stringify({ url: accountLink.url, accountId }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
-    } catch (stripeError: any) {
+    } catch (stripeError: unknown) {
       if (!allowStripeFallback) throw stripeError;
+      const stripeMessage = stripeError instanceof Error ? stripeError.message : String(stripeError);
 
       // Localhost/testing fallback while Stripe live activation is pending.
       const fallbackAccountId = accountId || `acct_local_${crypto.randomUUID().replaceAll("-", "").slice(0, 18)}`;
@@ -89,14 +90,15 @@ serve(async (req: Request) => {
 
       const fallbackUrl = `${returnUrl || Deno.env.get("PUBLIC_URL") || "http://localhost:8080"}/become-sitter?mock_connect=true`;
       return new Response(
-        JSON.stringify({ url: fallbackUrl, accountId: fallbackAccountId, mock: true, reason: stripeError.message }),
+        JSON.stringify({ url: fallbackUrl, accountId: fallbackAccountId, mock: true, reason: stripeMessage }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Connect account error:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: message }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

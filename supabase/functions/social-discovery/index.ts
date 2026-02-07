@@ -7,7 +7,21 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 serve(async (req: Request) => {
   try {
-    const { userId, lat, lng, radiusKm, minAge, maxAge } = await req.json();
+    const {
+      userId,
+      lat,
+      lng,
+      radiusKm,
+      minAge,
+      maxAge,
+      role,
+      gender,
+      species,
+      petSize,
+      advanced,
+      heightMin,
+      heightMax
+    } = await req.json();
     if (!userId || lat == null || lng == null) {
       return new Response(JSON.stringify({ error: "Missing required parameters" }), {
         status: 400,
@@ -26,6 +40,13 @@ serve(async (req: Request) => {
       p_radius_m: radiusM,
       p_min_age: minAgeSafe,
       p_max_age: maxAgeSafe,
+      p_role: role || null,
+      p_gender: gender || null,
+      p_species: Array.isArray(species) ? species : null,
+      p_pet_size: petSize || null,
+      p_advanced: Boolean(advanced),
+      p_height_min: typeof heightMin === "number" ? heightMin : null,
+      p_height_max: typeof heightMax === "number" ? heightMax : null,
     });
 
     if (error) throw error;
@@ -34,16 +55,17 @@ serve(async (req: Request) => {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[social-discovery]", err);
-    const message = `${err?.message || ""}`.toLowerCase();
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const message = errMsg.toLowerCase();
     if (message.includes("quota") || message.includes("rate limit")) {
       return new Response(JSON.stringify({ error: "Quota Exceeded" }), {
         status: 429,
         headers: { "Content-Type": "application/json" },
       });
     }
-    return new Response(JSON.stringify({ error: err.message || "Unknown error" }), {
+    return new Response(JSON.stringify({ error: errMsg || "Unknown error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });

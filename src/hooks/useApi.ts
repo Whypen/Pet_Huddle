@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
 
-interface ApiResponse<T = any> {
+interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -14,7 +14,7 @@ export const useApi = () => {
   const { session } = useAuth();
   const apiUrl = import.meta.env.VITE_API_URL;
 
-  const fetchApi = useCallback(async <T = any>(
+  const fetchApi = useCallback(async <T = unknown>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> => {
@@ -43,7 +43,7 @@ export const useApi = () => {
         headers,
       });
 
-      const data = await response.json();
+      const data: unknown = await response.json();
 
       if (!response.ok) {
         if (response.status === 429) {
@@ -55,19 +55,24 @@ export const useApi = () => {
         }
         return {
           success: false,
-          error: data.error || data.message || "Request failed",
+          error: (typeof data === "object" && data !== null && ("error" in data || "message" in data))
+            ? (String((data as Record<string, unknown>).error || (data as Record<string, unknown>).message || "Request failed"))
+            : "Request failed",
         };
       }
 
       return {
         success: true,
-        data: data.data || data,
+        data: ((typeof data === "object" && data !== null && "data" in data)
+          ? (data as Record<string, unknown>).data
+          : data) as T,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("API Error:", error);
+      const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
-        error: error.message || "Network error",
+        error: message || "Network error",
       };
     }
   }, [apiUrl, session?.access_token]);
@@ -116,14 +121,15 @@ export const useApi = () => {
     conversationId: string,
     message: string,
     petId?: string,
-    petProfile?: { name: string; species: string; breed?: string | null; weight?: number | null; weight_unit?: string | null }
+    petProfile?: { name: string; species: string; breed?: string | null; weight?: number | null; weight_unit?: string | null },
+    imageBase64?: string
   ) => {
     if (!session?.user?.id) {
       return Promise.resolve({ success: false, error: "Missing user session" });
     }
     return fetchApi("/ai-vet/chat", {
       method: "POST",
-      body: JSON.stringify({ conversationId, message, petId, petProfile, userId: session.user.id }),
+      body: JSON.stringify({ conversationId, message, petId, petProfile, userId: session.user.id, imageBase64 }),
     });
   }, [fetchApi, session?.user?.id]);
 

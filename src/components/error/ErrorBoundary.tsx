@@ -108,7 +108,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Help Text */}
             <p className="text-xs text-muted-foreground">
-              {t("If this issue persists, please contact support or report a bug through the Settings page.")}
+              {t("Please refresh or return home and try again.")}
             </p>
           </div>
         </div>

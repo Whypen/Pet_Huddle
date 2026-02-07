@@ -458,6 +458,10 @@ const SidebarMenuButton = React.forwardRef<
     />
   );
 
+  if (!button) {
+    return null;
+  }
+
   if (!tooltip) {
     return button;
   }

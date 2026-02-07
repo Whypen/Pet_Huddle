@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ComponentType } from "react";
 import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -10,7 +10,6 @@ import {
   Camera,
   Users,
   Sparkles,
-  Shield,
   Loader2,
   ExternalLink,
 } from "lucide-react";
@@ -32,16 +31,15 @@ interface PlanFeature {
 }
 
 const PLAN_FEATURES: PlanFeature[] = [
-  { name: "Badge Type", free: "Grey", premium: "Blue Premium", gold: "Gold Crown" },
-  { name: "Chat Access", free: "Limited", premium: "Unlimited", gold: "Unlimited + Priority" },
-  { name: "AI Vet", free: "Text Only", premium: "Photo + Audio", gold: "Unlimited Media" },
-  { name: "Broadcast Range", free: "1 mile", premium: "5 miles", gold: "10 miles" },
-  { name: "Social Filters", free: "Basic", premium: "Advanced", gold: "Advanced + Boosts" },
-  { name: "Ghost Mode", free: false, premium: true, gold: true },
-  { name: "Notice Board", free: false, premium: true, gold: true },
-  { name: "Priority Support", free: false, premium: false, gold: true },
-  { name: "Marketplace Priority", free: false, premium: false, gold: true },
-  { name: "Ad-free Experience", free: false, premium: true, gold: true },
+  { name: "Family Slot", free: "—", premium: "—", gold: "1 Extra Member" },
+  { name: "Thread", free: "1", premium: "5", gold: "30" },
+  { name: "Discovery Filters", free: "Basic", premium: "Advanced", gold: "Advanced" },
+  { name: "Visibility", free: "—", premium: "Priority", gold: "Priority" },
+  { name: "Star", free: "—", premium: "—", gold: "3" },
+  { name: "Media", free: "—", premium: "10", gold: "50" },
+  { name: "Alert", free: "5", premium: "20", gold: "Unlimited" },
+  { name: "Broadcast Range", free: "1km", premium: "5km", gold: "20km" },
+  { name: "Ad-free", free: "—", premium: "—", gold: "✓" },
 ];
 
 interface AddOn {
@@ -49,7 +47,7 @@ interface AddOn {
   name: string;
   description: string;
   price: number;
-  icon: any;
+  icon: ComponentType<{ className?: string }>;
   type: string;
   quantity?: number;
 }
@@ -58,7 +56,7 @@ const ADD_ONS: AddOn[] = [
   {
     id: "star_pack",
     name: "3 Star Pack",
-    description: "Boost your profile visibility",
+    description: "Superpower to trigger chats immediately",
     price: 4.99,
     icon: Star,
     type: "star_pack",
@@ -66,8 +64,8 @@ const ADD_ONS: AddOn[] = [
   },
   {
     id: "emergency_alert",
-    name: "Emergency Mesh Alert",
-    description: "Lost pet emergency broadcast",
+    name: "Broadcast Alert",
+    description: "Additional broadcast alert",
     price: 2.99,
     icon: AlertTriangle,
     type: "emergency_alert",
@@ -75,29 +73,12 @@ const ADD_ONS: AddOn[] = [
   },
   {
     id: "vet_media",
-    name: "10 AI Vet Media Credits",
-    description: "Upload photos/videos to AI Vet",
+    name: "Additional 10 Media",
+    description: "Additional 10 media usage across Social, Chats and AI Vet.",
     price: 3.99,
     icon: Camera,
     type: "vet_media",
     quantity: 10,
-  },
-  {
-    id: "family_slot",
-    name: "Family Member Slot",
-    description: "Add 1 family member to account",
-    price: 5.99,
-    icon: Users,
-    type: "family_slot",
-    quantity: 1,
-  },
-  {
-    id: "verified_badge",
-    name: "Verified Badge",
-    description: "One-time ID verification",
-    price: 9.99,
-    icon: Shield,
-    type: "verified_badge",
   },
 ];
 
@@ -112,10 +93,12 @@ const Premium = () => {
   const [selectedTier, setSelectedTier] = useState<"premium" | "gold">("premium");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
+  const [cart, setCart] = useState<Record<string, number>>({});
 
   const isPremium = profile?.tier === "premium";
   const isGold = profile?.tier === "gold";
   const hasActiveSubscription = isPremium || isGold;
+  const totalFamilySlots = (profile?.tier === "gold" ? 1 : 0) + (profile?.family_slots || 0);
 
   // =====================================================
   // RACE CONDITION HANDLING: Poll for updates after payment
@@ -154,9 +137,9 @@ const Premium = () => {
   }, [sessionId, hasActiveSubscription]);
 
   // =====================================================
-  // SUBSCRIPTION PRICING
+  // SUBSCRIPTION PRICING (dynamic from Stripe)
   // =====================================================
-  const pricing = {
+  const [pricing, setPricing] = useState({
     premium: {
       monthly: { price: 8.99, periodKey: "period.month" },
       yearly: { price: 80, periodKey: "period.year", monthlyEquivalent: 6.67, savingsKey: "premium.savings_26" },
@@ -165,12 +148,98 @@ const Premium = () => {
       monthly: { price: 19.99, periodKey: "period.month" },
       yearly: { price: 180, periodKey: "period.year", monthlyEquivalent: 15, savingsKey: "premium.savings_25" },
     },
+  });
+
+  const [addonPricing, setAddonPricing] = useState<Record<string, number>>({
+    star_pack: 4.99,
+    emergency_alert: 2.99,
+    vet_media: 3.99,
+  });
+
+  useEffect(() => {
+    const loadPricing = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("stripe-pricing");
+        if (error) throw error;
+        const prices = data?.prices || {};
+        setPricing((prev) => ({
+          premium: {
+            ...prev.premium,
+            monthly: { ...prev.premium.monthly, price: prices.premium_monthly?.amount ?? prev.premium.monthly.price },
+            yearly: {
+              ...prev.premium.yearly,
+              price: prices.premium_annual?.amount ?? prev.premium.yearly.price,
+              monthlyEquivalent: prices.premium_annual?.amount
+                ? Number((prices.premium_annual.amount / 12).toFixed(2))
+                : prev.premium.yearly.monthlyEquivalent,
+            },
+          },
+          gold: {
+            ...prev.gold,
+            monthly: { ...prev.gold.monthly, price: prices.gold_monthly?.amount ?? prev.gold.monthly.price },
+            yearly: {
+              ...prev.gold.yearly,
+              price: prices.gold_annual?.amount ?? prev.gold.yearly.price,
+              monthlyEquivalent: prices.gold_annual?.amount
+                ? Number((prices.gold_annual.amount / 12).toFixed(2))
+                : prev.gold.yearly.monthlyEquivalent,
+            },
+          },
+        }));
+
+        setAddonPricing((prev) => ({
+          ...prev,
+          star_pack: prices.star_pack?.amount ?? prev.star_pack,
+          emergency_alert: prices.emergency_alert?.amount ?? prev.emergency_alert,
+          vet_media: prices.vet_media?.amount ?? prev.vet_media,
+        }));
+      } catch (err) {
+        console.warn("[Premium] Failed to load Stripe pricing", err);
+      }
+    };
+    loadPricing();
+  }, []);
+
+  const addToCart = (type: string) => {
+    setCart((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
+  };
+
+  const removeFromCart = (type: string) => {
+    setCart((prev) => {
+      const next = { ...prev };
+      if (!next[type]) return next;
+      if (next[type] <= 1) {
+        delete next[type];
+      } else {
+        next[type] -= 1;
+      }
+      return next;
+    });
+  };
+
+  const cartItems = ADD_ONS.filter((addOn) => cart[addOn.type]).map((addOn) => ({
+    ...addOn,
+    cartQty: cart[addOn.type] || 0,
+    unitPrice: addonPricing[addOn.type] ?? addOn.price,
+  }));
+
+  const cartTotal = cartItems.reduce((sum, item) => sum + item.unitPrice * item.cartQty, 0);
+
+  const handleCheckoutCart = () => {
+    if (cartItems.length === 0) return;
+    createCheckoutSession({
+      mode: "payment",
+      items: cartItems.map((item) => ({ type: item.type, quantity: item.cartQty })),
+      amount: Math.round(cartTotal * 100),
+    });
   };
 
   // =====================================================
   // STRIPE CHECKOUT FUNCTIONS
   // =====================================================
-  const createCheckoutSession = async (type: string, mode: "subscription" | "payment", amount?: number) => {
+  const createCheckoutSession = async (
+    params: { type?: string; mode: "subscription" | "payment"; amount?: number; items?: { type: string; quantity: number }[] }
+  ) => {
     if (!user) {
       toast.error(t("Please sign in first"));
       return;
@@ -179,11 +248,13 @@ const Premium = () => {
     setIsProcessing(true);
 
     try {
+      const { type, mode, amount, items } = params;
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           type,
           mode,
+          items,
           amount,
           successUrl: `${window.location.origin}/premium?session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${window.location.origin}/premium`,
@@ -195,7 +266,7 @@ const Premium = () => {
       if (data?.url) {
         window.location.href = data.url;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Checkout error:", error);
       toast.error(t("Failed to create checkout session"));
     } finally {
@@ -206,11 +277,7 @@ const Premium = () => {
   const handleSubscribe = () => {
     const tierType = selectedTier === "gold" ? "gold" : "premium";
     const planType = selectedPlan === "yearly" ? "annual" : "monthly";
-    createCheckoutSession(`${tierType}_${planType}`, "subscription");
-  };
-
-  const handleBuyAddOn = (addOn: AddOn) => {
-    createCheckoutSession(addOn.type, "payment", addOn.price * 100);
+    createCheckoutSession({ type: `${tierType}_${planType}`, mode: "subscription" });
   };
 
   const handleManageBilling = async () => {
@@ -231,7 +298,7 @@ const Premium = () => {
       if (data?.url) {
         window.location.href = data.url;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Portal error:", error);
       toast.error(t("Failed to open billing portal"));
     } finally {
@@ -388,7 +455,7 @@ const Premium = () => {
               <Users className="w-4 h-4 text-[#A6D539]" />
               <span className="text-xs font-medium text-muted-foreground">{t("Family")}</span>
             </div>
-            <p className="text-2xl font-bold">{profile?.family_slots || 0}</p>
+            <p className="text-2xl font-bold">{totalFamilySlots}</p>
           </div>
         </div>
 
@@ -575,9 +642,12 @@ const Premium = () => {
 
         {/* Add-on Store */}
         <div className="mt-8">
-          <h3 className="text-lg font-bold mb-4">{t("Add-on Store")}</h3>
+          <h3 className="text-lg font-bold mb-4">{t("Add-ons")}</h3>
           <div className="grid grid-cols-2 gap-3">
-            {ADD_ONS.map((addOn) => (
+            {ADD_ONS.map((addOn) => {
+              const unitPrice = addonPricing[addOn.type] ?? addOn.price;
+              const qty = cart[addOn.type] || 0;
+              return (
               <motion.div
                 key={addOn.id}
                 whileHover={{ scale: 1.02 }}
@@ -590,9 +660,7 @@ const Premium = () => {
                       "w-10 h-10 rounded-full flex items-center justify-center",
                       addOn.id === "star_pack" && "bg-amber-100 dark:bg-amber-900/20",
                       addOn.id === "emergency_alert" && "bg-red-100 dark:bg-red-900/20",
-                      addOn.id === "vet_media" && "bg-primary/10 dark:bg-primary/20",
-                      addOn.id === "family_slot" && "bg-[#A6D539]/15 dark:bg-[#A6D539]/20",
-                      addOn.id === "verified_badge" && "bg-purple-100 dark:bg-purple-900/20"
+                      addOn.id === "vet_media" && "bg-primary/10 dark:bg-primary/20"
                     )}
                   >
                     <addOn.icon className="w-5 h-5" />
@@ -604,17 +672,76 @@ const Premium = () => {
                 <h4 className="font-semibold text-sm mb-1">{t(addOn.name)}</h4>
                 <p className="text-xs text-muted-foreground mb-3">{t(addOn.description)}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-lg font-bold">${addOn.price}</span>
-                  <Button
-                    onClick={() => handleBuyAddOn(addOn)}
-                    disabled={isProcessing}
-                    size="sm"
-                    variant="outline"
-                  >
-                    {t("Buy")}
-                  </Button>
+                  <span className="text-lg font-bold">${unitPrice.toFixed(2)}</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => removeFromCart(addOn.type)}
+                      disabled={qty === 0 || isProcessing}
+                      size="sm"
+                      variant="outline"
+                    >
+                      -
+                    </Button>
+                    <span className="text-xs font-semibold min-w-[18px] text-center">{qty}</span>
+                    <Button
+                      onClick={() => addToCart(addOn.type)}
+                      disabled={isProcessing}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {t("Add")}
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
+            )})}
+          </div>
+          <div className="mt-4 rounded-xl border border-border bg-muted/30 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-semibold">{t("Add-on Cart")}</span>
+              <span className="text-sm font-bold">${cartTotal.toFixed(2)}</span>
+            </div>
+            {cartItems.length === 0 ? (
+              <p className="text-xs text-muted-foreground">{t("No add-ons selected")}</p>
+            ) : (
+              <div className="space-y-2">
+                {cartItems.map((item) => (
+                  <div key={item.type} className="flex items-center justify-between text-xs">
+                    <span>{t(item.name)} ×{item.cartQty}</span>
+                    <span>${(item.unitPrice * item.cartQty).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button
+              onClick={handleCheckoutCart}
+              disabled={isProcessing || cartItems.length === 0}
+              className="w-full mt-3"
+            >
+              {isProcessing ? t("Processing...") : t("Checkout Add-ons")}
+            </Button>
+          </div>
+        </div>
+
+        {/* Past Transactions (Demo) */}
+        <div className="mt-6">
+          <h3 className="text-lg font-bold mb-3">{t("Past Transactions")}</h3>
+          <div className="space-y-2">
+            {[
+              { label: "Premium Monthly", amount: "$8.99", date: "Jan 5, 2026", status: "Completed" },
+              { label: "3 Star Pack", amount: "$4.99", date: "Dec 22, 2025", status: "Completed" },
+              { label: "Broadcast Alert", amount: "$2.99", date: "Dec 10, 2025", status: "Completed" },
+            ].map((row) => (
+              <div key={`${row.label}-${row.date}`} className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-xs">
+                <div>
+                  <p className="font-semibold">{t(row.label)}</p>
+                  <p className="text-muted-foreground">{t(row.date)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold">{row.amount}</p>
+                  <p className="text-muted-foreground">{t(row.status)}</p>
+                </div>
+              </div>
             ))}
           </div>
         </div>

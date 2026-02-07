@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Search, 
   AlertTriangle, 
   X,
   ThumbsUp,
@@ -12,8 +11,9 @@ import {
   Camera,
   Phone,
   Navigation,
-  Eye,
-  Hospital
+  Hospital,
+  MapPin,
+  Star
 } from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -27,7 +27,6 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
@@ -76,6 +75,9 @@ interface VetClinic {
   lng: number;
   phone?: string;
   openingHours?: string;
+  address?: string;
+  rating?: number;
+  isOpen?: boolean;
   is24h: boolean;
 }
 
@@ -103,18 +105,23 @@ const Map = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<MapAlert | null>(null);
   const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
+  const [selectedFriend, setSelectedFriend] = useState<DemoUser | null>(null);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
-  const [isOnline, setIsOnline] = useState(true);
+  const [pinning, setPinning] = useState(false);
+  const [manualLat, setManualLat] = useState("");
+  const [manualLng, setManualLng] = useState("");
   const [showConfirmRemove, setShowConfirmRemove] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [userLocationAccuracy, setUserLocationAccuracy] = useState<number | null>(null);
+  const [pinExpiresAt, setPinExpiresAt] = useState<string | null>(null);
+  const [retentionExpiresAt, setRetentionExpiresAt] = useState<string | null>(null);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [premiumFooterReason, setPremiumFooterReason] = useState<string>("mesh_alert");
-  const [alertCountToday, setAlertCountToday] = useState(0); // track daily alert count for 3rd-alert trigger
   const { upsellModal, closeUpsellModal, buyAddOn, checkEmergencyAlertAvailable } = useUpsell();
 
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-  const broadcastRange = isPremium ? 5 : 1;
+  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const broadcastRange = effectiveTier === "gold" ? 20 : isPremium ? 5 : 1;
 
   useEffect(() => {
     if (searchParams.get("mode") === "broadcast") {
@@ -133,74 +140,116 @@ const Map = () => {
     { id: "Others", label: t("map.filter_others") },
   ];
 
-  // Get user location
-  useEffect(() => {
+  const handlePinMyLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error(t("Geolocation is not supported on this device"));
+      return;
+    }
+    setPinning(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         setUserLocationAccuracy(pos.coords.accuracy);
         if (pos.coords.accuracy && pos.coords.accuracy > 500) {
           toast.warning(t("Location accuracy too low. Please retry with better GPS signal."));
-          // Fallback without persisting
-          setUserLocation({ lat: 22.3193, lng: 114.1694 });
+          setPinning(false);
           return;
         }
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setUserLocation({ lat, lng });
+        const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+        const retentionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        setPinExpiresAt(pinExpires);
+        setRetentionExpiresAt(retentionExpires);
+        if (user) {
+          await supabase.rpc("set_user_location", {
+            p_lat: lat,
+            p_lng: lng,
+            p_pin_hours: 2,
+            p_retention_hours: 24,
+          });
+        }
+        setPinning(false);
       },
-      () => setUserLocation({ lat: 22.3193, lng: 114.1694 }) // HK default fallback
+      () => {
+        toast.error(t("Unable to detect current location"));
+        setPinning(false);
+      }
     );
-  }, []);
+  };
 
-  // Fetch HK Vet Clinics from Overpass API
+  const handleManualPin = async () => {
+    const lat = Number(manualLat);
+    const lng = Number(manualLng);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      toast.error(t("Invalid coordinates"));
+      return;
+    }
+    setUserLocation({ lat, lng });
+    const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const retentionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    setPinExpiresAt(pinExpires);
+    setRetentionExpiresAt(retentionExpires);
+    if (user) {
+      await supabase.rpc("set_user_location", {
+        p_lat: lat,
+        p_lng: lng,
+        p_pin_hours: 2,
+        p_retention_hours: 24,
+      });
+    }
+  };
+
+  // Fetch HK Vet Clinics from Google Places (via Edge Function)
   const fetchVetClinics = useCallback(async () => {
     try {
-      const query = `
-        [out:json][timeout:25];
-        (
-          node["amenity"="veterinary"](22.15,113.82,22.56,114.45);
-          way["amenity"="veterinary"](22.15,113.82,22.56,114.45);
-        );
-        out center;
-      `;
-      
-      const response = await fetch("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: query,
-      });
-      
-      const data = await response.json();
-      
-      const clinics: VetClinic[] = data.elements.map((el: any) => ({
-        id: `vet-${el.id}`,
-        name: el.tags?.name || t("map.vet_clinic"),
-        lat: el.lat || el.center?.lat,
-        lng: el.lon || el.center?.lon,
-        phone: el.tags?.phone || el.tags?.["contact:phone"],
-        openingHours: el.tags?.opening_hours,
-        is24h: el.tags?.opening_hours?.toLowerCase().includes("24") || false,
-      })).filter((c: VetClinic) => c.lat && c.lng);
-      
+      const { data, error } = await supabase.functions.invoke("vet-clinics");
+      if (error) throw error;
+      const clinics: VetClinic[] = (data?.clinics || []).map((clinic: {
+        id: string;
+        name: string;
+        lat: number;
+        lng: number;
+        phone?: string;
+        openingHours?: string;
+        address?: string;
+        rating?: number;
+        isOpen?: boolean;
+      }) => ({
+        id: clinic.id,
+        name: clinic.name,
+        lat: clinic.lat,
+        lng: clinic.lng,
+        phone: clinic.phone,
+        openingHours: clinic.openingHours,
+        address: clinic.address,
+        rating: clinic.rating,
+        isOpen: clinic.isOpen,
+        is24h: clinic.openingHours?.toLowerCase?.().includes("24") || false,
+      }));
       setVetClinics(clinics);
     } catch (error) {
       console.error("Error fetching vet clinics:", error);
       // Fallback demo data
       setVetClinics([
-        { id: "vet-1", name: t("map.vet.hk_clinic"), lat: 22.2855, lng: 114.1577, is24h: true },
-        { id: "vet-2", name: t("map.vet.central_hospital"), lat: 22.2820, lng: 114.1588, is24h: false },
-        { id: "vet-3", name: t("map.vet.wan_chai"), lat: 22.2770, lng: 114.1730, is24h: true },
-        { id: "vet-4", name: t("map.vet.kowloon"), lat: 22.3018, lng: 114.1695, is24h: false },
+        { id: "vet-1", name: t("map.vet.hk_clinic"), lat: 22.2855, lng: 114.1577, is24h: true, isOpen: true, rating: 4.8 },
+        { id: "vet-2", name: t("map.vet.central_hospital"), lat: 22.2820, lng: 114.1588, is24h: false, isOpen: false, rating: 4.6 },
+        { id: "vet-3", name: t("map.vet.wan_chai"), lat: 22.2770, lng: 114.1730, is24h: true, isOpen: true, rating: 4.7 },
+        { id: "vet-4", name: t("map.vet.kowloon"), lat: 22.3018, lng: 114.1695, is24h: false, isOpen: true, rating: 4.5 },
       ]);
     }
   }, [t]);
 
   // Initialize map
   useEffect(() => {
-    if (map.current || !mapContainer.current || !userLocation) return;
+    if (map.current || !mapContainer.current) return;
 
+    const initialCenter = userLocation ? [userLocation.lng, userLocation.lat] : defaultCenter;
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v12",
-      center: [userLocation.lng, userLocation.lat],
-      zoom: 14,
+      center: initialCenter,
+      zoom: userLocation ? 14 : 11,
     });
 
     map.current.on("load", () => {
@@ -222,7 +271,7 @@ const Map = () => {
       map.current?.remove();
       map.current = null;
     };
-  }, [userLocation]);
+  }, []);
 
   // Handle resize
   useEffect(() => {
@@ -235,6 +284,12 @@ const Map = () => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (map.current && userLocation) {
+      map.current.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
+    }
+  }, [userLocation]);
 
   // Fetch vet clinics on mount
   useEffect(() => {
@@ -279,22 +334,6 @@ const Map = () => {
       .setLngLat([userLocation.lng, userLocation.lat])
       .addTo(map.current);
 
-    // Persist user location to Supabase profiles
-    if (user && (!userLocationAccuracy || userLocationAccuracy <= 500)) {
-      const persistLocation = async () => {
-        const { error } = await supabase
-          .from("profiles")
-          .update({ last_lat: userLocation.lat, last_lng: userLocation.lng })
-          .eq("id", user.id);
-
-        if (error) {
-          console.warn("Could not persist location:", error);
-        }
-      };
-
-      persistLocation();
-    }
-
     return () => marker.remove();
   }, [userLocation, mapLoaded, user]);
 
@@ -315,24 +354,36 @@ const Map = () => {
           return;
         }
 
+        const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
         const el = document.createElement("div");
         el.className = "vet-marker";
         el.innerHTML = `
           <div style="
-            width: 36px;
-            height: 36px;
-            background-color: #DC2626;
+            width: 34px;
+            height: 34px;
+            background-color: #ffffff;
             border-radius: 50%;
-            border: 3px solid white;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            border: 2px solid #E5E7EB;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             position: relative;
+            font-weight: bold;
+            color: #111827;
           ">
-            <span style="font-size: 18px;">${t("🏥")}</span>
-            ${vet.is24h ? `<span style="position: absolute; top: -8px; right: -8px; background: #A6D539; color: white; font-size: 8px; padding: 2px 4px; border-radius: 4px; font-weight: bold;">${t("24h")}</span>` : ''}
+            +
+            <span style="
+              position: absolute;
+              top: -2px;
+              right: -2px;
+              width: 8px;
+              height: 8px;
+              border-radius: 50%;
+              background: ${dotColor};
+              border: 1px solid #ffffff;
+            "></span>
           </div>
         `;
         el.addEventListener("click", () => setSelectedVet(vet));
@@ -344,14 +395,12 @@ const Map = () => {
       });
     }
 
-    // Add demo user markers (Friends filter)
+    // Add friend markers
     if (activeFilter === "all" || activeFilter === "Friends") {
-      const onlineUsers = isOnline ? demoUsers.filter(u => u.isOnline) : [];
-      onlineUsers.forEach((user) => {
-        // SPRINT 1: Null-check for user location coordinates
-        if (!user.location?.lng || !user.location?.lat ||
-            isNaN(user.location.lng) || isNaN(user.location.lat)) {
-          console.warn("Invalid user coordinates:", user);
+      demoUsers.forEach((friend) => {
+        if (!friend.location?.lng || !friend.location?.lat ||
+            isNaN(friend.location.lng) || isNaN(friend.location.lat)) {
+          console.warn("Invalid user coordinates:", friend);
           return;
         }
 
@@ -373,12 +422,14 @@ const Map = () => {
             font-weight: bold;
             color: white;
           ">
-            ${user.name.charAt(0)}
+            ${friend.name.charAt(0)}
           </div>
         `;
 
+        el.addEventListener("click", () => setSelectedFriend(friend));
+
         const marker = new mapboxgl.Marker(el)
-          .setLngLat([user.location.lng, user.location.lat])
+          .setLngLat([friend.location.lng, friend.location.lat])
           .addTo(map.current!);
         markersRef.current.push(marker);
       });
@@ -474,7 +525,7 @@ const Map = () => {
 
       markersRef.current.push(marker);
     });
-  }, [alerts, activeFilter, hiddenAlerts, mapLoaded, vetClinics, isOnline]);
+  }, [alerts, activeFilter, hiddenAlerts, mapLoaded, vetClinics]);
 
   const fetchAlerts = async () => {
     try {
@@ -518,6 +569,14 @@ const Map = () => {
     if (!canSend) {
       return;
     }
+    const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+      action_type: "mesh_alert",
+    });
+    if (allowed === false) {
+      setPremiumFooterReason("mesh_alert");
+      setIsPremiumFooterOpen(true);
+      return;
+    }
 
     setCreating(true);
 
@@ -554,18 +613,11 @@ const Map = () => {
 
       toast.success(t("Alert broadcasted!"));
 
-      // Track daily alert count — show PremiumFooter on 3rd alert for free users
-      const newCount = alertCountToday + 1;
-      setAlertCountToday(newCount);
-      if (!isPremium && newCount >= 3) {
-        setPremiumFooterReason("3rd_mesh_alert");
-        setIsPremiumFooterOpen(true);
-      }
-
       resetCreateForm();
       fetchAlerts();
-    } catch (error: any) {
-      toast.error(error.message || t("map.create_alert_failed"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("map.create_alert_failed"));
     } finally {
       setCreating(false);
     }
@@ -595,8 +647,12 @@ const Map = () => {
 
       toast.success(t("Thanks for your support!"));
       fetchAlerts();
-    } catch (error: any) {
-      if (error.code === "23505") {
+    } catch (error: unknown) {
+      const code =
+        (typeof error === "object" && error !== null && "code" in error)
+          ? String((error as Record<string, unknown>).code)
+          : "";
+      if (code === "23505") {
         toast.info(t("You've already supported this alert"));
       } else {
         toast.error(t("Failed to support alert"));
@@ -618,8 +674,12 @@ const Map = () => {
       });
 
       toast.success(t("Alert reported"));
-    } catch (error: any) {
-      if (error.code === "23505") {
+    } catch (error: unknown) {
+      const code =
+        (typeof error === "object" && error !== null && "code" in error)
+          ? String((error as Record<string, unknown>).code)
+          : "";
+      if (code === "23505") {
         toast.info(t("You've already reported this alert"));
       } else {
         toast.error(t("Failed to report alert"));
@@ -668,23 +728,46 @@ const Map = () => {
       
       {/* Header */}
       <header className="px-4 pt-4 pb-3 bg-card z-10 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder={t("map.search")}
-              className="w-full bg-muted rounded-full pl-12 pr-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
-            />
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <h1 className="text-xl font-bold">{t("Map")}</h1>
+            <p className="text-xs text-muted-foreground mt-1">
+              Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings.
+            </p>
           </div>
-          
-          {/* Go Online Toggle */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-full">
-            <Eye className={cn("w-4 h-4", isOnline ? "text-accent" : "text-muted-foreground")} />
-            <Switch checked={isOnline} onCheckedChange={setIsOnline} />
-          </div>
-          
+          <Button
+            onClick={handlePinMyLocation}
+            disabled={pinning}
+            className="h-10 rounded-xl bg-primary text-primary-foreground"
+          >
+            <MapPin className="w-4 h-4 mr-2" />
+            {pinning ? t("Pinning...") : t("Pin my Location")}
+          </Button>
         </div>
+        <div className="mt-3 grid grid-cols-[1fr,1fr,auto] gap-2">
+          <input
+            type="number"
+            value={manualLat}
+            onChange={(e) => setManualLat(e.target.value)}
+            placeholder={t("Latitude")}
+            className="h-9 rounded-lg bg-muted border border-border px-3 text-xs"
+          />
+          <input
+            type="number"
+            value={manualLng}
+            onChange={(e) => setManualLng(e.target.value)}
+            placeholder={t("Longitude")}
+            className="h-9 rounded-lg bg-muted border border-border px-3 text-xs"
+          />
+          <Button onClick={handleManualPin} variant="outline" className="h-9 rounded-lg px-3">
+            {t("Pin")}
+          </Button>
+        </div>
+        {pinExpiresAt && (
+          <p className="text-xs text-muted-foreground mt-2">
+            {t("Pinned until")}: {new Date(pinExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </p>
+        )}
       </header>
 
       {/* Filter Chips */}
@@ -709,7 +792,7 @@ const Map = () => {
 
       {/* Map Container */}
       <div className="flex-1 relative min-h-0">
-        {!userLocation || (loading && !mapLoaded) ? (
+        {loading && !mapLoaded ? (
           <div className="absolute inset-0 flex items-center justify-center bg-muted">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
@@ -856,12 +939,46 @@ const Map = () => {
                 </div>
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
-                  {selectedVet.is24h && (
-                    <span className="text-xs bg-[#A6D539] text-white px-2 py-0.5 rounded-full">
-                      {t("map.24h")}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {selectedVet.isOpen !== undefined && (
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded-full",
+                        selectedVet.isOpen ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                      )}>
+                        {selectedVet.isOpen ? t("Open") : t("Closed")}
+                      </span>
+                    )}
+                    {selectedVet.is24h && (
+                      <span className="text-xs bg-[#A6D539] text-white px-2 py-0.5 rounded-full">
+                        {t("map.24h")}
+                      </span>
+                    )}
+                  </div>
                 </div>
+              </div>
+
+              <div className="space-y-1 text-xs text-muted-foreground mb-4">
+                {selectedVet.address && <p>{selectedVet.address}</p>}
+                {selectedVet.openingHours && <p>{t("Hours")}: {selectedVet.openingHours}</p>}
+                {selectedVet.phone && <p>{t("Phone")}: {selectedVet.phone}</p>}
+                <p>{t("Timely reflection of any changes of operations of the Vet Clinic is not guaranteed")}</p>
+              </div>
+
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={() => {
+                    if (!profile?.is_verified) {
+                      toast.info(t("Available to verified users only"));
+                      return;
+                    }
+                  }}
+                  className="flex items-center gap-1 text-sm"
+                >
+                  <Star className="w-4 h-4 text-amber-500" />
+                  <span className={cn(!profile?.is_verified && "text-muted-foreground")}>
+                    {profile?.is_verified ? `${selectedVet.rating || 5.0} / 5` : t("Available to verified users only")}
+                  </span>
+                </button>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -979,6 +1096,44 @@ const Map = () => {
                   <Ban className="w-4 h-4" />
                   {t("Block User")}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Friend Profile Modal */}
+      <AnimatePresence>
+        {selectedFriend && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2100] bg-black/50 flex items-end"
+            onClick={() => setSelectedFriend(null)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-card rounded-t-3xl p-6 max-h-[70vh] overflow-auto"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">{selectedFriend.name}</h3>
+                  <p className="text-xs text-muted-foreground">{selectedFriend.locationName}</p>
+                </div>
+                <button onClick={() => setSelectedFriend(null)}>
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="text-sm text-muted-foreground mb-3">{selectedFriend.bio}</div>
+              <div className="text-sm font-medium mb-1">{t("Pets")}</div>
+              <div className="text-xs text-muted-foreground">
+                {(selectedFriend.pets || []).length > 0
+                  ? selectedFriend.pets.map((pet) => `${pet.name} (${pet.species})`).join(", ")
+                  : t("No pets listed")}
               </div>
             </motion.div>
           </motion.div>

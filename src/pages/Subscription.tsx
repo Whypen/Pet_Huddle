@@ -66,7 +66,8 @@ const Subscription = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
 
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
+  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
 
   // Updated pricing per requirements
   const pricing = {
@@ -92,8 +93,9 @@ const Subscription = () => {
       if (data?.url) {
         window.location.href = data.url;
       }
-    } catch (error: any) {
-      toast.error(error.message || "Failed to open billing portal");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || "Failed to open billing portal");
     } finally {
       setIsProcessing(false);
     }

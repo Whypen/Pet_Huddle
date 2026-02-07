@@ -12,6 +12,35 @@ import { useLanguage } from "@/contexts/LanguageContext";
 
 type OnboardingPhase = "security" | "profile" | "pet";
 
+type ProfileSetupData = {
+  displayName: string;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  genderGenre?: string | null;
+  dob?: string | null;
+  locationName?: string | null;
+  locationCountry?: string | null;
+  locationDistrict?: string | null;
+  petExperience: string[];
+  experienceYears: number;
+  height?: number | null;
+  degree?: string | null;
+  school?: string | null;
+  major?: string | null;
+  affiliation?: string | null;
+  ownsPets: boolean;
+  socialAvailability: boolean;
+  availabilityStatus: string[];
+  hasCar: boolean;
+  languages: string[];
+  showGender: boolean;
+  showAge: boolean;
+  showHeight: boolean;
+  showAcademic: boolean;
+  showAffiliation: boolean;
+  showBio: boolean;
+};
+
 const Onboarding = () => {
   const { t } = useLanguage();
   const navigate = useNavigate();
@@ -57,12 +86,13 @@ const Onboarding = () => {
       if (error) throw error;
       
       setPhase("profile");
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to save security information"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to save security information"));
     }
   };
 
-  const handleProfileComplete = async (profileData: any) => {
+  const handleProfileComplete = async (profileData: ProfileSetupData) => {
     if (!user) return;
     
     setLoading(true);
@@ -111,8 +141,9 @@ const Onboarding = () => {
         toast.success(<span className="font-huddle">{t("Welcome to Huddle! 🎉")}</span>);
         navigate("/", { replace: true });
       }
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to save profile"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to save profile"));
     } finally {
       setLoading(false);
     }
@@ -135,8 +166,9 @@ const Onboarding = () => {
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to complete setup"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to complete setup"));
     }
   };
 
@@ -156,8 +188,9 @@ const Onboarding = () => {
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to complete setup"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to complete setup"));
     }
   };
 

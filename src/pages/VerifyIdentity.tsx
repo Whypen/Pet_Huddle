@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -6,9 +6,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { X } from "lucide-react";
+import Webcam from "react-webcam";
 
 type DocType = "id" | "passport" | "drivers_license";
 
@@ -51,16 +51,20 @@ const VerifyIdentity = () => {
   const [country, setCountry] = useState("");
   const [docType, setDocType] = useState<DocType | "">("");
   const [agreed, setAgreed] = useState(false);
-  const [safeHarborAccepted, setSafeHarborAccepted] = useState(false);
-  const [showSafeHarborModal, setShowSafeHarborModal] = useState(false);
   const [selfie, setSelfie] = useState<File | null>(null);
   const [idDoc, setIdDoc] = useState<File | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
+  const [idPreview, setIdPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const selfieCamRef = useRef<Webcam>(null);
+  const idCamRef = useRef<Webcam>(null);
+
+  const biometricDisclosure = `We collect your selfie and ID document image to verify your age and identity and to protect our users from fraud and underage access. We generate biometric templates or age estimates from these images solely for this verification. We do not use your biometric data for general facial recognition or any purpose other than verification. Images are deleted after the check; we keep only the outcome (e.g. ‘age verified 18+’) and minimal metadata.`;
 
   const canNext =
     (step === 1 && country && docType) ||
-    (step === 2 && agreed && safeHarborAccepted) ||
+    (step === 2 && agreed) ||
     (step === 3 && selfie) ||
     (step === 4 && idDoc);
 
@@ -79,12 +83,6 @@ const VerifyIdentity = () => {
     loadCountry();
   }, [user?.id]);
 
-  useEffect(() => {
-    if (step === 2) {
-      setShowSafeHarborModal(true);
-    }
-  }, [step]);
-
   const upload = async (file: File, label: string) => {
     if (!user) throw new Error("No user");
     const ext = file.name.split(".").pop() || "jpg";
@@ -92,6 +90,56 @@ const VerifyIdentity = () => {
     const { error } = await supabase.storage.from("identity_verification").upload(path, file, { upsert: true });
     if (error) throw error;
     return path;
+  };
+
+  const dataUrlToFile = async (dataUrl: string, filename: string) => {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    return new File([blob], filename, { type: blob.type || "image/jpeg" });
+  };
+
+  const captureSelfie = async () => {
+    const imageSrc = selfieCamRef.current?.getScreenshot();
+    if (!imageSrc) {
+      toast.error(t("Unable to capture selfie. Please try again."));
+      return;
+    }
+    const file = await dataUrlToFile(imageSrc, "selfie.jpg");
+    const compressed = await compressImage(file);
+    setSelfie(compressed);
+    setSelfiePreview(imageSrc);
+  };
+
+  const captureIdDoc = async () => {
+    const imageSrc = idCamRef.current?.getScreenshot();
+    if (!imageSrc) {
+      toast.error(t("Unable to capture ID document. Please try again."));
+      return;
+    }
+    const file = await dataUrlToFile(imageSrc, "id.jpg");
+    const compressed = await compressImage(file);
+    setIdDoc(compressed);
+    setIdPreview(imageSrc);
+  };
+
+  const handleNext = async () => {
+    if (step === 3) {
+      if (!selfie) {
+        await captureSelfie();
+        return;
+      }
+      setStep(4);
+      return;
+    }
+    if (step === 4) {
+      if (!idDoc) {
+        await captureIdDoc();
+        return;
+      }
+      await finish();
+      return;
+    }
+    setStep((s) => s + 1);
   };
 
   const finish = async () => {
@@ -143,8 +191,9 @@ const VerifyIdentity = () => {
         navigate("/chats");
       }, 1200);
       setStep(5);
-    } catch (e: any) {
-      toast.error(e.message || t("Verification upload failed"));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(message || t("Verification upload failed"));
     } finally {
       setSaving(false);
     }
@@ -159,13 +208,11 @@ const VerifyIdentity = () => {
       >
         <X className="w-5 h-5" />
       </button>
-      <h1 className="text-2xl font-bold lowercase font-huddle">{t("verify.title") || "verify identity"}</h1>
+      <h1 className="text-2xl font-bold font-huddle">{t("Identity Verification")}</h1>
 
       {step === 1 && (
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            {t("We collect your selfie and ID document image to verify your age and identity.")}
-          </p>
+          <p className="text-xs text-muted-foreground">{biometricDisclosure}</p>
           <div>
             <label className="text-xs font-medium text-muted-foreground">{t("Country")}</label>
             <input
@@ -187,16 +234,10 @@ const VerifyIdentity = () => {
 
       {step === 2 && (
         <div className="space-y-3 text-sm">
-          <p>{t("We process identity and biometric data for verification and delete according to policy.")}</p>
+          <p>{biometricDisclosure}</p>
           <div className="flex items-center gap-2">
             <Checkbox checked={agreed} onCheckedChange={(v) => setAgreed(Boolean(v))} />
-            <span>{t("I agree & continue")}</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <Checkbox checked={safeHarborAccepted} onCheckedChange={(v) => setSafeHarborAccepted(Boolean(v))} />
-            <span className="text-xs text-muted-foreground">
-              I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
-            </span>
+            <span>{t("Agree & Continue")}</span>
           </div>
         </div>
       )}
@@ -204,15 +245,17 @@ const VerifyIdentity = () => {
       {step === 3 && (
         <div className="space-y-2">
           <p>{t("Selfie capture")}</p>
-          <input
-            type="file"
-            accept="image/*"
-            capture="user"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f) setSelfie(await compressImage(f));
-            }}
-          />
+          <div className="rounded-xl overflow-hidden border border-border">
+            <Webcam
+              ref={selfieCamRef}
+              screenshotFormat="image/jpeg"
+              videoConstraints={{ facingMode: { ideal: "environment" } }}
+              className="w-full h-56 object-cover"
+            />
+          </div>
+          {selfiePreview && (
+            <img src={selfiePreview} alt={t("Selfie preview")} className="rounded-xl border border-border" />
+          )}
           <p className="text-xs text-muted-foreground">{t("Tap I am ready to continue")}</p>
         </div>
       )}
@@ -220,15 +263,17 @@ const VerifyIdentity = () => {
       {step === 4 && (
         <div className="space-y-2">
           <p>{t("ID document capture")}</p>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f) setIdDoc(await compressImage(f));
-            }}
-          />
+          <div className="rounded-xl overflow-hidden border border-border">
+            <Webcam
+              ref={idCamRef}
+              screenshotFormat="image/jpeg"
+              videoConstraints={{ facingMode: "user" }}
+              className="w-full h-56 object-cover"
+            />
+          </div>
+          {idPreview && (
+            <img src={idPreview} alt={t("ID preview")} className="rounded-xl border border-border" />
+          )}
           <p className="text-xs text-muted-foreground">{t("Tap I am ready to submit")}</p>
         </div>
       )}
@@ -236,6 +281,9 @@ const VerifyIdentity = () => {
       {step === 5 && (
         <div className="space-y-3">
           <p className="text-[#3283ff] font-medium">{t("Social access granted pending review")}</p>
+          <p className="text-xs text-muted-foreground">
+            Thanks for completing verification. You can use the Social features for now while we finish our checks. If we later find that you are below the minimum age required for our Social or Chat features, your account may be blocked from these features or from the app entirely, in line with our Terms and Safety Policy.
+          </p>
           <Button className="bg-[#3283ff]" onClick={() => navigate("/chats")}>
             {t("Back to Chats")}
           </Button>
@@ -252,41 +300,16 @@ const VerifyIdentity = () => {
         </div>
       )}
 
-      <Dialog open={showSafeHarborModal} onOpenChange={setShowSafeHarborModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Safe Harbor Agreement</DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground">
-            I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
-          </p>
-          <label className="text-xs text-muted-foreground mt-2 block">
-            <input
-              type="checkbox"
-              checked={safeHarborAccepted}
-              onChange={(e) => setSafeHarborAccepted(e.target.checked)}
-              className="mr-2 align-middle"
-            />
-            I am 18+ and agree to the Terms of Service and Privacy Policy.
-          </label>
-          <DialogFooter>
-            <Button disabled={!safeHarborAccepted} onClick={() => setShowSafeHarborModal(false)}>
-              Continue
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {step < 5 && (
         <div className="flex gap-2">
           {step > 1 && <Button variant="outline" onClick={() => setStep((s) => s - 1)}>{t("Back")}</Button>}
           {step < 4 && (
-            <Button className="bg-[#3283ff]" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
-              {t("I am ready")}
+            <Button className="bg-[#3283ff]" disabled={!canNext} onClick={handleNext}>
+              {step === 2 ? t("Agree & Continue") : t("I am ready")}
             </Button>
           )}
           {step === 4 && (
-            <Button className="bg-[#3283ff]" disabled={!canNext || saving} onClick={finish}>
+            <Button className="bg-[#3283ff]" disabled={!canNext || saving} onClick={handleNext}>
               {saving ? t("Submitting...") : t("I am ready")}
             </Button>
           )}

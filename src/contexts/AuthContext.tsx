@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface Profile {
   id: string;
+  user_id?: string | null;
   display_name: string | null;
   legal_name: string | null;
   phone: string | null;
@@ -28,9 +29,13 @@ export interface Profile {
   has_car: boolean;
   languages: string[] | null;
   location_name: string | null;
+  location_country?: string | null;
+  location_district?: string | null;
   is_verified: boolean;
   user_role: string;
   tier?: string | null;
+  effective_tier?: string | null;
+  family_owner_id?: string | null;
   subscription_status?: string | null;
   stars_count?: number | null;
   mesh_alert_count?: number | null;
@@ -40,6 +45,7 @@ export interface Profile {
   owns_pets: boolean;
   social_availability: boolean;
   availability_status: string[];
+  social_album?: string[] | null;
   show_gender: boolean;
   show_orientation: boolean;
   show_age: boolean;
@@ -49,6 +55,7 @@ export interface Profile {
   show_affiliation: boolean;
   show_occupation: boolean;
   show_bio: boolean;
+  show_relationship_status?: boolean;
   last_lat?: number | null;
   last_lng?: number | null;
   care_circle?: string[] | null;
@@ -95,24 +102,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase
       .from("profiles")
       .select(`
-        id, display_name, legal_name, phone, avatar_url, bio,
+        id, user_id, display_name, legal_name, phone, avatar_url, bio,
         gender_genre, orientation, dob, height, weight, weight_unit,
         degree, school, major, affiliation, occupation,
         pet_experience, experience_years, relationship_status,
-        has_car, languages, location_name,
+        has_car, languages, location_name, location_country, location_district,
         is_verified, user_role, tier, subscription_status,
         stars_count, mesh_alert_count, media_credits, family_slots,
         onboarding_completed, owns_pets,
         social_availability, availability_status,
         show_gender, show_orientation, show_age, show_height, show_weight,
         show_academic, show_affiliation, show_occupation, show_bio,
-        last_lat, last_lng, care_circle, verification_status, verification_comment
+        last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status,
+        social_album
       `)
       .eq("id", userId)
       .maybeSingle();
 
     if (!error && data) {
-      setProfile(data as Profile);
+      let effectiveTier = data.tier || "free";
+      let familyOwnerId: string | null = null;
+      const { data: family } = await supabase
+        .from("family_members")
+        .select("inviter_user_id")
+        .eq("invitee_user_id", userId)
+        .eq("status", "accepted")
+        .maybeSingle();
+
+      if (family?.inviter_user_id) {
+        familyOwnerId = family.inviter_user_id;
+        const { data: inviter } = await supabase
+          .from("profiles")
+          .select("tier")
+          .eq("id", family.inviter_user_id)
+          .maybeSingle();
+        if (inviter?.tier) {
+          effectiveTier = inviter.tier;
+        }
+      }
+
+      setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
     }
   };
 
@@ -161,8 +190,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     console.log("Attempting Signup to:", supabaseUrl);
     const redirectUrl = `${window.location.origin}/`;
 
-    let data: any;
-    let error: any;
+    let data: { user: { id: string } | null } | null = null;
+    let error: { message?: string } | null = null;
     try {
       const res = await supabase.auth.signUp({
         email,
@@ -175,11 +204,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           },
         },
       });
-      data = res.data;
-      error = res.error;
-    } catch (e: any) {
+      data = res.data as unknown as { user: { id: string } | null };
+      error = res.error as unknown as { message?: string } | null;
+    } catch (e: unknown) {
       console.error("[AuthContext] signUp network error", e);
-      return { error: e as Error };
+      return { error: e instanceof Error ? e : new Error(String(e)) };
     }
 
     if (!error && data?.user?.id) {
@@ -214,9 +243,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       return { error: error as Error | null };
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[AuthContext] signIn network error", e);
-      return { error: e as Error };
+      return { error: e instanceof Error ? e : new Error(String(e)) };
     }
   };
 

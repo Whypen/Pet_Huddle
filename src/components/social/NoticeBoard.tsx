@@ -24,6 +24,7 @@ import { PremiumFooter } from "@/components/monetization/PremiumFooter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import imageCompression from "browser-image-compression";
 
 const tags = [
   { id: "Dog", labelKey: "threads.tag.dog", icon: MessageSquare, color: "bg-primary" },
@@ -92,6 +93,10 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [replyContent, setReplyContent] = useState("");
   const [replyImageFile, setReplyImageFile] = useState<File | null>(null);
   const [replyImagePreview, setReplyImagePreview] = useState<string | null>(null);
+  const [replyError, setReplyError] = useState("");
+  const [mentionSuggestions, setMentionSuggestions] = useState<{ id: string; display_name: string | null }[]>([]);
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false);
+  const [createErrors, setCreateErrors] = useState<{ title?: string; content?: string }>({});
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   // SPRINT 3: Track liked notices for green (#22c55e) button state
   const [likedNotices, setLikedNotices] = useState<Set<string>>(new Set());
@@ -202,9 +207,38 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     }
   };
 
+  const fetchMentionSuggestions = async (query: string) => {
+    if (!query) {
+      setMentionSuggestions([]);
+      setShowMentionSuggestions(false);
+      return;
+    }
+    const safeQuery = query.replace(/%/g, "");
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .ilike("display_name", `%${safeQuery}%`)
+      .limit(5);
+    setMentionSuggestions(data || []);
+    setShowMentionSuggestions((data || []).length > 0);
+  };
+
+  const handleReplyInputChange = (value: string) => {
+    setReplyContent(value);
+    setReplyError("");
+    const match = value.match(/@([\\w\\s]{1,24})$/);
+    if (match && match[1]) {
+      fetchMentionSuggestions(match[1].trim());
+    } else {
+      setShowMentionSuggestions(false);
+      setMentionSuggestions([]);
+    }
+  };
+
   const getThreadLimit = () => {
-    if (profile?.tier === "gold") return 30;
-    if (profile?.tier === "premium") return 5;
+    const tier = profile?.effective_tier || profile?.tier;
+    if (tier === "gold") return 30;
+    if (tier === "premium") return 5;
     return 1;
   };
 
@@ -213,16 +247,26 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     const loadRemaining = async () => {
       const limit = getThreadLimit();
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const ownerId = profile?.family_owner_id || user.id;
+      const { data: familyRows } = await supabase
+        .from("family_members")
+        .select("invitee_user_id")
+        .eq("inviter_user_id", ownerId)
+        .eq("status", "accepted");
+      const familyIds = Array.from(
+        new Set([ownerId, ...(familyRows || []).map((row: { invitee_user_id: string }) => row.invitee_user_id)])
+      );
+
       const { count } = await supabase
         .from("threads")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
+        .in("user_id", familyIds)
         .gte("created_at", since);
       const remaining = Math.max(0, limit - (count || 0));
       setThreadsRemaining(remaining);
     };
     loadRemaining();
-  }, [user?.id, profile?.tier]);
+  }, [user?.id, profile?.effective_tier, profile?.family_owner_id]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,16 +283,23 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const handleReply = async (thread: Thread) => {
     if (!user) return;
     if (!replyContent.trim()) {
-      toast.error(t("Reply cannot be empty"));
+      setReplyError(t("Reply cannot be empty"));
       return;
     }
     if (replyContent.length > 200) {
-      toast.error(t("Reply is too long"));
+      setReplyError(t("Reply is too long"));
       return;
     }
     let uploadedUrl: string | null = null;
     if (replyImageFile) {
-      const fileExt = replyImageFile.name.split(".").pop();
+      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+        action_type: "thread_image",
+      });
+      if (allowed === false) {
+        setIsPremiumFooterOpen(true);
+        return;
+      }
+      const fileExt = replyImageFile.name.split(".").pop() || "jpg";
       const fileName = `${user.id}/${Date.now()}-reply.${fileExt}`;
       const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, replyImageFile);
       if (uploadError) {
@@ -274,6 +325,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     setReplyFor(null);
     setReplyImageFile(null);
     setReplyImagePreview(null);
+    setReplyError("");
     fetchNotices(true);
   };
 
@@ -295,12 +347,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   };
 
   const handleCreateNotice = async () => {
-    if (!user || !content.trim() || !title.trim()) {
-      toast.error(t("Please enter some content"));
-      return;
-    }
-    if (content.length > 1000) {
-      toast.error(t("Thread content is too long"));
+    const nextErrors: { title?: string; content?: string } = {};
+    if (!title.trim()) nextErrors.title = t("Title is required");
+    if (!content.trim()) nextErrors.content = t("Content is required");
+    if (content.length > 1000) nextErrors.content = t("Thread content is too long");
+    setCreateErrors(nextErrors);
+    if (!user || Object.keys(nextErrors).length > 0) {
       return;
     }
 
@@ -314,10 +366,19 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     try {
       const limit = getThreadLimit();
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const ownerId = profile?.family_owner_id || user.id;
+      const { data: familyRows } = await supabase
+        .from("family_members")
+        .select("invitee_user_id")
+        .eq("inviter_user_id", ownerId)
+        .eq("status", "accepted");
+      const familyIds = Array.from(
+        new Set([ownerId, ...(familyRows || []).map((row: { invitee_user_id: string }) => row.invitee_user_id)])
+      );
       const { count } = await supabase
         .from("threads")
         .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
+        .in("user_id", familyIds)
         .gte("created_at", since);
       if ((count || 0) >= limit) {
         setIsPremiumFooterOpen(true);
@@ -375,9 +436,11 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       setImageFile(null);
       setImagePreview(null);
       setIsCreateOpen(false);
+      setCreateErrors({});
       fetchNotices(true);
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to post notice"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to post notice"));
     } finally {
       setCreating(false);
     }
@@ -642,10 +705,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                 setReplyContent("");
                                 setReplyImageFile(null);
                                 setReplyImagePreview(null);
+                                setReplyError("");
+                                setShowMentionSuggestions(false);
                                 return;
                               }
                               setReplyFor(notice.id);
                               setReplyContent(`@${notice.author?.display_name || "user"} `);
+                              setReplyError("");
                             }}
                           >
                             {t("Reply")}
@@ -670,10 +736,33 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                               <Textarea
                                 ref={replyInputRef}
                                 value={replyContent}
-                                onChange={(e) => setReplyContent(e.target.value)}
-                                className="rounded-xl min-h-[80px]"
+                                onChange={(e) => handleReplyInputChange(e.target.value)}
+                                className={cn("rounded-xl min-h-[80px]", replyError && "border-red-500")}
                                 maxLength={200}
+                                aria-invalid={Boolean(replyError)}
                               />
+                              {replyError && (
+                                <p className="text-xs text-destructive mt-1">{replyError}</p>
+                              )}
+                              {showMentionSuggestions && mentionSuggestions.length > 0 && (
+                                <div className="mt-2 rounded-xl border border-border bg-card shadow-sm">
+                                  {mentionSuggestions.map((option) => (
+                                    <button
+                                      key={option.id}
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = replyContent.replace(/@([\w\s]{1,24})$/, `@${option.display_name || ""} `);
+                                        setReplyContent(updated);
+                                        setShowMentionSuggestions(false);
+                                        setMentionSuggestions([]);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-xs hover:bg-muted"
+                                    >
+                                      @{option.display_name}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
                                 <span>{t("Max 200 chars")}</span>
                                 <span>{remainingReplyChars}</span>
@@ -686,13 +775,27 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                     type="file"
                                     accept="image/*"
                                     className="hidden"
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                       const file = e.target.files?.[0];
                                       if (!file) return;
-                                      setReplyImageFile(file);
-                                      const reader = new FileReader();
-                                      reader.onloadend = () => setReplyImagePreview(reader.result as string);
-                                      reader.readAsDataURL(file);
+                                      try {
+                                        const compressed = await imageCompression(file, {
+                                          maxSizeMB: 0.5,
+                                          maxWidthOrHeight: 1600,
+                                          useWebWorker: true,
+                                        });
+                                        if (compressed.size > 500 * 1024) {
+                                          toast.error(t("Image must be under 500KB"));
+                                          return;
+                                        }
+                                        setReplyImageFile(compressed);
+                                        const preview = await imageCompression.getDataUrlFromFile(compressed);
+                                        setReplyImagePreview(preview);
+                                      } catch (err) {
+                                        toast.error(t("Failed to process image"));
+                                      } finally {
+                                        e.target.value = "";
+                                      }
                                     }}
                                   />
                                 </label>
@@ -749,7 +852,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-card rounded-t-3xl p-6 pb-[calc(env(safe-area-inset-bottom)+96px)]"
+              className="w-full bg-card rounded-t-3xl p-6 pb-[calc(env(safe-area-inset-bottom)+var(--nav-height)+24px)]"
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold">{t("Create Thread")}</h3>
@@ -783,8 +886,15 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                 placeholder={t("Title")}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-3"
+                className={cn(
+                  "w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-1",
+                  createErrors.title && "border-red-500"
+                )}
+                aria-invalid={Boolean(createErrors.title)}
               />
+              {createErrors.title && (
+                <p className="text-xs text-destructive mb-3">{createErrors.title}</p>
+              )}
 
               {/* Hashtags */}
               <div className="mb-3">
@@ -829,9 +939,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                 placeholder={t("What's on your mind?")}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="rounded-xl min-h-[100px] mb-4"
+                className={cn("rounded-xl min-h-[100px] mb-2", createErrors.content && "border-red-500")}
                 maxLength={1000}
+                aria-invalid={Boolean(createErrors.content)}
               />
+              {createErrors.content && (
+                <p className="text-xs text-destructive mb-2">{createErrors.content}</p>
+              )}
               <div className="flex items-center justify-between text-xs text-muted-foreground mb-4">
                 <span>{t("Max 1000 chars")}</span>
                 <span>{remainingChars}</span>

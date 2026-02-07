@@ -14,7 +14,7 @@ interface NetworkContextType {
 interface OfflineAction {
   id: string;
   type: string;
-  data: any;
+  data: unknown;
   timestamp: Date;
   retryCount: number;
 }
@@ -39,11 +39,28 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     try {
       const stored = localStorage.getItem(OFFLINE_ACTIONS_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        setPendingActions(parsed.map((action: any) => ({
-          ...action,
-          timestamp: new Date(action.timestamp)
-        })));
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const next = parsed.map((action): OfflineAction => {
+            const rec = (typeof action === "object" && action !== null) ? (action as Record<string, unknown>) : {};
+            const id = typeof rec.id === "string" ? rec.id : crypto.randomUUID();
+            const type = typeof rec.type === "string" ? rec.type : "unknown";
+            const retryCount = typeof rec.retryCount === "number" ? rec.retryCount : 0;
+            const timestampRaw = rec.timestamp;
+            const timestamp =
+              typeof timestampRaw === "string" || timestampRaw instanceof Date
+                ? new Date(timestampRaw)
+                : new Date();
+            return {
+              id,
+              type,
+              data: rec.data,
+              timestamp,
+              retryCount,
+            };
+          });
+          setPendingActions(next);
+        }
       }
     } catch (error) {
       console.error("Failed to load offline actions:", error);

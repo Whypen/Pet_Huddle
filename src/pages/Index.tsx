@@ -71,7 +71,7 @@ const wisdomTips: Record<string, string[]> = {
 
 const Index = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
@@ -80,8 +80,10 @@ const Index = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchPets();
-  }, []);
+    if (user?.id) {
+      fetchPets();
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     const channel = supabase
@@ -102,9 +104,12 @@ const Index = () => {
 
   const fetchPets = async () => {
     try {
+      if (!user?.id) return;
       const { data, error } = await supabase
         .from("pets")
         .select("id, name, species, breed, weight, weight_unit, dob, photo_url")
+        .eq("owner_id", user?.id)
+        .eq("is_active", true)
         .order("created_at", { ascending: true });
 
       if (error) throw error;

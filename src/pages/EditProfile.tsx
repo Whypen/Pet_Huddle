@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
+import imageCompression from "browser-image-compression";
 
 // Option constants matching database schema
 const genderOptions = ["Male", "Female", "Non-binary", "PNA"];
@@ -49,10 +50,19 @@ const EditProfile = () => {
   const [customLanguage, setCustomLanguage] = useState("");
   const [petsProfileCount, setPetsProfileCount] = useState(0);
   const [selectedCountry, setSelectedCountry] = useState("");
-  const [detectingLocation, setDetectingLocation] = useState(false);
   const isIdentityLocked = profile?.verification_status === "approved" || profile?.is_verified;
+  const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState({
-    humanDob: "",
+    legalName: "",
+    displayName: "",
+    phone: "",
+    dob: "",
+    height: "",
+    weight: "",
+    school: "",
+    major: "",
+    occupation: "",
+    experienceYears: "",
   });
 
   const [formData, setFormData] = useState({
@@ -87,6 +97,7 @@ const EditProfile = () => {
     location_name: "",
     location_country: "",
     location_district: "",
+    social_album: [] as string[],
 
     // Pet Experience
     pet_experience: [] as string[],
@@ -107,7 +118,16 @@ const EditProfile = () => {
     show_affiliation: false,
     show_occupation: false,
     show_bio: true,
+    show_relationship_status: true,
   });
+
+  const hasErrors = Object.values(fieldErrors).some(Boolean);
+  const hasRequiredFields =
+    formData.legal_name.trim().length > 0 &&
+    formData.display_name.trim().length > 0 &&
+    formData.phone.trim().length > 0 &&
+    !!formData.dob;
+  const isFormValid = hasRequiredFields && !hasErrors;
 
   useEffect(() => {
     if (profile) {
@@ -153,13 +173,60 @@ const EditProfile = () => {
         show_affiliation: profile.show_affiliation ?? false,
         show_occupation: profile.show_occupation ?? false,
         show_bio: profile.show_bio ?? true,
+        show_relationship_status: profile.show_relationship_status ?? true,
+        social_album: profile.social_album || [],
       });
       setSelectedCountry(matchedCountry?.code || "");
       if (profile.avatar_url) {
         setPhotoPreview(profile.avatar_url);
       }
+      if (profile.social_album && profile.social_album.length > 0) {
+        refreshSocialAlbumUrls(profile.social_album);
+      }
     }
   }, [profile]);
+
+  const refreshSocialAlbumUrls = async (paths: string[]) => {
+    if (!paths.length) {
+      setSocialAlbumUrls({});
+      return;
+    }
+    const entries = await Promise.all(
+      paths.map(async (path) => {
+        if (path.startsWith("http")) return [path, path] as const;
+        const { data } = await supabase.storage
+          .from("social_album")
+          .createSignedUrl(path, 60 * 60);
+        return [path, data?.signedUrl || ""] as const;
+      })
+    );
+    const next: Record<string, string> = {};
+    entries.forEach(([path, url]) => {
+      if (url) next[path] = url;
+    });
+    setSocialAlbumUrls(next);
+  };
+
+  const handleSocialAlbumUpload = async (file: File) => {
+    if (!user) return;
+    const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true };
+    const compressed = await imageCompression(file, options);
+    if (compressed.size > 500 * 1024) {
+      toast.error(t("Image must be under 500KB"));
+      return;
+    }
+    const ext = compressed.name.split(".").pop() || "jpg";
+    const filePath = `${user.id}/${crypto.randomUUID()}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from("social_album")
+      .upload(filePath, compressed, { upsert: false });
+    if (uploadError) {
+      toast.error(uploadError.message || t("Upload failed"));
+      return;
+    }
+    setFormData((prev) => ({ ...prev, social_album: [...prev.social_album, filePath].slice(0, 5) }));
+    await refreshSocialAlbumUrls([...formData.social_album, filePath].slice(0, 5));
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -187,36 +254,6 @@ const EditProfile = () => {
     }
   }, [formData.pet_experience]);
 
-  const useCurrentLocation = async () => {
-    if (!navigator.geolocation) {
-      toast.error(t("Geolocation is not supported on this device"));
-      return;
-    }
-    setDetectingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        const locale = new Intl.Locale(navigator.language || "en");
-        const region = locale.region
-          ? countryOptions.find((country) => country.code === locale.region)
-          : null;
-        setSelectedCountry(region?.code || "");
-        setFormData((prev) => ({
-          ...prev,
-          location_country: region?.label || "",
-          location_district: "Current Location",
-          location_name: `${"Current Location"}${region ? `, ${region.label}` : ""}`,
-        }));
-        setDetectingLocation(false);
-      },
-      () => {
-        toast.error(t("Unable to detect current location"));
-        setDetectingLocation(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
-  };
-
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -227,6 +264,12 @@ const EditProfile = () => {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleRemoveSocialAlbum = async (path: string) => {
+    const next = formData.social_album.filter((p) => p !== path);
+    setFormData((prev) => ({ ...prev, social_album: next }));
+    await refreshSocialAlbumUrls(next);
   };
 
   const toggleArrayItem = (field: "availability_status" | "pet_experience" | "languages", item: string) => {
@@ -259,48 +302,51 @@ const EditProfile = () => {
     if (!user) return;
 
     if (!formData.legal_name.trim()) {
-      toast.error(t("Legal name is required"));
+      setFieldErrors((prev) => ({ ...prev, legalName: t("Legal name is required") }));
       return;
     }
     if (!formData.display_name.trim()) {
-      toast.error(t("Display name is required"));
+      setFieldErrors((prev) => ({ ...prev, displayName: t("Display name is required") }));
       return;
     }
     if (!formData.phone.trim()) {
-      toast.error(t("Phone number is required"));
+      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number is required") }));
       return;
     }
     if (!E164_PHONE_REGEX.test(formData.phone.trim())) {
-      toast.error(t("Phone number must include country code, e.g. +85212345678"));
+      setFieldErrors((prev) => ({
+        ...prev,
+        phone: t("Phone number must include country code, e.g. +85212345678"),
+      }));
       return;
     }
     if (!formData.dob) {
-      toast.error(t("Date of birth is required"));
+      setFieldErrors((prev) => ({ ...prev, dob: t("Date of birth is required") }));
       return;
     }
     if (formData.height && (!NUMERIC_ONLY_REGEX.test(formData.height) || Number(formData.height) > 300)) {
-      toast.error(t("Height must be a number up to 300"));
+      setFieldErrors((prev) => ({ ...prev, height: t("Height must be a number up to 300") }));
       return;
     }
     if (formData.weight && (!NUMERIC_ONLY_REGEX.test(formData.weight) || Number(formData.weight) > 700)) {
-      toast.error(t("Weight must be a number up to 700"));
+      setFieldErrors((prev) => ({ ...prev, weight: t("Weight must be a number up to 700") }));
       return;
     }
     if (NUMERIC_ONLY_REGEX.test(formData.school.trim()) && formData.school.trim().length > 0) {
-      toast.error(t("School cannot be numbers only"));
+      setFieldErrors((prev) => ({ ...prev, school: t("School cannot be numbers only") }));
       return;
     }
     if (NUMERIC_ONLY_REGEX.test(formData.major.trim()) && formData.major.trim().length > 0) {
-      toast.error(t("Major cannot be numbers only"));
+      setFieldErrors((prev) => ({ ...prev, major: t("Major cannot be numbers only") }));
       return;
     }
     if (NUMERIC_ONLY_REGEX.test(formData.occupation.trim()) && formData.occupation.trim().length > 0) {
-      toast.error(t("Occupation cannot be numbers only"));
+      setFieldErrors((prev) => ({ ...prev, occupation: t("Occupation cannot be numbers only") }));
       return;
     }
     if (formData.pet_experience.length > 0 && !formData.pet_experience.includes("None")) {
       if (!formData.experience_years || !NUMERIC_ONLY_REGEX.test(formData.experience_years)) {
-        toast.error(t("Years of experience must be numeric"));
+        setFieldErrors((prev) => ({ ...prev, experienceYears: t("Years of experience must be numeric") }));
         return;
       }
     }
@@ -371,6 +417,8 @@ const EditProfile = () => {
           show_affiliation: formData.show_affiliation,
           show_occupation: formData.show_occupation,
           show_bio: formData.show_bio,
+          show_relationship_status: formData.show_relationship_status,
+          social_album: formData.social_album,
           avatar_url: avatarUrl,
           updated_at: new Date().toISOString(),
         })
@@ -381,8 +429,9 @@ const EditProfile = () => {
       await refreshProfile();
       toast.success(t("Profile updated!"));
       navigate(-1);
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to update profile"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to update profile"));
     } finally {
       setLoading(false);
     }
@@ -398,7 +447,7 @@ const EditProfile = () => {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-xl font-bold flex-1">{t("Edit Profile")}</h1>
-        <Button onClick={handleSave} disabled={loading} size="sm" className="gap-2">
+        <Button onClick={handleSave} disabled={loading || !isFormValid} size="sm" className="gap-2">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           {t("Save")}
         </Button>
@@ -430,28 +479,44 @@ const EditProfile = () => {
             {/* Legal Name */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Legal Name")}</label>
-              <Input
-                value={formData.legal_name}
-                onChange={(e) => setFormData(prev => ({ ...prev, legal_name: e.target.value }))}
-                placeholder={t("Your legal name")}
-                className="h-12 rounded-xl"
-                required
-                disabled={isIdentityLocked}
-              />
-            </div>
+            <Input
+              value={formData.legal_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, legal_name: e.target.value }))}
+              onBlur={() =>
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  legalName: formData.legal_name.trim() ? "" : t("Legal name is required"),
+                }))
+              }
+              placeholder={t("Your legal name")}
+              className="h-12 rounded-xl"
+              required
+              disabled={isIdentityLocked}
+              aria-invalid={Boolean(fieldErrors.legalName)}
+            />
+            {fieldErrors.legalName && <ErrorLabel message={fieldErrors.legalName} />}
+          </div>
 
             {/* Display Name */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Display/User Name")}</label>
-              <Input
-                value={formData.display_name}
-                onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
-                placeholder={t("Your display name")}
-                className="h-12 rounded-xl"
-                required
-                disabled={isIdentityLocked}
-              />
-            </div>
+            <Input
+              value={formData.display_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, display_name: e.target.value }))}
+              onBlur={() =>
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  displayName: formData.display_name.trim() ? "" : t("Display name is required"),
+                }))
+              }
+              placeholder={t("Your display name")}
+              className="h-12 rounded-xl"
+              required
+              disabled={isIdentityLocked}
+              aria-invalid={Boolean(fieldErrors.displayName)}
+            />
+            {fieldErrors.displayName && <ErrorLabel message={fieldErrors.displayName} />}
+          </div>
 
             {/* User ID */}
             <div>
@@ -467,16 +532,31 @@ const EditProfile = () => {
             {/* Phone */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Phone")}</label>
-              <PhoneInput
-                international
-                defaultCountry="HK"
-                value={formData.phone}
-                onChange={(value) => setFormData((prev) => ({ ...prev, phone: value || "" }))}
-                className="phone-input-auth h-12 rounded-xl border border-border px-3"
-                placeholder={t("Phone (+XXX)")}
-                disabled={isIdentityLocked}
-              />
-            </div>
+            <PhoneInput
+              international
+              defaultCountry="HK"
+              value={formData.phone}
+              onChange={(value) => setFormData((prev) => ({ ...prev, phone: value || "" }))}
+              onBlur={() =>
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  phone:
+                    !formData.phone.trim()
+                      ? t("Phone number is required")
+                      : !E164_PHONE_REGEX.test(formData.phone.trim())
+                      ? t("Phone number must include country code, e.g. +85212345678")
+                      : "",
+                }))
+              }
+              className={cn(
+                "phone-input-auth h-12 rounded-xl border border-border px-3",
+                fieldErrors.phone && "border-red-500"
+              )}
+              placeholder={t("Phone (+XXX)")}
+              disabled={isIdentityLocked}
+            />
+            {fieldErrors.phone && <ErrorLabel message={fieldErrors.phone} />}
+          </div>
 
             {/* Date of Birth */}
             <div>
@@ -501,14 +581,15 @@ const EditProfile = () => {
                   today.setHours(0, 0, 0, 0);
                   setFieldErrors((prev) => ({
                     ...prev,
-                    humanDob: dob > today ? t("Human DOB cannot be in the future") : "",
+                    dob: dob > today ? t("Human DOB cannot be in the future") : "",
                   }));
                 }}
                 className="h-12 rounded-xl"
                 required
+                aria-invalid={Boolean(fieldErrors.dob)}
               />
-              {fieldErrors.humanDob && (
-                <ErrorLabel message={fieldErrors.humanDob} />
+              {fieldErrors.dob && (
+                <ErrorLabel message={fieldErrors.dob} />
               )}
             </div>
 
@@ -530,6 +611,49 @@ const EditProfile = () => {
                 placeholder={t("Tell others about yourself...")}
                 className="min-h-[100px] rounded-xl"
               />
+            </div>
+
+            {/* Social Album */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">{t("Social Album")}</label>
+                <span className="text-xs text-muted-foreground">{t("Max 5, <500KB")}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {formData.social_album.map((path) => (
+                  <div key={path} className="relative rounded-xl overflow-hidden border border-border bg-muted">
+                    <img
+                      src={socialAlbumUrls[path] || path}
+                      alt={t("Social Album")}
+                      className="w-full h-24 object-cover"
+                      loading="lazy"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSocialAlbum(path)}
+                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {formData.social_album.length < 5 && (
+                  <label className="h-24 rounded-xl border border-dashed border-border flex items-center justify-center text-xs text-muted-foreground cursor-pointer">
+                    {t("Add")}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        handleSocialAlbumUpload(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
             </div>
           </div>
 
@@ -618,12 +742,22 @@ const EditProfile = () => {
                 type="number"
                 value={formData.height}
                 onChange={(e) => setFormData(prev => ({ ...prev, height: e.target.value }))}
+                onBlur={() => {
+                  if (!formData.height) {
+                    setFieldErrors((prev) => ({ ...prev, height: "" }));
+                    return;
+                  }
+                  const valid = NUMERIC_ONLY_REGEX.test(formData.height) && Number(formData.height) <= 300;
+                  setFieldErrors((prev) => ({ ...prev, height: valid ? "" : t("Height must be a number up to 300") }));
+                }}
                 placeholder={t("Height in cm")}
                 className="h-12 rounded-xl"
                 min={0}
                 max={300}
                 inputMode="numeric"
+                aria-invalid={Boolean(fieldErrors.height)}
               />
+              {fieldErrors.height && <ErrorLabel message={fieldErrors.height} />}
             </div>
 
             {/* Weight */}
@@ -643,11 +777,20 @@ const EditProfile = () => {
                   type="number"
                   value={formData.weight}
                   onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
+                  onBlur={() => {
+                    if (!formData.weight) {
+                      setFieldErrors((prev) => ({ ...prev, weight: "" }));
+                      return;
+                    }
+                    const valid = NUMERIC_ONLY_REGEX.test(formData.weight) && Number(formData.weight) <= 700;
+                    setFieldErrors((prev) => ({ ...prev, weight: valid ? "" : t("Weight must be a number up to 700") }));
+                  }}
                   placeholder={t("0")}
                   className="h-12 rounded-xl flex-1"
                   min={0}
                   max={700}
                   inputMode="numeric"
+                  aria-invalid={Boolean(fieldErrors.weight)}
                 />
                 <select
                   value={formData.weight_unit}
@@ -692,16 +835,28 @@ const EditProfile = () => {
             <Input
               value={formData.school}
               onChange={(e) => setFormData(prev => ({ ...prev, school: e.target.value }))}
+              onBlur={() => {
+                const invalid = NUMERIC_ONLY_REGEX.test(formData.school.trim()) && formData.school.trim().length > 0;
+                setFieldErrors((prev) => ({ ...prev, school: invalid ? t("School cannot be numbers only") : "" }));
+              }}
               placeholder={t("School Name")}
               className="h-11 rounded-lg"
+              aria-invalid={Boolean(fieldErrors.school)}
             />
+            {fieldErrors.school && <ErrorLabel message={fieldErrors.school} />}
 
             <Input
               value={formData.major}
               onChange={(e) => setFormData(prev => ({ ...prev, major: e.target.value }))}
+              onBlur={() => {
+                const invalid = NUMERIC_ONLY_REGEX.test(formData.major.trim()) && formData.major.trim().length > 0;
+                setFieldErrors((prev) => ({ ...prev, major: invalid ? t("Major cannot be numbers only") : "" }));
+              }}
               placeholder={t("Major / Field of Study")}
               className="h-11 rounded-lg"
+              aria-invalid={Boolean(fieldErrors.major)}
             />
+            {fieldErrors.major && <ErrorLabel message={fieldErrors.major} />}
 
             {/* Occupation */}
             <div>
@@ -718,9 +873,15 @@ const EditProfile = () => {
               <Input
                 value={formData.occupation}
                 onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))}
+                onBlur={() => {
+                  const invalid = NUMERIC_ONLY_REGEX.test(formData.occupation.trim()) && formData.occupation.trim().length > 0;
+                  setFieldErrors((prev) => ({ ...prev, occupation: invalid ? t("Occupation cannot be numbers only") : "" }));
+                }}
                 placeholder={t("Job title / Occupation")}
                 className="h-11 rounded-lg"
+                aria-invalid={Boolean(fieldErrors.occupation)}
               />
+              {fieldErrors.occupation && <ErrorLabel message={fieldErrors.occupation} />}
             </div>
           </div>
 
@@ -750,7 +911,16 @@ const EditProfile = () => {
 
             {/* Relationship Status */}
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("Relationship Status")}</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">{t("Relationship Status")}</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{t("Visible to others")}</span>
+                  <Switch
+                    checked={formData.show_relationship_status}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_relationship_status: checked }))}
+                  />
+                </div>
+              </div>
               <select
                 value={formData.relationship_status}
                 onChange={(e) => setFormData(prev => ({ ...prev, relationship_status: e.target.value }))}
@@ -827,15 +997,6 @@ const EditProfile = () => {
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Location")}</label>
               <div className="flex gap-2 mb-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={useCurrentLocation}
-                  disabled={detectingLocation}
-                >
-                  {detectingLocation ? t("Detecting...") : t("Use Current Location")}
-                </Button>
                 <select
                   value={selectedCountry}
                   onChange={(e) => {
@@ -924,10 +1085,20 @@ const EditProfile = () => {
                   max="50"
                   value={formData.experience_years}
                   onChange={(e) => setFormData(prev => ({ ...prev, experience_years: e.target.value.replace(/[^\d]/g, "") }))}
+                  onBlur={() => {
+                    if (formData.pet_experience.length === 0 || formData.pet_experience.includes("None")) {
+                      setFieldErrors((prev) => ({ ...prev, experienceYears: "" }));
+                      return;
+                    }
+                    const valid = !!formData.experience_years && NUMERIC_ONLY_REGEX.test(formData.experience_years);
+                    setFieldErrors((prev) => ({ ...prev, experienceYears: valid ? "" : t("Years of experience must be numeric") }));
+                  }}
                   placeholder={t("0")}
                   className="h-12 rounded-xl w-28"
                   inputMode="numeric"
+                  aria-invalid={Boolean(fieldErrors.experienceYears)}
                 />
+                {fieldErrors.experienceYears && <ErrorLabel message={fieldErrors.experienceYears} />}
                 {formData.experience_years === "0" && (
                   <p className="text-xs text-muted-foreground mt-1">{t("Less than 1 year")}</p>
                 )}
@@ -940,7 +1111,15 @@ const EditProfile = () => {
             <span className="text-sm font-medium">{t("Currently own pets?")}</span>
             <Switch
               checked={petsProfileCount > 0 ? true : formData.owns_pets}
-              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, owns_pets: checked }))}
+              onCheckedChange={(checked) =>
+                setFormData(prev => ({
+                  ...prev,
+                  owns_pets: checked,
+                  availability_status: checked
+                    ? prev.availability_status.filter((s) => s !== "Animal Friend (No Pet)")
+                    : prev.availability_status.filter((s) => s !== "Pet Parent"),
+                }))
+              }
               disabled={petsProfileCount > 0}
             />
           </div>
@@ -960,19 +1139,40 @@ const EditProfile = () => {
                   <button
                     key={status}
                     onClick={() => {
-                      if (petsProfileCount > 0 && status === "Animal Friend (No Pet)") {
+                      const hasPets = petsProfileCount > 0 || formData.owns_pets;
+                      if (hasPets && status === "Animal Friend (No Pet)") {
                         toast.error(t("Animal Friend (No Pet) is unavailable when you already have pet profiles"));
                         return;
                       }
-                      toggleArrayItem("availability_status", status);
+                      if (!hasPets && status === "Pet Parent") {
+                        toast.error(t("Pet Parent is unavailable when you have no pet profiles"));
+                        return;
+                      }
+                      setFormData((prev) => {
+                        const withoutOpposite =
+                          status === "Pet Parent"
+                            ? prev.availability_status.filter((s) => s !== "Animal Friend (No Pet)")
+                            : status === "Animal Friend (No Pet)"
+                            ? prev.availability_status.filter((s) => s !== "Pet Parent")
+                            : prev.availability_status;
+                        const next = withoutOpposite.includes(status)
+                          ? withoutOpposite.filter((s) => s !== status)
+                          : [...withoutOpposite, status];
+                        return { ...prev, availability_status: next };
+                      });
                     }}
-                    disabled={petsProfileCount > 0 && status === "Animal Friend (No Pet)"}
+                    disabled={
+                      ((petsProfileCount > 0 || formData.owns_pets) && status === "Animal Friend (No Pet)") ||
+                      (!(petsProfileCount > 0 || formData.owns_pets) && status === "Pet Parent")
+                    }
                     className={cn(
                       "px-3 py-2 rounded-full text-sm font-medium transition-all",
                       formData.availability_status.includes(status)
                         ? "bg-accent text-accent-foreground"
                         : "bg-card text-muted-foreground border border-border",
-                      petsProfileCount > 0 && status === "Animal Friend (No Pet)" && "opacity-40 cursor-not-allowed"
+                      (((petsProfileCount > 0 || formData.owns_pets) && status === "Animal Friend (No Pet)") ||
+                        (!(petsProfileCount > 0 || formData.owns_pets) && status === "Pet Parent")) &&
+                        "opacity-40 cursor-not-allowed"
                     )}
                   >
                     {status}
