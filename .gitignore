@@ -25,3 +25,7 @@ dist-ssr
 Platform Keys.rtf
 Backend.env.md
 supabase/config.toml.bak
+
+# Large media / source assets (use copies inside app packages instead)
+Brand Video*.MOV
+huddle transparent logo.png
