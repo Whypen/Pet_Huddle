@@ -674,7 +674,7 @@ const EditPetProfile = () => {
                   <Plus className="w-4 h-4" />
                 </Button>
               </div>
-              <p className="absolute left-0 -bottom-1 text-xs text-muted-foreground">
+              <p className="absolute left-0 -bottom-1 text-xs text-brandSubtext">
                 {t("Input last vaccination dates for better tracking")}
               </p>
               {fieldErrors.vaccinationDate && (

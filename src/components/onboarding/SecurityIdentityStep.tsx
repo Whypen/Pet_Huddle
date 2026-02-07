@@ -5,12 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorLabel } from "@/components/ui/ErrorLabel";
+import { Checkbox } from "@/components/ui/checkbox";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 interface SecurityIdentityStepProps {
   legalName: string;
@@ -35,6 +36,7 @@ export const SecurityIdentityStep = ({
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({ legalName: "", phone: "" });
+  const [legalConsent, setLegalConsent] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -78,7 +80,10 @@ export const SecurityIdentityStep = ({
     toast.info(t("Verification skipped - you can complete this later in settings"));
   };
 
-  const canContinue = (legalName.trim() && phone.trim()) && (verificationStatus === "pending" || verificationStatus === "skipped");
+  const isValid =
+    Boolean(legalName.trim() && phone.trim()) &&
+    (verificationStatus === "pending" || verificationStatus === "skipped") &&
+    legalConsent;
 
   return (
     <div className="space-y-6">
@@ -103,9 +108,10 @@ export const SecurityIdentityStep = ({
             value={legalName}
             onChange={(e) => {
               onLegalNameChange(e.target.value);
-              if (e.target.value.trim()) {
-                setFieldErrors((prev) => ({ ...prev, legalName: "" }));
-              }
+              setFieldErrors((prev) => ({
+                ...prev,
+                legalName: e.target.value.trim() ? "" : t("Legal name is required"),
+              }));
             }}
             className={`h-12 rounded-xl ${fieldErrors.legalName ? "border-red-500" : ""}`}
             aria-invalid={Boolean(fieldErrors.legalName)}
@@ -128,15 +134,38 @@ export const SecurityIdentityStep = ({
             value={phone}
             onChange={(value) => {
               onPhoneChange(value || '');
-              if (value?.trim()) {
-                setFieldErrors((prev) => ({ ...prev, phone: "" }));
-              }
+              setFieldErrors((prev) => ({
+                ...prev,
+                phone: value?.trim() ? "" : t("Phone number is required"),
+              }));
             }}
             className={`phone-input-onboarding h-12 rounded-xl border px-3 bg-muted ${fieldErrors.phone ? "border-red-500" : "border-border"}`}
             placeholder={t("Enter phone number")}
             disabled={verificationStatus === "verified"}
           />
           <ErrorLabel message={fieldErrors.phone} />
+        </div>
+      </div>
+
+      {/* Mandatory Consent */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-start gap-3">
+          <Checkbox
+            id="legalConsent"
+            checked={legalConsent}
+            onCheckedChange={(v) => setLegalConsent(v === true)}
+          />
+          <label htmlFor="legalConsent" className="text-sm leading-relaxed text-brandText">
+            I have read and agree to the{" "}
+            <Link to="/terms" className="text-brandBlue hover:underline">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link to="/privacy" className="text-brandBlue hover:underline">
+              Privacy Policy
+            </Link>
+            .
+          </label>
         </div>
       </div>
 
@@ -238,15 +267,14 @@ export const SecurityIdentityStep = ({
           </Button>
         )}
 
-        {canContinue && (
-          <Button
-            onClick={onContinue}
-            className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90"
-          >
-            {t("Continue to Profile Setup")}
-            <ChevronRight className="w-5 h-5 ml-2" />
-          </Button>
-        )}
+        <Button
+          onClick={onContinue}
+          className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-50"
+          disabled={!isValid}
+        >
+          {t("Continue to Profile Setup")}
+          <ChevronRight className="w-5 h-5 ml-2" />
+        </Button>
       </div>
     </div>
   );

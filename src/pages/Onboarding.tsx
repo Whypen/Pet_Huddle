@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import huddleLogo from "@/assets/huddle-logo.jpg";
+import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -138,7 +138,7 @@ const Onboarding = () => {
         setPhase("pet");
       } else {
         await refreshProfile();
-        toast.success(<span className="font-huddle">{t("Welcome to Huddle! 🎉")}</span>);
+        toast.success(t("Welcome to Huddle! 🎉"));
         navigate("/", { replace: true });
       }
     } catch (error: unknown) {
@@ -162,7 +162,7 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success(<span className="font-huddle">{t("Welcome to Huddle! 🎉")}</span>);
+      toast.success(t("Welcome to Huddle! 🎉"));
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
@@ -184,7 +184,7 @@ const Onboarding = () => {
       if (error) throw error;
       
       await refreshProfile();
-      toast.success(<span className="font-huddle">{t("Welcome to Huddle! You can add pets later.")}</span>);
+      toast.success(t("Welcome to Huddle! You can add pets later."));
       localStorage.removeItem("huddle_offline_actions");
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
@@ -203,9 +203,9 @@ const Onboarding = () => {
         <div className="px-6 py-4">
           <div className="flex items-center justify-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden">
-              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-cover" />
+              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-contain" />
             </div>
-            <span className="font-bold text-lg text-foreground lowercase font-huddle">{t("huddle")}</span>
+            <span className="font-bold text-lg text-brandText lowercase">{t("huddle")}</span>
           </div>
           
           {/* Progress Indicator */}

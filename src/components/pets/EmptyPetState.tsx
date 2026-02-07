@@ -19,7 +19,7 @@ export const EmptyPetState = ({ onAddPet }: EmptyPetStateProps) => {
         <PawPrint className="w-10 h-10 text-accent" />
       </div>
       
-      <h2 className="text-xl font-bold mb-2 font-huddle">{t("Your Huddle is Empty")}</h2>
+      <h2 className="text-xl font-bold mb-2">{t("Your Huddle is Empty")}</h2>
       <p className="text-muted-foreground text-sm mb-6">
         {t("Add your first pet to unlock full community features and connect with other pet lovers!")}
       </p>

@@ -38,12 +38,12 @@ import { useSearchParams } from "react-router-dom";
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
 const alertTypeColors: Record<string, string> = {
-  Stray: "#3283FF",
+  Stray: "#2145CF",
   Lost: "#EF4444",
   Found: "#A1A4A9",
   Friends: "#A6D539",
   Others: "#A1A4A9",
-  stray: "#3283FF",
+  stray: "#2145CF",
   lost: "#EF4444",
   found: "#A1A4A9",
   friends: "#A6D539",
@@ -322,7 +322,7 @@ const Map = () => {
       <div style="
         width: 20px;
         height: 20px;
-        background-color: #3283FF;
+        background-color: #2145CF;
         border-radius: 50%;
         border: 3px solid white;
         box-shadow: 0 0 0 4px rgba(37,99,235,0.3), 0 4px 12px rgba(0,0,0,0.3);

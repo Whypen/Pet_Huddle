@@ -48,7 +48,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
             </button>
 
             {/* Header with Gradient */}
-            <div className="relative bg-gradient-to-br from-[#3283FF] via-[#1E40AF] to-[#1E3A8A] px-6 pt-8 pb-12">
+            <div className="relative bg-gradient-to-br from-brandGold via-[#B38F18] to-[#7C6210] px-6 pt-8 pb-12">
               <div className="absolute inset-0 overflow-hidden">
                 <motion.div
                   animate={{ rotate: 360 }}
@@ -69,12 +69,12 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
                   transition={{ delay: 0.2, type: "spring" }}
                   className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
                 >
-                  <Crown className="w-10 h-10 text-white" />
-                </motion.div>
-                <h2 className="text-2xl font-bold text-white mb-1 font-huddle">{t("Huddle Premium")}</h2>
-                <p className="text-white/80 text-sm">{t("Unlock the full experience")}</p>
-              </div>
+                <Crown className="w-10 h-10 text-white" />
+              </motion.div>
+              <h2 className="text-2xl font-bold text-white mb-1">{t("Huddle Premium")}</h2>
+              <p className="text-white/80 text-sm">{t("Unlock the full experience")}</p>
             </div>
+          </div>
 
             {/* Features */}
             <div className="px-6 py-6 -mt-6 bg-card rounded-t-3xl relative">
@@ -107,7 +107,7 @@ export const PremiumUpsell = ({ isOpen, onClose }: PremiumUpsellProps) => {
               {/* CTA Button */}
               <motion.button
                 whileTap={{ scale: 0.98 }}
-                className="w-full py-4 rounded-xl bg-primary text-white font-semibold text-lg shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-xl bg-brandGold text-brandText font-semibold text-lg shadow-lg flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-5 h-5" />
                 {t("Upgrade to Premium")}

@@ -4,7 +4,7 @@ import { X, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useApi } from "@/hooks/useApi";
 import { useLanguage } from "@/contexts/LanguageContext";
-import huddleLogo from "@/assets/huddle-logo.jpg";
+import huddleLogo from "@/assets/huddle-logo-transparent.png";
 
 interface FounderMessageProps {
   onClose: () => void;
@@ -78,16 +78,16 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
             </button>
 
             <div className="w-20 h-20 mx-auto rounded-full bg-white shadow-lg overflow-hidden mb-3">
-              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-cover" />
+              <img src={huddleLogo} alt={t("huddle")} className="w-full h-full object-contain" />
             </div>
 
-            <h2 className="text-xl font-bold text-white mb-1 font-huddle">{t("Welcome to huddle")}</h2>
+            <h2 className="text-xl font-bold text-white mb-1">{t("Welcome to huddle")}</h2>
             <p className="text-white/80 text-sm">{t("Family mesh for pets")}</p>
           </div>
 
           {/* Message content */}
           <div className="p-6">
-            <div className="text-sm text-foreground whitespace-pre-line leading-relaxed font-huddle">
+            <div className="text-sm text-foreground whitespace-pre-line leading-relaxed">
               {message}
             </div>
           </div>

@@ -22,7 +22,7 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
         className={cn(
           "rounded-full flex items-center justify-center",
           verified
-            ? "bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706]"
+            ? "bg-brandGold"
             : "bg-muted",
           badgeSize
         )}
@@ -34,9 +34,9 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
         <div
           className={cn(
             "rounded-full flex items-center justify-center",
+            "bg-brandBlue",
             badgeSize
           )}
-          style={{ backgroundColor: "#3283FF" }}
           title={t("Has a Car")}
         >
           <Car className={cn(iconSize, "text-white")} />

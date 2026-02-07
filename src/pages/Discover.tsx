@@ -408,7 +408,7 @@ const Discover = () => {
                       }}
                       className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
                     >
-                      <Star className="w-4 h-4 text-[#3283FF]" />
+                      <Star className="w-4 h-4 text-brandBlue" />
                     </button>
                     <button
                       onClick={(e) => {

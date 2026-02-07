@@ -767,7 +767,7 @@ const Settings = () => {
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
-              <p className="text-xs text-muted-foreground mb-4 font-huddle">
+              <p className="text-xs text-muted-foreground mb-4">
                 {t("Enter a 10-digit User ID to invite a family member.")}
               </p>
               <Input

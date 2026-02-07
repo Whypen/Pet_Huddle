@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
-import huddleLogo from "@/assets/huddle-logo.jpg";
+import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const Auth = () => {
@@ -192,13 +192,13 @@ const Auth = () => {
           animate={{ scale: 1, opacity: 1 }}
           className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
         >
-          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-cover" />
+          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-contain" />
         </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="text-3xl font-bold text-foreground lowercase font-huddle"
+          className="text-3xl font-bold text-brandText lowercase"
         >
           {t("app.name")}
         </motion.h1>
@@ -491,11 +491,11 @@ const Auth = () => {
       <div className="py-8 text-center">
         <p className="text-xs text-muted-foreground">
           {t("auth.by_continuing")}{" "}
-          <Link to="/terms" className="text-[#3283FF] hover:underline">
+          <Link to="/terms" className="text-brandBlue hover:underline">
             {t("auth.terms")}
           </Link>{" "}
           {t("auth.and")}{" "}
-          <Link to="/privacy" className="text-[#3283FF] hover:underline">
+          <Link to="/privacy" className="text-brandBlue hover:underline">
             {t("auth.privacy")}
           </Link>
         </p>

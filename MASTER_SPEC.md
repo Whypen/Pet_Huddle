@@ -9,6 +9,16 @@
 ## 0. Product DNA
 huddle is a mobile‑first pet‑care super‑app blending family mesh safety (emergency broadcasts), nanny marketplace (escrow bookings with 10% platform fee), social discovery (swipes/matches with pop‑ups), and fintech (subscriptions/add‑ons with webhooks). Experience target: Instagram/TikTok smoothness, minimal UI with Huddle Blue accents, gold gradient for premium. PWA required for native‑like install and offline behavior. No dead ends, no lag.
 
+## 0.1 Branded UI Design System (Mandatory)
+Design tokens and typography rules are defined in `ui_design_system.md` and MUST be enforced across all UI.
+
+Tokens (MUST match exactly):
+- Primary (Huddle Blue): #2145CF
+- Secondary (Premium Gold): #CFAB21
+- Primary Text: #424965 (Apply to all headings and body)
+- Subtext: #4a4a4a (Apply to captions and vaccination remarks)
+- Validation/Error: #EF4444 (Pure red for borders and text)
+
 ---
 
 ## 1. Architecture & Stack

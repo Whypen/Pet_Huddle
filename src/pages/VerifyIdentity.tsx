@@ -208,7 +208,7 @@ const VerifyIdentity = () => {
       >
         <X className="w-5 h-5" />
       </button>
-      <h1 className="text-2xl font-bold font-huddle">{t("Identity Verification")}</h1>
+      <h1 className="text-2xl font-bold">{t("Identity Verification")}</h1>
 
       {step === 1 && (
         <div className="space-y-3">

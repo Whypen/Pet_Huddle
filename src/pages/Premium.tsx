@@ -119,7 +119,7 @@ const Premium = () => {
         if (updatedProfile && (updatedProfile.tier === "premium" || updatedProfile.tier === "gold")) {
           setIsPolling(false);
           clearInterval(pollInterval);
-          toast.success(<span className="font-huddle">{t("Welcome to huddle Premium!")}</span>);
+          toast.success(t("Welcome to huddle Premium!"));
         }
       }, 2000);
 
@@ -315,7 +315,7 @@ const Premium = () => {
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-xl font-bold font-huddle">{t("huddle Premium")}</h1>
+        <h1 className="text-xl font-bold">{t("huddle Premium")}</h1>
       </header>
 
       <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
@@ -323,7 +323,7 @@ const Premium = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative bg-gradient-to-br from-[#3283FF] via-[#1E40AF] to-[#1E3A8A] rounded-2xl p-6 mb-6 overflow-hidden"
+          className="relative bg-gradient-to-br from-brandBlue via-[#1B39AA] to-[#132A7D] rounded-2xl p-6 mb-6 overflow-hidden"
           style={{
             boxShadow: "0 8px 32px rgba(37, 99, 235, 0.3)",
           }}
@@ -344,8 +344,8 @@ const Premium = () => {
             <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1 font-huddle">{t("huddle Premium")}</h2>
-            <p className="text-white/90 text-sm font-huddle">{t("Unlock the full huddle experience")}</p>
+            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
+            <p className="text-white/90 text-sm">{t("Unlock the full huddle experience")}</p>
           </div>
         </motion.div>
 
@@ -366,8 +366,8 @@ const Premium = () => {
                 className={cn(
                   "w-10 h-10 rounded-full flex items-center justify-center",
                   isGold
-                    ? "bg-gradient-to-r from-amber-400 to-amber-500"
-                    : "bg-[#3283FF]"
+                    ? "bg-brandGold"
+                    : "bg-brandBlue"
                 )}
               >
                 {isGold ? (
@@ -445,7 +445,7 @@ const Premium = () => {
           </div>
           <div className="bg-card border border-border rounded-xl p-3">
             <div className="flex items-center gap-2 mb-1">
-              <Camera className="w-4 h-4 text-[#3283FF]" />
+              <Camera className="w-4 h-4 text-brandBlue" />
               <span className="text-xs font-medium text-muted-foreground">{t("Media")}</span>
             </div>
             <p className="text-2xl font-bold">{profile?.media_credits || 0}</p>
@@ -498,7 +498,7 @@ const Premium = () => {
               <div className="p-3 text-center border-l border-border bg-primary/5">
                 {typeof feature.premium === "boolean" ? (
                   feature.premium ? (
-                    <Check className="w-3 h-3 text-[#3283FF] mx-auto" />
+                    <Check className="w-3 h-3 text-brandBlue mx-auto" />
                   ) : (
                       <span className="text-muted-foreground">{t("—")}</span>
                   )
@@ -535,12 +535,12 @@ const Premium = () => {
                 className={cn(
                   "p-4 rounded-xl border-2 text-left transition-all",
                   selectedTier === "premium"
-                    ? "border-[#3283FF] bg-[#3283FF]/5"
-                    : "border-border hover:border-[#3283FF]/50"
+                    ? "border-brandBlue bg-brandBlue/5"
+                    : "border-border hover:border-brandBlue/50"
                 )}
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-[#3283FF]" />
+                  <Sparkles className="w-5 h-5 text-brandBlue" />
                   <span className="font-bold">{t("Premium")}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">{t("Best for individuals")}</p>
@@ -612,7 +612,7 @@ const Premium = () => {
                 "w-full py-6 text-lg gap-2 mb-6",
                 selectedTier === "gold"
                   ? "bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
-                  : "bg-gradient-to-r from-[#3283FF] to-[#1E40AF] hover:from-[#1E40AF] hover:to-[#1E3A8A] text-white"
+                  : "bg-gradient-to-r from-brandBlue to-[#1B39AA] hover:from-[#1B39AA] hover:to-[#132A7D] text-white"
               )}
               style={{
                 boxShadow:

@@ -1,7 +1,5 @@
-import type { Config } from "tailwindcss";
-import tailwindcssAnimate from "tailwindcss-animate";
-
-export default {
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   darkMode: ["class"],
   content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
   prefix: "",
@@ -16,13 +14,29 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: [
+          "Microsoft YaHei UI",
+          "Microsoft YaHei",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Segoe UI",
+          "Roboto",
+          "sans-serif",
+        ],
       },
       fontSize: {
         base: ["var(--font-pt14)", { lineHeight: "1.5" }],
         sub: ["var(--font-pt12)", { lineHeight: "1.4" }],
       },
       colors: {
+        // Brand tokens (must match ui_design_system.md)
+        brandBlue: "#2145CF",
+        brandGold: "#CFAB21",
+        brandText: "#424965",
+        brandSubtext: "#4a4a4a",
+        brandError: "#EF4444",
+
+        // shadcn design tokens (kept for compatibility)
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -128,8 +142,8 @@ export default {
         bounce: "bounce 1s infinite",
       },
       spacing: {
-        "nav": "var(--nav-height)",
-        "safe": "env(safe-area-inset-bottom, 0px)",
+        nav: "var(--nav-height)",
+        safe: "env(safe-area-inset-bottom, 0px)",
         "token-1": "var(--space-1)",
         "token-2": "var(--space-2)",
         "token-3": "var(--space-3)",
@@ -142,5 +156,6 @@ export default {
       },
     },
   },
-  plugins: [tailwindcssAnimate],
-} satisfies Config;
+  plugins: [require("tailwindcss-animate")],
+};
+
