@@ -69,22 +69,26 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
 
   return (
     <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
-      <div className="flex items-center justify-between px-4 py-3 max-w-md mx-auto">
-        <div className="w-9 h-9" aria-hidden="true" />
-
-        {/* Centered Logo with Brand Name - Clickable to Dashboard */}
+      <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
+        {/* Left brand wordmark (UAT: fontSize 24 bold) */}
         <button
           onClick={handleLogoClick}
-          className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 hover:opacity-80 transition-opacity"
+          className="text-brandText font-bold lowercase text-[24px] leading-none"
+          aria-label={t("huddle")}
+        >
+          {t("huddle")}
+        </button>
+
+        {/* Centered Logo */}
+        <button
+          onClick={handleLogoClick}
+          className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
         >
           <img
             src={huddleLogo}
             alt={t("huddle")}
-            className="h-8 w-8 object-contain rounded-lg"
+            className="h-8 w-8 object-contain"
           />
-          <div className="hidden sm:flex flex-col">
-            <span className="text-base font-bold lowercase leading-tight text-brandText">{t("huddle")}</span>
-          </div>
         </button>
 
         {/* Right: Settings (Gear) Icon Only */}

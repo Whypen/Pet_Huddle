@@ -1,4 +1,4 @@
-import { Shield, Car, Crown } from "lucide-react";
+import { Shield, Car } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -7,7 +7,6 @@ interface UserAvatarProps {
   name?: string | null;
   isVerified?: boolean;
   hasCar?: boolean;
-  isPremium?: boolean;
   size?: "sm" | "md" | "lg" | "xl";
   showBadges?: boolean;
   className?: string;
@@ -40,7 +39,6 @@ export const UserAvatar = ({
   name,
   isVerified = false,
   hasCar = false,
-  isPremium = false,
   size = "md",
   showBadges = true,
   className,
@@ -93,23 +91,15 @@ export const UserAvatar = ({
             </div>
           )}
 
-          {/* Verification/Premium Badge - Bottom Right */}
+          {/* Verification Badge - Bottom Right (UAT: no crown/premium) */}
           <div
             className={cn(
               "absolute -bottom-1 -right-1 rounded-full flex items-center justify-center ring-2 ring-white",
               badgeSizeClasses[size],
-              isPremium
-                ? "bg-brandGold"
-                : isVerified
-                ? "bg-brandGold"
-                : "bg-[#A1A4A9]"
+              isVerified ? "bg-brandGold" : "bg-[#A1A4A9]"
             )}
           >
-            {isPremium ? (
-              <Crown className={cn("text-white", iconSizeClasses[size])} />
-            ) : (
-              <Shield className={cn("text-white", iconSizeClasses[size])} />
-            )}
+            <Shield className={cn("text-white", iconSizeClasses[size])} />
           </div>
         </>
       )}

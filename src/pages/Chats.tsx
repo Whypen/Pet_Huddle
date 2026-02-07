@@ -1017,7 +1017,6 @@ const Chats = () => {
                         name={chat.name}
                         isVerified={chat.isVerified}
                         hasCar={chat.hasCar}
-                        isPremium={chat.isPremium}
                         size="lg"
                         showBadges={true}
                       />

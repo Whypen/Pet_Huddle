@@ -19,6 +19,9 @@ Tokens (MUST match exactly):
 - Subtext: #4a4a4a (Apply to captions and vaccination remarks)
 - Validation/Error: #EF4444 (Pure red for borders and text)
 
+### UAT Feedback Integration v1.1 (UI Guidelines)
+UAT-driven UI behavior and measurements are defined in `ui_design_system.md` under "UAT Global UI Guidelines (v1.1)" and MUST be treated as a release gate.
+
 ---
 
 ## 1. Architecture & Stack
