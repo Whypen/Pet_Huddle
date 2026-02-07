@@ -32,11 +32,11 @@ serve(async (req) => {
 
     const { data: roleRow } = await supabase
       .from("profiles")
-      .select("role")
+      .select("user_role")
       .eq("id", authUser.user.id)
       .maybeSingle();
 
-    if (roleRow?.role !== "admin") {
+    if (roleRow?.user_role !== "admin") {
       return json({ error: "Forbidden" }, 403);
     }
 
@@ -47,7 +47,7 @@ serve(async (req) => {
 
     const { data: booking, error } = await supabase
       .from("marketplace_bookings")
-      .select("id, stripe_payment_intent_id, amount, platform_fee, sitter_payout, status")
+      .select("id, stripe_payment_intent_id, stripe_charge_id, amount, platform_fee, sitter_payout, status, sitter_id")
       .eq("id", bookingId)
       .single();
 
@@ -55,12 +55,16 @@ serve(async (req) => {
 
     if (action === "refund") {
       if (booking.stripe_payment_intent_id?.startsWith("pi_")) {
-        await stripe.refunds.create({ payment_intent: booking.stripe_payment_intent_id });
+        await stripe.refunds.create(
+          { payment_intent: booking.stripe_payment_intent_id },
+          { idempotencyKey: `refund_${bookingId}` }
+        );
       }
       await supabase
         .from("marketplace_bookings")
         .update({
           status: "refunded",
+          escrow_status: "refunded",
           platform_fee: 0,
           sitter_payout: 0,
         })
@@ -68,18 +72,50 @@ serve(async (req) => {
       return json({ ok: true });
     }
 
-    // release
+    const { data: sitter } = await supabase
+      .from("sitter_profiles")
+      .select("stripe_connect_account_id")
+      .eq("user_id", booking.sitter_id)
+      .maybeSingle();
+
+    if (!sitter?.stripe_connect_account_id) {
+      return json({ error: "Sitter has no connected account" }, 400);
+    }
+
+    let chargeId = booking.stripe_charge_id;
+    let currency = "usd";
+    if (booking.stripe_payment_intent_id?.startsWith("pi_")) {
+      const intent = await stripe.paymentIntents.retrieve(booking.stripe_payment_intent_id);
+      currency = intent.currency || currency;
+      if (!chargeId && intent.latest_charge) {
+        chargeId = typeof intent.latest_charge === "string" ? intent.latest_charge : intent.latest_charge.id;
+      }
+    }
+
+    const transfer = await stripe.transfers.create(
+      {
+        amount: booking.sitter_payout,
+        currency,
+        destination: sitter.stripe_connect_account_id,
+        ...(chargeId ? { source_transaction: chargeId } : {}),
+        metadata: { booking_id: bookingId },
+      },
+      { idempotencyKey: `transfer_${bookingId}` }
+    );
+
     await supabase
       .from("marketplace_bookings")
       .update({
-        status: "released",
-        platform_fee: booking.platform_fee,
-        sitter_payout: booking.sitter_payout,
+        status: "completed",
+        escrow_status: "released",
+        stripe_transfer_id: transfer.id,
+        stripe_charge_id: chargeId || booking.stripe_charge_id,
       })
       .eq("id", bookingId);
 
     return json({ ok: true });
-  } catch (err: any) {
-    return json({ error: err?.message || "Server error" }, 500);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return json({ error: message || "Server error" }, 500);
   }
 });

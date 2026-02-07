@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import imageCompression from "browser-image-compression";
 
 interface Message {
   id: string;
@@ -64,7 +65,7 @@ const ChatDialogue = () => {
         schema: "public",
         table: "chat_messages",
         filter: `room_id=eq.${chatId}`,
-      }, (payload: any) => {
+      }, (payload: { new: { id: string; content: string; sender_id: string; created_at: string } | null }) => {
         if (payload.new && payload.new.sender_id !== user?.id) {
           const incoming: Message = {
             id: payload.new.id,
@@ -96,7 +97,7 @@ const ChatDialogue = () => {
           .limit(100);
 
         if (!error && data) {
-          const mapped: Message[] = data.map((m: any) => ({
+          const mapped: Message[] = data.map((m: { id: string; content: string; sender_id: string; created_at: string }) => ({
             id: m.id,
             content: m.content,
             senderId: m.sender_id,
@@ -155,6 +156,13 @@ const ChatDialogue = () => {
 
     setIsLoading(true);
     try {
+      const compressed = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
+      if (compressed.size > 500 * 1024) {
+        toast.error(t("Image must be under 500KB"));
+        setIsLoading(false);
+        e.target.value = "";
+        return;
+      }
       const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
         action_type: "chat_image",
       });
@@ -164,9 +172,9 @@ const ChatDialogue = () => {
         e.target.value = "";
         return;
       }
-      const ext = file.name.split(".").pop() || "jpg";
+      const ext = compressed.name.split(".").pop() || "jpg";
       const path = `${user.id}/chat/${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("notices").upload(path, file);
+      const { error: uploadError } = await supabase.storage.from("notices").upload(path, compressed);
       if (uploadError) throw uploadError;
 
       const { data: pub } = supabase.storage.from("notices").getPublicUrl(path);
@@ -283,7 +291,8 @@ const ChatDialogue = () => {
         <div className="flex items-center gap-3 max-w-md mx-auto">
           <button
             onClick={() => {
-              const isFree = !profile?.tier || profile?.tier === "free";
+              const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+              const isFree = effectiveTier === "free";
               const mediaCredits = profile?.media_credits || 0;
               if (isFree && mediaCredits <= 0) {
                 setIsPremiumFooterOpen(true);

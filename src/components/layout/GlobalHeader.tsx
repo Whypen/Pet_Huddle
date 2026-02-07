@@ -1,13 +1,12 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bell, Settings, Plus } from "lucide-react";
+import { Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-logo.jpg";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
@@ -23,11 +22,9 @@ interface Pet {
 
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps) => {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
-
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
 
   // Fetch user's pets
   useEffect(() => {
@@ -73,16 +70,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   return (
     <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
       <div className="flex items-center justify-between px-4 py-3 max-w-md mx-auto">
-        {/* Left: Notifications */}
-        <button
-          className="p-2 rounded-full hover:bg-muted transition-colors relative"
-          aria-label={t("Notifications")}
-          onClick={() => toast.info(t("Notifications coming soon"))}
-        >
-          <Bell className="w-5 h-5 text-muted-foreground" />
-          {/* Notification dot */}
-          <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-        </button>
+        <div className="w-9 h-9" aria-hidden="true" />
 
         {/* Centered Logo with Brand Name - Clickable to Dashboard */}
         <button

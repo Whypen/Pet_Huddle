@@ -1,11 +1,10 @@
-import { Home, Users, MessageCircle, Stethoscope, MapPin } from "lucide-react";
+import { Users, MessageCircle, Stethoscope, MapPin } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { icon: Home, label: "nav.home", path: "/" },
   { icon: Users, label: "nav.social", path: "/social" },
   { icon: MessageCircle, label: "nav.chats", path: "/chats" },
   { icon: Stethoscope, label: "nav.ai_vet", path: "/ai-vet" },
@@ -21,12 +20,9 @@ export const BottomNav = () => {
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border shadow-elevated">
       <div className="flex items-center justify-around h-nav max-w-md mx-auto px-2 pb-safe">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.path ||
-            (item.path === "/" && location.pathname === "/");
-          // Brand hierarchy: Home = green (#A6D539), all others = Huddle Blue (#3283FF)
-          const isHomeIcon = item.path === "/";
-          const activeColor = isHomeIcon ? "text-[#A6D539]" : "text-[#3283FF]";
-          const activeBg = isHomeIcon ? "bg-[#A6D539]/10" : "bg-[#3283FF]/10";
+          const isActive = location.pathname === item.path;
+          const activeColor = "text-[#3283FF]";
+          const activeBg = "bg-[#3283FF]/10";
 
           return (
             <motion.button

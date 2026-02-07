@@ -24,6 +24,39 @@ async function getTier(userId: string) {
   return data?.tier || "free";
 }
 
+async function getTokenBucket(userId: string) {
+  const now = new Date();
+  const { data } = await supabase
+    .from("ai_vet_rate_limits")
+    .select("tokens, last_refill")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) {
+    await supabase.from("ai_vet_rate_limits").insert({ user_id: userId, tokens: 50 });
+    return { tokens: 50 };
+  }
+  const lastRefill = new Date(data.last_refill);
+  if (now.getTime() - lastRefill.getTime() >= 24 * 60 * 60 * 1000) {
+    await supabase
+      .from("ai_vet_rate_limits")
+      .update({ tokens: 50, last_refill: now.toISOString() })
+      .eq("user_id", userId);
+    return { tokens: 50 };
+  }
+  return { tokens: data.tokens ?? 0 };
+}
+
+async function consumeTokenBucket(userId: string) {
+  const bucket = await getTokenBucket(userId);
+  if (bucket.tokens <= 0) return { allowed: false, remaining: 0 };
+  const remaining = bucket.tokens - 1;
+  await supabase
+    .from("ai_vet_rate_limits")
+    .update({ tokens: remaining })
+    .eq("user_id", userId);
+  return { allowed: true, remaining };
+}
+
 async function consumeToken(userId: string, actionType: string) {
   const { data, error } = await supabase.rpc("check_and_increment_quota", {
     action_type: actionType,
@@ -34,15 +67,30 @@ async function consumeToken(userId: string, actionType: string) {
   return { allowed: data === true, remaining: null };
 }
 
-async function callGemini({ message, petProfile, imageBase64 }: { message: string; petProfile?: any; imageBase64?: string }) {
+type PetProfileContext = {
+  name?: string;
+  species?: string;
+  breed?: string | null;
+  age?: string | number | null;
+  weight?: string | number | null;
+  weight_unit?: string | null;
+  history?: string | null;
+};
+
+async function callGemini({ message, petProfile, imageBase64 }: { message: string; petProfile?: PetProfileContext; imageBase64?: string }) {
   const model = imageBase64 ? IMAGE_MODEL : TEXT_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
 
   const prompt = petProfile
-    ? `Pet Profile:\nName: ${petProfile.name}\nSpecies: ${petProfile.species}\nBreed: ${petProfile.breed || ""}\nAge: ${petProfile.age || ""}\nWeight: ${petProfile.weight || ""} ${petProfile.weight_unit || ""}\nHistory: ${petProfile.history || ""}\n\nUser Question: ${message}`
-    : message;
+    ? `You are Dr. Huddle, an empathetic, calm, jargon-free AI vet assistant. Provide concise, pet-centric, actionable guidance and list clear next steps. If symptoms suggest emergency care, say so.\n\nPet Profile:\nName: ${petProfile.name}\nSpecies: ${petProfile.species}\nBreed: ${petProfile.breed || ""}\nAge: ${petProfile.age || ""}\nWeight: ${petProfile.weight || ""} ${petProfile.weight_unit || ""}\nHistory: ${petProfile.history || ""}\n\nUser Question: ${message}`
+    : `You are Dr. Huddle, an empathetic, calm, jargon-free AI vet assistant. Provide concise, pet-centric, actionable guidance and list clear next steps.\n\nUser Question: ${message}`;
 
-  const contents: any[] = [{ parts: [{ text: prompt }] }];
+  const contents: Array<{
+    parts: Array<
+      | { text: string }
+      | { inline_data: { mime_type: string; data: string } }
+    >;
+  }> = [{ parts: [{ text: prompt }] }];
 
   if (imageBase64) {
     contents[0].parts.push({
@@ -63,16 +111,26 @@ async function callGemini({ message, petProfile, imageBase64 }: { message: strin
     return { quota: true };
   }
 
-  const data = await res.json();
+  const data: unknown = await res.json();
   if (!res.ok) {
-    const msg = (data?.error?.message || "").toLowerCase();
+    const rec = (typeof data === "object" && data !== null) ? (data as Record<string, unknown>) : {};
+    const err = (typeof rec.error === "object" && rec.error !== null) ? (rec.error as Record<string, unknown>) : {};
+    const msg = String(err.message || "").toLowerCase();
     if (msg.includes("quota") || msg.includes("rate")) {
       return { quota: true };
     }
-    throw new Error(data?.error?.message || "Gemini request failed");
+    throw new Error(String(err.message || "Gemini request failed"));
   }
 
-  const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join("\n");
+  const root = (typeof data === "object" && data !== null) ? (data as Record<string, unknown>) : {};
+  const candidates = Array.isArray(root.candidates) ? (root.candidates as unknown[]) : [];
+  const c0 = (typeof candidates[0] === "object" && candidates[0] !== null) ? (candidates[0] as Record<string, unknown>) : {};
+  const content = (typeof c0.content === "object" && c0.content !== null) ? (c0.content as Record<string, unknown>) : {};
+  const parts = Array.isArray(content.parts) ? (content.parts as unknown[]) : [];
+  const text = parts
+    .map((p) => (typeof p === "object" && p !== null) ? String((p as Record<string, unknown>).text || "") : "")
+    .filter(Boolean)
+    .join("\n");
   return { text: text || "" };
 }
 
@@ -103,29 +161,34 @@ serve(async (req: Request) => {
       return json({ data: { remaining: null, tier } }, 200);
     }
 
-    const { data } = await supabase
-      .from("ai_vet_rate_limits")
-      .select("tokens")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    return json({ data: { remaining: data?.tokens ?? 50, tier } }, 200);
+    const bucket = await getTokenBucket(userId);
+    return json({ data: { remaining: bucket.tokens ?? 0, tier } }, 200);
   }
 
   if (req.method === "POST" && path.endsWith("/chat")) {
     const { conversationId, message, petProfile, userId, imageBase64 } = await req.json();
     if (!userId || !message) return json({ error: "Missing userId or message" }, 400);
 
-    const bucket = imageBase64
-      ? await consumeToken(userId, "ai_vision")
-      : { allowed: true, remaining: null };
-    if (!bucket.allowed) return json({ error: "Quota Exceeded" }, 429);
+    const tier = await getTier(userId);
+    let remaining: number | null = null;
+    if (tier !== "premium" && tier !== "gold") {
+      const bucket = await consumeTokenBucket(userId);
+      if (!bucket.allowed) return json({ error: "Quota Exceeded" }, 429);
+      remaining = bucket.remaining;
+    }
+
+    if (imageBase64) {
+      const vision = await consumeToken(userId, "ai_vision");
+      if (!vision.allowed) return json({ error: "Quota Exceeded" }, 429);
+    }
 
     try {
       const gem = await callGemini({ message, petProfile, imageBase64 });
       if (gem?.quota) return json({ error: "Quota Exceeded" }, 429);
 
       const aiMessage = gem.text || "";
+      const triageKeywords = ["emergency", "bleeding", "seizure", "poison", "choking", "unconscious", "not breathing"];
+      const triage = triageKeywords.some((k) => message.toLowerCase().includes(k));
 
       if (conversationId) {
         const { data: convo } = await supabase
@@ -144,13 +207,14 @@ serve(async (req: Request) => {
           .eq("id", conversationId);
       }
 
-      return json({ data: { message: aiMessage, remaining: bucket.remaining } }, 200);
-    } catch (err: any) {
-      const msg = `${err?.message || ""}`.toLowerCase();
+      return json({ data: { message: aiMessage, triage, remaining } }, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const msg = message.toLowerCase();
       if (msg.includes("quota") || msg.includes("rate")) {
         return json({ error: "Quota Exceeded" }, 429);
       }
-      return json({ error: err.message || "Gemini error" }, 500);
+      return json({ error: message || "Gemini error" }, 500);
     }
   }
 

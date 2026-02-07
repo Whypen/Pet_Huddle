@@ -226,8 +226,9 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
       toast.success(`${formData.name} ${t("has been added to your huddle! 🎉")}`);
       onComplete();
       onClose();
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to add pet"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to add pet"));
     } finally {
       setLoading(false);
     }

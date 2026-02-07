@@ -17,30 +17,39 @@ const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // =====================================================
-// STRIPE PRODUCT ID MAP — live IDs from Stripe Dashboard
-// Subscriptions: premium_monthly / premium_annual use the
-//   same Product; Stripe resolves the correct Price by the
-//   plan key passed in from Premium.tsx.
-// Add-ons: one-time payment mode — amount is set by the
-//   client; Product ID is attached for receipt labelling.
+// STRIPE PRODUCT/PRICE MAP — dynamic pricing via Stripe
 // =====================================================
 const STRIPE_PRODUCTS: Record<string, string> = {
-  // Subscription tiers
-  premium_monthly:  "prod_TuEpCL4vGGwUpk",
-  premium_annual:   "prod_TuEpCL4vGGwUpk",  // same Product; annual Price is a child
-  gold_monthly:     "prod_TuF4blxU2yHqBV",
-  gold_annual:      "prod_TuF4blxU2yHqBV",  // same Product; annual Price is a child
+  premium_monthly: "prod_TuEpCL4vGGwUpk",
+  premium_annual: "prod_TuEpCL4vGGwUpk",
+  gold_monthly: "prod_TuF4blxU2yHqBV",
+  gold_annual: "prod_TuF4blxU2yHqBV",
+  star_pack: "prod_TuFPF3zjXiWiK8",
+  emergency_alert: "prod_TuFKa021SiFK58",
+  vet_media: "prod_TuFLRWYZGrItCP",
+};
 
-  // Identity & badges
-  verified_badge:   "prod_TuFRNkLiOOKuHZ",
+const STRIPE_PRICE_IDS: Record<string, string | undefined> = {
+  premium_monthly: Deno.env.get("STRIPE_PRICE_PREMIUM_MONTHLY"),
+  premium_annual: Deno.env.get("STRIPE_PRICE_PREMIUM_ANNUAL"),
+  gold_monthly: Deno.env.get("STRIPE_PRICE_GOLD_MONTHLY"),
+  gold_annual: Deno.env.get("STRIPE_PRICE_GOLD_ANNUAL"),
+  star_pack: Deno.env.get("STRIPE_PRICE_STAR_PACK"),
+  emergency_alert: Deno.env.get("STRIPE_PRICE_BROADCAST_ALERT"),
+  vet_media: Deno.env.get("STRIPE_PRICE_MEDIA_10"),
+};
 
-  // Add-on packs
-  star_pack:        "prod_TuFPF3zjXiWiK8",
-  emergency_alert:  "prod_TuFKa021SiFK58",
-  vet_media:        "prod_TuFLRWYZGrItCP",
-  family_slot:      "prod_TuFNGDVKRYPPsG",
-  "5_media_pack":   "prod_TuFQ8x2UN7yYjm",
-  "7_day_extension":"prod_TuFIj3NC2W7TvV",
+const SUB_DEFAULTS: Record<string, { amount: number; interval: "month" | "year" }> = {
+  premium_monthly: { amount: 899, interval: "month" },
+  premium_annual: { amount: 8000, interval: "year" },
+  gold_monthly: { amount: 1999, interval: "month" },
+  gold_annual: { amount: 18000, interval: "year" },
+};
+
+const ADDON_DEFAULTS: Record<string, number> = {
+  star_pack: 499,
+  emergency_alert: 299,
+  vet_media: 399,
 };
 
 serve(async (req: Request) => {
@@ -49,13 +58,14 @@ serve(async (req: Request) => {
       userId,
       type,
       mode,
+      items,
       amount,
       metadata: extraMetadata,
       successUrl,
       cancelUrl,
     } = await req.json();
 
-    if (!userId || !type || !mode) {
+    if (!userId || !mode || (!type && !items)) {
       return new Response(
         JSON.stringify({ error: "Missing required parameters" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
@@ -86,7 +96,7 @@ serve(async (req: Request) => {
     }
 
     // Generate idempotency key
-    const idempotencyKey = `${userId}-${type}-${Date.now()}`;
+    const idempotencyKey = `${userId}-${type || "cart"}-${Date.now()}`;
 
     // Create checkout session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -102,15 +112,7 @@ serve(async (req: Request) => {
     };
 
     if (mode === "subscription") {
-      // Recurring prices — authoritative amounts live server-side
-      const SUB_PRICES: Record<string, { amount: number; interval: "month" | "year" }> = {
-        premium_monthly: { amount: 899,   interval: "month" },
-        premium_annual:  { amount: 8000,  interval: "year"  },
-        gold_monthly:    { amount: 1999,  interval: "month" },
-        gold_annual:     { amount: 18000, interval: "year"  },
-      };
-
-      const sub = SUB_PRICES[type];
+      const sub = SUB_DEFAULTS[type];
       if (!sub) {
         return new Response(
           JSON.stringify({ error: `Unknown subscription type: ${type}` }),
@@ -118,61 +120,66 @@ serve(async (req: Request) => {
         );
       }
 
-      sessionParams.line_items = [
-        {
-          price_data: {
-            currency: "usd",
-            product: STRIPE_PRODUCTS[type],
-            recurring: { interval: sub.interval },
-            unit_amount: sub.amount,
-          },
-          quantity: 1,
-        },
-      ];
+      const priceId = STRIPE_PRICE_IDS[type];
+      sessionParams.line_items = priceId
+        ? [{ price: priceId, quantity: 1 }]
+        : [
+            {
+              price_data: {
+                currency: "usd",
+                product: STRIPE_PRODUCTS[type],
+                recurring: { interval: sub.interval },
+                unit_amount: sub.amount,
+              },
+              quantity: 1,
+            },
+          ];
       sessionParams.payment_method_types = ["card"];
     } else {
-      // One-time payment — attach the live Product ID so the
-      // Stripe receipt shows the correct product name & SKU.
-      const productId = STRIPE_PRODUCTS[type];
-      // Server-authoritative pricing for add-ons
-      const ADDON_PRICES: Record<string, number> = {
-        star_pack: 499,
-        emergency_alert: 299,
-        vet_media: 399,
-        family_slot: 599,
-        verified_badge: 999,
-        "5_media_pack": 399,
-        "7_day_extension": 499,
-      };
+      const lineItems = (items && Array.isArray(items) ? items : [{ type, quantity: 1 }]).map(
+        (item: unknown) => {
+          const rec = (typeof item === "object" && item !== null) ? (item as Record<string, unknown>) : {};
+          const itemType = typeof rec.type === "string" ? rec.type : String(rec.type || "");
+          const qty = Math.max(1, Number(rec.quantity || 1));
+          const expectedAmount = ADDON_DEFAULTS[itemType];
+          if (!expectedAmount) {
+            throw new Error(`Unknown add-on type: ${itemType}`);
+          }
+          const priceId = STRIPE_PRICE_IDS[itemType];
+          if (priceId) {
+            return { price: priceId, quantity: qty };
+          }
+          const productId = STRIPE_PRODUCTS[itemType];
+          return {
+            price_data: {
+              currency: "usd",
+              ...(productId
+                ? { product: productId }
+                : { product_data: { name: String(itemType).replace(/_/g, " ").toUpperCase() } }
+              ),
+              unit_amount: expectedAmount,
+            },
+            quantity: qty,
+          };
+        }
+      );
 
-      const expectedAmount = ADDON_PRICES[type];
-      if (!expectedAmount) {
-        return new Response(
-          JSON.stringify({ error: `Unknown add-on type: ${type}` }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
+      if (amount) {
+        const expected = lineItems.reduce((sum, li) => {
+          if ("price_data" in li && li.price_data?.unit_amount) {
+            return sum + (li.price_data.unit_amount * (li.quantity || 1));
+          }
+          return sum;
+        }, 0);
+        if (expected && amount !== expected) {
+          return new Response(
+            JSON.stringify({ error: "Invalid amount for add-on" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
       }
 
-      if (amount && amount !== expectedAmount) {
-        return new Response(
-          JSON.stringify({ error: "Invalid amount for add-on" }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      sessionParams.line_items = [
-        {
-          price_data: {
-            currency: "usd",
-            ...(productId
-              ? { product: productId }
-              : { product_data: { name: type.replace(/_/g, " ").toUpperCase() } }
-            ),
-            unit_amount: expectedAmount,
-          },
-          quantity: 1,
-        },
-      ];
+      sessionParams.line_items = lineItems;
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams, {
@@ -183,9 +190,10 @@ serve(async (req: Request) => {
       JSON.stringify({ url: session.url }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Checkout session error:", error);
-    const message = `${error?.message || ""}`.toLowerCase();
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const message = errMsg.toLowerCase();
     if (message.includes("quota") || message.includes("rate limit")) {
       return new Response(
         JSON.stringify({ error: "Quota Exceeded" }),
@@ -193,7 +201,7 @@ serve(async (req: Request) => {
       );
     }
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errMsg }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

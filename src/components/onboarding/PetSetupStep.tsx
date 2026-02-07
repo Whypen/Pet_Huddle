@@ -8,10 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { SPECIES_LIST, BREED_OPTIONS, VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { cn } from "@/lib/utils";
 
 interface PetData {
   photoUrl: string;
@@ -44,6 +46,11 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>("");
+  const [fieldErrors, setFieldErrors] = useState({
+    name: "",
+    species: "",
+    customSpecies: "",
+  });
   
   const [formData, setFormData] = useState<PetData>({
     photoUrl: "",
@@ -125,17 +132,18 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
   };
 
   const handleSubmit = async () => {
-    // Validation
+    const nextErrors = { name: "", species: "", customSpecies: "" };
     if (!formData.name.trim()) {
-      toast.error(t("Please enter your pet's name"));
-      return;
+      nextErrors.name = t("Please enter your pet's name");
     }
     if (!formData.species) {
-      toast.error(t("Please select a species"));
-      return;
+      nextErrors.species = t("Please select a species");
     }
     if (formData.species === "Others" && !formData.customSpecies.trim()) {
-      toast.error(t("Please enter a custom species name"));
+      nextErrors.customSpecies = t("Please enter a custom species name");
+    }
+    setFieldErrors(nextErrors);
+    if (Object.values(nextErrors).some(Boolean)) {
       return;
     }
 
@@ -201,9 +209,10 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
         </span>
       );
       onComplete();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving pet:", error);
-      if (!error.message?.includes("Failed to")) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("Failed to")) {
         toast.error(t("Failed to save pet profile"));
       }
     } finally {
@@ -249,19 +258,32 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
           <Label>{t("Pet Name *")}</Label>
           <Input
             value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            onChange={(e) => {
+              const next = e.target.value;
+              setFormData(prev => ({ ...prev, name: next }));
+              if (next.trim()) {
+                setFieldErrors((prev) => ({ ...prev, name: "" }));
+              }
+            }}
             placeholder={t("What's your pet's name?")}
-            className="h-12 rounded-xl"
+            className={cn("h-12 rounded-xl", fieldErrors.name && "border-red-500")}
+            aria-invalid={Boolean(fieldErrors.name)}
           />
+          <ErrorLabel message={fieldErrors.name} />
         </div>
 
         <div className="space-y-2">
           <Label>{t("Species *")}</Label>
           <Select
             value={formData.species}
-            onValueChange={(value) => setFormData(prev => ({ ...prev, species: value, breed: "" }))}
+            onValueChange={(value) => {
+              setFormData(prev => ({ ...prev, species: value, breed: "" }));
+              if (value) {
+                setFieldErrors((prev) => ({ ...prev, species: "" }));
+              }
+            }}
           >
-            <SelectTrigger className="h-12 rounded-xl">
+            <SelectTrigger className={cn("h-12 rounded-xl", fieldErrors.species && "border-red-500")}>
               <SelectValue placeholder={t("Select species")} />
             </SelectTrigger>
             <SelectContent>
@@ -270,6 +292,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
               ))}
             </SelectContent>
           </Select>
+          <ErrorLabel message={fieldErrors.species} />
         </div>
 
         {formData.species === "Others" && (
@@ -281,10 +304,18 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
             <Label>{t("Custom Species *")}</Label>
             <Input
               value={formData.customSpecies}
-              onChange={(e) => setFormData(prev => ({ ...prev, customSpecies: e.target.value }))}
+              onChange={(e) => {
+                const next = e.target.value;
+                setFormData(prev => ({ ...prev, customSpecies: next }));
+                if (next.trim()) {
+                  setFieldErrors((prev) => ({ ...prev, customSpecies: "" }));
+                }
+              }}
               placeholder={t("Enter species name")}
-              className="h-12 rounded-xl"
+              className={cn("h-12 rounded-xl", fieldErrors.customSpecies && "border-red-500")}
+              aria-invalid={Boolean(fieldErrors.customSpecies)}
             />
+            <ErrorLabel message={fieldErrors.customSpecies} />
           </motion.div>
         )}
 

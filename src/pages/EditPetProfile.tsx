@@ -98,12 +98,22 @@ const EditPetProfile = () => {
   const [vaccinationInput, setVaccinationInput] = useState({ name: "", date: "" });
   const [medicationInput, setMedicationInput] = useState({ name: "", dosage: "", frequency: "" });
   const [fieldErrors, setFieldErrors] = useState({
+    name: "",
+    species: "",
+    customSpecies: "",
     petDob: "",
     weight: "",
     vaccinationDate: "",
     nextVaccination: "",
     microchipId: "",
   });
+
+  const hasErrors = Object.values(fieldErrors).some(Boolean);
+  const hasRequiredFields =
+    formData.name.trim().length > 0 &&
+    (formData.species !== "" || formData.custom_species.trim().length > 0) &&
+    (formData.species !== "others" || formData.custom_species.trim().length > 0);
+  const isFormValid = hasRequiredFields && !hasErrors;
 
   useEffect(() => {
     if (petId) {
@@ -239,6 +249,25 @@ const EditPetProfile = () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    if (!formData.name.trim()) {
+      setFieldErrors((prev) => ({ ...prev, name: t("Pet name is required") }));
+    }
+
+    if (!formData.species && !formData.custom_species.trim()) {
+      setFieldErrors((prev) => ({ ...prev, species: t("Species is required") }));
+    }
+
+    if (formData.species === "others" && !formData.custom_species.trim()) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        customSpecies: t("Species is required"),
+      }));
+    }
+
+    if (!formData.name.trim() || (!formData.species && !formData.custom_species.trim())) {
+      return;
+    }
+
     if (formData.dob) {
       const petDob = new Date(formData.dob);
       if (petDob > today) {
@@ -274,16 +303,6 @@ const EditPetProfile = () => {
         ...prev,
         microchipId: t("Microchip ID must be 15 digits"),
       }));
-      return;
-    }
-
-    if (!formData.name) {
-      toast.error(t("Pet name is required"));
-      return;
-    }
-
-    if (!formData.species && !formData.custom_species) {
-      toast.error(t("Species is required"));
       return;
     }
 
@@ -378,8 +397,9 @@ const EditPetProfile = () => {
       }
 
       navigate(-1);
-    } catch (error: any) {
-      toast.error(error.message || t("Failed to save pet"));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message || t("Failed to save pet"));
     } finally {
       setSaving(false);
     }
@@ -403,7 +423,7 @@ const EditPetProfile = () => {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-xl font-bold flex-1">{isNewPet ? "Add Pet" : "Edit Pet Profile"}</h1>
-        <Button onClick={handleSave} disabled={saving} size="sm" className="gap-2">
+        <Button onClick={handleSave} disabled={saving || !isFormValid} size="sm" className="gap-2">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save
         </Button>
@@ -434,15 +454,23 @@ const EditPetProfile = () => {
             <Input
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              onBlur={() => {
+                setFieldErrors((prev) => ({
+                  ...prev,
+                  name: formData.name.trim() ? "" : t("Pet name is required"),
+                }));
+              }}
               placeholder={t("Pet's name")}
               className="h-12 rounded-xl"
+              aria-invalid={Boolean(fieldErrors.name)}
             />
+            {fieldErrors.name && <ErrorLabel message={fieldErrors.name} />}
           </div>
 
           {/* Species */}
           <div>
             <label className="text-sm font-medium mb-2 block">{t("Species *")}</label>
-            <div className="flex flex-wrap gap-2 mb-2">
+            <div className={cn("flex flex-wrap gap-2 mb-2", fieldErrors.species && "rounded-xl border border-red-500 p-2")}>
               {speciesOptions.map((species) => (
                 <button
                   key={species.id}
@@ -466,10 +494,19 @@ const EditPetProfile = () => {
               <Input
                 value={formData.custom_species}
                 onChange={(e) => setFormData(prev => ({ ...prev, custom_species: e.target.value }))}
+                onBlur={() => {
+                  setFieldErrors((prev) => ({
+                    ...prev,
+                    customSpecies: formData.custom_species.trim() ? "" : t("Species is required"),
+                  }));
+                }}
                 placeholder={t("Enter species...")}
                 className="h-12 rounded-xl mt-2"
+                aria-invalid={Boolean(fieldErrors.customSpecies)}
               />
             )}
+            {fieldErrors.species && <ErrorLabel message={fieldErrors.species} />}
+            {fieldErrors.customSpecies && <ErrorLabel message={fieldErrors.customSpecies} />}
           </div>
 
           {/* Breed */}
@@ -544,6 +581,7 @@ const EditPetProfile = () => {
                 }));
               }}
               className="h-12 rounded-xl"
+              aria-invalid={Boolean(fieldErrors.petDob)}
             />
             {fieldErrors.petDob && (
               <ErrorLabel message={fieldErrors.petDob} />
@@ -571,6 +609,7 @@ const EditPetProfile = () => {
                 }}
                 placeholder={t("0")}
                 className="h-12 rounded-xl flex-1"
+                aria-invalid={Boolean(fieldErrors.weight)}
               />
               <select
                 value={formData.weight_unit}
@@ -663,6 +702,7 @@ const EditPetProfile = () => {
                   }
                 }}
                 className="h-10 rounded-lg"
+                aria-invalid={Boolean(fieldErrors.nextVaccination)}
               />
               {fieldErrors.nextVaccination && (
                 <ErrorLabel message={fieldErrors.nextVaccination} />
@@ -775,6 +815,7 @@ const EditPetProfile = () => {
               placeholder={t("000000000000000")}
               className="h-12 rounded-xl font-mono"
               maxLength={15}
+              aria-invalid={Boolean(fieldErrors.microchipId)}
             />
             {fieldErrors.microchipId ? (
               <ErrorLabel message={fieldErrors.microchipId} />

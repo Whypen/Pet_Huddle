@@ -21,7 +21,7 @@ export interface FilterState {
   seeFurther: boolean; // SPRINT 3: See Further toggle for extending max distance
   ageRange: [number, number];
   gender: string;
-  petHeight: string;
+  petSize: string;
   languages: string[]; // SPRINT 3: Language filter
   // Premium filters (stored but not applied for free users)
   verifiedOnly: boolean;
@@ -40,7 +40,7 @@ export const defaultFilters: FilterState = {
   seeFurther: false, // Default to standard range
   ageRange: [18, 65], // Will be dynamically set to user's age ±3 in component
   gender: "",
-  petHeight: "",
+  petSize: "",
   languages: [],
   verifiedOnly: false,
   activeNow: false,
@@ -79,7 +79,7 @@ const speciesOptions = [
 ];
 
 const genderOptions = ["Any", "Male", "Female", "Non-binary"];
-const petHeightOptions = ["Any", "Small", "Medium", "Large", "Extra Large"];
+const petSizeOptions = ["Any", "Small", "Medium", "Large", "Extra Large"];
 
 // SPRINT 3: Language filter options
 const languageOptions = [
@@ -325,11 +325,11 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     <div className="col-span-2">
                       <label className="text-xs text-muted-foreground mb-1 block">{t("Pet Size")}</label>
                       <select
-                        value={localFilters.petHeight}
-                        onChange={(e) => setLocalFilters(prev => ({ ...prev, petHeight: e.target.value }))}
+                        value={localFilters.petSize}
+                        onChange={(e) => setLocalFilters(prev => ({ ...prev, petSize: e.target.value }))}
                         className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
                       >
-                        {petHeightOptions.map(opt => (
+                        {petSizeOptions.map(opt => (
                           <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
                         ))}
                       </select>

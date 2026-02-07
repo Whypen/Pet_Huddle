@@ -73,7 +73,7 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed bottom-0 left-0 right-0 z-[1600] max-w-md mx-auto"
+            className="fixed bottom-[var(--nav-height)] left-0 right-0 z-[1600] max-w-md mx-auto"
           >
             <div
               className="rounded-t-2xl p-5 shadow-2xl"

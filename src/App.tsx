@@ -243,6 +243,14 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/admin/verifications"
+                    element={
+                      <ProtectedRoute>
+                        <Admin />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/admin/control-center"
                     element={
                       <ProtectedRoute>

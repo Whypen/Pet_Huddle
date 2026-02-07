@@ -38,8 +38,8 @@ export const ActiveFilters = ({ filters, onRemove }: ActiveFiltersProps) => {
   }
 
   // Pet Size
-  if (filters.petHeight) {
-    activeFilterChips.push({ key: "petHeight", label: `${filters.petHeight} size` });
+  if (filters.petSize) {
+    activeFilterChips.push({ key: "petSize", label: `${filters.petSize} size` });
   }
 
   if (activeFilterChips.length === 0) return null;

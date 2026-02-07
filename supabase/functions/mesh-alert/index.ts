@@ -27,10 +27,7 @@ const FCM_BATCH_SIZE = 500; // Firebase allows up to 500 tokens per batch
 const BATCH_DELAY_MS = 100; // Small delay between batches to prevent rate limiting
 
 serve(async (req) => {
-  return new Response(
-    JSON.stringify({ error: "Notifications disabled" }),
-    { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-  );
+  const notificationsDisabled = true;
 
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -84,7 +81,7 @@ serve(async (req) => {
         description,
         photo_url,
         status,
-        owner:profiles!lost_pet_alerts_owner_id_fkey(id, display_name, avatar_url, fcm_token),
+        owner:profiles!lost_pet_alerts_owner_id_fkey(id, display_name, avatar_url, fcm_token, tier),
         pet:pets(name, species, photo_url)
       `)
       .eq('id', alertId)
@@ -98,6 +95,28 @@ serve(async (req) => {
     if (!alert) {
       throw new Error('Alert not found');
     }
+
+    let ownerTier = alert.owner?.tier || "free";
+    // Family quota inheritance: use inviter's tier if alert owner is a family invitee
+    if (alert.owner?.id) {
+      const { data: familyLink } = await supabase
+        .from("family_members")
+        .select("inviter_user_id")
+        .eq("invitee_user_id", alert.owner.id)
+        .eq("status", "accepted")
+        .maybeSingle();
+      if (familyLink?.inviter_user_id) {
+        const { data: inviter } = await supabase
+          .from("profiles")
+          .select("tier")
+          .eq("id", familyLink.inviter_user_id)
+          .maybeSingle();
+        if (inviter?.tier) {
+          ownerTier = inviter.tier;
+        }
+      }
+    }
+    const effectiveRadiusMeters = ownerTier === "gold" ? 20000 : ownerTier === "premium" ? 5000 : 1000;
 
     if (alert.status !== 'active') {
       console.log('[Mesh-Alert] Alert is not active, skipping notifications');
@@ -122,7 +141,7 @@ serve(async (req) => {
       .rpc('find_nearby_users', {
         alert_lat: alert.latitude,
         alert_lng: alert.longitude,
-        radius_meters: radiusMeters,
+        radius_meters: effectiveRadiusMeters,
         min_vouch_score: minVouchScore
       });
 
@@ -148,9 +167,15 @@ serve(async (req) => {
     }
 
     // Filter users with valid FCM tokens (exclude alert owner)
-    const fcmTokens = nearbyUsers
-      .filter((user: any) => user.fcm_token && user.id !== alert.owner?.id)
-      .map((user: any) => user.fcm_token);
+    const fcmTokens = (Array.isArray(nearbyUsers) ? nearbyUsers : [])
+      .map((user) => {
+        const rec = (typeof user === "object" && user !== null) ? (user as Record<string, unknown>) : {};
+        const id = typeof rec.id === "string" ? rec.id : null;
+        const token = typeof rec.fcm_token === "string" ? rec.fcm_token : null;
+        return { id, token };
+      })
+      .filter((u): u is { id: string; token: string } => Boolean(u.id && u.token && u.id !== alert.owner?.id))
+      .map((u) => u.token);
 
     console.log(`[Mesh-Alert] Found ${fcmTokens.length} users to notify (${nearbyUsers.length} total nearby)`);
 
@@ -203,7 +228,16 @@ serve(async (req) => {
     let eventStatus = 'SUCCESS';
 
     const fcmKey = Deno.env.get('FCM_SERVICE_ACCOUNT_KEY');
-    if (!fcmKey) {
+    if (notificationsDisabled) {
+      console.warn('[Mesh-Alert] Notifications disabled by configuration.');
+      sendResult = {
+        successCount: 0,
+        failureCount: 0,
+        results: []
+      };
+      eventType = 'FCM_DISABLED';
+      eventStatus = 'SKIPPED';
+    } else if (!fcmKey) {
       console.warn('[Mesh-Alert] FCM service not configured. Notifications disabled.');
       sendResult = {
         successCount: 0,
@@ -216,7 +250,7 @@ serve(async (req) => {
       try {
         sendResult = await sendFCMNotificationsBatched(fcmTokens, notificationPayload);
         console.log(`[Mesh-Alert] Sent ${sendResult.successCount} successful, ${sendResult.failureCount} failed`);
-      } catch (fcmError: any) {
+      } catch (fcmError: unknown) {
         console.error('[Mesh-Alert] FCM send failed:', fcmError);
         sendResult = {
           successCount: 0,
@@ -245,7 +279,7 @@ serve(async (req) => {
           success_count: sendResult.successCount,
           failure_count: sendResult.failureCount,
           metadata: {
-            radius_meters: radiusMeters,
+            radius_meters: effectiveRadiusMeters,
             min_vouch_score: minVouchScore,
             nearby_users_count: nearbyUsers.length,
             fcm_error: sendResult.successCount === 0 && sendResult.failureCount > 0 ? 'FCM service may not be configured' : undefined
@@ -271,7 +305,7 @@ serve(async (req) => {
           failure_count: sendResult.failureCount,
           error_message: eventType === 'MOCK_SENT' ? 'FCM service not configured - mock notification sent' : null,
           metadata: {
-            radius_meters: radiusMeters,
+            radius_meters: effectiveRadiusMeters,
             min_vouch_score: minVouchScore,
             nearby_users_count: nearbyUsers.length,
             filtered_owner: true,
@@ -294,7 +328,7 @@ serve(async (req) => {
         alert_id: alertId,
         notified: sendResult.successCount,
         failed: sendResult.failureCount,
-        radius_meters: radiusMeters,
+        radius_meters: effectiveRadiusMeters,
         nearby_users: nearbyUsers.length,
         min_vouch_score: minVouchScore,
         details: {
@@ -309,18 +343,19 @@ serve(async (req) => {
       }
     );
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Mesh-Alert] Function error:', error);
+    const message = error instanceof Error ? error.message : String(error);
 
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message || 'Unknown error occurred',
+        error: message || 'Unknown error occurred',
         timestamp: new Date().toISOString()
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: error.message?.includes('Missing required') ? 400 : 500,
+        status: message.includes('Missing required') ? 400 : 500,
       }
     );
   }
@@ -332,7 +367,7 @@ serve(async (req) => {
  */
 async function sendFCMNotificationsBatched(
   tokens: string[],
-  payload: any
+  payload: Record<string, unknown>
 ): Promise<NotificationResult> {
   const batches: string[][] = [];
 
@@ -423,7 +458,8 @@ async function sendFCMNotificationsBatched(
         await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
       }
 
-    } catch (batchError: any) {
+    } catch (batchError: unknown) {
+      const message = batchError instanceof Error ? batchError.message : String(batchError);
       console.error(`[FCM] Batch ${i + 1} failed:`, batchError);
       // Mark entire batch as failed
       totalFailure += batch.length;
@@ -431,7 +467,7 @@ async function sendFCMNotificationsBatched(
         allResults.push({
           success: false,
           token,
-          error: batchError.message || 'Batch send failed'
+          error: message || 'Batch send failed'
         });
       });
     }
@@ -451,7 +487,7 @@ async function sendFCMNotificationsBatched(
  */
 async function mockSendFCMBatch(
   tokens: string[],
-  payload: any
+  payload: Record<string, unknown>
 ): Promise<NotificationResult> {
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 200));

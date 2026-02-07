@@ -108,7 +108,7 @@ const HazardScanner = () => {
         }
       }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Scan error:", error);
       toast.error(t("Failed to scan image"));
     } finally {

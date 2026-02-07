@@ -37,10 +37,11 @@ export const useUpsell = () => {
     if (!user) return false;
 
     // Fetch from database (RLS-protected, read-only)
+    const ownerId = profile?.family_owner_id || user.id;
     const { data: currentProfile } = await supabase
       .from("profiles")
       .select("stars_count")
-      .eq("id", user.id)
+      .eq("id", ownerId)
       .single();
 
     const starsCount = currentProfile?.stars_count || 0;
@@ -66,13 +67,19 @@ export const useUpsell = () => {
   const checkEmergencyAlertAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
+    const ownerId = profile?.family_owner_id || user.id;
     const { data: currentProfile } = await supabase
       .from("profiles")
-      .select("mesh_alert_count")
-      .eq("id", user.id)
+      .select("mesh_alert_count, tier")
+      .eq("id", ownerId)
       .single();
 
     const alertCount = currentProfile?.mesh_alert_count || 0;
+    const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+
+    if (effectiveTier === "gold") {
+      return true;
+    }
 
     if (alertCount === 0) {
       setUpsellModal({
@@ -95,21 +102,14 @@ export const useUpsell = () => {
   const checkMediaCreditsAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
+    const ownerId = profile?.family_owner_id || user.id;
     const { data: currentProfile } = await supabase
       .from("profiles")
       .select("media_credits, tier")
-      .eq("id", user.id)
+      .eq("id", ownerId)
       .single();
 
     const mediaCredits = currentProfile?.media_credits || 0;
-    const tier = currentProfile?.tier || "free";
-
-    // Premium/Gold users get unlimited or higher limits
-    if (tier === "premium" || tier === "gold") {
-      return true;
-    }
-
-    // Free tier needs credits
     if (mediaCredits === 0) {
       setUpsellModal({
         isOpen: true,
@@ -131,17 +131,27 @@ export const useUpsell = () => {
   const checkFamilySlotsAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
+    const ownerId = profile?.family_owner_id || user.id;
     const { data: currentProfile } = await supabase
       .from("profiles")
-      .select("family_slots, care_circle")
-      .eq("id", user.id)
+      .select("family_slots, tier")
+      .eq("id", ownerId)
       .single();
 
+    const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+    const baseSlots = effectiveTier === "gold" ? 1 : 0;
     const familySlots = currentProfile?.family_slots || 0;
-    const careCircle = Array.isArray(currentProfile?.care_circle) ? currentProfile?.care_circle : [];
-    const currentFamilyCount = careCircle.length;
 
-    if (currentFamilyCount >= 2 + familySlots) {
+    const { count } = await supabase
+      .from("family_members")
+      .select("id", { count: "exact", head: true })
+      .eq("inviter_user_id", ownerId)
+      .eq("status", "accepted");
+
+    const currentFamilyCount = count || 0;
+    const totalSlots = baseSlots + familySlots;
+
+    if (currentFamilyCount >= totalSlots) {
       setUpsellModal({
         isOpen: true,
         type: "family_slot",

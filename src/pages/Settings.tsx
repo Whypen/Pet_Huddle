@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -24,6 +24,7 @@ import {
   Crown,
   Check,
   Loader2,
+  LifeBuoy,
 } from "lucide-react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -38,6 +39,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useUpsell } from "@/hooks/useUpsell";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const languageOptions: { value: Language; labelKey: string }[] = [
   { value: "en", labelKey: "language.english" },
@@ -58,6 +60,15 @@ const Settings = () => {
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteUserId, setInviteUserId] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [pendingInvite, setPendingInvite] = useState<{ id: string; inviterId: string; inviterName: string } | null>(null);
+  const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string }[]>([]);
+  const [familyExpanded, setFamilyExpanded] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportSending, setSupportSending] = useState(false);
   const [bugDescription, setBugDescription] = useState("");
   const [pressTimer, setPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,9 +106,8 @@ const Settings = () => {
   const isMinor = profileAge !== null && profileAge >= 13 && profileAge < 16;
   const isGold = profile?.tier === "gold";
   const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-  const currentFamilyCount = profile?.care_circle?.length || 0;
+  const currentFamilyCount = familyMembers.length;
   const availableFamilySlots = Math.max(0, (profile?.family_slots || 0) - currentFamilyCount);
-  const inviteLink = user ? `${window.location.origin}/invite?ref=${user.id}` : "";
 
   // Handle pause all notifications
   const handlePauseAll = (checked: boolean) => {
@@ -142,19 +152,100 @@ const Settings = () => {
 
   const handleInvite = async () => {
     if (!user) return;
+    setInviteError("");
+    const trimmed = inviteUserId.trim();
+    if (!/^\d{10}$/.test(trimmed)) {
+      setInviteError(t("User ID must be 10 digits"));
+      return;
+    }
     if (availableFamilySlots <= 0) {
       await checkFamilySlotsAvailable();
       return;
     }
-    const link = `${window.location.origin}/invite?ref=${user.id}`;
-    try {
-      await navigator.clipboard.writeText(link);
-      toast.success(t("Invite link copied"));
-    } catch (error) {
-      console.error("Failed to copy invite link:", error);
-      toast.error(t("Failed to copy invite link"));
+    const { data: target, error } = await supabase
+      .from("profiles")
+      .select("id, display_name, user_id")
+      .eq("user_id", trimmed)
+      .maybeSingle();
+    if (error || !target) {
+      setInviteError(t("Invalid User ID"));
+      return;
+    }
+    if (target.id === user.id) {
+      setInviteError(t("You cannot invite yourself"));
+      return;
+    }
+    const { error: inviteError } = await supabase
+      .from("family_members")
+      .insert({
+        inviter_user_id: user.id,
+        invitee_user_id: target.id,
+        status: "pending",
+      });
+    if (inviteError) {
+      toast.error(inviteError.message || t("Failed to send invite"));
+      return;
+    }
+    toast.success(t("Invite sent"));
+    setShowInviteModal(false);
+    setInviteUserId("");
+  };
+
+  const loadFamily = async () => {
+    if (!user) return;
+    const { data: accepted } = await supabase
+      .from("family_members")
+      .select(
+        "id, inviter_user_id, invitee_user_id, profiles:profiles!family_members_invitee_user_id_fkey(display_name), inviter:profiles!family_members_inviter_user_id_fkey(display_name)"
+      )
+      .eq("status", "accepted")
+      .or(`inviter_user_id.eq.${user.id},invitee_user_id.eq.${user.id}`);
+    const mapped = (accepted || []).map((row: {
+      id: string;
+      inviter_user_id: string;
+      invitee_user_id: string;
+      profiles?: { display_name: string | null } | null;
+      inviter?: { display_name: string | null } | null;
+    }) => {
+      const name =
+        row.inviter_user_id === user.id ? row.profiles?.display_name : row.inviter?.display_name;
+      return { id: row.id, name: name || t("Unknown") };
+    });
+    setFamilyMembers(mapped);
+  };
+
+  const loadPendingInvite = async () => {
+    if (!user) return;
+    const { data: pending } = await supabase
+      .from("family_members")
+      .select("id, inviter_user_id, inviter:profiles!family_members_inviter_user_id_fkey(display_name)")
+      .eq("invitee_user_id", user.id)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (pending) {
+      setPendingInvite({
+        id: pending.id,
+        inviterId: pending.inviter_user_id,
+        inviterName: pending.inviter?.display_name || t("User"),
+      });
     }
   };
+
+  const handleInviteDecision = async (decision: "accepted" | "declined") => {
+    if (!pendingInvite) return;
+    await supabase
+      .from("family_members")
+      .update({ status: decision })
+      .eq("id", pendingInvite.id);
+    setPendingInvite(null);
+    await loadFamily();
+  };
+
+  useEffect(() => {
+    loadFamily();
+    loadPendingInvite();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const handleDeleteAccount = () => {
     toast.success(t("Account deletion requested. You will receive a confirmation email."));
@@ -169,6 +260,35 @@ const Settings = () => {
     toast.success(t("Bug report submitted. Thank you!"));
     setBugDescription("");
     setShowBugReport(false);
+  };
+
+  const handleSupportSubmit = async () => {
+    if (!user) return;
+    if (!supportMessage.trim()) {
+      toast.error(t("Please enter your message"));
+      return;
+    }
+    setSupportSending(true);
+    try {
+      const { error } = await supabase.functions.invoke("support-request", {
+        body: {
+          userId: user.id,
+          subject: supportSubject,
+          message: supportMessage,
+          email: profile?.email || user.email,
+        },
+      });
+      if (error) throw error;
+      toast.success(t("Support request sent"));
+      setShowSupportModal(false);
+      setSupportSubject("");
+      setSupportMessage("");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || t("Failed to send support request"));
+    } finally {
+      setSupportSending(false);
+    }
   };
 
   // Password change flow
@@ -248,7 +368,7 @@ const Settings = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
+    <div className="min-h-screen bg-background pb-28">
       <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
 
       {/* Header */}
@@ -353,10 +473,34 @@ const Settings = () => {
                   await checkFamilySlotsAvailable();
                 }
               }}
+              disabled={!isGold}
+              className={cn(
+                "px-4",
+                isGold ? "bg-[#A6D539] text-white hover:bg-[#A6D539]/90" : "bg-muted text-muted-foreground"
+              )}
             >
               {t("Invite")}
             </Button>
           </div>
+          <button
+            onClick={() => setFamilyExpanded((prev) => !prev)}
+            className="mt-3 text-xs text-primary underline"
+          >
+            {familyExpanded ? t("Hide Family") : t("View Family")}
+          </button>
+          {familyExpanded && (
+            <div className="mt-3 space-y-2">
+              {familyMembers.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("No family members yet")}</p>
+              ) : (
+                familyMembers.map((m) => (
+                  <div key={m.id} className="text-sm text-muted-foreground">
+                    {m.name}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
           {!isGold && (
             <div className="mt-3 rounded-xl border border-amber-300/60 bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-100 p-4 text-center">
               <p className="text-sm font-semibold text-amber-800">{t("Upgrade to Gold for Family Sharing.")}</p>
@@ -499,46 +643,8 @@ const Settings = () => {
           <h3 className="text-sm font-semibold text-muted-foreground mb-3">
             {t("settings.notifications")}
           </h3>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-xl mb-2">
-              <div className="flex items-center gap-3">
-                <BellOff className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.pause_all")}</span>
-              </div>
-              <Switch checked={pauseNotif} onCheckedChange={handlePauseAll} />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <Bell className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.social_notif")}</span>
-              </div>
-              <Switch checked={socialNotif} onCheckedChange={setSocialNotif} disabled={pauseNotif} />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.safety_notif")}</span>
-              </div>
-              <Switch checked={safetyNotif} onCheckedChange={setSafetyNotif} disabled={pauseNotif} />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <User className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.ai_notif")}</span>
-              </div>
-              <Switch checked={aiNotif} onCheckedChange={setAiNotif} disabled={pauseNotif} />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <Globe className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.email_notif")}</span>
-              </div>
-              <Switch checked={emailNotif} onCheckedChange={setEmailNotif} disabled={pauseNotif} />
-            </div>
+          <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+            {t("Notifications are disabled in this build.")}
           </div>
         </section>
 
@@ -580,19 +686,27 @@ const Settings = () => {
           </button>
         </section>
 
+        {/* Help & Support */}
+        <section className="p-4 border-b border-border">
+          <button
+            onClick={() => setShowSupportModal(true)}
+            className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <LifeBuoy className="w-5 h-5 text-primary" />
+              <span className="font-medium">{t("Help & Support")}</span>
+            </div>
+            <ChevronRight className="w-5 h-5 text-muted-foreground" />
+          </button>
+        </section>
+
         {/* Danger Zone */}
         <section className="p-4 border-b border-border">
           <div className="space-y-2">
             <button
-              onClick={handleLogout}
-              className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-muted transition-colors"
+              className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive"
+              onClick={() => toast.warning(t("To deactivate, contact support@huddle.app"))}
             >
-              <LogOut className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium">{t("settings.logout")}</span>
-            </button>
-
-            <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive"
-              onClick={() => toast.warning(t("To deactivate, contact support@huddle.app"))}>
               <EyeOff className="w-5 h-5" />
               <span className="font-medium">{t("settings.deactivate")}</span>
             </button>
@@ -611,6 +725,17 @@ const Settings = () => {
         <div className="p-6 text-center">
           <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
         </div>
+      </div>
+
+      {/* Pinned Logout */}
+      <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border px-4 py-3 pb-safe">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-muted transition-colors"
+        >
+          <LogOut className="w-5 h-5 text-muted-foreground" />
+          <span className="font-medium">{t("settings.logout")}</span>
+        </button>
       </div>
 
       {/* Modals */}
@@ -643,25 +768,79 @@ const Settings = () => {
             >
               <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
               <p className="text-xs text-muted-foreground mb-4 font-huddle">
-                {t("Share this link to invite a family member to your huddle.")}
+                {t("Enter a 10-digit User ID to invite a family member.")}
               </p>
               <Input
-                value={inviteLink}
-                readOnly
-                className="mb-4"
+                value={inviteUserId}
+                onChange={(e) => setInviteUserId(e.target.value.replace(/[^\d]/g, "").slice(0, 10))}
+                placeholder={t("Enter 10-digit User ID")}
+                className="mb-2"
               />
+              {inviteError && <p className="text-xs text-red-500 mb-2">{inviteError}</p>}
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowInviteModal(false)} className="flex-1">
                   {t("common.cancel")}
                 </Button>
                 <Button onClick={handleInvite} className="flex-1">
-                  {t("Copy Invite Link")}
+                  {t("Invite")}
                 </Button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Pending Invite Modal */}
+      <Dialog open={!!pendingInvite} onOpenChange={() => setPendingInvite(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("Family Invitation")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {pendingInvite
+              ? `${pendingInvite.inviterName} ${t("has invited you to join their family!")}`
+              : ""}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleInviteDecision("declined")}>
+              {t("Decline")}
+            </Button>
+            <Button onClick={() => handleInviteDecision("accepted")}>
+              {t("Accept")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Help & Support Modal */}
+      <Dialog open={showSupportModal} onOpenChange={setShowSupportModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("Help & Support")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={supportSubject}
+              onChange={(e) => setSupportSubject(e.target.value)}
+              placeholder={t("Subject")}
+            />
+            <Textarea
+              value={supportMessage}
+              onChange={(e) => setSupportMessage(e.target.value)}
+              placeholder={t("Describe your issue")}
+              className="min-h-[120px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSupportModal(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={handleSupportSubmit} disabled={supportSending}>
+              {supportSending ? t("Sending...") : t("Submit")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Password Change Modal */}
       <AnimatePresence>
@@ -989,8 +1168,9 @@ const Settings = () => {
                           toast.success(t("ID uploaded! Waiting for approval"));
                           setShowIDUpload(false);
                           setIDFile(null);
-                        } catch (error: any) {
-                          toast.error(error.message || t("Upload failed"));
+                        } catch (error: unknown) {
+                          const message = error instanceof Error ? error.message : String(error);
+                          toast.error(message || t("Upload failed"));
                         } finally {
                           setIdUploading(false);
                         }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Plus, Mic, Send, Lock, Loader2, Image, Camera } from "lucide-react";
+import { ArrowLeft, Mic, Send, Lock, Loader2, Camera } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import aiVetAvatar from "@/assets/ai-vet-avatar.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import imageCompression from "browser-image-compression";
 
 interface Message {
   id: string;
@@ -29,6 +30,10 @@ interface Pet {
   dob: string | null;
   weight: number | null;
   weight_unit: string | null;
+  bio?: string | null;
+  routine?: string | null;
+  medications?: Array<{ name?: string; dosage?: string; frequency?: string; notes?: string }> | null;
+  vaccinations?: Array<{ name?: string; date?: string }> | null;
 }
 
 const AIVet = () => {
@@ -48,9 +53,16 @@ const AIVet = () => {
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [remaining, setRemaining] = useState<number | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [showEmergencyPrompt, setShowEmergencyPrompt] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [mediaCredits, setMediaCredits] = useState<number | null>(null);
 
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
+  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const hasMediaCredits = (mediaCredits ?? profile?.media_credits ?? 0) > 0;
 
   // Fetch user's pets
   useEffect(() => {
@@ -59,6 +71,20 @@ const AIVet = () => {
       checkUsage();
     }
   }, [user]);
+
+  useEffect(() => {
+    const loadMediaCredits = async () => {
+      if (!user) return;
+      const ownerId = profile?.family_owner_id || user.id;
+      const { data } = await supabase
+        .from("profiles")
+        .select("media_credits")
+        .eq("id", ownerId)
+        .maybeSingle();
+      if (data) setMediaCredits(data.media_credits ?? 0);
+    };
+    loadMediaCredits();
+  }, [user, profile?.family_owner_id]);
 
   // Add initial greeting when conversation starts
   useEffect(() => {
@@ -81,7 +107,7 @@ const AIVet = () => {
     try {
       const { data, error } = await supabase
         .from("pets")
-        .select("id, name, species, breed, dob, weight, weight_unit")
+        .select("id, name, species, breed, dob, weight, weight_unit, bio, routine, medications, vaccinations")
         .eq("owner_id", user!.id)
         .eq("is_active", true);
 
@@ -151,11 +177,25 @@ const AIVet = () => {
             name: selectedPet.name,
             species: selectedPet.species,
             breed: selectedPet.breed,
+            age: selectedPet.dob
+              ? Math.floor((Date.now() - new Date(selectedPet.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+              : null,
             weight: selectedPet.weight,
             weight_unit: selectedPet.weight_unit,
+            history: selectedPet.bio || selectedPet.routine || "",
           }
         : undefined;
-      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile);
+      let imageBase64: string | undefined;
+      if (imageFile) {
+        const reader = new FileReader();
+        imageBase64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = reject;
+          reader.readAsDataURL(imageFile);
+        });
+        imageBase64 = imageBase64.split(",")[1] || imageBase64;
+      }
+      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64);
 
       if (result.success && result.data) {
         const aiMessage: Message = {
@@ -170,6 +210,9 @@ const AIVet = () => {
         if (!isPremium && result.data.remaining !== undefined) {
           setRemaining(result.data.remaining);
         }
+        if (result.data.triage) {
+          setShowEmergencyPrompt(true);
+        }
       } else if (result.error === "rate_limit_exceeded" || result.error === "quota_exceeded") {
         setShowUpgradeModal(true);
         setIsPremiumOpen(true);
@@ -177,44 +220,35 @@ const AIVet = () => {
       } else {
         throw new Error(result.error || "Failed to get response");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("AI Vet error:", error);
-
-      // Fallback to simulated response if backend fails
-      setTimeout(() => {
-        const fallbackMessage: Message = {
-          id: `ai-${Date.now()}`,
-          role: "assistant",
-          content: t("ai.fallback_message"),
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        };
-        setMessages((prev) => [...prev, fallbackMessage]);
-      }, 1000);
+      toast.error(t("Failed to get response"));
     } finally {
       setIsLoading(false);
+      setImageFile(null);
+      setImagePreview(null);
     }
   };
 
-  const handlePremiumFeature = async () => {
-    if (!isPremium) {
-      try {
-        if (!user) return;
-        const { data: currentProfile } = await supabase
-          .from("profiles")
-          .select("media_credits, tier")
-          .eq("id", user.id)
-          .single();
+  const handleMediaAccess = async () => {
+    try {
+      if (!user) return;
+      const ownerId = profile?.family_owner_id || user.id;
+      const { data: currentProfile } = await supabase
+        .from("profiles")
+        .select("media_credits, tier")
+        .eq("id", ownerId)
+        .single();
 
-        const mediaCredits = currentProfile?.media_credits || 0;
-        const tier = currentProfile?.tier || "free";
-
-        if (tier === "free" && mediaCredits <= 0) {
-          setIsPremiumFooterOpen(true);
-          return;
-        }
-      } catch (error) {
-        console.error("Failed to refresh media credits:", error);
+      const mediaCredits = currentProfile?.media_credits ?? 0;
+      if (mediaCredits <= 0) {
+        setIsPremiumOpen(true);
+        return;
       }
+      setMediaCredits(mediaCredits);
+      imageInputRef.current?.click();
+    } catch (error) {
+      console.error("Failed to refresh media credits:", error);
       setIsPremiumOpen(true);
     }
   };
@@ -355,12 +389,36 @@ const AIVet = () => {
         <div className="flex items-center gap-3 max-w-md mx-auto">
           {/* Photo upload - Premium only */}
           <button
-            onClick={handlePremiumFeature}
-            className={cn("p-2 rounded-full hover:bg-muted transition-colors relative", !isPremium && "opacity-50")}
+            onClick={handleMediaAccess}
+            className={cn("p-2 rounded-full hover:bg-muted transition-colors relative", !hasMediaCredits && "opacity-50")}
           >
             <Camera className="w-5 h-5 text-muted-foreground" />
-            {!isPremium && <Lock className="w-3 h-3 text-primary absolute -top-0.5 -right-0.5" />}
+            {!hasMediaCredits && <Lock className="w-3 h-3 text-primary absolute -top-0.5 -right-0.5" />}
           </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              try {
+                const compressed = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
+                if (compressed.size > 500 * 1024) {
+                  toast.error(t("Image must be under 500KB"));
+                  return;
+                }
+                setImageFile(compressed);
+                const preview = await imageCompression.getDataUrlFromFile(compressed);
+                setImagePreview(preview);
+              } catch (err) {
+                toast.error(t("Failed to process image"));
+              } finally {
+                e.target.value = "";
+              }
+            }}
+          />
 
           <div className="flex-1 relative">
             <input
@@ -374,10 +432,10 @@ const AIVet = () => {
             />
             {/* Audio button - Premium only */}
             <button
-              onClick={handlePremiumFeature}
-              className={cn("absolute right-3 top-1/2 -translate-y-1/2 p-1", !isPremium && "opacity-50")}
+              onClick={handleMediaAccess}
+              className={cn("absolute right-3 top-1/2 -translate-y-1/2 p-1", !hasMediaCredits && "opacity-50")}
             >
-              {isPremium ? (
+              {hasMediaCredits ? (
                 <Mic className="w-5 h-5 text-muted-foreground" />
               ) : (
                 <div className="relative">
@@ -400,6 +458,19 @@ const AIVet = () => {
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </motion.button>
         </div>
+        {imagePreview && (
+          <div className="mt-2 max-w-md mx-auto">
+            <img src={imagePreview} alt={t("Preview")} className="rounded-xl max-h-40 object-cover w-full" />
+          </div>
+        )}
+        {showEmergencyPrompt && (
+          <div className="mt-2 max-w-md mx-auto rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive flex items-center justify-between">
+            <span>{t("Emergency detected. Open Map for immediate assistance.")}</span>
+            <button className="text-destructive underline" onClick={() => navigate("/map?mode=broadcast")}>
+              {t("Open Map")}
+            </button>
+          </div>
+        )}
       </div>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
