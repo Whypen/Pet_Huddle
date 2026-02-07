@@ -8,16 +8,17 @@ alter table public.marketplace_bookings
 
 do $$
 declare
-  conname text;
+  v_conname text;
 begin
-  select conname into conname
+  select c.conname into v_conname
   from pg_constraint
+  as c
   where conrelid = 'public.marketplace_bookings'::regclass
     and contype = 'c'
     and pg_get_constraintdef(oid) ilike '%status%';
 
-  if conname is not null then
-    execute format('alter table public.marketplace_bookings drop constraint %I', conname);
+  if v_conname is not null then
+    execute format('alter table public.marketplace_bookings drop constraint %I', v_conname);
   end if;
 end $$;
 

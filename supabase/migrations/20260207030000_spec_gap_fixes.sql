@@ -131,4 +131,6 @@ select
   end;
 
 -- One-time cleanup for fake pet profiles
-truncate table public.pets;
+-- NOTE: TRUNCATE fails when foreign keys reference pets (e.g., ai_vet_conversations).
+-- A DELETE achieves the same cleanup while respecting ON DELETE actions.
+delete from public.pets;
