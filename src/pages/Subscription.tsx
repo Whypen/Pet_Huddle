@@ -400,10 +400,8 @@ const Subscription = () => {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="mt-8 text-center">
-          <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
-        </div>
+        {/* UAT: remove version string */}
+        <div className="mt-8 text-center" />
       </div>
     </div>
   );
