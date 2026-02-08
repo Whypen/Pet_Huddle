@@ -830,7 +830,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className={cn(
-                  "w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm mb-1",
+                  "w-full h-9 rounded-[12px] border border-border bg-muted px-2 py-1 text-sm text-left mb-1",
                   createErrors.title && "border-red-500"
                 )}
                 aria-invalid={Boolean(createErrors.title)}
@@ -859,7 +859,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                     });
                     setHashtagInput("");
                   }}
-                  className="w-full rounded-xl border border-border bg-muted px-3 py-2 text-sm"
+                  className="w-full h-9 rounded-[12px] border border-border bg-muted px-2 py-1 text-sm text-left"
                 />
                 {hashtags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">

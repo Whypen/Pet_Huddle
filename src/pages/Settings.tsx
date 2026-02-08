@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Crown, FileText, HelpCircle, LogOut, Shield, User, X, PawPrint, BadgeCheck } from "lucide-react";
+import { ChevronRight, Crown, FileText, HelpCircle, LogOut, Shield, User, X, PawPrint, BadgeCheck, Diamond, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useAuth } from "@/contexts/AuthContext";
@@ -117,33 +117,32 @@ export default function SettingsPage() {
             whileTap={{ scale: 0.98 }}
             onClick={() => cardTap("premium")}
             className={cn(
-              "flex-1 min-w-0 h-[110px] rounded-[16px] border bg-white p-3 shadow-sm text-left",
-              activeCard === "premium" ? "border-brandBlue border-2" : "border-brandBlue/40"
+              "flex-1 min-w-0 h-[88px] rounded-[16px] border p-3 shadow-sm text-left flex flex-col justify-between",
+              "bg-brandBlue text-white",
+              activeCard === "premium" ? "border-white/70 border-2" : "border-white/30"
             )}
           >
-            <div className="text-sm font-extrabold text-brandText">Unlock Premium</div>
-            <div className="text-xs text-brandText/70 mt-1 line-clamp-1">Best for Pet Lovers</div>
-            <div className="mt-2 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2">
-              Explore <ChevronRight className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <Diamond className="w-4 h-4 text-white" />
+              <div className="text-sm font-extrabold text-white">Unlock Premium</div>
             </div>
+            <div className="text-xs text-white/90 mt-1 line-clamp-1">Manage your privileges</div>
           </motion.button>
 
           <motion.button
             whileTap={{ scale: 0.98 }}
             onClick={() => cardTap("gold")}
             className={cn(
-              "relative flex-1 min-w-0 h-[110px] rounded-[16px] border bg-white p-3 shadow-sm text-left",
-              activeCard === "gold" ? "border-brandGold border-2" : "border-brandGold/40"
+              "relative flex-1 min-w-0 h-[88px] rounded-[16px] border p-3 shadow-sm text-left flex flex-col justify-between",
+              "bg-brandGold text-white",
+              activeCard === "gold" ? "border-white/70 border-2" : "border-white/30"
             )}
           >
-            <span className="absolute -top-3 left-3 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
-              Recommended
-            </span>
-            <div className="text-sm font-extrabold text-brandText">Unlock Gold</div>
-            <div className="text-xs text-brandText/70 mt-1 line-clamp-1">Ultimate Experience</div>
-            <div className="mt-2 w-full rounded-lg bg-brandGold text-white font-bold py-2 flex items-center justify-center gap-2">
-              Explore <ChevronRight className="w-4 h-4" />
+            <div className="flex items-center gap-2">
+              <Star className="w-4 h-4 text-white" />
+              <div className="text-sm font-extrabold text-white">Unlock Gold</div>
             </div>
+            <div className="text-xs text-white/90 mt-1 line-clamp-1">Manage your privileges</div>
           </motion.button>
         </div>
 
@@ -237,7 +236,7 @@ export default function SettingsPage() {
                     value={supportMessage}
                     onChange={(e) => setSupportMessage(e.target.value)}
                     placeholder="Describe your issue"
-                    className="w-full min-h-[120px] rounded-[12px] border border-brandText/40 bg-white px-3 py-2 text-sm text-brandText placeholder:italic placeholder:text-gray-500/60 focus:outline-none focus:border-brandBlue focus:shadow-sm"
+                    className="w-full min-h-[120px] rounded-[12px] border border-brandText/40 bg-white px-2 py-1 text-sm text-brandText text-left placeholder:italic placeholder:text-gray-500/60 focus:outline-none focus:border-brandBlue focus:shadow-sm"
                   />
                   <button
                     disabled={sending || !supportMessage.trim()}

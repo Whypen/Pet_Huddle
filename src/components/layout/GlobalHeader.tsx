@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bell, Settings } from "lucide-react";
+import { Bell, Diamond, Settings, Star, User as UserIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
@@ -22,10 +23,18 @@ interface Pet {
 
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps) => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
+  const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
+  const initials = useMemo(() => {
+    const name = profile?.display_name || "User";
+    return name.trim().slice(0, 1).toUpperCase();
+  }, [profile?.display_name]);
 
   // Fetch user's pets
   useEffect(() => {
@@ -130,18 +139,100 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
           <img
             src={huddleLogo}
             alt={t("huddle")}
-            className="h-8 w-8 object-contain"
+            className="h-7 w-auto max-w-[140px] object-contain"
           />
         </button>
 
-        {/* Right: Settings (Gear) Icon Only */}
-        <button
-          onClick={onMenuClick || (() => navigate('/settings'))}
-          className="p-2 rounded-full hover:bg-muted transition-colors"
-          aria-label={t("Settings")}
-        >
-          <Settings className="w-5 h-5 text-muted-foreground" />
-        </button>
+        {/* Right: Settings (Gear) menu (popover/drawer) */}
+        <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+          <SheetTrigger asChild>
+            <button
+              onClick={() => {
+                if (onMenuClick) {
+                  onMenuClick();
+                  return;
+                }
+                setMenuOpen(true);
+              }}
+              className="p-2 rounded-full hover:bg-muted transition-colors"
+              aria-label={t("Settings")}
+            >
+              <Settings className="w-5 h-5 text-muted-foreground" />
+            </button>
+          </SheetTrigger>
+          <SheetContent className="p-4 w-[320px] sm:max-w-sm">
+            {/* Menu order (UAT): Avatar/Name/Badge -> Unlock blocks -> Profile link */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "w-12 h-12 rounded-full flex items-center justify-center font-extrabold bg-muted border-2 text-brandText",
+                    isVerified ? "border-brandGold" : "border-gray-300",
+                  )}
+                  aria-label="Avatar"
+                >
+                  {initials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="text-base font-extrabold text-brandText truncate">
+                      {profile?.display_name || "User"}
+                    </div>
+                    <span
+                      className={cn(
+                        "inline-flex items-center justify-center w-5 h-5 rounded-full border-2 flex-shrink-0",
+                        isVerified ? "border-brandGold" : "border-gray-300",
+                      )}
+                      aria-label={isVerified ? "Verified" : isPending ? "Pending" : "Not verified"}
+                    />
+                  </div>
+                  <div className="text-xs text-brandText/60 truncate">{user?.email || ""}</div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 w-full">
+                <SheetClose asChild>
+                  <button
+                    onClick={() => navigate("/premium?tab=Premium")}
+                    className="flex-1 min-w-0 rounded-[16px] bg-brandBlue text-white p-3 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Diamond className="w-4 h-4 text-white" />
+                      <div className="text-sm font-extrabold">Unlock Premium</div>
+                    </div>
+                  </button>
+                </SheetClose>
+
+                <SheetClose asChild>
+                  <button
+                    onClick={() => navigate("/premium?tab=Gold")}
+                    className="flex-1 min-w-0 rounded-[16px] bg-brandGold text-white p-3 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Star className="w-4 h-4 text-white" />
+                      <div className="text-sm font-extrabold">Unlock Gold</div>
+                    </div>
+                  </button>
+                </SheetClose>
+              </div>
+
+              <div className="pt-1">
+                <SheetClose asChild>
+                  <button
+                    onClick={() => navigate("/edit-profile")}
+                    className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                  >
+                    <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+                      <UserIcon className="w-5 h-5 text-brandText/70" />
+                      Profile
+                    </span>
+                    <span className="text-brandText/50">&rsaquo;</span>
+                  </button>
+                </SheetClose>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     </header>
   );

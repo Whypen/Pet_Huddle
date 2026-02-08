@@ -290,7 +290,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                             ...prev, 
                             ageRange: [parseInt(e.target.value), prev.ageRange[1]] 
                           }))}
-                          className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                          className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                         />
                         <span className="text-muted-foreground">-</span>
                         <input
@@ -302,7 +302,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                             ...prev, 
                             ageRange: [prev.ageRange[0], parseInt(e.target.value)] 
                           }))}
-                          className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                          className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                         />
                       </div>
                     </div>
@@ -313,7 +313,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                       <select
                         value={localFilters.gender}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, gender: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
+                        className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
                       >
                         {genderOptions.map(opt => (
                           <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
@@ -327,7 +327,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                       <select
                         value={localFilters.petSize}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, petSize: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-lg bg-muted text-sm outline-none focus:ring-2 focus:ring-primary/50 appearance-none"
+                        className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
                       >
                         {petSizeOptions.map(opt => (
                           <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>

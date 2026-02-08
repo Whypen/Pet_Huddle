@@ -10,7 +10,8 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(({ classNa
     <textarea
       className={cn(
         // UAT v1.1 input styling
-        "flex min-h-[80px] w-full rounded-[12px] border bg-white px-3 py-2 text-sm text-center min-[600px]:text-left ring-offset-background",
+        // Global UI override (compact): padding v4/h8, placeholders and text left-aligned.
+        "flex min-h-[80px] w-full rounded-[12px] border bg-white px-2 py-1 text-sm text-left ring-offset-background",
         "border-brandText/40 placeholder:italic placeholder:text-gray-500/60",
         "focus-visible:outline-none focus-visible:border-brandBlue focus-visible:shadow-sm focus-visible:ring-0",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-[#f0f0f0]",

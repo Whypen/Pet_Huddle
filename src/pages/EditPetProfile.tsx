@@ -486,7 +486,7 @@ const EditPetProfile = () => {
                 }));
               }}
               placeholder={t("Pet's name")}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
               aria-invalid={Boolean(fieldErrors.name)}
             />
             {fieldErrors.name && <ErrorLabel message={fieldErrors.name} />}
@@ -526,7 +526,7 @@ const EditPetProfile = () => {
                   }));
                 }}
                 placeholder={t("Enter species...")}
-                className="h-12 rounded-xl mt-2"
+                className="rounded-[12px] mt-2"
                 aria-invalid={Boolean(fieldErrors.customSpecies)}
               />
             )}
@@ -541,7 +541,7 @@ const EditPetProfile = () => {
               <select
                 value={formData.breed}
                 onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
-                className="h-12 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                className="h-9 w-full rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left"
               >
                 <option value="">{t("Select breed")}</option>
                 {(speciesBreeds[formData.species] || ["Other"]).map((breed) => (
@@ -605,7 +605,7 @@ const EditPetProfile = () => {
                   petDob: petDob > today ? t("Pet DOB cannot be in the future") : "",
                 }));
               }}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
               aria-invalid={Boolean(fieldErrors.petDob)}
             />
             {fieldErrors.petDob && (
@@ -633,13 +633,13 @@ const EditPetProfile = () => {
                   }
                 }}
                 placeholder={t("0")}
-                className="h-12 rounded-xl flex-1"
+                className="rounded-[12px] flex-1"
                 aria-invalid={Boolean(fieldErrors.weight)}
               />
               <select
                 value={formData.weight_unit}
                 onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
-                className="h-12 rounded-xl bg-muted border border-border px-3"
+                className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
               >
                 <option value="kg">{t("kg")}</option>
                 <option value="lbs">{t("lbs")}</option>
@@ -669,7 +669,7 @@ const EditPetProfile = () => {
                 <select
                   value={vaccinationInput.name}
                   onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
-                  className="flex-1 h-10 rounded-lg bg-card border border-border px-3 text-sm"
+                  className="flex-1 h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                 >
                   <option value="">{t("Select vaccine...")}</option>
                   {VACCINATION_OPTIONS.map(v => (
@@ -693,7 +693,7 @@ const EditPetProfile = () => {
                     }
                   }}
                   placeholder={t("Select date")}
-                  className="h-10 rounded-lg w-36"
+                  className="rounded-[12px] w-36"
                 />
                 <Button onClick={addVaccination} size="sm" variant="secondary">
                   <Plus className="w-4 h-4" />
@@ -726,7 +726,7 @@ const EditPetProfile = () => {
                     }));
                   }
                 }}
-                className="h-10 rounded-lg"
+                className="rounded-[12px]"
                 aria-invalid={Boolean(fieldErrors.nextVaccination)}
               />
               {fieldErrors.nextVaccination && (
@@ -756,20 +756,20 @@ const EditPetProfile = () => {
                 value={medicationInput.name}
                 onChange={(e) => setMedicationInput(prev => ({ ...prev, name: e.target.value }))}
                 placeholder={t("Medication name")}
-                className="h-10 rounded-lg"
+                className="rounded-[12px]"
               />
               <div className="flex gap-2">
                 <Input
                   value={medicationInput.dosage}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, dosage: e.target.value }))}
                   placeholder={t("Dosage")}
-                  className="h-10 rounded-lg flex-1"
+                  className="rounded-[12px] flex-1"
                 />
                 <Input
                   value={medicationInput.frequency}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, frequency: e.target.value }))}
                   placeholder={t("Frequency")}
-                  className="h-10 rounded-lg flex-1"
+                  className="rounded-[12px] flex-1"
                 />
                 <Button onClick={addMedication} size="sm" variant="secondary">
                   <Plus className="w-4 h-4" />
@@ -806,20 +806,20 @@ const EditPetProfile = () => {
               value={formData.clinic_name}
               onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
               placeholder={t("Clinic name")}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
             />
             <Input
               value={formData.preferred_vet}
               onChange={(e) => setFormData(prev => ({ ...prev, preferred_vet: e.target.value }))}
               placeholder={t("Preferred vet")}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
             />
             <PhoneInput
               international
               defaultCountry="HK"
               value={formData.phone_no}
               onChange={(value) => setFormData(prev => ({ ...prev, phone_no: value || "" }))}
-              className="phone-input-auth h-12 rounded-xl border border-border px-3"
+              className="phone-input-auth h-9 rounded-[12px] bg-white border border-brandText/40 px-2 py-1 text-left"
               placeholder={t("Clinic phone (+XXX)")}
             />
           </div>
@@ -838,7 +838,7 @@ const EditPetProfile = () => {
                 }));
               }}
               placeholder={t("000000000000000")}
-              className="h-12 rounded-xl font-mono"
+              className="rounded-[12px] font-mono"
               maxLength={15}
               aria-invalid={Boolean(fieldErrors.microchipId)}
             />

@@ -1,13 +1,16 @@
 import { useMemo, useState } from "react";
-import { Modal, Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
+import { Modal, Platform, Pressable, Text, View } from "react-native";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import { COLORS, TYPO } from "../theme/tokens";
 
 function formatDate(d: Date | null) {
   if (!d) return "";
+  // Global UI override: numeric format MM/DD/YYYY
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${dd} ${months[d.getMonth()]}, ${d.getFullYear()}`;
+  const yyyy = String(d.getFullYear());
+  return `${mm}/${dd}/${yyyy}`;
 }
 
 type Props = {
@@ -31,9 +34,8 @@ export function DateField({
   disabled,
   placeholder = "Select date",
 }: Props) {
-  const { width } = useWindowDimensions();
-  const isWide = width > 600;
-  const align = isWide ? "left" : "center";
+  // Placeholders and input text must be left-aligned (override).
+  const align = "left";
   const [open, setOpen] = useState(false);
 
   const borderColor = error ? COLORS.brandError : COLORS.brandText;
@@ -58,22 +60,27 @@ export function DateField({
           borderWidth: 1,
           borderRadius: 12,
           backgroundColor: disabled ? COLORS.disabledBg : COLORS.white,
-          paddingHorizontal: 14,
-          paddingVertical: 12,
+          height: 36, // Global UI override: compact inputs
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          flexDirection: "row",
+          alignItems: "center",
         }}
       >
-        <Text
-          style={{
-            color: showPlaceholder ? "rgba(66,73,101,0.45)" : COLORS.brandText,
-            opacity: showPlaceholder ? 0.6 : 1,
-            fontStyle: showPlaceholder ? "italic" : "normal",
-            fontSize: TYPO.bodySize,
-            textAlign: align,
-          }}
-          numberOfLines={1}
-        >
-          {showPlaceholder ? placeholder : text}
+        <Text style={{ flex: 1 }} numberOfLines={1}>
+          <Text
+            style={{
+              color: showPlaceholder ? "rgba(66,73,101,0.45)" : COLORS.brandText,
+              opacity: showPlaceholder ? 0.6 : 1,
+              fontStyle: showPlaceholder ? "italic" : "normal",
+              fontSize: TYPO.bodySize,
+              textAlign: align,
+            }}
+          >
+            {showPlaceholder ? placeholder : text}
+          </Text>
         </Text>
+        <Ionicons name="calendar-outline" size={18} color="rgba(66,73,101,0.65)" />
       </Pressable>
 
       {error ? <Text style={{ color: COLORS.brandError, fontSize: 12, marginTop: 6, textAlign: align }}>{error}</Text> : null}
@@ -124,4 +131,3 @@ export function DateField({
     </View>
   );
 }
-

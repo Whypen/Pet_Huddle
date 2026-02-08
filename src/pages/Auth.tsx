@@ -267,7 +267,7 @@ const Auth = () => {
                         setDisplayName(e.target.value);
                         setErrors((prev) => ({ ...prev, displayName: undefined }));
                       }}
-                      className={`pl-12 h-12 rounded-xl ${errors.displayName ? "border-destructive" : "border-border"}`}
+                      className={`pl-12 ${errors.displayName ? "border-destructive" : "border-border"}`}
                     />
                   </div>
                   {errors.displayName && (
@@ -284,7 +284,7 @@ const Auth = () => {
                         setSignupEmail(e.target.value);
                         setErrors((prev) => ({ ...prev, signupEmail: undefined }));
                       }}
-                      className={`pl-12 h-12 rounded-xl ${errors.signupEmail ? "border-destructive" : "border-border"}`}
+                      className={`pl-12 ${errors.signupEmail ? "border-destructive" : "border-border"}`}
                     />
                   </div>
                   {errors.signupEmail && (
@@ -301,7 +301,7 @@ const Auth = () => {
                         setSignupPhone(value || "");
                         setErrors((prev) => ({ ...prev, phone: undefined }));
                       }}
-                      className={`phone-input-auth h-12 rounded-xl bg-muted border ${errors.phone ? "border-destructive" : "border-border"} pl-12`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.phone ? "border-destructive" : "border-brandText/40"} pl-12 pr-2 py-1 text-left`}
                       placeholder={t("Phone (+XXX)")}
                     />
                   </div>
@@ -326,7 +326,7 @@ const Auth = () => {
                           setLoginEmail(e.target.value);
                           setErrors((prev) => ({ ...prev, loginEmail: undefined }));
                         }}
-                        className={`pl-12 h-12 rounded-xl ${errors.loginEmail ? "border-destructive" : "border-border"}`}
+                        className={`pl-12 ${errors.loginEmail ? "border-destructive" : "border-border"}`}
                       />
                     </>
                   ) : (
@@ -338,7 +338,7 @@ const Auth = () => {
                         setLoginPhone(value || "");
                         setErrors((prev) => ({ ...prev, loginPhone: undefined }));
                       }}
-                      className={`phone-input-auth h-12 rounded-xl ${errors.loginPhone ? "border-destructive" : "border-border"}`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.loginPhone ? "border-destructive" : "border-brandText/40"} px-2 py-1 text-left`}
                       placeholder={t("Mobile Number")}
                     />
                   )}
@@ -373,7 +373,7 @@ const Auth = () => {
                     setPassword(e.target.value);
                     setErrors((prev) => ({ ...prev, password: undefined }));
                   }}
-                  className={`pl-12 pr-12 h-12 rounded-xl ${errors.password ? "border-destructive" : "border-border"}`}
+                  className={`pl-12 pr-12 ${errors.password ? "border-destructive" : "border-border"}`}
                 />
                 <button
                   type="button"

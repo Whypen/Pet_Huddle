@@ -1243,7 +1243,7 @@ const Map = () => {
                   <select
                     value={String(selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12))}
                     onChange={(e) => setSelectedDurationH(Number(e.target.value))}
-                    className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
+                    className="w-full h-9 rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                   >
                     <option value="12">12h</option>
                     <option value="24" disabled={!isPremium}>24h</option>

@@ -1505,7 +1505,7 @@ const Chats = () => {
                   value={bookingLocation}
                   onChange={(e) => setBookingLocation(e.target.value)}
                   placeholder={t("Enter service location")}
-                  className="w-full h-10 rounded-xl bg-muted border border-border px-4 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                  className="w-full h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                 />
               </div>
 
@@ -1515,7 +1515,7 @@ const Chats = () => {
                   <select
                     value={bookingCurrency}
                     onChange={(e) => setBookingCurrency(e.target.value)}
-                    className="h-12 rounded-xl bg-muted border border-border px-2 text-sm"
+                    className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                   >
                     <option value="USD">USD</option>
                     <option value="HKD">HKD</option>
@@ -1528,7 +1528,7 @@ const Chats = () => {
                     min="1"
                     max="500"
                     disabled={!!sitterHourlyRate}
-                    className="flex-1 h-12 rounded-xl bg-muted border border-border px-4 text-lg font-semibold outline-none focus:ring-2 focus:ring-primary/50"
+                    className="flex-1 h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm font-semibold text-left outline-none focus:border-brandBlue focus:shadow-sm"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">

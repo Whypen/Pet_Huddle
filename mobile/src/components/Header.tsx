@@ -61,7 +61,7 @@ export function Header({ showBack }: Props) {
       <View className="absolute left-0 right-0 items-center">
         <Image
           source={huddleLogo}
-          style={{ width: 28, height: 28 }}
+          style={{ width: 120, height: 28 }}
           resizeMode="contain"
           accessibilityLabel="Huddle logo"
         />

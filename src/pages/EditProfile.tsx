@@ -489,7 +489,7 @@ const EditProfile = () => {
                 }))
               }
               placeholder={t("Your legal name")}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
               required
               disabled={isIdentityLocked}
               aria-invalid={Boolean(fieldErrors.legalName)}
@@ -510,7 +510,7 @@ const EditProfile = () => {
                 }))
               }
               placeholder={t("Your display name")}
-              className="h-12 rounded-xl"
+              className="rounded-[12px]"
               required
               disabled={isIdentityLocked}
               aria-invalid={Boolean(fieldErrors.displayName)}
@@ -524,7 +524,7 @@ const EditProfile = () => {
               <Input
                 value={formData.user_id || ""}
                 placeholder={t("User ID")}
-                className="h-12 rounded-xl bg-muted"
+                className="rounded-[12px] bg-[#f0f0f0]"
                 readOnly
               />
             </div>
@@ -549,7 +549,7 @@ const EditProfile = () => {
                 }))
               }
               className={cn(
-                "phone-input-auth h-12 rounded-xl border border-border px-3",
+                "phone-input-auth h-9 rounded-[12px] border border-brandText/40 bg-white px-2 py-1 text-left",
                 fieldErrors.phone && "border-red-500"
               )}
               placeholder={t("Phone (+XXX)")}
@@ -584,7 +584,7 @@ const EditProfile = () => {
                     dob: dob > today ? t("Human DOB cannot be in the future") : "",
                   }));
                 }}
-                className="h-12 rounded-xl"
+                className="rounded-[12px]"
                 required
                 aria-invalid={Boolean(fieldErrors.dob)}
               />
@@ -751,7 +751,7 @@ const EditProfile = () => {
                   setFieldErrors((prev) => ({ ...prev, height: valid ? "" : t("Height must be a number up to 300") }));
                 }}
                 placeholder={t("Height in cm")}
-                className="h-12 rounded-xl"
+                className="rounded-[12px]"
                 min={0}
                 max={300}
                 inputMode="numeric"
@@ -786,7 +786,7 @@ const EditProfile = () => {
                     setFieldErrors((prev) => ({ ...prev, weight: valid ? "" : t("Weight must be a number up to 700") }));
                   }}
                   placeholder={t("0")}
-                  className="h-12 rounded-xl flex-1"
+                  className="rounded-[12px] flex-1"
                   min={0}
                   max={700}
                   inputMode="numeric"
@@ -795,7 +795,7 @@ const EditProfile = () => {
                 <select
                   value={formData.weight_unit}
                   onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
-                  className="h-12 rounded-xl bg-muted border border-border px-3"
+                  className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                 >
                   <option value="kg">{t("kg")}</option>
                   <option value="lbs">{t("lbs")}</option>
@@ -924,7 +924,7 @@ const EditProfile = () => {
               <select
                 value={formData.relationship_status}
                 onChange={(e) => setFormData(prev => ({ ...prev, relationship_status: e.target.value }))}
-                className="w-full h-12 rounded-xl bg-muted border border-border px-3"
+                className="w-full h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
               >
                 <option value="">{t("Select...")}</option>
                 {relationshipOptions.map(r => (
@@ -1029,7 +1029,7 @@ const EditProfile = () => {
                   }))
                 }
                 placeholder={t("Your district")}
-                className="h-12 rounded-xl"
+                className="rounded-[12px]"
               />
             </div>
           </div>
@@ -1094,7 +1094,7 @@ const EditProfile = () => {
                     setFieldErrors((prev) => ({ ...prev, experienceYears: valid ? "" : t("Years of experience must be numeric") }));
                   }}
                   placeholder={t("0")}
-                  className="h-12 rounded-xl w-28"
+                  className="rounded-[12px] w-28"
                   inputMode="numeric"
                   aria-invalid={Boolean(fieldErrors.experienceYears)}
                 />

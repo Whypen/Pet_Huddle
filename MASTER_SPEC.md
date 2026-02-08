@@ -25,6 +25,21 @@ Tokens (MUST match exactly):
 ### UAT Feedback Integration v1.1 (UI Guidelines)
 UAT-driven UI behavior and measurements are defined in `ui_design_system.md` under "UAT Global UI Guidelines (v1.1)" and MUST be treated as a release gate.
 
+### Global UI Updates & Implementation (Checklist Contract)
+These requirements are a zero-bullshit release gate. Implement in code (web + mobile), re-audit, UAT, sync, and only then push to GitHub `main`.
+
+1. **Minimize height of all input fields and padding**: Reduce input height to **36px** and padding to **vertical 4px, horizontal 8px** (Tailwind example: `h-9 py-1 px-2`). Scan `/src` (web) and `mobile/src` (mobile) for all inputs and ensure no oversized overrides remain.
+2. **Date using numeric input format**: Dates must display and accept numeric format `MM/DD/YYYY`. For mobile date fields, implement via `@react-native-community/datetimepicker` and show `MM/DD/YYYY` in the field; when user typing is allowed, set `keyboardType="numeric"` or apply a `MM/DD/YYYY` mask.
+3. **Use attached icon**: Add left/right icons to inputs via container `View` with icon components. Use a **calendar icon** for date fields. On mobile, use `@expo/vector-icons`.
+4. **All input field placeholders aligned to left**: Placeholders and input text MUST be left-aligned (`textAlign: 'left'` / Tailwind `text-left`). Override any center defaults.
+5. **Move "Unlock Premium" and "Unlock Gold" above "Profile" in menu bar/popover/drawer**: The menu opened from the gear icon must render in this order: **Avatar/Name/Badge first**, then **Unlock Premium/Gold blocks**, then **Profile link**. This is separate from the full Settings page.
+6. **"Unlock Premium Block" updates**: Brand Blue background (`bg-brandBlue`), all white text (`text-white`), remove inner Explore CTA (no inner button; whole block is clickable). Add a diamond icon next to "Unlock Premium" (left-aligned). Tap redirects to **Manage Subscription** (`/premium`) with **Premium tab** selected.
+7. **"Unlock Gold Block" updates**: Brand Gold background (`bg-brandGold`), all white text (`text-white`), remove inner Explore CTA (whole block clickable). Add a star icon next to "Unlock Gold" (left-aligned). Tap redirects to **Manage Subscription** (`/premium`) with **Gold tab** selected. Blocks must squeeze within width (`flex-1`, no overflow).
+8. **Re-audit & UAT**: Scan `/src` for keywords (`input`, `Unlock Premium`, `Unlock Gold`, icon usage) and UAT by roles (Free/Premium/Gold): verify input height/align, menu order, redirects, and that no padding bloat remains.
+9. **Sync & Push**: If any schema/config is affected, sync Supabase first. Then commit with message **"Global UI Fixes"** and push to GitHub `main`. Run **3x verify**: lint/build/test.
+10. **Legal Check**: Subscription redirects must have clear intent (no hidden fees). Taps to Manage Subscription must not auto-purchase; pricing and checkout confirmation must be shown before payment.
+11. **Update header logo with attached logo**: All headers must use the attached **huddle transparent logo.png** as the primary app logo (centered). Use appropriate sizing for the wordmark (width auto, constrained height).
+
 ---
 
 ## 1. Architecture & Stack
@@ -378,8 +393,11 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
   - Badge: gold rim if verified (`verification_status='approved'` or `is_verified=true`), gray if pending.
 - Premium/Gold blocks: placed between Avatar row and profile actions.
   - Layout: `flex-row`, `flex-1`, `width: 100%`, no overflow, approx 30% shorter height than v1.1 cards.
+  - Styling (Global UI override):
+    - Unlock Premium: `bg-brandBlue`, `text-white`, diamond icon, **no inner Explore CTA** (whole block clickable).
+    - Unlock Gold: `bg-brandGold`, `text-white`, star icon, **no inner Explore CTA** (whole block clickable).
   - CTA behavior:
-    - Click "Unlock Premium" -> `/premium` with Premium tab selected.
+    - Click "Unlock Premium" -> `/premium` with Premium tab selected (web: `?tab=Premium`; mobile: route param `initialTab='Premium'`).
     - Click "Unlock Gold" -> `/premium` with Gold tab selected (web: `?tab=Gold`; mobile: route param `initialTab='Gold'`).
 - Remove border for all Session Names (section headers). Keep tight spacing (small gaps between list items).
 - Rows (no section sub-headers like "Profiles / Account Settings / Subscription / Help & Support"):
@@ -395,6 +413,7 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 **Navigation:**
 - Gear icon opens Settings (web route `/settings`, mobile Settings tab).
 - "Account Setting" opens Account Settings screen/page (web route `/account-settings`, mobile `AccountSettingsScreen`).
+  - Gear menu (popover/drawer) must show: Avatar/Name/Badge -> Unlock Premium/Gold blocks -> Profile link.
 
 ## 13a) `AccountSettings.tsx` / `AccountSettingsScreen.tsx` (UAT)
 **Purpose:** Centralize account settings, notification preferences, and delete-account.

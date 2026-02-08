@@ -21,15 +21,14 @@ export function PremiumGoldBanner({ onSelect }: { onSelect?: (id: CardId) => voi
       {
         id: "premium",
         title: "Unlock Premium",
-        desc: "More discovery and social controls.",
+        desc: "Manage your privileges",
         color: COLORS.brandBlue,
       },
       {
         id: "gold",
         title: "Unlock Gold",
-        desc: "Ultimate experience and best value.",
+        desc: "Manage your privileges",
         color: COLORS.brandGold,
-        recommended: true,
       },
     ],
     []
@@ -40,6 +39,7 @@ export function PremiumGoldBanner({ onSelect }: { onSelect?: (id: CardId) => voi
       <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
         {cards.map((item) => {
           const active = selected === item.id;
+          const icon: keyof typeof Ionicons.glyphMap = item.id === "premium" ? "diamond" : "star";
           return (
             <Pressable
               key={item.id}
@@ -51,13 +51,13 @@ export function PremiumGoldBanner({ onSelect }: { onSelect?: (id: CardId) => voi
               style={({ pressed }) => ({
                 flex: 1,
                 minWidth: 0,
-                height: 110, // ~30% shorter than the previous card
+                height: 88, // ~30% shorter than the previous card
                 borderRadius: 16,
-                borderWidth: active ? 2 : 1,
-                borderColor: item.color,
+                borderWidth: active ? 2 : 0,
+                borderColor: "rgba(255,255,255,0.85)",
                 padding: 12,
-                backgroundColor: pressed ? "rgba(33,69,207,0.06)" : "rgba(255,255,255,0.95)",
-                transform: [{ scale: pressed ? 1.02 : 1 }],
+                backgroundColor: item.color, // Checklist: solid brand backgrounds
+                transform: [{ scale: pressed ? 0.99 : 1 }],
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 1 },
                 shadowOpacity: 0.10,
@@ -65,32 +65,13 @@ export function PremiumGoldBanner({ onSelect }: { onSelect?: (id: CardId) => voi
                 elevation: 1,
               })}
             >
-              {item.recommended ? (
-                <View
-                  style={{
-                    alignSelf: "flex-start",
-                    backgroundColor: "#A855F7",
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 999,
-                    marginBottom: 6,
-                  }}
-                >
-                  <Text style={{ color: COLORS.white, fontSize: 10, fontWeight: "800" }}>Recommended</Text>
-                </View>
-              ) : null}
-
-              <Text style={{ color: COLORS.brandText, fontSize: 14, fontWeight: "800" }}>{item.title}</Text>
-              <Text style={{ color: COLORS.brandSubtext, fontSize: 12, marginTop: 4 }} numberOfLines={1}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name={icon} size={16} color={COLORS.white} />
+                <Text style={{ color: COLORS.white, fontSize: 14, fontWeight: "900" }}>{item.title}</Text>
+              </View>
+              <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12, marginTop: 6 }} numberOfLines={1}>
                 {item.desc}
               </Text>
-
-              <View style={{ flex: 1 }} />
-
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                <Text style={{ color: item.color, fontSize: 12, fontWeight: "900" }}>Explore</Text>
-                <Ionicons name="arrow-forward" size={14} color={item.color} />
-              </View>
             </Pressable>
           );
         })}
