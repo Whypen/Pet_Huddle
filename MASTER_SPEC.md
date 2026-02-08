@@ -1,10 +1,13 @@
-# MASTER_SPEC.md — huddle v1.7 (Definitive, Single Source of Truth)
+# MASTER_SPEC.md — huddle v1.9 (Definitive, Single Source of Truth)
 
 **Audience:** New full‑stack developer rebuilding from scratch.
 
 **Source of Truth:** This document supersedes all previous specs. No other spec files exist in repo. Any change requires version bump and changelog entry in this file.
 
 ---
+
+## Changelog
+- **v1.9**: Final perks override, full algo consolidation, notifications + map UI for quota/upsell enforcement.
 
 ## 0. Product DNA
 huddle is a mobile‑first pet‑care super‑app blending family mesh safety (emergency broadcasts), nanny marketplace (escrow bookings with 10% platform fee), social discovery (swipes/matches with pop‑ups), and fintech (subscriptions/add‑ons with webhooks). Experience target: Instagram/TikTok smoothness, minimal UI with Huddle Blue accents, gold gradient for premium. PWA required for native‑like install and offline behavior. No dead ends, no lag.
@@ -76,11 +79,20 @@ When the user taps **Submit** in `/verify-identity`:
 4. **Redirect:** Success animation → redirect to `/chats`.
 
 ### 2.6 Quota Management System (QMS)
-- **Table:** `user_quotas` with daily counters: `ai_images`, `chat_images`, `thread_posts`
-- **Function:** `check_and_increment_quota(action_type TEXT)`
-- **Free limits:** `ai_vision = 1/day`, `chat_image = 5/day`, `thread_post = 1/day`
-- **Premium/Gold:** unlimited for these actions
-- **Enforcement points:** ai-vet (image), chat image uploads, thread posts, booking edge function gate
+- **Table:** `user_quotas` (RLS-protected) with counters + add-on extras:
+  - `thread_posts_today`, `discovery_views_today`, `media_usage_today`
+  - `stars_used_cycle`, `broadcast_alerts_week`
+  - `extra_stars`, `extra_media_10`, `extra_broadcast_72h`
+- **Function:** `check_and_increment_quota(action_type TEXT)` (security definer; server source-of-truth)
+- **Snapshot RPC:** `get_quota_snapshot()` for UI (read-only)
+- **v1.9 Limits (Contractual):**
+  - **Thread posts/day:** Free `1`, Premium `5`, Gold `20` (Gold is pooled via family owner)
+  - **Discovery profiles/day:** Free `40` (blurry upsell after), Premium/Gold unlimited
+  - **Media/day (AI Vet/Chats/Threads/Broadcast images):** Free `0` (block), Premium `10`, Gold `50` (add-on `extra_media_10` consumes after base)
+  - **Stars/cycle:** Gold `3` (add-on `extra_stars` consumes after base; can be purchased on any tier)
+  - **Broadcast alerts/week:** Free `5`, Premium/Gold `20` (enforced by `map_alerts` trigger to support add-on semantics)
+- **Family pooling (Gold):** `family_members(status='accepted')` shares pool owner’s counters/limits.
+- **Upsell UI:** On server-deny (RPC returns `false` or trigger raises `quota_exceeded`), show sticky upsell banner (white bg, gold border) with CTA to `/premium` (and preselect add-on when applicable).
 
 ---
 
@@ -363,7 +375,6 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 ## 13) `Settings.tsx`
 **UI Elements:**
 - Account settings, toggles
-- Version text (long‑press admin hatch)
 
 ## 14) `Admin.tsx`
 **UI Elements:**
@@ -621,13 +632,33 @@ Safeguards & Enforcement
 
 ---
 
-**End of MASTER_SPEC v1.7**
+**End of MASTER_SPEC v1.9**
 
 ---
 
 ## 11. Contract Requirements
 
 This section is the contract override for membership perks, quotas, and consolidated algorithms. It supersedes earlier quota and perk logic where conflicts exist.
+
+### v1.9 Final Override (Authoritative, Implemented)
+
+This subsection is the **authoritative** v1.9 contract for perks and quota enforcement. If any other subsection in this document conflicts with this one, **this one wins**.
+
+| Feature | Free | Premium ($9.99/month) | Gold ($19.99/month) |
+|---|---|---|---|
+| Thread posts | 1/day | 5/day | 20/day |
+| Discovery profiles/day | 40 max (blurry upsell after) | Unlimited | Unlimited |
+| Filtering | Basic (age, gender, distance, species, role) | Advanced (+height, sexual orientation, highest degree, relationship status, Car badge, pet experience, language, verified-only) | Advanced (same) |
+| Media/Images (AI Vet/Chats/Threads/Broadcast) | 0 (block) | 10/day | 50/day |
+| Stars (direct chat) | 0 | 0 | 3/cycle |
+| Broadcast Alerts | 5/week, 12h map visible, 2km range | 20/week, 24h visible, 10km range | 20/week, 48h visible, 20km range |
+| Family Member | 0 | 0 | 1 (quota inheritance; Gold pooling) |
+
+- Add-ons (any tier, Stripe Checkout): `+3 Stars`, `+10 Media`, `+1 Broadcast (72h/20km)`; implemented via extras columns in `user_quotas`.
+- Enforcement: QMS in `user_quotas` via `check_and_increment_quota(action_type TEXT)`; Broadcast quotas enforced in `map_alerts` trigger (supports add-on semantics).
+- Upsell: On exceed/gate, show sticky banner (white bg, gold border) with CTA to `/premium` (and preselect add-on when applicable).
+
+### Archived / Superseded Contract Text (Kept for Traceability)
 
 ### Membership Perks Table (Core Algo Base, Enforce via RLS + QMS)
 

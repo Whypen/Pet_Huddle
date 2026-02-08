@@ -4,11 +4,13 @@ import MapView, { Marker, type MapPressEvent, PROVIDER_DEFAULT } from "react-nat
 import * as Location from "expo-location";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
 import { Header } from "../components/Header";
 import { HText } from "../components/HText";
 import { COLORS } from "../theme/tokens";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/useAuth";
+import { useUpsellBanner } from "../contexts/UpsellBannerContext";
 
 type MapTab = "Event" | "Friends";
 
@@ -39,6 +41,8 @@ type FriendPin = {
 
 export function MapScreen() {
   const { user, profile } = useAuth();
+  const navigation = useNavigation();
+  const { showUpsellBanner } = useUpsellBanner();
   const [tab, setTab] = useState<MapTab>("Event");
   const [visibleEnabled, setVisibleEnabled] = useState(false);
   const [pinning, setPinning] = useState(false);
@@ -53,10 +57,10 @@ export function MapScreen() {
   const [selectedLoc, setSelectedLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [alertType, setAlertType] = useState<"Stray" | "Lost" | "Others">("Stray");
   const [desc, setDesc] = useState("");
-  const [rangeKm, setRangeKm] = useState<number>(10);
+  const [rangeKm, setRangeKm] = useState<number>(2);
   const [durH, setDurH] = useState<number>(12);
   const [postOnThreads, setPostOnThreads] = useState(false);
-  const [extrasBroadcasts, setExtrasBroadcasts] = useState(0);
+  const [extraBroadcast72h, setExtraBroadcast72h] = useState(0);
 
   const profileRec = useMemo(() => {
     if (profile && typeof profile === "object") return profile as Record<string, unknown>;
@@ -70,7 +74,8 @@ export function MapScreen() {
   }, [profileRec]);
 
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  const baseRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
+  // v1.9 override: Broadcast radius (km): Free 2, Premium 10, Gold 20.
+  const baseRange = effectiveTier === "gold" ? 20 : isPremium ? 10 : 2;
   const baseDur = effectiveTier === "gold" ? 48 : isPremium ? 24 : 12;
 
   useEffect(() => {
@@ -80,9 +85,10 @@ export function MapScreen() {
 
   const loadSnapshot = useCallback(async () => {
     const res = await supabase.rpc("get_quota_snapshot");
-    const d = (res.data && typeof res.data === "object") ? (res.data as Record<string, unknown>) : null;
-    const b = Number(d?.extras_broadcasts ?? 0);
-    setExtrasBroadcasts(Number.isFinite(b) ? b : 0);
+    const row =
+      Array.isArray(res.data) ? (res.data[0] as Record<string, unknown> | undefined) : (res.data as Record<string, unknown> | null);
+    const b = Number(row?.extra_broadcast_72h ?? 0);
+    setExtraBroadcast72h(Number.isFinite(b) ? b : 0);
   }, []);
 
   useEffect(() => {
@@ -201,7 +207,11 @@ export function MapScreen() {
       if (ins.error) {
         const msg = typeof ins.error.message === "string" ? ins.error.message : "";
         if (msg.includes("quota_exceeded")) {
-          Alert.alert("Limit reached", "Broadcast limit reached. Upgrade to get more alerts.");
+          showUpsellBanner({
+            message: "Limited. You have reached your Broadcast limit for this week.",
+            ctaLabel: "Go to Premium",
+            onCta: () => navigation.navigate("Premium" as never),
+          });
           return;
         }
         throw ins.error;
@@ -229,25 +239,24 @@ export function MapScreen() {
     } catch {
       Alert.alert("Broadcast", "Failed to create broadcast.");
     }
-  }, [alertType, desc, durH, fetchAlerts, loadSnapshot, postOnThreads, rangeKm, selectedLoc, user]);
+  }, [alertType, desc, durH, fetchAlerts, loadSnapshot, navigation, postOnThreads, rangeKm, selectedLoc, showUpsellBanner, user]);
 
   const rangeOptions = useMemo(
     () => [
+      { v: 2, label: "2km", enabled: baseRange >= 2 },
       { v: 10, label: "10km", enabled: baseRange >= 10 },
-      { v: 25, label: "25km", enabled: baseRange >= 25 },
-      { v: 50, label: "50km", enabled: baseRange >= 50 },
-      { v: 150, label: "150km (Add-on)", enabled: extrasBroadcasts > 0 },
+      { v: 20, label: baseRange >= 20 ? "20km" : "20km (Add-on)", enabled: baseRange >= 20 || extraBroadcast72h > 0 },
     ],
-    [baseRange, extrasBroadcasts]
+    [baseRange, extraBroadcast72h]
   );
   const durOptions = useMemo(
     () => [
       { v: 12, label: "12h", enabled: baseDur >= 12 },
       { v: 24, label: "24h", enabled: baseDur >= 24 },
       { v: 48, label: "48h", enabled: baseDur >= 48 },
-      { v: 72, label: "72h (Add-on)", enabled: extrasBroadcasts > 0 },
+      { v: 72, label: "72h (Add-on)", enabled: extraBroadcast72h > 0 },
     ],
-    [baseDur, extrasBroadcasts]
+    [baseDur, extraBroadcast72h]
   );
 
   return (

@@ -28,8 +28,8 @@ const DEFAULT_PRICING: Pricing = {
 
 const ADD_ONS: { id: AddOnId; title: string; subtitle: string; pill?: string }[] = [
   { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "emergency_alert", title: "Broadcast (72H/150km)", subtitle: "+1 Broadcast (72h / 150km)", pill: "72H" },
-  { id: "vet_media", title: "AI Vet Media (+10)", subtitle: "+10 Media (AI Vet only)" },
+  { id: "emergency_alert", title: "Broadcast (72H/20km)", subtitle: "+1 Broadcast (72h / 20km)", pill: "72H" },
+  { id: "vet_media", title: "Media (+10)", subtitle: "+10 Media", pill: "Extra" },
 ];
 
 function money(n: number) {
@@ -284,14 +284,14 @@ export function PremiumScreen() {
                     d: tab === "Gold" ? "Unlimited discovery + priority ranking" : "Unlimited discovery + standard ranking",
                     icon: "sparkles-outline" as const,
                   },
-                  { t: "Threads", d: tab === "Gold" ? "30 posts/day (pooled with family)" : "15 posts/day", icon: "chatbox-ellipses-outline" as const },
-                  { t: "AI Vet", d: tab === "Gold" ? "20 uploads/day (pooled) + 5 priority/month" : "10 uploads/day", icon: "medkit-outline" as const },
-                  { t: "Broadcast", d: tab === "Gold" ? "50/month • 50km • 48h (pooled)" : "30/month • 25km • 24h", icon: "radio-outline" as const },
+                  { t: "Threads", d: tab === "Gold" ? "20 posts/day" : "5 posts/day", icon: "chatbox-ellipses-outline" as const },
+                  { t: "Media", d: tab === "Gold" ? "50/day (AI Vet/Chats/Threads)" : "10/day (AI Vet/Chats/Threads)", icon: "image-outline" as const },
+                  { t: "Broadcast", d: tab === "Gold" ? "20/week • 20km • 48h" : "20/week • 10km • 24h", icon: "radio-outline" as const },
+                  { t: "Filters", d: "Advanced filters (Premium+)", icon: "options-outline" as const },
                   ...(tab === "Gold"
                     ? [
-                        { t: "Stars", d: "10/month (pooled) direct chat triggers", icon: "star-outline" as const },
-                        { t: "Family", d: "1 member (shared billing, pooled quotas)", icon: "people-outline" as const },
-                        { t: "Video", d: "Chats/Threads video upload (Gold-only)", icon: "videocam-outline" as const },
+                        { t: "Stars", d: "3/cycle (direct chat)", icon: "star-outline" as const },
+                        { t: "Family", d: "1 member (quota inheritance)", icon: "people-outline" as const },
                       ]
                     : []),
                 ].map((f) => (

@@ -31,6 +31,7 @@ import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/VerifyIdentity";
 import AdminDisputes from "./screens/AdminDisputes";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
+import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,9 +58,10 @@ const App = () => (
               }}
             >
               <AuthProvider>
-                <OfflineBanner />
-                <ScrollToTop />
-                <Routes>
+                <UpsellBannerProvider>
+                  <OfflineBanner />
+                  <ScrollToTop />
+                  <Routes>
                   {/* Public Routes */}
                   <Route path="/auth" element={<Auth />} />
 
@@ -273,7 +275,8 @@ const App = () => (
 
                   {/* Catch-all */}
                   <Route path="*" element={<NotFound />} />
-                </Routes>
+                  </Routes>
+                </UpsellBannerProvider>
               </AuthProvider>
             </BrowserRouter>
           </TooltipProvider>

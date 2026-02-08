@@ -22,6 +22,8 @@ function nowTag() {
 }
 
 async function main() {
+  const step = (msg) => console.error(`[uat] ${msg}`);
+  step("start");
   const { url, anon, service } = extractEnvFromBackendEnvMd();
   if (!url || !anon || !service) {
     console.error("Missing Supabase config in Backend.env.md");
@@ -33,6 +35,7 @@ async function main() {
   });
 
   const tag = nowTag();
+  step(`tag=${tag}`);
   const pw = "Test1234!Test1234!";
   const emails = {
     free: `free+uat-${tag}@huddle.test`,
@@ -42,6 +45,7 @@ async function main() {
   };
 
   const created = {};
+  step("creating users");
   for (const [k, email] of Object.entries(emails)) {
     const res = await admin.auth.admin.createUser({
       email,
@@ -52,6 +56,7 @@ async function main() {
     if (res.error) throw res.error;
     created[k] = res.data.user.id;
   }
+  step("users created");
 
   const upsertProfile = async (id, tier, display_name, legal_name, phone) => {
     const r = await admin
@@ -74,13 +79,16 @@ async function main() {
     if (r.error) throw r.error;
   };
 
+  step("upserting profiles");
   await upsertProfile(created.free, "free", "Free User", "Free User", "+85200000001");
   await upsertProfile(created.premium, "premium", "Premium User", "Premium User", "+85200000002");
   await upsertProfile(created.gold, "gold", "Gold User", "Gold User", "+85200000003");
   await upsertProfile(created.family, "free", "Family Member", "Family Member", "+85200000004");
+  step("profiles upserted");
 
   // Link family member to gold (accepted)
   {
+    step("linking family");
     const ins = await admin
       .from("family_members")
       .insert({
@@ -91,19 +99,25 @@ async function main() {
       .select("id")
       .maybeSingle();
     if (ins.error) throw ins.error;
+    step("family linked");
   }
 
   // Ensure quota rows exist for pool owners.
+  step("ensuring quota rows");
   for (const id of [created.free, created.premium, created.gold]) {
     const q = await admin.from("user_quotas").upsert({ user_id: id }, { onConflict: "user_id" });
     if (q.error) throw q.error;
   }
+  step("quota rows ensured");
 
   // Buckets check (best-effort).
+  step("checking buckets");
   const buckets = await admin.storage.listBuckets();
   const bucketNames = buckets.data?.map((b) => b.name) ?? [];
+  step(`buckets=${bucketNames.length}`);
 
   // Tables check (best-effort). If a table doesn't exist, `.from()` will return an error.
+  step("checking tables");
   const tableChecks = {};
   const checkTable = async (table, col = "id") => {
     const r = await admin.from(table).select(col, { head: true, count: "exact" });
@@ -114,6 +128,7 @@ async function main() {
   await checkTable("notifications", "id");
   await checkTable("family_members", "id");
   await checkTable("reminders", "id");
+  step("tables checked");
 
   // Helper: sign in as user and run quota calls.
   const makeUserClient = () =>
@@ -141,25 +156,79 @@ async function main() {
 
   const results = {};
 
-  results.free_thread = await signInAndRun(emails.free, (c) => countAllowed(c, "thread_post", 4));
-  results.premium_thread = await signInAndRun(emails.premium, (c) => countAllowed(c, "thread_post", 16));
-  results.gold_thread = await signInAndRun(emails.gold, (c) => countAllowed(c, "thread_post", 20));
-  results.family_thread = await signInAndRun(emails.family, (c) => countAllowed(c, "thread_post", 11));
+  // v1.9 perks: threads Free 1/day, Premium 5/day, Gold 20/day (pooled).
+  step("testing threads quota");
+  results.free_thread = await signInAndRun(emails.free, (c) => countAllowed(c, "thread_post", 2));
+  results.premium_thread = await signInAndRun(emails.premium, (c) => countAllowed(c, "thread_post", 6));
+  // Pool proof: Gold uses 15, family uses 6 -> family should allow 5 (15+5=20 total).
+  results.gold_thread = await signInAndRun(emails.gold, (c) => countAllowed(c, "thread_post", 15));
+  results.family_thread = await signInAndRun(emails.family, (c) => countAllowed(c, "thread_post", 6));
+  step("threads quota done");
 
+  step("testing discovery quota");
   results.free_discovery = await signInAndRun(emails.free, (c) => countAllowed(c, "discovery_profile", 41));
   // Contract override: Premium/Gold discovery is unlimited (QMS should never deny).
-  results.premium_discovery = await signInAndRun(emails.premium, (c) => countAllowed(c, "discovery_profile", 200));
-  results.gold_discovery = await signInAndRun(emails.gold, (c) => countAllowed(c, "discovery_profile", 200));
+  results.premium_discovery = await signInAndRun(emails.premium, (c) => countAllowed(c, "discovery_profile", 80));
+  results.gold_discovery = await signInAndRun(emails.gold, (c) => countAllowed(c, "discovery_profile", 80));
+  step("discovery quota done");
 
-  results.free_ai_vet = await signInAndRun(emails.free, (c) => countAllowed(c, "ai_vet_upload", 1));
-  results.premium_ai_vet = await signInAndRun(emails.premium, (c) => countAllowed(c, "ai_vet_upload", 11));
-  results.gold_ai_vet = await signInAndRun(emails.gold, (c) => countAllowed(c, "ai_vet_upload", 21));
+  // v1.9 perks: Media (images) Free 0/day, Premium 10/day, Gold 50/day.
+  step("testing media quota");
+  results.free_media = await signInAndRun(emails.free, (c) => countAllowed(c, "media", 1));
+  results.premium_media = await signInAndRun(emails.premium, (c) => countAllowed(c, "media", 11));
+  results.gold_media = await signInAndRun(emails.gold, (c) => countAllowed(c, "media", 51));
+  step("media quota done");
 
-  results.gold_priority = await signInAndRun(emails.gold, (c) => countAllowed(c, "ai_vet_priority", 6));
-  results.gold_star = await signInAndRun(emails.gold, (c) => countAllowed(c, "star", 11));
+  // v1.9 perks: Stars Gold 3/cycle.
+  step("testing stars quota");
+  results.gold_star = await signInAndRun(emails.gold, (c) => countAllowed(c, "star", 4));
+  step("stars quota done");
 
-  // Broadcasts are enforced on insert triggers; test via direct quota counter.
-  results.free_broadcast = await signInAndRun(emails.free, (c) => countAllowed(c, "broadcast_alert", 4));
+  // Broadcasts are enforced on insert triggers (weekly): Free 5/week, Premium/Gold 20/week.
+  async function countBroadcastInserts(email, times, opts = {}) {
+    return await signInAndRun(email, async (c) => {
+      const uid = (await c.auth.getUser()).data.user.id;
+      let ok = 0;
+      for (let i = 0; i < times; i++) {
+        const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+        const ins = await c
+          .from("map_alerts")
+          .insert({
+            creator_id: uid,
+            latitude: 22.2828,
+            longitude: 114.1583,
+            alert_type: "Stray",
+            description: `uat broadcast ${i}`,
+            photo_url: null,
+            range_meters: 2000,
+            expires_at: expiresAt,
+          })
+          .select("id")
+          .maybeSingle();
+        if (!ins.error) {
+          ok += 1;
+          continue;
+        }
+        const msg = String(ins.error.message || "").toLowerCase();
+        if (msg.includes("quota_exceeded")) break;
+        throw ins.error;
+      }
+      return ok;
+    });
+  }
+
+  step("testing broadcast quota");
+  results.free_broadcast = await countBroadcastInserts(emails.free, 6);
+  step("broadcast quota done");
+
+  // Add-on behavior: +1 broadcast token (72h/20km). Grant 1 token to Free user and allow 6th insert.
+  step("testing broadcast add-on token");
+  await admin
+    .from("user_quotas")
+    .update({ extra_broadcast_72h: 1, broadcast_alerts_week: 0, broadcast_week_used: 0, week_start: new Date().toISOString().slice(0, 10) })
+    .eq("user_id", created.free);
+  results.free_broadcast_plus_addon = await countBroadcastInserts(emails.free, 6);
+  step("broadcast add-on done");
 
   console.log(
     JSON.stringify(

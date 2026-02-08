@@ -6,6 +6,7 @@ import { RootNavigator } from "./src/navigation/RootNavigator";
 import { supabase } from "./src/lib/supabase";
 import { COLORS } from "./src/theme/tokens";
 import { AuthProvider } from "./src/contexts/AuthContext";
+import { UpsellBannerProvider } from "./src/contexts/UpsellBannerContext";
 
 export default function App() {
   const [connecting, setConnecting] = useState(true);
@@ -40,7 +41,9 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <RootNavigator />
+        <UpsellBannerProvider>
+          <RootNavigator />
+        </UpsellBannerProvider>
       </AuthProvider>
       <StatusBar style="auto" />
     </SafeAreaProvider>

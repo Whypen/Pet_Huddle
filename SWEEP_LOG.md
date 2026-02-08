@@ -131,3 +131,41 @@ Mobile verification:
 
 Known constraint:
 - Android SDK not configured on this machine (`ANDROID_HOME` missing), so `expo run:android` currently cannot run.
+
+---
+
+## v1.9 Final Override Re-Sweep (2026-02-09)
+
+Backend migration hardening:
+- Fixed production `notifications` schema mismatch (`title`/`body` NOT NULL) and updated `notify_on_map_alert_insert` trigger to insert compatibly across schema variants.
+
+Supabase UAT script proof:
+- Ran `node scripts/uat_sweep.mjs` (tag `20260208191525`) and validated:
+  - Buckets present: `identity_verification`, `social_album` (and core buckets)
+  - Tables present: `user_quotas`, `consent_logs`, `notifications`, `family_members`, `reminders`
+  - Quotas (v1.9): Free threads `1/day`, Premium `5/day`, Gold pooled `20/day`; Free discovery `40/day`, Premium/Gold unlimited; media `0/10/50` per day; stars `3/cycle`; broadcasts Free `5/week` (+1 with add-on token)
+
+Raw output (excerpt):
+```json
+{
+  "quota_results": {
+    "free_thread": 1,
+    "premium_thread": 5,
+    "gold_thread": 15,
+    "family_thread": 5,
+    "free_discovery": 40,
+    "premium_discovery": 80,
+    "gold_discovery": 80,
+    "free_media": 0,
+    "premium_media": 10,
+    "gold_media": 50,
+    "gold_star": 3,
+    "free_broadcast": 5,
+    "free_broadcast_plus_addon": 6
+  }
+}
+```
+
+Frontend alignment:
+- Web + Mobile `/premium` features updated to match v1.9 numbers and add-on ranges.
+- Sticky upsell banner implemented (web + mobile) and wired into quota-deny paths for Threads + Map broadcasts.

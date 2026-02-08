@@ -20,10 +20,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 import imageCompression from "browser-image-compression";
 
 const tags = [
@@ -69,6 +69,7 @@ interface NoticeBoardProps {
 export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user, profile } = useAuth();
+  const { showUpsellBanner } = useUpsellBanner();
   const [notices, setNotices] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -103,13 +104,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [keyword, setKeyword] = useState("");
   const [topicFilter, setTopicFilter] = useState<string>("All");
   const [sortMode, setSortMode] = useState<"Trending" | "Latest">("Trending");
-  const [quotaDialog, setQuotaDialog] = useState<{
-    open: boolean;
-    title: string;
-    message: string;
-    ctaLabel?: string;
-    showCta: boolean;
-  }>({ open: false, title: "", message: "", showCta: false });
 
   useEffect(() => {
     fetchNotices(true);
@@ -243,30 +237,21 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const openThreadQuotaDialog = () => {
     const tier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
     if (tier === "gold") {
-      setQuotaDialog({
-        open: true,
-        title: "Limited",
-        message: "Limited. Your quota will reset in 24h.",
-        showCta: false,
-      });
+      showUpsellBanner({ message: "Limited. Your quota will reset in 24h." });
       return;
     }
     if (tier === "premium") {
-      setQuotaDialog({
-        open: true,
-        title: "Limited",
+      showUpsellBanner({
         message: "Limited. Upgrade to Gold to post more today.",
         ctaLabel: "Go to Premium",
-        showCta: true,
+        onCta: onPremiumClick,
       });
       return;
     }
-    setQuotaDialog({
-      open: true,
-      title: "Limited",
+    showUpsellBanner({
       message: "Limited. Upgrade to Premium/Gold to post more today.",
       ctaLabel: "Go to Premium",
-      showCta: true,
+      onCta: onPremiumClick,
     });
   };
 
@@ -957,30 +942,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         )}
       </AnimatePresence>
 
-      <Dialog open={quotaDialog.open} onOpenChange={(open) => setQuotaDialog((s) => ({ ...s, open }))}>
-        <DialogContent className="max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>{quotaDialog.title}</DialogTitle>
-          </DialogHeader>
-          <div className="text-sm text-muted-foreground">{quotaDialog.message}</div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setQuotaDialog((s) => ({ ...s, open: false }))}>
-              {t("Close")}
-            </Button>
-            {quotaDialog.showCta ? (
-              <Button
-                className="bg-brandBlue text-white"
-                onClick={() => {
-                  setQuotaDialog((s) => ({ ...s, open: false }));
-                  onPremiumClick();
-                }}
-              >
-                {quotaDialog.ctaLabel || t("Go to Premium")}
-              </Button>
-            ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

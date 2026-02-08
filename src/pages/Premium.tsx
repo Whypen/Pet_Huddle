@@ -34,26 +34,27 @@ const DEFAULT_PRICING: Pricing = {
 
 const ADD_ONS: AddOn[] = [
   { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "emergency_alert", title: "Broadcast (72H/150km)", subtitle: "+1 Broadcast (72h / 150km)" , pill: "72H" },
-  { id: "vet_media", title: "AI Vet Media (+10)", subtitle: "+10 Media (AI Vet only)" },
+  { id: "emergency_alert", title: "Broadcast (72H/20km)", subtitle: "+1 Broadcast (72h / 20km)", pill: "72H" },
+  { id: "vet_media", title: "Media (+10)", subtitle: "+10 Media", pill: "Extra" },
 ];
 
 const FEATURES = (tier: "premium" | "gold") =>
   tier === "premium"
     ? [
         { title: "Unlimited", tip: "Unlimited discovery + standard ranking", icon: Sparkles },
-        { title: "Threads", tip: "15 posts/day", icon: CheckCircle2 },
-        { title: "AI Vet", tip: "10 uploads/day", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "30/month • 25km • 24h", icon: CheckCircle2 },
+        { title: "Threads", tip: "5 posts/day", icon: CheckCircle2 },
+        { title: "Media", tip: "10/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "20/week • 10km • 24h", icon: CheckCircle2 },
+        { title: "Filters", tip: "Advanced filters (Premium+)", icon: CheckCircle2 },
       ]
     : [
         { title: "Unlimited", tip: "Unlimited discovery + priority ranking", icon: Sparkles },
-        { title: "Threads", tip: "30 posts/day (pooled with family)", icon: CheckCircle2 },
-        { title: "Stars", tip: "10/month (pooled) direct chat triggers", icon: CheckCircle2 },
-        { title: "AI Vet", tip: "20 uploads/day (pooled) + 5 priority/month", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "50/month • 50km • 48h (pooled)", icon: CheckCircle2 },
-        { title: "Family", tip: "1 member (shared billing, pooled quotas)", icon: CheckCircle2 },
-        { title: "Video", tip: "Chats/Threads video upload (Gold-only)", icon: CheckCircle2 },
+        { title: "Threads", tip: "20 posts/day", icon: CheckCircle2 },
+        { title: "Stars", tip: "3/cycle (direct chat)", icon: CheckCircle2 },
+        { title: "Media", tip: "50/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "20/week • 20km • 48h", icon: CheckCircle2 },
+        { title: "Family", tip: "1 member (quota inheritance)", icon: CheckCircle2 },
+        { title: "Filters", tip: "Advanced filters (Premium+)", icon: CheckCircle2 },
       ];
 
 function money(n: number) {
@@ -108,6 +109,25 @@ export default function PremiumPage() {
         // ignore
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    // Auto-select add-on tab when navigated from an upsell trigger.
+    const pending = sessionStorage.getItem("pending_addon");
+    if (!pending) return;
+    const map: Record<string, AddOnId | null> = {
+      star: "star_pack",
+      emergency_alert: "emergency_alert",
+      media: "vet_media",
+      family_slot: null,
+    };
+    const id = map[pending];
+    if (id) {
+      setTab("Add-on");
+      setSelected((s) => ({ ...s, [id]: true }));
+      setQty((q) => ({ ...q, [id]: Math.min(10, Math.max(1, q[id] ?? 1)) }));
+    }
+    sessionStorage.removeItem("pending_addon");
   }, []);
 
   const cartItems = useMemo(() => {

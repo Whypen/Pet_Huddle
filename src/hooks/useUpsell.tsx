@@ -18,6 +18,19 @@ interface UpsellModalState {
   price: number;
 }
 
+type QuotaSnapshot = {
+  user_id: string;
+  tier: string;
+  thread_posts_today: number;
+  discovery_views_today: number;
+  media_usage_today: number;
+  stars_used_cycle: number;
+  broadcast_alerts_week: number;
+  extra_stars: number;
+  extra_media_10: number;
+  extra_broadcast_72h: number;
+};
+
 export const useUpsell = () => {
   const { profile, user } = useAuth();
   const { t } = useLanguage();
@@ -29,6 +42,24 @@ export const useUpsell = () => {
     price: 0,
   });
 
+  const fetchQuotaSnapshot = useCallback(async (): Promise<QuotaSnapshot | null> => {
+    if (!user) return null;
+    const r = await supabase.rpc("get_quota_snapshot");
+    if (r.error) {
+      console.warn("[useUpsell] get_quota_snapshot failed", r.error);
+      return null;
+    }
+    // Supabase RPC returns either a row or an array depending on the generated types,
+    // so normalize defensively.
+    const row = Array.isArray(r.data) ? r.data[0] : r.data;
+    return (row ?? null) as QuotaSnapshot | null;
+  }, [user]);
+
+  const effectiveTier = useCallback(
+    (snap: QuotaSnapshot | null) => String(profile?.effective_tier || profile?.tier || snap?.tier || "free").toLowerCase(),
+    [profile?.effective_tier, profile?.tier]
+  );
+
   /**
    * Check if user needs to buy stars before boosting profile
    * Call this BEFORE any star-consuming action
@@ -36,17 +67,14 @@ export const useUpsell = () => {
   const checkStarsAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
-    // Fetch from database (RLS-protected, read-only)
-    const ownerId = profile?.family_owner_id || user.id;
-    const { data: currentProfile } = await supabase
-      .from("profiles")
-      .select("stars_count")
-      .eq("id", ownerId)
-      .single();
+    const snap = await fetchQuotaSnapshot();
+    const tier = effectiveTier(snap);
+    const base = tier === "gold" ? 3 : 0;
+    const used = snap?.stars_used_cycle ?? 0;
+    const extra = snap?.extra_stars ?? 0;
+    const remaining = Math.max(0, base - used) + Math.max(0, extra);
 
-    const starsCount = currentProfile?.stars_count || 0;
-
-    if (starsCount === 0) {
+    if (remaining <= 0) {
       setUpsellModal({
         isOpen: true,
         type: "star",
@@ -58,7 +86,7 @@ export const useUpsell = () => {
     }
 
     return true;
-  }, [user]);
+  }, [effectiveTier, fetchQuotaSnapshot, t, user]);
 
   /**
    * Check if user can send emergency alert
@@ -67,33 +95,27 @@ export const useUpsell = () => {
   const checkEmergencyAlertAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
-    const ownerId = profile?.family_owner_id || user.id;
-    const { data: currentProfile } = await supabase
-      .from("profiles")
-      .select("mesh_alert_count, tier")
-      .eq("id", ownerId)
-      .single();
+    // Broadcast usage is enforced server-side by trigger, but we can provide an early upsell hint.
+    const snap = await fetchQuotaSnapshot();
+    const tier = effectiveTier(snap);
+    const base = tier === "free" ? 5 : 20;
+    const used = snap?.broadcast_alerts_week ?? 0;
+    const extra = snap?.extra_broadcast_72h ?? 0;
+    const remaining = Math.max(0, base - used) + Math.max(0, extra);
 
-    const alertCount = currentProfile?.mesh_alert_count || 0;
-    const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-
-    if (effectiveTier === "gold") {
-      return true;
-    }
-
-    if (alertCount === 0) {
+    if (remaining <= 0) {
       setUpsellModal({
         isOpen: true,
         type: "emergency_alert",
         title: t("No Emergency Alerts Left"),
-        description: t("Buy an Emergency Alert to broadcast a lost pet notification to nearby users."),
+        description: t("Buy an additional Broadcast token to send one more alert."),
         price: 2.99,
       });
       return false;
     }
 
     return true;
-  }, [user]);
+  }, [effectiveTier, fetchQuotaSnapshot, t, user]);
 
   /**
    * Check if user can upload media to AI Vet
@@ -102,27 +124,26 @@ export const useUpsell = () => {
   const checkMediaCreditsAvailable = useCallback(async (): Promise<boolean> => {
     if (!user) return false;
 
-    const ownerId = profile?.family_owner_id || user.id;
-    const { data: currentProfile } = await supabase
-      .from("profiles")
-      .select("media_credits, tier")
-      .eq("id", ownerId)
-      .single();
+    const snap = await fetchQuotaSnapshot();
+    const tier = effectiveTier(snap);
+    const base = tier === "gold" ? 50 : tier === "premium" ? 10 : 0;
+    const used = snap?.media_usage_today ?? 0;
+    const extra = snap?.extra_media_10 ?? 0;
+    const remaining = Math.max(0, base - used) + Math.max(0, extra);
 
-    const mediaCredits = currentProfile?.media_credits || 0;
-    if (mediaCredits === 0) {
+    if (remaining <= 0) {
       setUpsellModal({
         isOpen: true,
         type: "media",
         title: t("Out of Media Credits"),
-        description: t("Upgrade to Premium for unlimited media or buy a 10-pack to continue uploading photos and videos to AI Vet."),
+        description: t("Upgrade or buy a +10 Media add-on to continue uploading images."),
         price: 3.99,
       });
       return false;
     }
 
     return true;
-  }, [user]);
+  }, [effectiveTier, fetchQuotaSnapshot, t, user]);
 
   /**
    * Check if user can add more family members
@@ -132,15 +153,9 @@ export const useUpsell = () => {
     if (!user) return false;
 
     const ownerId = profile?.family_owner_id || user.id;
-    const { data: currentProfile } = await supabase
-      .from("profiles")
-      .select("family_slots, tier")
-      .eq("id", ownerId)
-      .single();
-
-    const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-    const baseSlots = effectiveTier === "gold" ? 1 : 0;
-    const familySlots = currentProfile?.family_slots || 0;
+    const snap = await fetchQuotaSnapshot();
+    const tier = effectiveTier(snap);
+    const totalSlots = tier === "gold" ? 1 : 0;
 
     const { count } = await supabase
       .from("family_members")
@@ -149,21 +164,20 @@ export const useUpsell = () => {
       .eq("status", "accepted");
 
     const currentFamilyCount = count || 0;
-    const totalSlots = baseSlots + familySlots;
 
     if (currentFamilyCount >= totalSlots) {
       setUpsellModal({
         isOpen: true,
         type: "family_slot",
         title: t("Family Limit Reached"),
-        description: t("Buy additional family slots to add more members to your huddle account."),
+        description: t("Upgrade to Gold to invite 1 family member."),
         price: 5.99,
       });
       return false;
     }
 
     return true;
-  }, [user]);
+  }, [effectiveTier, fetchQuotaSnapshot, t, user, profile?.family_owner_id]);
 
   /**
    * Close upsell modal

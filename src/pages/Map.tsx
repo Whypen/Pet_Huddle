@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import imageCompression from "browser-image-compression";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -31,7 +32,8 @@ import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { demoUsers, demoAlerts, DemoUser, DemoAlert } from "@/lib/demoData";
 import { useUpsell } from "@/hooks/useUpsell";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -115,7 +117,9 @@ type MapAlertsNearbyRow = {
 const Map = () => {
   const { user, profile } = useAuth();
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { showUpsellBanner } = useUpsellBanner();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
@@ -163,12 +167,12 @@ const Map = () => {
   const [selectedRangeKm, setSelectedRangeKm] = useState<number | null>(null);
   const [selectedDurationH, setSelectedDurationH] = useState<number | null>(null);
   const [postOnThreads, setPostOnThreads] = useState(false);
-  const [extrasBroadcasts, setExtrasBroadcasts] = useState<number>(0);
+  const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  // Contract override: Broadcast radius (km): Free 10, Premium 25, Gold 50.
-  const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
+  // v1.9 override: Broadcast radius (km): Free 2, Premium 10, Gold 20.
+  const broadcastRange = effectiveTier === "gold" ? 20 : isPremium ? 10 : 2;
   const viewRadiusMeters = 50000; // Contract: Map view limited to 50km
 
   useEffect(() => {
@@ -186,9 +190,11 @@ const Map = () => {
     if (!user) return;
     const res = await supabase.rpc("get_quota_snapshot");
     if (res.error) return;
-    const d = res.data && typeof res.data === "object" ? (res.data as Record<string, unknown>) : null;
-    const b = Number(d ? d["extras_broadcasts"] : 0);
-    setExtrasBroadcasts(Number.isFinite(b) ? b : 0);
+    const row =
+      Array.isArray(res.data) ? (res.data[0] as Record<string, unknown> | undefined) : (res.data as Record<string, unknown> | null);
+    const d = row && typeof row === "object" ? row : null;
+    const b = Number(d ? d["extra_broadcast_72h"] : 0);
+    setExtraBroadcast72h(Number.isFinite(b) ? b : 0);
   }, [user]);
 
   useEffect(() => {
@@ -780,12 +786,29 @@ const Map = () => {
       let photoUrl = null;
 
       if (imageFile) {
+        // v1.9 override: broadcast media deducts from Media quota (Free=0, Premium=10/day, Gold=50/day).
+        const q = await supabase.rpc("check_and_increment_quota", { action_type: "media" });
+        if (q.data !== true) {
+          showUpsellBanner({
+            message: "Limited. Upgrade or add +10 Media to continue uploading images today.",
+            ctaLabel: "Go to Premium",
+            onCta: () => {
+              sessionStorage.setItem("pending_addon", "media");
+              navigate("/premium");
+            },
+          });
+          return;
+        }
+
+        // Client-side compression (<500KB target) to reduce storage + bandwidth.
+        const compressed = await imageCompression(imageFile, { maxSizeMB: 0.5, useWebWorker: true });
+        const uploadFile = compressed instanceof File ? compressed : imageFile;
         const fileExt = imageFile.name.split(".").pop();
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
 
         const { error: uploadError } = await supabase.storage
           .from("alerts")
-          .upload(fileName, imageFile);
+          .upload(fileName, uploadFile);
 
         if (uploadError) throw uploadError;
 
@@ -819,8 +842,14 @@ const Map = () => {
         const errObj = (typeof error === "object" && error !== null) ? (error as Record<string, unknown>) : null;
         const msg = typeof (errObj?.message) === "string" ? (errObj.message as string) : "";
         if (msg.includes("quota_exceeded")) {
-          setPremiumFooterReason("broadcast_alert");
-          setIsPremiumFooterOpen(true);
+          showUpsellBanner({
+            message: "Limited. You have reached your Broadcast limit for this week.",
+            ctaLabel: "Go to Premium",
+            onCta: () => {
+              sessionStorage.setItem("pending_addon", "emergency_alert");
+              navigate("/premium");
+            },
+          });
           return;
         }
         throw error;
@@ -1202,10 +1231,11 @@ const Map = () => {
                     onChange={(e) => setSelectedRangeKm(Number(e.target.value))}
                     className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
                   >
+                    <option value="2" disabled={broadcastRange < 2}>2km</option>
                     <option value="10" disabled={broadcastRange < 10}>10km</option>
-                    <option value="25" disabled={broadcastRange < 25}>25km</option>
-                    <option value="50" disabled={broadcastRange < 50}>50km</option>
-                    <option value="150" disabled={extrasBroadcasts <= 0}>150km (Add-on)</option>
+                    <option value="20" disabled={broadcastRange < 20 && extraBroadcast72h <= 0}>
+                      {broadcastRange >= 20 ? "20km" : "20km (Add-on)"}
+                    </option>
                   </select>
                 </div>
                 <div>
@@ -1215,10 +1245,10 @@ const Map = () => {
                     onChange={(e) => setSelectedDurationH(Number(e.target.value))}
                     className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
                   >
-                    <option value="12" disabled={(effectiveTier === "premium" || effectiveTier === "gold") ? false : false}>12h</option>
+                    <option value="12">12h</option>
                     <option value="24" disabled={!isPremium}>24h</option>
                     <option value="48" disabled={effectiveTier !== "gold"}>48h</option>
-                    <option value="72" disabled={extrasBroadcasts <= 0}>72h (Add-on)</option>
+                    <option value="72" disabled={extraBroadcast72h <= 0}>72h (Add-on)</option>
                   </select>
                 </div>
               </div>
