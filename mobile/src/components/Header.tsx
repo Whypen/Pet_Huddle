@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useEffect, useState } from "react";
 import { COLORS } from "../theme/tokens";
 import { BackButton } from "./BackButton";
-import huddleLogo from "../../assets/huddle-logo.png";
+import huddleLogo from "../../assets/huddle-name-transparent.png";
 import { useAuth } from "../contexts/useAuth";
 import { supabase } from "../lib/supabase";
 import type { RootStackParamList } from "../navigation/types";
