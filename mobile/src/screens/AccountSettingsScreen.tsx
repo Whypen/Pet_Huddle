@@ -1,9 +1,10 @@
-import { Alert, LayoutAnimation, Platform, Pressable, ScrollView, UIManager, View } from "react-native";
+import { Alert, LayoutAnimation, Platform, Pressable, ScrollView, Switch, UIManager, View } from "react-native";
 import * as LocalAuthentication from "expo-local-authentication";
 import { Header } from "../components/Header";
 import { HText } from "../components/HText";
 import { COLORS, LAYOUT } from "../theme/tokens";
 import { useAuth } from "../contexts/useAuth";
+import { supabase } from "../lib/supabase";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -16,8 +17,13 @@ function statusColors(status: string | null | undefined) {
 }
 
 export function AccountSettingsScreen() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const s = statusColors(profile?.verification_status);
+  const prefs = (profile && typeof profile === "object" ? (profile as Record<string, unknown>).prefs : null) as
+    | Record<string, unknown>
+    | null;
+  const pushEnabled = Boolean(prefs && prefs.push_notifications_enabled);
+  const emailEnabled = Boolean(prefs && prefs.email_notifications_enabled);
 
   const onBiometric = async () => {
     const has = await LocalAuthentication.hasHardwareAsync();
@@ -61,7 +67,7 @@ export function AccountSettingsScreen() {
       <ScrollView contentContainerStyle={{ padding: LAYOUT.sectionPaddingH, gap: 8 }}>
         {/* UAT: Remove Account Info section. */}
         <HText variant="heading" style={{ fontSize: 16, fontWeight: "800", marginTop: 4 }}>
-          Account Security
+          Account Setting
         </HText>
 
         <Item
@@ -86,10 +92,106 @@ export function AccountSettingsScreen() {
 
         <Item title="Biometric Login" onPress={onBiometric} />
 
-        {/* UAT: Remove 2FA / Hide from Map / Notifications / Manage Subscription / Deactivate. */}
-        <HText variant="meta" style={{ color: COLORS.brandSubtext, marginTop: 8 }}>
-          Help & Support is moved to the main navigation (Settings tab).
+        {/* Notification settings (profiles.prefs) */}
+        <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 12 }}>
+          Notifications
         </HText>
+        <View
+          style={{
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandText}1F`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: COLORS.white,
+          }}
+        >
+          <HText variant="body" style={{ fontWeight: "600" }}>
+            Push Notifications
+          </HText>
+          <Switch
+            value={pushEnabled}
+            onValueChange={async (v) => {
+              if (!user?.id) return;
+              const next = { ...(prefs ?? {}), push_notifications_enabled: v };
+              const r = await supabase.from("profiles").update({ prefs: next }).eq("id", user.id);
+              if (r.error) Alert.alert("Update failed", r.error.message);
+            }}
+          />
+        </View>
+        <View
+          style={{
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandText}1F`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: COLORS.white,
+          }}
+        >
+          <HText variant="body" style={{ fontWeight: "600" }}>
+            Email Notifications
+          </HText>
+          <Switch
+            value={emailEnabled}
+            onValueChange={async (v) => {
+              if (!user?.id) return;
+              const next = { ...(prefs ?? {}), email_notifications_enabled: v };
+              const r = await supabase.from("profiles").update({ prefs: next }).eq("id", user.id);
+              if (r.error) Alert.alert("Update failed", r.error.message);
+            }}
+          />
+        </View>
+
+        {/* Delete account */}
+        <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 12 }}>
+          Danger Zone
+        </HText>
+        <Pressable
+          onPress={() => {
+            Alert.alert("Delete account", "Are you sure? This is permanent.", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: async () => {
+                  if (!user?.id) return;
+                  const del = await supabase.from("profiles").delete().eq("id", user.id);
+                  if (del.error) {
+                    Alert.alert("Delete failed", del.error.message);
+                    return;
+                  }
+                  await supabase.auth.signOut();
+                },
+              },
+            ]);
+          }}
+          hitSlop={4}
+          style={({ pressed }) => ({
+            height: LAYOUT.rowHeight,
+            minHeight: 44,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${COLORS.brandError}55`,
+            paddingHorizontal: 14,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            backgroundColor: pressed ? "rgba(239,68,68,0.08)" : COLORS.white,
+          })}
+        >
+          <HText variant="body" style={{ fontWeight: "800", color: COLORS.brandError }}>
+            Delete Account
+          </HText>
+        </Pressable>
       </ScrollView>
     </View>
   );

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, ChevronRight, Lock, Sparkles } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -65,6 +65,7 @@ export default function PremiumPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
 
   // UAT: auto-select Premium on load.
   const [tab, setTab] = useState<TierTab>("Premium");
@@ -128,6 +129,15 @@ export default function PremiumPage() {
       setQty((q) => ({ ...q, [id]: Math.min(10, Math.max(1, q[id] ?? 1)) }));
     }
     sessionStorage.removeItem("pending_addon");
+  }, []);
+
+  useEffect(() => {
+    const desired = searchParams.get("tab");
+    if (desired === "Gold" || desired === "Premium" || desired === "Add-on") {
+      setTab(desired);
+      fade.current += 1;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cartItems = useMemo(() => {
@@ -390,7 +400,7 @@ export default function PremiumPage() {
       <GlobalHeader />
 
       <div className="px-4 pt-4">
-        <h1 className="text-xl font-semibold text-brandText">Choose Your Privileges</h1>
+        <h1 className="text-xl font-semibold text-brandText">Manage Subscription</h1>
       </div>
 
       {TierTabs}

@@ -20,6 +20,6 @@ export type TabsParamList = {
   Pet: undefined;
   Chats: undefined;
   Map: undefined;
-  Premium: undefined;
+  Premium: { initialTab?: "Premium" | "Gold" | "Add-on" } | undefined;
   Settings: undefined;
 };

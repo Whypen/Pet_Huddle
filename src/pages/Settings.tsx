@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronRight, Crown, FileText, HelpCircle, LogOut, Shield, User, X } from "lucide-react";
+import { ChevronRight, Crown, FileText, HelpCircle, LogOut, Shield, User, X, PawPrint, BadgeCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [sending, setSending] = useState(false);
 
   const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
+  const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
 
   const cardTap = (c: Card) => {
     setActiveCard(c);
@@ -32,7 +33,7 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
-    navigate("/premium");
+    navigate(c === "gold" ? "/premium?tab=Gold" : "/premium?tab=Premium");
   };
 
   const initials = useMemo(() => {
@@ -82,48 +83,8 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-background pb-nav">
       <GlobalHeader />
 
-      {/* UAT: PREMIUM + GOLD BANNER sticky on scroll */}
-      <div className="sticky top-12 z-10 bg-background/95 backdrop-blur-sm border-b border-border/50">
-        <div className="px-4 pt-3 pb-4">
-          <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x snap-mandatory">
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => cardTap("premium")}
-              className={cn(
-                "snap-center flex-shrink-0 w-[80vw] max-w-[360px] aspect-[1.8/1] rounded-[16px] border bg-white p-4 shadow-sm text-left",
-                activeCard === "premium" ? "border-brandGold border-2" : "border-brandBlue/40"
-              )}
-            >
-              <div className="text-base font-bold text-brandText">Unlock Premium</div>
-              <div className="text-sm text-brandText/70 mt-1">Best for Pet Lovers</div>
-              <div className="mt-3 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2">
-                Explore <ChevronRight className="w-4 h-4" />
-              </div>
-            </motion.button>
-
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => cardTap("gold")}
-              className={cn(
-                "snap-center flex-shrink-0 w-[80vw] max-w-[360px] aspect-[1.8/1] rounded-[16px] border bg-white p-4 shadow-sm text-left relative",
-                activeCard === "gold" ? "border-brandGold border-2" : "border-brandGold/40"
-              )}
-            >
-              <span className="absolute -top-3 left-4 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
-                Recommended
-              </span>
-              <div className="text-base font-bold text-brandText">Unlock Gold</div>
-              <div className="text-sm text-brandText/70 mt-1">Ultimate Experience</div>
-              <div className="mt-3 w-full rounded-lg bg-brandGold text-white font-bold py-2 flex items-center justify-center gap-2">
-                Explore <ChevronRight className="w-4 h-4" />
-              </div>
-            </motion.button>
-          </div>
-        </div>
-      </div>
-
       <div className="px-4 py-4 space-y-3">
-        {/* UAT: remove 'identity pending' status text; keep badge on avatar */}
+        {/* Next to Avatar: user name + verification badge */}
         <div className="flex items-center gap-3">
           <div
             className={cn(
@@ -134,37 +95,68 @@ export default function SettingsPage() {
           >
             {initials}
           </div>
-          <div className="flex-1">
-            <div className="text-base font-bold text-brandText">{t("settings.title")}</div>
-            <div className="text-xs text-brandText/70">{t("Profile, account security, subscription, legal.")}</div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="text-base font-bold text-brandText truncate">{profile?.display_name || "User"}</div>
+              <span
+                className={cn(
+                  "inline-flex items-center justify-center w-5 h-5 rounded-full border-2",
+                  isVerified ? "border-brandGold" : "border-gray-300"
+                )}
+                aria-label={isVerified ? "Verified" : isPending ? "Pending" : "Not verified"}
+              >
+                <BadgeCheck className={cn("w-3.5 h-3.5", isVerified ? "text-brandGold" : "text-brandText/50")} />
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* UAT Structure */}
-        <div className="pt-2">
-          <div className="text-xs font-bold text-brandText/70 mb-2">Profiles</div>
-          <div className="space-y-2">
-            <Row icon={User} label="Edit User Profile" onClick={() => navigate("/edit-profile")} />
-            <Row icon={User} label="Edit Pet Profile" onClick={() => navigate("/edit-pet-profile")} />
-          </div>
+        {/* Unlock Premium/Gold blocks between Avatar and Edit User Profile; squeeze within width; shorter height */}
+        <div className="flex gap-3 w-full">
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => cardTap("premium")}
+            className={cn(
+              "flex-1 min-w-0 h-[110px] rounded-[16px] border bg-white p-3 shadow-sm text-left",
+              activeCard === "premium" ? "border-brandBlue border-2" : "border-brandBlue/40"
+            )}
+          >
+            <div className="text-sm font-extrabold text-brandText">Unlock Premium</div>
+            <div className="text-xs text-brandText/70 mt-1 line-clamp-1">Best for Pet Lovers</div>
+            <div className="mt-2 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2">
+              Explore <ChevronRight className="w-4 h-4" />
+            </div>
+          </motion.button>
+
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => cardTap("gold")}
+            className={cn(
+              "relative flex-1 min-w-0 h-[110px] rounded-[16px] border bg-white p-3 shadow-sm text-left",
+              activeCard === "gold" ? "border-brandGold border-2" : "border-brandGold/40"
+            )}
+          >
+            <span className="absolute -top-3 left-3 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
+              Recommended
+            </span>
+            <div className="text-sm font-extrabold text-brandText">Unlock Gold</div>
+            <div className="text-xs text-brandText/70 mt-1 line-clamp-1">Ultimate Experience</div>
+            <div className="mt-2 w-full rounded-lg bg-brandGold text-white font-bold py-2 flex items-center justify-center gap-2">
+              Explore <ChevronRight className="w-4 h-4" />
+            </div>
+          </motion.button>
         </div>
 
-        <div className="pt-2">
-          <div className="text-xs font-bold text-brandText/70 mb-2">Account Settings</div>
-          <div className="space-y-2">
-            <Row icon={Shield} label="Account Security" onClick={() => navigate("/settings")} />
-            <Row icon={Shield} label="Identity Verification" onClick={() => navigate("/verify-identity")} gold />
-          </div>
+        {/* Remove section sub-headers; keep tight spacing */}
+        <div className="space-y-2">
+          <Row icon={User} label="Edit User Profile" onClick={() => navigate("/edit-profile")} />
+          <Row icon={PawPrint} label="Edit Pet Profile" onClick={() => navigate("/edit-pet-profile")} />
+          <Row icon={Shield} label="Account Setting" onClick={() => navigate("/account-settings")} />
+          <Row icon={Shield} label="Identity Verification" onClick={() => navigate("/verify-identity")} gold />
+          <Row icon={Crown} label="Manage Subscription" onClick={() => navigate("/premium")} gold />
         </div>
 
-        <div className="pt-2">
-          <div className="text-xs font-bold text-brandText/70 mb-2">Subscription</div>
-          <div className="space-y-2">
-            <Row icon={Crown} label="Choose Your Privileges" onClick={() => navigate("/premium")} gold />
-          </div>
-        </div>
-
-        <div className="pt-2">
+        <div className="pt-1">
           <button
             onClick={() => setLegalOpen((v) => !v)}
             className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
@@ -183,11 +175,8 @@ export default function SettingsPage() {
           ) : null}
         </div>
 
-        <div className="pt-2">
-          <div className="text-xs font-bold text-brandText/70 mb-2">Help & Support</div>
-          <div className="space-y-2">
-            <Row icon={HelpCircle} label="Help & Support" onClick={() => setSupportOpen(true)} />
-          </div>
+        <div className="pt-1">
+          <Row icon={HelpCircle} label="Help & Support" onClick={() => setSupportOpen(true)} />
         </div>
 
         {/* UAT: Logout destructive */}
@@ -272,4 +261,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

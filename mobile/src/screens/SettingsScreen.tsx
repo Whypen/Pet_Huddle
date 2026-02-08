@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useAuth } from "../contexts/useAuth";
 import { UserAvatar } from "../components/UserAvatar";
 import { supabase } from "../lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
 
 export function SettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -24,32 +25,44 @@ export function SettingsScreen() {
     <View style={{ flex: 1, backgroundColor: COLORS.white }}>
       <Header />
 
-      <ScrollView
-        stickyHeaderIndices={[0]}
-        contentContainerStyle={{ paddingBottom: 24 }}
-      >
-        {/* UAT: PREMIUM + GOLD BANNER sticky on scroll */}
-        <View style={{ backgroundColor: COLORS.white }}>
-          <PremiumGoldBanner />
-        </View>
-
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <View style={{ paddingHorizontal: LAYOUT.sectionPaddingH, paddingVertical: LAYOUT.sectionPaddingV, gap: 8 }}>
-          {/* UAT: remove "identity pending" status text; keep badge on avatar rim */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8 }}>
+          {/* Next to Avatar: name + verification badge (gold rim if verified, gray if pending) */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 4 }}>
             <UserAvatar verificationStatus={profile?.verification_status ?? "Pending"} showCarBadge size={56} />
-            <View style={{ flex: 1 }}>
-              <HText variant="heading" style={{ fontSize: 16, fontWeight: "800" }}>
-                Settings
-              </HText>
-              <HText variant="meta" style={{ color: COLORS.brandSubtext }}>
-                Profile, account security, subscription, legal.
-              </HText>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <HText variant="heading" style={{ fontSize: 16, fontWeight: "800", color: COLORS.brandText, flexShrink: 1 }} numberOfLines={1}>
+                  {profile?.display_name ?? "User"}
+                </HText>
+                <View
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    borderWidth: 2,
+                    borderColor: (profile?.verification_status ?? "").toLowerCase() === "approved" ? COLORS.brandGold : "rgba(66,73,101,0.35)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons
+                    name={(profile?.verification_status ?? "").toLowerCase() === "approved" ? "checkmark" : "time-outline"}
+                    size={12}
+                    color={(profile?.verification_status ?? "").toLowerCase() === "approved" ? COLORS.brandGold : "rgba(66,73,101,0.65)"}
+                  />
+                </View>
+              </View>
             </View>
           </View>
 
-          <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 4 }}>
-            Profiles
-          </HText>
+          {/* Premium/Gold blocks between avatar and profile actions; squeeze within width */}
+          <PremiumGoldBanner
+            onSelect={(id) => {
+              navigation.navigate("RootTabs", { screen: "Premium", params: { initialTab: id === "gold" ? "Gold" : "Premium" } });
+            }}
+          />
+
           <Pressable
             onPress={() => navigation.navigate("UserProfile")}
             style={({ pressed }) => ({
@@ -61,7 +74,7 @@ export function SettingsScreen() {
               paddingHorizontal: 14,
               justifyContent: "center",
               backgroundColor: pressed ? "rgba(33,69,207,0.04)" : COLORS.white,
-              marginBottom: 8,
+              marginBottom: 4,
             })}
           >
             <HText variant="body" style={{ fontWeight: "700" }}>
@@ -69,9 +82,6 @@ export function SettingsScreen() {
             </HText>
           </Pressable>
 
-          <HText variant="heading" style={{ fontSize: 14, fontWeight: "800" }}>
-            Account Settings
-          </HText>
           <Pressable
             onPress={() => navigation.navigate("AccountSettings")}
             style={({ pressed }) => ({
@@ -83,17 +93,14 @@ export function SettingsScreen() {
               paddingHorizontal: 14,
               justifyContent: "center",
               backgroundColor: pressed ? "rgba(33,69,207,0.04)" : COLORS.white,
-              marginBottom: 8,
+              marginBottom: 4,
             })}
           >
             <HText variant="body" style={{ fontWeight: "700" }}>
-              Security & Access
+              Account Setting
             </HText>
           </Pressable>
 
-          <HText variant="heading" style={{ fontSize: 14, fontWeight: "800" }}>
-            Subscription
-          </HText>
           <Pressable
             onPress={() => navigation.navigate("RootTabs", { screen: "Premium" })}
             style={({ pressed }) => ({
@@ -105,11 +112,11 @@ export function SettingsScreen() {
               paddingHorizontal: 14,
               justifyContent: "center",
               backgroundColor: pressed ? "rgba(207,171,33,0.08)" : COLORS.white,
-              marginBottom: 8,
+              marginBottom: 4,
             })}
           >
             <HText variant="body" style={{ fontWeight: "800" }}>
-              Explore Premium / Gold
+              Manage Subscription
             </HText>
           </Pressable>
 
@@ -128,7 +135,7 @@ export function SettingsScreen() {
               paddingHorizontal: 14,
               justifyContent: "center",
               backgroundColor: pressed ? "rgba(33,69,207,0.04)" : COLORS.white,
-              marginBottom: 8,
+              marginBottom: 4,
             })}
           >
             <HText variant="body" style={{ fontWeight: "700" }}>
@@ -174,9 +181,6 @@ export function SettingsScreen() {
             </View>
           ) : null}
 
-          <HText variant="heading" style={{ fontSize: 14, fontWeight: "800" }}>
-            Help & Support
-          </HText>
           <Pressable
             onPress={() => {}}
             style={({ pressed }) => ({
@@ -188,7 +192,7 @@ export function SettingsScreen() {
               paddingHorizontal: 14,
               justifyContent: "center",
               backgroundColor: pressed ? "rgba(33,69,207,0.04)" : COLORS.white,
-              marginBottom: 8,
+              marginBottom: 4,
             })}
           >
             <HText variant="body" style={{ fontWeight: "600" }}>

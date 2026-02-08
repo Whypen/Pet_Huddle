@@ -14,6 +14,7 @@ export type Profile = {
   dob: string | null;
   verification_status: VerificationStatus | null;
   social_album: string[] | null;
+  prefs?: Record<string, unknown> | null;
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -32,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await supabase
         .from("profiles")
-        .select("id,user_id,display_name,legal_name,phone,dob,verification_status,social_album")
+        .select("id,user_id,display_name,legal_name,phone,dob,verification_status,social_album,prefs")
         .eq("id", user.id)
         .maybeSingle();
       if (res.error) throw res.error;

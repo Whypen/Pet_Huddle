@@ -23,6 +23,7 @@ import EditPetProfile from "./pages/EditPetProfile";
 import PetDetails from "./pages/PetDetails";
 import Settings from "./pages/Settings";
 import Premium from "./pages/Premium";
+import AccountSettings from "./pages/AccountSettings";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
@@ -197,6 +198,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <Settings />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/account-settings"
+                    element={
+                      <ProtectedRoute>
+                        <AccountSettings />
                       </ProtectedRoute>
                     }
                   />

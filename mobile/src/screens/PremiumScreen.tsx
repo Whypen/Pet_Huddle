@@ -5,7 +5,7 @@ import { Header } from "../components/Header";
 import { HText } from "../components/HText";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/useAuth";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/types";
 
@@ -39,6 +39,7 @@ function money(n: number) {
 export function PremiumScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const route = useRoute();
 
   // UAT: auto-select Premium on load.
   const [tab, setTab] = useState<TierTab>("Premium");
@@ -84,6 +85,15 @@ export function PremiumScreen() {
         // ignore
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    const p = (route as { params?: Record<string, unknown> } | null)?.params ?? undefined;
+    const desired = typeof p?.initialTab === "string" ? (p.initialTab as string) : null;
+    if (desired === "Premium" || desired === "Gold" || desired === "Add-on") {
+      selectTab(desired as TierTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cartItems = useMemo(() => {
@@ -163,7 +173,7 @@ export function PremiumScreen() {
         {/* UAT: Sticky top tier tabs */}
         <View className="bg-white px-4 pt-2 pb-3 border-b border-brandText/10">
           <HText variant="heading" className="text-[18px] font-extrabold text-brandText">
-            Choose Your Privileges
+            Manage Subscription
           </HText>
 
           <View className="mt-3 flex-row gap-2 rounded-xl border border-brandText/20 bg-white p-1">

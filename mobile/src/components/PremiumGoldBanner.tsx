@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../theme/tokens";
 import { hapticCardThud } from "../lib/haptics";
@@ -14,7 +14,7 @@ type Card = {
   recommended?: boolean;
 };
 
-export function PremiumGoldBanner() {
+export function PremiumGoldBanner({ onSelect }: { onSelect?: (id: CardId) => void }) {
   const [selected, setSelected] = useState<CardId | null>(null);
   const cards = useMemo<Card[]>(
     () => [
@@ -36,35 +36,31 @@ export function PremiumGoldBanner() {
   );
 
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 }}>
-      <FlatList
-        horizontal
-        pagingEnabled
-        snapToAlignment="center"
-        showsHorizontalScrollIndicator={false}
-        data={cards}
-        keyExtractor={(c) => c.id}
-        renderItem={({ item }) => {
+    <View style={{ paddingTop: 4, paddingBottom: 8 }}>
+      <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+        {cards.map((item) => {
           const active = selected === item.id;
           return (
             <Pressable
+              key={item.id}
               onPress={async () => {
                 await hapticCardThud();
                 setSelected(item.id);
+                onSelect?.(item.id);
               }}
               style={({ pressed }) => ({
-                width: 320,
-                aspectRatio: 1.8,
+                flex: 1,
+                minWidth: 0,
+                height: 110, // ~30% shorter than the previous card
                 borderRadius: 16,
                 borderWidth: active ? 2 : 1,
                 borderColor: item.color,
-                padding: 16,
-                marginRight: 16,
+                padding: 12,
                 backgroundColor: pressed ? "rgba(33,69,207,0.06)" : "rgba(255,255,255,0.95)",
-                transform: [{ scale: pressed ? 1.05 : 1 }],
+                transform: [{ scale: pressed ? 1.02 : 1 }],
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.12,
+                shadowOpacity: 0.10,
                 shadowRadius: 2,
                 elevation: 1,
               })}
@@ -74,39 +70,31 @@ export function PremiumGoldBanner() {
                   style={{
                     alignSelf: "flex-start",
                     backgroundColor: "#A855F7",
-                    paddingHorizontal: 10,
-                    paddingVertical: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
                     borderRadius: 999,
-                    marginBottom: 10,
+                    marginBottom: 6,
                   }}
                 >
-                  <Text style={{ color: COLORS.white, fontSize: 12, fontWeight: "800" }}>Recommended</Text>
+                  <Text style={{ color: COLORS.white, fontSize: 10, fontWeight: "800" }}>Recommended</Text>
                 </View>
               ) : null}
 
-              <Text style={{ color: COLORS.brandText, fontSize: 16, fontWeight: "800" }}>{item.title}</Text>
-              <Text style={{ color: COLORS.brandSubtext, fontSize: 14, marginTop: 8 }}>{item.desc}</Text>
+              <Text style={{ color: COLORS.brandText, fontSize: 14, fontWeight: "800" }}>{item.title}</Text>
+              <Text style={{ color: COLORS.brandSubtext, fontSize: 12, marginTop: 4 }} numberOfLines={1}>
+                {item.desc}
+              </Text>
 
-              <View
-                style={{
-                  marginTop: 12,
-                  backgroundColor: item.color,
-                  borderRadius: 12,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                  flexDirection: "row",
-                  justifyContent: "center",
-                  gap: 8,
-                }}
-              >
-                <Text style={{ color: COLORS.white, fontSize: 14, fontWeight: "700" }}>Explore</Text>
-                <Ionicons name="arrow-forward" size={16} color={COLORS.white} />
+              <View style={{ flex: 1 }} />
+
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <Text style={{ color: item.color, fontSize: 12, fontWeight: "900" }}>Explore</Text>
+                <Ionicons name="arrow-forward" size={14} color={item.color} />
               </View>
             </Pressable>
           );
-        }}
-      />
+        })}
+      </View>
     </View>
   );
 }
-
