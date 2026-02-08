@@ -116,7 +116,9 @@ serve(async (req) => {
         }
       }
     }
-    const effectiveRadiusMeters = ownerTier === "gold" ? 20000 : ownerTier === "premium" ? 5000 : 1000;
+    // Contract override: Broadcast visibility radius by membership.
+    // Free: 10km, Premium: 25km, Gold: 50km (family-inherited).
+    const effectiveRadiusMeters = ownerTier === "gold" ? 50000 : ownerTier === "premium" ? 25000 : 10000;
 
     if (alert.status !== 'active') {
       console.log('[Mesh-Alert] Alert is not active, skipping notifications');

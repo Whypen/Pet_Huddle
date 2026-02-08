@@ -14,7 +14,7 @@ type Billing = "monthly" | "yearly";
 type Pricing = {
   premium: { monthly: number; yearly: number };
   gold: { monthly: number; yearly: number };
-  addOn: { star_pack: number; broadcast_alert: number; media_10: number };
+  addOn: { star_pack: number; emergency_alert: number; vet_media: number };
 };
 
 type AddOnId = keyof Pricing["addOn"];
@@ -27,28 +27,33 @@ type AddOn = {
 };
 
 const DEFAULT_PRICING: Pricing = {
-  premium: { monthly: 8.99, yearly: 80.99 },
+  premium: { monthly: 9.99, yearly: 80.99 },
   gold: { monthly: 19.99, yearly: 180.99 },
-  addOn: { star_pack: 4.99, broadcast_alert: 2.99, media_10: 3.99 },
+  addOn: { star_pack: 4.99, emergency_alert: 2.99, vet_media: 3.99 },
 };
 
 const ADD_ONS: AddOn[] = [
   { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "broadcast_alert", title: "Broadcast Alert", subtitle: "Additional broadcast alert", pill: "72H" },
-  { id: "media_10", title: "Additional 10 media", subtitle: "Additional 10 media usage across Social, Chats and AI Vet." },
+  { id: "emergency_alert", title: "Broadcast (72H/150km)", subtitle: "+1 Broadcast (72h / 150km)" , pill: "72H" },
+  { id: "vet_media", title: "AI Vet Media (+10)", subtitle: "+10 Media (AI Vet only)" },
 ];
 
 const FEATURES = (tier: "premium" | "gold") =>
   tier === "premium"
     ? [
-        { title: "Unlimited", tip: "More discovery and social access", icon: Sparkles },
-        { title: "Threads", tip: "5 threads/month", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "5km range", icon: CheckCircle2 },
+        { title: "Unlimited", tip: "Unlimited discovery + standard ranking", icon: Sparkles },
+        { title: "Threads", tip: "15 posts/day", icon: CheckCircle2 },
+        { title: "AI Vet", tip: "10 uploads/day", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "30/month • 25km • 24h", icon: CheckCircle2 },
       ]
     : [
-        { title: "Unlimited", tip: "Ultra-wide visibility and perks", icon: Sparkles },
-        { title: "Threads", tip: "30 threads/month", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "20km range", icon: CheckCircle2 },
+        { title: "Unlimited", tip: "Unlimited discovery + priority ranking", icon: Sparkles },
+        { title: "Threads", tip: "30 posts/day (pooled with family)", icon: CheckCircle2 },
+        { title: "Stars", tip: "10/month (pooled) direct chat triggers", icon: CheckCircle2 },
+        { title: "AI Vet", tip: "20 uploads/day (pooled) + 5 priority/month", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "50/month • 50km • 48h (pooled)", icon: CheckCircle2 },
+        { title: "Family", tip: "1 member (shared billing, pooled quotas)", icon: CheckCircle2 },
+        { title: "Video", tip: "Chats/Threads video upload (Gold-only)", icon: CheckCircle2 },
       ];
 
 function money(n: number) {
@@ -66,13 +71,13 @@ export default function PremiumPage() {
   const [pricing, setPricing] = useState<Pricing>(DEFAULT_PRICING);
   const [selected, setSelected] = useState<Record<AddOnId, boolean>>({
     star_pack: false,
-    broadcast_alert: false,
-    media_10: false,
+    emergency_alert: false,
+    vet_media: false,
   });
   const [qty, setQty] = useState<Record<AddOnId, number>>({
     star_pack: 1,
-    broadcast_alert: 1,
-    media_10: 1,
+    emergency_alert: 1,
+    vet_media: 1,
   });
 
   const fade = useRef(0);
@@ -95,8 +100,8 @@ export default function PremiumPage() {
           },
           addOn: {
             star_pack: prices.star_pack?.amount ?? prev.addOn.star_pack,
-            broadcast_alert: prices.emergency_alert?.amount ?? prev.addOn.broadcast_alert,
-            media_10: prices.vet_media?.amount ?? prev.addOn.media_10,
+            emergency_alert: prices.emergency_alert?.amount ?? prev.addOn.emergency_alert,
+            vet_media: prices.vet_media?.amount ?? prev.addOn.vet_media,
           },
         }));
       } catch {
@@ -395,4 +400,3 @@ export default function PremiumPage() {
     </div>
   );
 }
-

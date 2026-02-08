@@ -13,7 +13,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 interface PremiumFooterProps {
   isOpen: boolean;
   onClose: () => void;
-  triggerReason?: string; // "notice_create" | "mesh_alert" | "chat_media" | "3rd_mesh_alert"
+  triggerReason?: string; // "notice_create" | "mesh_alert" | "broadcast_alert" | "chat_media" | "3rd_mesh_alert"
 }
 
 const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
@@ -25,6 +25,10 @@ const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
     title: "Extended Broadcast needs Premium",
     body: "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.",
   },
+  broadcast_alert: {
+    title: "Broadcast limit reached",
+    body: "Upgrade to Premium or Gold to send more broadcast alerts and expand your radius and visibility.",
+  },
   chat_media: {
     title: "Media sharing is a Premium perk",
     body: "Send photos & files in chats. Unlock unlimited media with Premium.",
@@ -35,7 +39,7 @@ const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
   },
   default: {
     title: "Unlock the full huddle experience",
-    body: "Premium gives you access to all features — starting at just $8.99/month.",
+    body: "Premium gives you access to all features — starting at just $9.99/month.",
   },
 };
 

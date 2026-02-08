@@ -335,6 +335,16 @@ async function handleSubscriptionDeleted(
     p_user_id: profile.id,
   });
 
+  // Clear cycle anchor details to avoid stale anniversary-based resets.
+  await supabase
+    .from("profiles")
+    .update({
+      subscription_cycle_anchor_day: null,
+      subscription_current_period_start: null,
+      subscription_current_period_end: null,
+    })
+    .eq("id", profile.id);
+
   console.log(`[SUBSCRIPTION DELETED] User ${profile.id} subscription canceled`);
 
   return {
@@ -368,12 +378,32 @@ async function handleSubscriptionUpdated(
   const tier = subscription.metadata?.tier || "premium";
   const status = subscription.status;
 
+  // For anniversary-based monthly quota resets, persist a stable day-of-month anchor.
+  // Stripe provides billing_cycle_anchor (seconds since epoch). Fall back to current_period_start.
+  const anchorSeconds =
+    typeof subscription.billing_cycle_anchor === "number"
+      ? subscription.billing_cycle_anchor
+      : typeof subscription.current_period_start === "number"
+        ? subscription.current_period_start
+        : null;
+  const anchorDay =
+    anchorSeconds != null ? new Date(anchorSeconds * 1000).getUTCDate() : null;
+
   await supabase
     .from("profiles")
     .update({
       tier: tier,
       subscription_status: status,
       stripe_subscription_id: subscription.id,
+      subscription_cycle_anchor_day: anchorDay,
+      subscription_current_period_start:
+        typeof subscription.current_period_start === "number"
+          ? new Date(subscription.current_period_start * 1000).toISOString()
+          : null,
+      subscription_current_period_end:
+        typeof subscription.current_period_end === "number"
+          ? new Date(subscription.current_period_end * 1000).toISOString()
+          : null,
     })
     .eq("id", profile.id);
 

@@ -625,6 +625,55 @@ Safeguards & Enforcement
 
 ---
 
+## 11. Contract Requirements
+
+This section is the contract override for membership perks, quotas, and consolidated algorithms. It supersedes earlier quota and perk logic where conflicts exist.
+
+### Membership Perks Table (Core Algo Base, Enforce via RLS + QMS)
+
+| Feature | Free | Premium ($9.99/month) | Gold ($19.99/month) |
+|---|---|---|---|
+| Thread posts | 3/day | 15/day | 30/day (pooled with family) |
+| Discovery profiles/day | 40 max (blurry upsell after) | Unlimited + standard ranking (score-based sort) | Unlimited + priority ranking (top slots, seen more) |
+| Filtering | Basic (age, gender, distance, species, role) | Advanced (+height, orientation, degree, relationship status, car badge, pet experience, language, verified-only) | Advanced + "Who waved at you" (blue pill filter), "Active users only" (last_login < 24h) |
+| AI Vet uploads | 0 (block) | 10/day | 20/day (pooled) + 5 priority analyses/month (faster queue, detailed output via Gemini Pro) |
+| Chat/Thread images | Unlimited | Unlimited | Unlimited |
+| Stars (direct chat triggers) | 0 | 0 | 10/month (pooled) |
+| Broadcast Alerts | 3/week, visible 12h, radius 10km | 30/month, visible 24h, radius 25km | 50/month, visible 48h, radius 50km (pooled) |
+| Family Member | 0 | 0 | 1 (shared billing/profiles, pooled quotas for AI Vet/threads/stars/broadcasts; both get Gold badge/unlimited discovery/priority/filters/video upload) |
+| Video Upload (Chats/Threads) | 0 (block) | 0 | Yes (exclusive, unlimited, <500MB compressed) |
+
+### Add-ons (Any Tier, Stripe Checkout)
+
+Add-ons (any tier, Stripe Checkout): +3 Stars, +10 Media (for AI Vet only, chats/threads unlimited), +1 Broadcast (72h/150km). Extras columns in user_quotas; UI: /Premium checkboxes/qty/real-time total.
+
+### QMS (Quota Management System) Enforcement
+
+QMS is enforced in `user_quotas` via `check_and_increment_quota(action_type TEXT)` Postgres function.
+
+Resets:
+- Daily (00:00 UTC) for daily counters.
+- Weekly (Monday) for weekly counters.
+- Monthly on anniversary for monthly counters (computed using subscription cycle anchor; applied via rollover).
+
+Family pooling:
+- Gold family pooling: shared counts via family_members.
+
+Upsell:
+- On exceed or gate, popup modal with tier-specific text and CTA to `/premium`, except Gold exhaustion (no CTA, wait message).
+
+### Verbatim Override Block (Do Not Edit)
+
+Enforcement: QMS—Quota Management System in user_quotas table (columns for each counter, e.g., thread_posts_today INT), check_and_increment_quota(action_type TEXT) Postgres function (COUNT < limit + extras; consume extras first). Resets: pg_cron daily/weekly/monthly. Family pooling: JOIN family_members for shared counts. Upsell: On exceed/gate, React Native popup (not banner—your spec) with tier-specific text + CTA to /Premium (except Gold exhaustion—no CTA, just wait message).
+
+Membership Perks Table (Core Algo Base—Enforce via RLS + QMS)
+
+FeatureFreePremium ($9.99/month)Gold ($19.99/month)Thread posts3/day15/day30/day (pooled with family)Discovery profiles/day40 max (blurry upsell after)Unlimited + standard ranking (score-based sort)Unlimited + priority ranking (top slots, seen more)FilteringBasic (age, gender, distance, species, role)Advanced (+height, orientation, degree, relationship status, car badge, pet experience, language, verified-only)Advanced + "Who waved at you" (blue pill filter), "Active users only" (last_login < 24h)AI Vet uploads0 (block)10/day20/day (pooled) + 5 priority analyses/month (faster queue, detailed output via Gemini Pro)Chat/Thread imagesUnlimitedUnlimitedUnlimitedStars (direct chat triggers)0010/month (pooled)Broadcast Alerts3/week, visible 12h, radius 10km30/month, visible 24h, radius 25km50/month, visible 48h, radius 50km (pooled)Family Member001 (shared billing/profiles, pooled quotas for AI Vet/threads/stars/broadcasts; both get Gold badge/unlimited discovery/priority/filters/video upload)Video Upload (Chats/Threads)0 (block)0Yes (exclusive, unlimited, <500MB compressed)
+
+Add-ons (any tier, Stripe Checkout): +3 Stars, +10 Media (for AI Vet only—chats/threads unlimited), +1 Broadcast (72h/150km). Extras columns in user_quotas; UI: /Premium checkboxes/qty/real-time total.
+Resets: Daily (00:00 UTC) for day; Weekly (Monday) for week; Monthly on anniversary for month/priority analyses.
+Upsell Popups: React Native Alert (or Modal) on exceed/gate—tier-specific text (your exact wording for threads; similar for others, e.g., AI Vet Gold: "We've temporarily limited image upload... try tomorrow" no CTA). Haptic feedback + subtle shake anim.
+
 ## 99. User-Provided Requirements (Verbatim — Do Not Edit)
 
 HERE  is what you need to do

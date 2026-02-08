@@ -116,12 +116,13 @@ const Map = () => {
   const [pinExpiresAt, setPinExpiresAt] = useState<string | null>(null);
   const [retentionExpiresAt, setRetentionExpiresAt] = useState<string | null>(null);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
-  const [premiumFooterReason, setPremiumFooterReason] = useState<string>("mesh_alert");
-  const { upsellModal, closeUpsellModal, buyAddOn, checkEmergencyAlertAvailable } = useUpsell();
+  const [premiumFooterReason, setPremiumFooterReason] = useState<string>("broadcast_alert");
+  const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  const broadcastRange = effectiveTier === "gold" ? 20 : isPremium ? 5 : 1;
+  // Contract override: Broadcast radius (km): Free 10, Premium 25, Gold 50.
+  const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
 
   useEffect(() => {
     if (searchParams.get("mode") === "broadcast") {
@@ -565,15 +566,11 @@ const Map = () => {
       toast.error(t("Please select a location on the map"));
       return;
     }
-    const canSend = await checkEmergencyAlertAvailable();
-    if (!canSend) {
-      return;
-    }
     const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
-      action_type: "mesh_alert",
+      action_type: "broadcast_alert",
     });
     if (allowed === false) {
-      setPremiumFooterReason("mesh_alert");
+      setPremiumFooterReason("broadcast_alert");
       setIsPremiumFooterOpen(true);
       return;
     }

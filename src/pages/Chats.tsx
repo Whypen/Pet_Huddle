@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -15,7 +15,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
-import { useUpsell } from "@/hooks/useUpsell";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { demoUsers } from "@/lib/demoData";
@@ -223,7 +222,6 @@ const Chats = () => {
   const { t } = useLanguage();
   const { isConnected, onNewMessage, onOnlineStatus } = useWebSocket();
   const { getConversations } = useApi();
-  const { checkStarsAvailable } = useUpsell();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -298,8 +296,19 @@ const Chats = () => {
     }
   }, [discoveryKey]);
 
-  const bumpDiscoverySeen = () => {
-    if (isPremium) return;
+  const bumpDiscoverySeen = async (): Promise<boolean> => {
+    if (isPremium) return true;
+    try {
+      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+        action_type: "discovery_profile",
+      });
+      if (allowed === false) {
+        setIsPremiumOpen(true);
+        return false;
+      }
+    } catch {
+      // Fail-open for UX, but keep local counter.
+    }
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
       try {
@@ -309,6 +318,7 @@ const Chats = () => {
       }
       return next;
     });
+    return true;
   };
 
   useEffect(() => {
@@ -857,9 +867,10 @@ const Chats = () => {
                   "w-[80vw] max-w-[320px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer snap-center",
                   blocked && "cursor-not-allowed"
                 )}
-                onClick={() => {
+                onClick={async () => {
                   if (blocked) return;
-                  bumpDiscoverySeen();
+                  const ok = await bumpDiscoverySeen();
+                  if (!ok) return;
                   setSelectedDiscovery(p);
                   setActiveAlbumIndex(0);
                   setShowDiscoveryModal(true);
@@ -874,10 +885,11 @@ const Chats = () => {
 
                 <div className="absolute top-2 right-2 flex gap-1">
                   <button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
                       if (blocked) return;
-                      bumpDiscoverySeen();
+                      const ok = await bumpDiscoverySeen();
+                      if (!ok) return;
                       toast.success(t("Wave sent"));
                     }}
                     className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
@@ -888,12 +900,8 @@ const Chats = () => {
                     onClick={async (e) => {
                       e.stopPropagation();
                       if (blocked) return;
-                      bumpDiscoverySeen();
-                      const ok = await checkStarsAvailable();
-                      if (!ok) {
-                        toast.error(t("Buy a star pack to immediately chat with the user"));
-                        return;
-                      }
+                      const okSeen = await bumpDiscoverySeen();
+                      if (!okSeen) return;
                       const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
                         action_type: "star",
                       });

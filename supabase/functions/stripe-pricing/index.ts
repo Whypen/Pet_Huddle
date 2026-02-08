@@ -17,10 +17,10 @@ const PRICE_IDS: Record<string, string | undefined> = {
 };
 
 const DEFAULTS: Record<string, { amount: number; currency: string; interval?: string }> = {
-  premium_monthly: { amount: 8.99, currency: "usd", interval: "month" },
-  premium_annual: { amount: 80.0, currency: "usd", interval: "year" },
+  premium_monthly: { amount: 9.99, currency: "usd", interval: "month" },
+  premium_annual: { amount: 80.99, currency: "usd", interval: "year" },
   gold_monthly: { amount: 19.99, currency: "usd", interval: "month" },
-  gold_annual: { amount: 180.0, currency: "usd", interval: "year" },
+  gold_annual: { amount: 180.99, currency: "usd", interval: "year" },
   star_pack: { amount: 4.99, currency: "usd" },
   emergency_alert: { amount: 2.99, currency: "usd" },
   vet_media: { amount: 3.99, currency: "usd" },

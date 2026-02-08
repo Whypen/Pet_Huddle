@@ -40,10 +40,10 @@ const STRIPE_PRICE_IDS: Record<string, string | undefined> = {
 };
 
 const SUB_DEFAULTS: Record<string, { amount: number; interval: "month" | "year" }> = {
-  premium_monthly: { amount: 899, interval: "month" },
-  premium_annual: { amount: 8000, interval: "year" },
+  premium_monthly: { amount: 999, interval: "month" },
+  premium_annual: { amount: 8099, interval: "year" },
   gold_monthly: { amount: 1999, interval: "month" },
-  gold_annual: { amount: 18000, interval: "year" },
+  gold_annual: { amount: 18099, interval: "year" },
 };
 
 const ADDON_DEFAULTS: Record<string, number> = {

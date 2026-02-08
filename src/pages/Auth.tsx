@@ -31,6 +31,7 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPhone, setLoginPhone] = useState("");
@@ -216,7 +217,10 @@ const Auth = () => {
           {/* Tab Switcher */}
           <div className="flex bg-muted rounded-full p-1 mb-6">
             <button
-              onClick={() => setIsLogin(true)}
+              onClick={() => {
+                setIsLogin(true);
+                setConsentAccepted(false);
+              }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 isLogin
                   ? "bg-card text-foreground shadow-sm"
@@ -226,7 +230,10 @@ const Auth = () => {
               {t("auth.login")}
             </button>
             <button
-              onClick={() => setIsLogin(false)}
+              onClick={() => {
+                setIsLogin(false);
+                setConsentAccepted(false);
+              }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 !isLogin
                   ? "bg-card text-foreground shadow-sm"
@@ -415,9 +422,30 @@ const Auth = () => {
               </div>
             )}
 
+            {!isLogin && (
+              <div className="flex items-start space-x-2">
+                <Checkbox
+                  id="consent"
+                  checked={consentAccepted}
+                  onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
+                />
+                <label htmlFor="consent" className="text-xs text-muted-foreground leading-snug cursor-pointer">
+                  I have read and agree to the{" "}
+                  <Link to="/terms" className="text-primary underline underline-offset-2">
+                    Terms of Service
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/privacy" className="text-primary underline underline-offset-2">
+                    Privacy Policy
+                  </Link>
+                  .
+                </label>
+              </div>
+            )}
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || (!isLogin && !consentAccepted)}
               className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
             >
               {loading ? (
@@ -429,41 +457,6 @@ const Auth = () => {
               )}
             </Button>
           </form>
-
-          {/* SSO Placeholders - Sprint 1 */}
-          <div className="mt-6 space-y-3">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border"></div>
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-card px-2 text-muted-foreground">{t("auth.or_continue")}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                disabled
-                className="h-12 rounded-xl relative"
-              >
-                <Lock className="w-4 h-4 mr-2" />
-                {t("auth.apple")}
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("auth.soon")}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled
-                className="h-12 rounded-xl relative"
-              >
-                <Lock className="w-4 h-4 mr-2" />
-                {t("auth.google")}
-                <span className="absolute -top-1 -right-1 text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{t("auth.soon")}</span>
-              </Button>
-            </div>
-          </div>
 
           {isLogin && (
             <button

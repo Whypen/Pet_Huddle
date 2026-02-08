@@ -20,7 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { PremiumFooter } from "@/components/monetization/PremiumFooter";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -75,7 +75,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [hasMore, setHasMore] = useState(true);
   const [lastCreatedAt, setLastCreatedAt] = useState<string | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -87,7 +86,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
-  const [threadsRemaining, setThreadsRemaining] = useState<number | null>(null);
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
@@ -105,6 +103,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [keyword, setKeyword] = useState("");
   const [topicFilter, setTopicFilter] = useState<string>("All");
   const [sortMode, setSortMode] = useState<"Trending" | "Latest">("Trending");
+  const [quotaDialog, setQuotaDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    ctaLabel?: string;
+    showCta: boolean;
+  }>({ open: false, title: "", message: "", showCta: false });
 
   useEffect(() => {
     fetchNotices(true);
@@ -235,38 +240,35 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     }
   };
 
-  const getThreadLimit = () => {
-    const tier = profile?.effective_tier || profile?.tier;
-    if (tier === "gold") return 30;
-    if (tier === "premium") return 5;
-    return 1;
+  const openThreadQuotaDialog = () => {
+    const tier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    if (tier === "gold") {
+      setQuotaDialog({
+        open: true,
+        title: "Limited",
+        message: "Limited. Your quota will reset in 24h.",
+        showCta: false,
+      });
+      return;
+    }
+    if (tier === "premium") {
+      setQuotaDialog({
+        open: true,
+        title: "Limited",
+        message: "Limited. Upgrade to Gold to post more today.",
+        ctaLabel: "Go to Premium",
+        showCta: true,
+      });
+      return;
+    }
+    setQuotaDialog({
+      open: true,
+      title: "Limited",
+      message: "Limited. Upgrade to Premium/Gold to post more today.",
+      ctaLabel: "Go to Premium",
+      showCta: true,
+    });
   };
-
-  useEffect(() => {
-    if (!user?.id) return;
-    const loadRemaining = async () => {
-      const limit = getThreadLimit();
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const ownerId = profile?.family_owner_id || user.id;
-      const { data: familyRows } = await supabase
-        .from("family_members")
-        .select("invitee_user_id")
-        .eq("inviter_user_id", ownerId)
-        .eq("status", "accepted");
-      const familyIds = Array.from(
-        new Set([ownerId, ...(familyRows || []).map((row: { invitee_user_id: string }) => row.invitee_user_id)])
-      );
-
-      const { count } = await supabase
-        .from("threads")
-        .select("id", { count: "exact", head: true })
-        .in("user_id", familyIds)
-        .gte("created_at", since);
-      const remaining = Math.max(0, limit - (count || 0));
-      setThreadsRemaining(remaining);
-    };
-    loadRemaining();
-  }, [user?.id, profile?.effective_tier, profile?.family_owner_id]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -292,13 +294,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
     }
     let uploadedUrl: string | null = null;
     if (replyImageFile) {
-      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
-        action_type: "thread_image",
-      });
-      if (allowed === false) {
-        setIsPremiumFooterOpen(true);
-        return;
-      }
       const fileExt = replyImageFile.name.split(".").pop() || "jpg";
       const fileName = `${user.id}/${Date.now()}-reply.${fileExt}`;
       const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, replyImageFile);
@@ -356,35 +351,9 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       return;
     }
 
-    if ((threadsRemaining ?? 0) <= 0) {
-      setIsPremiumFooterOpen(true);
-      return;
-    }
-
     setCreating(true);
 
     try {
-      const limit = getThreadLimit();
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const ownerId = profile?.family_owner_id || user.id;
-      const { data: familyRows } = await supabase
-        .from("family_members")
-        .select("invitee_user_id")
-        .eq("inviter_user_id", ownerId)
-        .eq("status", "accepted");
-      const familyIds = Array.from(
-        new Set([ownerId, ...(familyRows || []).map((row: { invitee_user_id: string }) => row.invitee_user_id)])
-      );
-      const { count } = await supabase
-        .from("threads")
-        .select("id", { count: "exact", head: true })
-        .in("user_id", familyIds)
-        .gte("created_at", since);
-      if ((count || 0) >= limit) {
-        setIsPremiumFooterOpen(true);
-        return;
-      }
-
       let imageUrl = null;
 
       if (imageFile) {
@@ -410,7 +379,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         action_type: "thread_post",
       });
       if (allowed === false) {
-        setIsPremiumFooterOpen(true);
+        openThreadQuotaDialog();
         return;
       }
 
@@ -542,19 +511,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         </button>
 
         <div className="flex items-center gap-3">
-          {threadsRemaining !== null && (
-            <span className="text-xs text-muted-foreground">
-              {t("Quota")}: {threadsRemaining}
-            </span>
-          )}
           <Button
-            onClick={() => {
-              if ((threadsRemaining ?? 0) <= 0) {
-                setIsPremiumFooterOpen(true);
-                return;
-              }
-              setIsCreateOpen(true);
-            }}
+            onClick={() => setIsCreateOpen(true)}
             size="sm"
             className="rounded-full bg-primary hover:bg-primary/90 text-white"
           >
@@ -947,7 +905,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                 <p className="text-xs text-destructive mb-2">{createErrors.content}</p>
               )}
               <div className="flex items-center justify-between text-xs text-muted-foreground mb-4">
-                <span>{t("Max 1000 chars")}</span>
                 <span>{remainingChars}</span>
               </div>
 
@@ -1000,12 +957,30 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         )}
       </AnimatePresence>
 
-      {/* Premium Footer — triggers on Notice Board 'Create' for free users */}
-      <PremiumFooter
-        isOpen={isPremiumFooterOpen}
-        onClose={() => setIsPremiumFooterOpen(false)}
-        triggerReason="notice_create"
-      />
+      <Dialog open={quotaDialog.open} onOpenChange={(open) => setQuotaDialog((s) => ({ ...s, open }))}>
+        <DialogContent className="max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{quotaDialog.title}</DialogTitle>
+          </DialogHeader>
+          <div className="text-sm text-muted-foreground">{quotaDialog.message}</div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setQuotaDialog((s) => ({ ...s, open: false }))}>
+              {t("Close")}
+            </Button>
+            {quotaDialog.showCta ? (
+              <Button
+                className="bg-brandBlue text-white"
+                onClick={() => {
+                  setQuotaDialog((s) => ({ ...s, open: false }));
+                  onPremiumClick();
+                }}
+              >
+                {quotaDialog.ctaLabel || t("Go to Premium")}
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

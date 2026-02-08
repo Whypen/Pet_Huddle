@@ -70,14 +70,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   return (
     <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
       <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
-        {/* Left brand wordmark (UAT: fontSize 24 bold) */}
-        <button
-          onClick={handleLogoClick}
-          className="text-brandText font-bold lowercase text-[24px] leading-none"
-          aria-label={t("huddle")}
-        >
-          {t("huddle")}
-        </button>
+        {/* Contract override: center logo only (no left 'huddle' wordmark). Keep spacer for centering. */}
+        <div className="w-9 h-9" aria-hidden="true" />
 
         {/* Centered Logo */}
         <button

@@ -46,7 +46,7 @@ export function PremiumScreen() {
 
   const premiumPlans = useMemo<Plan[]>(
     () => [
-      { id: "premium_monthly", label: "Monthly", price: "$8.99" },
+      { id: "premium_monthly", label: "Monthly", price: "$9.99" },
       { id: "premium_yearly", label: "Yearly", price: "$80.99", savePill: "Save 26%" },
     ],
     []
@@ -62,8 +62,8 @@ export function PremiumScreen() {
   const addOns = useMemo<AddOn[]>(
     () => [
       { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately", price: 4.99 },
-      { id: "broadcast_alert", title: "Broadcast Alert", subtitle: "Additional broadcast alert", price: 2.99 },
-      { id: "media_10", title: "Additional 10 media", subtitle: "Across Social, Chats and AI Vet", price: 3.99 },
+      { id: "emergency_alert", title: "Broadcast (72H/150km)", subtitle: "+1 Broadcast (72h / 150km)", price: 2.99 },
+      { id: "vet_media", title: "AI Vet Media (+10)", subtitle: "+10 Media (AI Vet only)", price: 3.99 },
     ],
     []
   );
@@ -77,9 +77,17 @@ export function PremiumScreen() {
   const Features = ({ gold }: { gold?: boolean }) => (
     <View style={{ gap: 8, marginTop: 12 }}>
       {[
-        { t: "Unlimited", d: gold ? "Ultra-wide visibility and perks" : "More discovery and social access" },
-        { t: "Threads", d: gold ? "30 threads/month" : "5 threads/month" },
-        { t: "Broadcast", d: gold ? "20km range" : "5km range" },
+        { t: "Unlimited", d: gold ? "Unlimited discovery + priority ranking" : "Unlimited discovery + standard ranking" },
+        { t: "Threads", d: gold ? "30 posts/day (pooled with family)" : "15 posts/day" },
+        { t: "AI Vet", d: gold ? "20 uploads/day (pooled) + 5 priority/month" : "10 uploads/day" },
+        { t: "Broadcast", d: gold ? "50/month • 50km • 48h (pooled)" : "30/month • 25km • 24h" },
+        ...(gold
+          ? [
+              { t: "Stars", d: "10/month (pooled) direct chat triggers" },
+              { t: "Family", d: "1 member (shared billing, pooled quotas)" },
+              { t: "Video", d: "Chats/Threads video upload (Gold-only)" },
+            ]
+          : []),
       ].map((f) => (
         <Pressable
           key={f.t}

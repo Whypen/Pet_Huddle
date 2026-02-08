@@ -2,7 +2,6 @@ import { Image, View } from "react-native";
 import { COLORS, LAYOUT } from "../theme/tokens";
 import { BackButton } from "./BackButton";
 import huddleLogo from "../../assets/huddle-logo.png";
-import { HText } from "./HText";
 
 type Props = {
   showBack?: boolean;
@@ -21,11 +20,10 @@ export function Header({ showBack }: Props) {
         backgroundColor: COLORS.white,
       }}
     >
-      {showBack ? <BackButton /> : null}
-
-      <HText variant="heading" style={{ fontSize: 24, fontWeight: "700" }} accessibilityRole="header">
-        huddle
-      </HText>
+      {/* Contract override: center logo only (no left wordmark). */}
+      <View style={{ width: 44, height: 44, justifyContent: "center" }}>
+        {showBack ? <BackButton /> : null}
+      </View>
 
       <View style={{ position: "absolute", left: 0, right: 0, alignItems: "center" }}>
         <Image
@@ -35,6 +33,9 @@ export function Header({ showBack }: Props) {
           accessibilityLabel="Huddle logo"
         />
       </View>
+
+      {/* Right spacer to keep center alignment consistent */}
+      <View style={{ width: 44, height: 44 }} />
     </View>
   );
 }
