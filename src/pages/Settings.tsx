@@ -721,10 +721,7 @@ const Settings = () => {
           </div>
         </section>
 
-        {/* Footer */}
-        <div className="p-6 text-center">
-          <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
-        </div>
+        {/* UAT: remove version string display */}
       </div>
 
       {/* Pinned Logout */}

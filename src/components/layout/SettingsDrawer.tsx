@@ -101,9 +101,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                   </div>
                   <div>
                     <p className="font-semibold">{profile?.display_name || t("User")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {isVerified ? t("settings.verified_badge") : t("settings.pending")}
-                    </p>
+                    {/* UAT: remove 'identity pending' status text; keep badge on avatar only */}
                     <span
                       className={cn(
                         "inline-block mt-0.5 text-xs font-medium px-2 py-0.5 rounded-full",
@@ -146,11 +144,6 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                   <LogOut className="w-5 h-5" />
                   <span className="font-medium">{t("settings.logout")}</span>
                 </button>
-              </div>
-              
-              {/* Version Footer */}
-              <div className="px-6 pb-4 text-center">
-                <span className="text-xs text-muted-foreground">{t("v1.0.0 (2026)")}</span>
               </div>
             </div>
           </motion.div>
