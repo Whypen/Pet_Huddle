@@ -1,760 +1,398 @@
-import { useState, useEffect, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  Crown,
-  Check,
-  Star,
-  AlertTriangle,
-  Camera,
-  Users,
-  Sparkles,
-  Loader2,
-  ExternalLink,
-} from "lucide-react";
+import { CheckCircle2, ChevronRight, Lock, Sparkles } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 
-// Stripe product IDs are intentionally server-side only.
+type TierTab = "Premium" | "Gold" | "Add-on";
+type Billing = "monthly" | "yearly";
 
-interface PlanFeature {
-  name: string;
-  free: boolean | string;
-  premium: boolean | string;
-  gold: boolean | string;
-}
+type Pricing = {
+  premium: { monthly: number; yearly: number };
+  gold: { monthly: number; yearly: number };
+  addOn: { star_pack: number; broadcast_alert: number; media_10: number };
+};
 
-const PLAN_FEATURES: PlanFeature[] = [
-  { name: "Family Slot", free: "—", premium: "—", gold: "1 Extra Member" },
-  { name: "Thread", free: "1", premium: "5", gold: "30" },
-  { name: "Discovery Filters", free: "Basic", premium: "Advanced", gold: "Advanced" },
-  { name: "Visibility", free: "—", premium: "Priority", gold: "Priority" },
-  { name: "Star", free: "—", premium: "—", gold: "3" },
-  { name: "Media", free: "—", premium: "10", gold: "50" },
-  { name: "Alert", free: "5", premium: "20", gold: "Unlimited" },
-  { name: "Broadcast Range", free: "1km", premium: "5km", gold: "20km" },
-  { name: "Ad-free", free: "—", premium: "—", gold: "✓" },
-];
+type AddOnId = keyof Pricing["addOn"];
 
-interface AddOn {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  icon: ComponentType<{ className?: string }>;
-  type: string;
-  quantity?: number;
-}
+type AddOn = {
+  id: AddOnId;
+  title: string;
+  subtitle: string;
+  pill?: string;
+};
+
+const DEFAULT_PRICING: Pricing = {
+  premium: { monthly: 8.99, yearly: 80.99 },
+  gold: { monthly: 19.99, yearly: 180.99 },
+  addOn: { star_pack: 4.99, broadcast_alert: 2.99, media_10: 3.99 },
+};
 
 const ADD_ONS: AddOn[] = [
-  {
-    id: "star_pack",
-    name: "3 Star Pack",
-    description: "Superpower to trigger chats immediately",
-    price: 4.99,
-    icon: Star,
-    type: "star_pack",
-    quantity: 3,
-  },
-  {
-    id: "emergency_alert",
-    name: "Broadcast Alert",
-    description: "Additional broadcast alert",
-    price: 2.99,
-    icon: AlertTriangle,
-    type: "emergency_alert",
-    quantity: 1,
-  },
-  {
-    id: "vet_media",
-    name: "Additional 10 Media",
-    description: "Additional 10 media usage across Social, Chats and AI Vet.",
-    price: 3.99,
-    icon: Camera,
-    type: "vet_media",
-    quantity: 10,
-  },
+  { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
+  { id: "broadcast_alert", title: "Broadcast Alert", subtitle: "Additional broadcast alert", pill: "72H" },
+  { id: "media_10", title: "Additional 10 media", subtitle: "Additional 10 media usage across Social, Chats and AI Vet." },
 ];
 
-const Premium = () => {
-  const { t } = useLanguage();
+const FEATURES = (tier: "premium" | "gold") =>
+  tier === "premium"
+    ? [
+        { title: "Unlimited", tip: "More discovery and social access", icon: Sparkles },
+        { title: "Threads", tip: "5 threads/month", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "5km range", icon: CheckCircle2 },
+      ]
+    : [
+        { title: "Unlimited", tip: "Ultra-wide visibility and perks", icon: Sparkles },
+        { title: "Threads", tip: "30 threads/month", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "20km range", icon: CheckCircle2 },
+      ];
+
+function money(n: number) {
+  return `$${n.toFixed(2)}`;
+}
+
+export default function PremiumPage() {
   const navigate = useNavigate();
-  const { profile, user, refreshProfile } = useAuth();
-  const [searchParams] = useSearchParams();
-  const sessionId = searchParams.get("session_id");
+  const { user } = useAuth();
+  const { t } = useLanguage();
 
-  const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly">("monthly");
-  const [selectedTier, setSelectedTier] = useState<"premium" | "gold">("premium");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
-  const [cart, setCart] = useState<Record<string, number>>({});
-
-  const isPremium = profile?.tier === "premium";
-  const isGold = profile?.tier === "gold";
-  const hasActiveSubscription = isPremium || isGold;
-  const totalFamilySlots = (profile?.tier === "gold" ? 1 : 0) + (profile?.family_slots || 0);
-
-  // =====================================================
-  // RACE CONDITION HANDLING: Poll for updates after payment
-  // =====================================================
-  useEffect(() => {
-    if (sessionId && !hasActiveSubscription) {
-      setIsPolling(true);
-      toast.info(t("Processing your payment..."));
-
-      const pollInterval = setInterval(async () => {
-        await refreshProfile();
-        const { data: updatedProfile } = await supabase
-          .from("profiles")
-          .select("tier, stars_count, mesh_alert_count, media_credits, family_slots, verified")
-          .eq("id", user?.id)
-          .single();
-
-        if (updatedProfile && (updatedProfile.tier === "premium" || updatedProfile.tier === "gold")) {
-          setIsPolling(false);
-          clearInterval(pollInterval);
-          toast.success(t("Welcome to huddle Premium!"));
-        }
-      }, 2000);
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        if (isPolling) {
-          setIsPolling(false);
-          clearInterval(pollInterval);
-          toast.warning(t("Payment processing is taking longer than expected. Please check back in a few minutes."));
-        }
-      }, 30000);
-
-      return () => clearInterval(pollInterval);
-    }
-  }, [sessionId, hasActiveSubscription]);
-
-  // =====================================================
-  // SUBSCRIPTION PRICING (dynamic from Stripe)
-  // =====================================================
-  const [pricing, setPricing] = useState({
-    premium: {
-      monthly: { price: 8.99, periodKey: "period.month" },
-      yearly: { price: 80, periodKey: "period.year", monthlyEquivalent: 6.67, savingsKey: "premium.savings_26" },
-    },
-    gold: {
-      monthly: { price: 19.99, periodKey: "period.month" },
-      yearly: { price: 180, periodKey: "period.year", monthlyEquivalent: 15, savingsKey: "premium.savings_25" },
-    },
+  // UAT: auto-select Premium on load.
+  const [tab, setTab] = useState<TierTab>("Premium");
+  const [billing, setBilling] = useState<Billing>("monthly");
+  const [pricing, setPricing] = useState<Pricing>(DEFAULT_PRICING);
+  const [selected, setSelected] = useState<Record<AddOnId, boolean>>({
+    star_pack: false,
+    broadcast_alert: false,
+    media_10: false,
+  });
+  const [qty, setQty] = useState<Record<AddOnId, number>>({
+    star_pack: 1,
+    broadcast_alert: 1,
+    media_10: 1,
   });
 
-  const [addonPricing, setAddonPricing] = useState<Record<string, number>>({
-    star_pack: 4.99,
-    emergency_alert: 2.99,
-    vet_media: 3.99,
-  });
+  const fade = useRef(0);
 
   useEffect(() => {
-    const loadPricing = async () => {
+    // UAT: dynamic pricing from Stripe if available (fallback to defaults).
+    (async () => {
       try {
         const { data, error } = await supabase.functions.invoke("stripe-pricing");
         if (error) throw error;
         const prices = data?.prices || {};
         setPricing((prev) => ({
           premium: {
-            ...prev.premium,
-            monthly: { ...prev.premium.monthly, price: prices.premium_monthly?.amount ?? prev.premium.monthly.price },
-            yearly: {
-              ...prev.premium.yearly,
-              price: prices.premium_annual?.amount ?? prev.premium.yearly.price,
-              monthlyEquivalent: prices.premium_annual?.amount
-                ? Number((prices.premium_annual.amount / 12).toFixed(2))
-                : prev.premium.yearly.monthlyEquivalent,
-            },
+            monthly: prices.premium_monthly?.amount ?? prev.premium.monthly,
+            yearly: prices.premium_annual?.amount ?? prev.premium.yearly,
           },
           gold: {
-            ...prev.gold,
-            monthly: { ...prev.gold.monthly, price: prices.gold_monthly?.amount ?? prev.gold.monthly.price },
-            yearly: {
-              ...prev.gold.yearly,
-              price: prices.gold_annual?.amount ?? prev.gold.yearly.price,
-              monthlyEquivalent: prices.gold_annual?.amount
-                ? Number((prices.gold_annual.amount / 12).toFixed(2))
-                : prev.gold.yearly.monthlyEquivalent,
-            },
+            monthly: prices.gold_monthly?.amount ?? prev.gold.monthly,
+            yearly: prices.gold_annual?.amount ?? prev.gold.yearly,
+          },
+          addOn: {
+            star_pack: prices.star_pack?.amount ?? prev.addOn.star_pack,
+            broadcast_alert: prices.emergency_alert?.amount ?? prev.addOn.broadcast_alert,
+            media_10: prices.vet_media?.amount ?? prev.addOn.media_10,
           },
         }));
-
-        setAddonPricing((prev) => ({
-          ...prev,
-          star_pack: prices.star_pack?.amount ?? prev.star_pack,
-          emergency_alert: prices.emergency_alert?.amount ?? prev.emergency_alert,
-          vet_media: prices.vet_media?.amount ?? prev.vet_media,
-        }));
-      } catch (err) {
-        console.warn("[Premium] Failed to load Stripe pricing", err);
+      } catch {
+        // ignore
       }
-    };
-    loadPricing();
+    })();
   }, []);
 
-  const addToCart = (type: string) => {
-    setCart((prev) => ({ ...prev, [type]: (prev[type] || 0) + 1 }));
-  };
+  const cartItems = useMemo(() => {
+    return ADD_ONS.filter((a) => selected[a.id]).map((a) => ({
+      ...a,
+      qty: Math.min(10, Math.max(1, qty[a.id] ?? 1)),
+      price: pricing.addOn[a.id],
+    }));
+  }, [pricing.addOn, qty, selected]);
 
-  const removeFromCart = (type: string) => {
-    setCart((prev) => {
-      const next = { ...prev };
-      if (!next[type]) return next;
-      if (next[type] <= 1) {
-        delete next[type];
-      } else {
-        next[type] -= 1;
-      }
-      return next;
-    });
-  };
+  const cartTotal = useMemo(() => cartItems.reduce((s, i) => s + i.qty * i.price, 0), [cartItems]);
 
-  const cartItems = ADD_ONS.filter((addOn) => cart[addOn.type]).map((addOn) => ({
-    ...addOn,
-    cartQty: cart[addOn.type] || 0,
-    unitPrice: addonPricing[addOn.type] ?? addOn.price,
-  }));
+  const purchaseLabel = useMemo(() => {
+    if (tab === "Add-on") return `Total ${money(cartTotal)}`;
+    const tier = tab === "Gold" ? "gold" : "premium";
+    const p = pricing[tier][billing];
+    return `${money(p)} / ${billing === "monthly" ? "month" : "year"}`;
+  }, [billing, cartTotal, pricing, tab]);
 
-  const cartTotal = cartItems.reduce((sum, item) => sum + item.unitPrice * item.cartQty, 0);
-
-  const handleCheckoutCart = () => {
-    if (cartItems.length === 0) return;
-    createCheckoutSession({
-      mode: "payment",
-      items: cartItems.map((item) => ({ type: item.type, quantity: item.cartQty })),
-      amount: Math.round(cartTotal * 100),
-    });
-  };
-
-  // =====================================================
-  // STRIPE CHECKOUT FUNCTIONS
-  // =====================================================
-  const createCheckoutSession = async (
-    params: { type?: string; mode: "subscription" | "payment"; amount?: number; items?: { type: string; quantity: number }[] }
-  ) => {
+  const secureCheckout = async () => {
     if (!user) {
-      toast.error(t("Please sign in first"));
+      navigate("/auth");
       return;
     }
-
-    setIsProcessing(true);
-
-    try {
-      const { type, mode, amount, items } = params;
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+    if (tab === "Add-on") {
+      if (!cartItems.length) return;
+      // UAT: cart multi-select; server-side checkout handled by Edge Function.
+      await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
-          type,
-          mode,
-          items,
-          amount,
-          successUrl: `${window.location.origin}/premium?session_id={CHECKOUT_SESSION_ID}`,
+          mode: "payment",
+          items: cartItems.map((i) => ({ type: i.id, quantity: i.qty })),
+          amount: Math.round(cartTotal * 100),
+          successUrl: `${window.location.origin}/premium`,
           cancelUrl: `${window.location.origin}/premium`,
         },
       });
-
-      if (error) throw error;
-
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } catch (error: unknown) {
-      console.error("Checkout error:", error);
-      toast.error(t("Failed to create checkout session"));
-    } finally {
-      setIsProcessing(false);
+      return;
     }
+
+    const type = `${tab === "Gold" ? "gold" : "premium"}_${billing === "monthly" ? "monthly" : "annual"}`;
+    await supabase.functions.invoke("create-checkout-session", {
+      body: {
+        userId: user.id,
+        mode: "subscription",
+        type,
+        successUrl: `${window.location.origin}/premium`,
+        cancelUrl: `${window.location.origin}/premium`,
+      },
+    });
   };
 
-  const handleSubscribe = () => {
-    const tierType = selectedTier === "gold" ? "gold" : "premium";
-    const planType = selectedPlan === "yearly" ? "annual" : "monthly";
-    createCheckoutSession({ type: `${tierType}_${planType}`, mode: "subscription" });
-  };
+  const TierTabs = (
+    <div className="sticky top-12 z-10 bg-background/95 backdrop-blur-sm border-b border-border/50 shadow-[0_6px_16px_-16px_rgba(0,0,0,0.35)]">
+      <div className="px-4 pt-4 pb-3">
+        <div className="flex items-center gap-2 rounded-[12px] border border-gray-300 p-1 bg-white">
+          {(["Premium", "Gold", "Add-on"] as const).map((tName) => {
+            const active = tab === tName;
+            return (
+              <button
+                key={tName}
+                onClick={() => {
+                  setTab(tName);
+                  // UAT: 0.3s fade-in transition
+                  fade.current += 1;
+                }}
+                className={cn(
+                  "relative flex-1 h-10 rounded-[12px] text-sm transition-opacity",
+                  active ? "font-bold text-brandGold" : "text-brandText/70"
+                )}
+              >
+                <span className="relative inline-flex items-center justify-center w-full h-full">
+                  {tName === "Gold" ? (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
+                      Recommended
+                    </span>
+                  ) : null}
+                  {tName}
+                </span>
+                {active ? (
+                  <span className="absolute left-3 right-3 bottom-0 h-[2px] bg-brandGold rounded-full" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 
-  const handleManageBilling = async () => {
-    if (!user) return;
+  const Content = (
+    <motion.div
+      key={`${tab}-${fade.current}`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="px-4 pb-[110px]"
+    >
+      <div className="pt-4">
+        <p className="text-sm text-gray-600">
+          {tab === "Premium"
+            ? "Best for Pet Lovers"
+            : tab === "Gold"
+              ? "Ultimate Experience"
+              : "Add on extra privileges any time."}
+        </p>
+      </div>
 
-    setIsProcessing(true);
+      {tab === "Premium" || tab === "Gold" ? (
+        <>
+          <div className="mt-4 space-y-3">
+            {([
+              {
+                id: "monthly" as const,
+                label: "Monthly",
+                price: tab === "Gold" ? pricing.gold.monthly : pricing.premium.monthly,
+              },
+              {
+                id: "yearly" as const,
+                label: "Yearly",
+                price: tab === "Gold" ? pricing.gold.yearly : pricing.premium.yearly,
+                pill: tab === "Gold" ? "Save 25%" : "Save 26%",
+              },
+            ] as const).map((p) => {
+              const active = billing === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setBilling(p.id)}
+                  className={cn(
+                    "w-full flex items-center justify-between rounded-[12px] border p-3 transition-transform",
+                    active ? "border-brandGold" : "border-gray-300"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "w-4 h-4 rounded-full border-2",
+                        active ? "border-brandGold bg-brandGold" : "border-gray-300"
+                      )}
+                    />
+                    <span className="text-sm font-semibold text-brandText">
+                      {p.label} {money(p.price)}
+                    </span>
+                  </div>
+                  {p.pill ? (
+                    <span className={cn("text-xs px-2 py-1 rounded-full font-semibold", tab === "Gold" ? "bg-brandGold/15 text-brandGold" : "bg-brandBlue/10 text-brandBlue")}>
+                      {p.pill}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
 
-    try {
-      const { data, error } = await supabase.functions.invoke("create-portal-session", {
-        body: {
-          userId: user.id,
-          returnUrl: `${window.location.origin}/premium`,
-        },
-      });
+          <div className="mt-4">
+            {FEATURES(tab === "Gold" ? "gold" : "premium").map((f) => (
+              <button key={f.title} className="w-full flex items-start gap-3 py-3">
+                <f.icon className="w-6 h-6 text-brandBlue" />
+                <div className="flex-1 text-left">
+                  <div className="text-sm font-bold text-brandText">{f.title}</div>
+                  <div className="text-xs text-gray-600 mt-1">{f.tip}</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-brandText/60 mt-1" />
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {ADD_ONS.map((a) => {
+            const checked = selected[a.id];
+            const q = qty[a.id] ?? 1;
+            return (
+              <div key={a.id} className="rounded-2xl border border-gray-300 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setSelected((s) => ({ ...s, [a.id]: !s[a.id] }));
+                          setQty((x) => ({ ...x, [a.id]: Math.min(10, Math.max(1, x[a.id] ?? 1)) }));
+                        }}
+                        className={cn(
+                          "w-6 h-6 rounded-[8px] border-2",
+                          checked ? "border-brandGold bg-brandGold" : "border-gray-300"
+                        )}
+                        aria-label={a.title}
+                      />
+                      <div className="text-sm font-bold text-brandText">{a.title}</div>
+                      {a.pill ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-brandText/80 font-semibold">
+                          {a.pill}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">{a.subtitle}</div>
+                  </div>
+                  <div className="text-sm font-bold text-brandText">{money(pricing.addOn[a.id])}</div>
+                </div>
 
-      if (error) throw error;
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setQty((x) => ({ ...x, [a.id]: Math.max(1, (x[a.id] ?? 1) - 1) }))}
+                      disabled={!checked}
+                      className={cn(
+                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
+                        !checked && "opacity-40"
+                      )}
+                    >
+                      -
+                    </button>
+                    <div className="w-8 text-center font-black text-brandText">{checked ? q : 0}</div>
+                    <button
+                      onClick={() => setQty((x) => ({ ...x, [a.id]: Math.min(10, (x[a.id] ?? 1) + 1) }))}
+                      disabled={!checked}
+                      className={cn(
+                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
+                        !checked && "opacity-40"
+                      )}
+                    >
+                      +
+                    </button>
+                  </div>
 
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } catch (error: unknown) {
-      console.error("Portal error:", error);
-      toast.error(t("Failed to open billing portal"));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+                  <button
+                    onClick={() => setSelected((s) => ({ ...s, [a.id]: true }))}
+                    disabled={!checked}
+                    className={cn(
+                      "px-4 py-2 rounded-xl bg-brandBlue text-white font-bold",
+                      !checked && "opacity-50"
+                    )}
+                  >
+                    Add to Cart
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
+  );
 
   return (
     <div className="min-h-screen bg-background pb-nav">
       <GlobalHeader />
 
-      {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h1 className="text-xl font-bold">{t("huddle Premium")}</h1>
-      </header>
+      <div className="px-4 pt-4">
+        <h1 className="text-xl font-semibold text-brandText">Choose Your Privileges</h1>
+      </div>
 
-      <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
-        {/* Hero Banner */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="relative bg-gradient-to-br from-brandBlue via-[#1B39AA] to-[#132A7D] rounded-2xl p-6 mb-6 overflow-hidden"
-          style={{
-            boxShadow: "0 8px 32px rgba(37, 99, 235, 0.3)",
-          }}
-        >
-          <div className="absolute inset-0 overflow-hidden">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-              className="absolute -top-20 -right-20 w-40 h-40 bg-white/10 rounded-full"
-            />
-            <motion.div
-              animate={{ rotate: -360 }}
-              transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-              className="absolute -bottom-10 -left-10 w-32 h-32 bg-white/10 rounded-full"
-            />
-          </div>
-          <div className="relative text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <Crown className="w-8 h-8 text-white" />
+      {TierTabs}
+      {Content}
+
+      {/* UAT: fixed bottom purchase area (height: 90px) */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 bg-white shadow-[0_-10px_22px_-18px_rgba(0,0,0,0.35)] border-t border-border">
+        <div className="max-w-md mx-auto h-[90px] px-4 pt-3 pb-3">
+          <div className="flex items-center justify-between">
+            <div className="text-base font-bold text-brandText">
+              {tab === "Add-on"
+                ? `Cart ${cartItems.reduce((s, i) => s + i.qty, 0)}`
+                : tab === "Gold"
+                  ? "Gold"
+                  : "Premium"}
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
-            <p className="text-white/90 text-sm">{t("Unlock the full huddle experience")}</p>
+            <div className="text-base font-bold text-brandText">{purchaseLabel}</div>
           </div>
-        </motion.div>
 
-        {/* Current Status */}
-        {hasActiveSubscription && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
+          <button
+            onClick={secureCheckout}
+            disabled={tab === "Add-on" && cartItems.length === 0}
             className={cn(
-              "rounded-xl p-4 mb-6",
-              isGold
-                ? "bg-gradient-to-r from-amber-50 to-amber-100 dark:from-amber-900/20 dark:to-amber-800/20"
-                : "bg-primary/10"
+              "mt-2 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2",
+              tab === "Add-on" && cartItems.length === 0 && "opacity-50"
             )}
           >
-            <div className="flex items-center gap-3">
-              <div
-                className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center",
-                  isGold
-                    ? "bg-brandGold"
-                    : "bg-brandBlue"
-                )}
-              >
-                {isGold ? (
-                  <Crown className="w-5 h-5 text-amber-900" />
-                ) : (
-                  <Sparkles className="w-5 h-5 text-white" />
-                )}
-              </div>
-              <div>
-                <p
-                  className={cn(
-                    "font-semibold",
-                    isGold
-                      ? "text-amber-800 dark:text-amber-200"
-                      : "text-primary"
-                  )}
-                >
-                  {isGold ? t("You're a Gold Member!") : t("You're a Premium Member!")}
-                </p>
-                <p
-                  className={cn(
-                    "text-sm",
-                    isGold
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-primary/80"
-                  )}
-                >
-                  {t("Status:")} {profile?.subscription_status || t("active")}
-                </p>
-              </div>
-              <Button
-                onClick={handleManageBilling}
-                disabled={isProcessing}
-                variant="outline"
-                size="sm"
-                className="ml-auto"
-              >
-                <ExternalLink className="w-4 h-4 mr-2" />
-                {t("Manage")}
-              </Button>
-            </div>
-          </motion.div>
-        )}
+            <Lock className="w-4 h-4" />
+            Secure Privileges
+          </button>
 
-        {/* Processing Indicator */}
-        {isPolling && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-primary/10 border border-primary/20 rounded-xl p-4 mb-6 flex items-center gap-3"
-          >
-            <Loader2 className="w-5 h-5 text-primary animate-spin" />
-            <div>
-              <p className="font-semibold text-primary">{t("Processing Payment...")}</p>
-              <p className="text-sm text-muted-foreground">{t("This may take a few seconds")}</p>
-            </div>
-          </motion.div>
-        )}
-
-        {/* User Credits Display (Read-Only - RLS Protected) */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-card border border-border rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Star className="w-4 h-4 text-amber-500" />
-              <span className="text-xs font-medium text-muted-foreground">{t("Stars")}</span>
-            </div>
-            <p className="text-2xl font-bold">{profile?.stars_count || 0}</p>
+          <div className="mt-1 text-[10px] text-gray-500">
+            <button onClick={() => navigate("/terms")} className="text-brandBlue underline font-semibold">
+              Terms
+            </button>
           </div>
-          <div className="bg-card border border-border rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <AlertTriangle className="w-4 h-4 text-red-500" />
-              <span className="text-xs font-medium text-muted-foreground">{t("Alerts")}</span>
-            </div>
-            <p className="text-2xl font-bold">{profile?.mesh_alert_count || 0}</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Camera className="w-4 h-4 text-brandBlue" />
-              <span className="text-xs font-medium text-muted-foreground">{t("Media")}</span>
-            </div>
-            <p className="text-2xl font-bold">{profile?.media_credits || 0}</p>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Users className="w-4 h-4 text-[#A6D539]" />
-              <span className="text-xs font-medium text-muted-foreground">{t("Family")}</span>
-            </div>
-            <p className="text-2xl font-bold">{totalFamilySlots}</p>
-          </div>
-        </div>
-
-        {/* Compare Plans Table */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
-          <div className="grid grid-cols-4 bg-muted/50">
-            <div className="p-3">
-              <span className="text-xs font-medium text-muted-foreground">{t("Feature")}</span>
-            </div>
-            <div className="p-3 text-center border-l border-border">
-              <span className="text-xs font-medium">{t("Free")}</span>
-            </div>
-            <div className="p-3 text-center border-l border-border bg-primary/5">
-              <span className="text-xs font-semibold text-primary">
-                {t("Premium")}
-              </span>
-            </div>
-            <div className="p-3 text-center border-l border-border bg-amber-50 dark:bg-amber-900/20">
-              <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">{t("Gold")}</span>
-            </div>
-          </div>
-
-          {PLAN_FEATURES.map((feature, i) => (
-            <div
-              key={feature.name}
-              className={cn("grid grid-cols-4", i % 2 === 0 && "bg-muted/30")}
-            >
-              <div className="p-3 text-xs">{t(feature.name)}</div>
-              <div className="p-3 text-center border-l border-border">
-                {typeof feature.free === "boolean" ? (
-                  feature.free ? (
-                    <Check className="w-3 h-3 text-accent mx-auto" />
-                  ) : (
-                      <span className="text-muted-foreground">{t("—")}</span>
-                  )
-                ) : (
-                  <span className="text-xs text-muted-foreground">{t(feature.free)}</span>
-                )}
-              </div>
-              <div className="p-3 text-center border-l border-border bg-primary/5">
-                {typeof feature.premium === "boolean" ? (
-                  feature.premium ? (
-                    <Check className="w-3 h-3 text-brandBlue mx-auto" />
-                  ) : (
-                      <span className="text-muted-foreground">{t("—")}</span>
-                  )
-                ) : (
-                  <span className="text-xs font-medium text-primary">
-                    {t(feature.premium)}
-                  </span>
-                )}
-              </div>
-              <div className="p-3 text-center border-l border-border bg-amber-50/50 dark:bg-amber-900/10">
-                {typeof feature.gold === "boolean" ? (
-                  feature.gold ? (
-                    <Check className="w-3 h-3 text-amber-600 mx-auto" />
-                  ) : (
-                      <span className="text-muted-foreground">{t("—")}</span>
-                  )
-                ) : (
-                  <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                    {t(feature.gold)}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Subscription Plans (Only for non-subscribed users) */}
-        {!hasActiveSubscription && (
-          <>
-            {/* Tier Selector */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <button
-                onClick={() => setSelectedTier("premium")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  selectedTier === "premium"
-                    ? "border-brandBlue bg-brandBlue/5"
-                    : "border-border hover:border-brandBlue/50"
-                )}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-5 h-5 text-brandBlue" />
-                  <span className="font-bold">{t("Premium")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">{t("Best for individuals")}</p>
-              </button>
-
-              <button
-                onClick={() => setSelectedTier("gold")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  selectedTier === "gold"
-                    ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20"
-                    : "border-border hover:border-amber-500/50"
-                )}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Crown className="w-5 h-5 text-amber-500" />
-                  <span className="font-bold">{t("Gold")}</span>
-                </div>
-                <p className="text-xs text-muted-foreground">{t("Ultimate experience")}</p>
-              </button>
-            </div>
-
-            {/* Billing Period */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              <button
-                onClick={() => setSelectedPlan("monthly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  selectedPlan === "monthly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
-              >
-                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Monthly")}</p>
-                <p className="text-2xl font-bold">
-                  ${pricing[selectedTier].monthly.price}
-                </p>
-                <p className="text-xs text-muted-foreground">{t("per month")}</p>
-              </button>
-
-              <button
-                onClick={() => setSelectedPlan("yearly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all relative",
-                  selectedPlan === "yearly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
-              >
-                <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                  {t(pricing[selectedTier].yearly.savingsKey)}
-                </span>
-                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Yearly")}</p>
-                <p className="text-2xl font-bold">${pricing[selectedTier].yearly.price}</p>
-                <p className="text-xs text-muted-foreground">
-                  {t("per_month_short").replace(
-                    "{value}",
-                    pricing[selectedTier].yearly.monthlyEquivalent.toFixed(2)
-                  )}
-                </p>
-              </button>
-            </div>
-
-            {/* Subscribe Button */}
-            <Button
-              onClick={handleSubscribe}
-              disabled={isProcessing}
-              className={cn(
-                "w-full py-6 text-lg gap-2 mb-6",
-                selectedTier === "gold"
-                  ? "bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-amber-900"
-                  : "bg-gradient-to-r from-brandBlue to-[#1B39AA] hover:from-[#1B39AA] hover:to-[#132A7D] text-white"
-              )}
-              style={{
-                boxShadow:
-                  selectedTier === "gold"
-                    ? "0 4px 20px rgba(251, 191, 36, 0.4)"
-                    : "0 4px 20px rgba(50, 131, 255, 0.4)",
-              }}
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  {t("Processing...")}
-                </>
-              ) : (
-                <>
-                  {selectedTier === "gold" ? (
-                    <Crown className="w-5 h-5" />
-                  ) : (
-                    <Sparkles className="w-5 h-5" />
-                  )}
-                  {t("Upgrade to")} {selectedTier === "gold" ? t("Gold") : t("Premium")}
-                </>
-              )}
-            </Button>
-          </>
-        )}
-
-        {/* Add-on Store */}
-        <div className="mt-8">
-          <h3 className="text-lg font-bold mb-4">{t("Add-ons")}</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {ADD_ONS.map((addOn) => {
-              const unitPrice = addonPricing[addOn.type] ?? addOn.price;
-              const qty = cart[addOn.type] || 0;
-              return (
-              <motion.div
-                key={addOn.id}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="bg-card border border-border rounded-xl p-4"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div
-                    className={cn(
-                      "w-10 h-10 rounded-full flex items-center justify-center",
-                      addOn.id === "star_pack" && "bg-amber-100 dark:bg-amber-900/20",
-                      addOn.id === "emergency_alert" && "bg-red-100 dark:bg-red-900/20",
-                      addOn.id === "vet_media" && "bg-primary/10 dark:bg-primary/20"
-                    )}
-                  >
-                    <addOn.icon className="w-5 h-5" />
-                  </div>
-                  {addOn.quantity && (
-                    <span className="text-xs font-bold text-primary">×{addOn.quantity}</span>
-                  )}
-                </div>
-                <h4 className="font-semibold text-sm mb-1">{t(addOn.name)}</h4>
-                <p className="text-xs text-muted-foreground mb-3">{t(addOn.description)}</p>
-                <div className="flex items-center justify-between">
-                  <span className="text-lg font-bold">${unitPrice.toFixed(2)}</span>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => removeFromCart(addOn.type)}
-                      disabled={qty === 0 || isProcessing}
-                      size="sm"
-                      variant="outline"
-                    >
-                      -
-                    </Button>
-                    <span className="text-xs font-semibold min-w-[18px] text-center">{qty}</span>
-                    <Button
-                      onClick={() => addToCart(addOn.type)}
-                      disabled={isProcessing}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {t("Add")}
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            )})}
-          </div>
-          <div className="mt-4 rounded-xl border border-border bg-muted/30 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold">{t("Add-on Cart")}</span>
-              <span className="text-sm font-bold">${cartTotal.toFixed(2)}</span>
-            </div>
-            {cartItems.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("No add-ons selected")}</p>
-            ) : (
-              <div className="space-y-2">
-                {cartItems.map((item) => (
-                  <div key={item.type} className="flex items-center justify-between text-xs">
-                    <span>{t(item.name)} ×{item.cartQty}</span>
-                    <span>${(item.unitPrice * item.cartQty).toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <Button
-              onClick={handleCheckoutCart}
-              disabled={isProcessing || cartItems.length === 0}
-              className="w-full mt-3"
-            >
-              {isProcessing ? t("Processing...") : t("Checkout Add-ons")}
-            </Button>
-          </div>
-        </div>
-
-        {/* Past Transactions (Demo) */}
-        <div className="mt-6">
-          <h3 className="text-lg font-bold mb-3">{t("Past Transactions")}</h3>
-          <div className="space-y-2">
-            {[
-              { label: "Premium Monthly", amount: "$8.99", date: "Jan 5, 2026", status: "Completed" },
-              { label: "3 Star Pack", amount: "$4.99", date: "Dec 22, 2025", status: "Completed" },
-              { label: "Broadcast Alert", amount: "$2.99", date: "Dec 10, 2025", status: "Completed" },
-            ].map((row) => (
-              <div key={`${row.label}-${row.date}`} className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-xs">
-                <div>
-                  <p className="font-semibold">{t(row.label)}</p>
-                  <p className="text-muted-foreground">{t(row.date)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold">{row.amount}</p>
-                  <p className="text-muted-foreground">{t(row.status)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-8 text-center">
-          <span className="text-xs text-muted-foreground">
-            {t("Secure payments powered by Stripe")}
-          </span>
         </div>
       </div>
     </div>
   );
-};
+}
 
-export default Premium;

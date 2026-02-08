@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { computeAgeYears, computeNextEvent, formatNextEventLabel, type PetReminder } from "@/utils/petLogic";
 
 interface Pet {
   id: string;
@@ -78,6 +79,7 @@ const Index = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [nextEventLabel, setNextEventLabel] = useState<string>("—");
 
   useEffect(() => {
     if (user?.id) {
@@ -125,17 +127,34 @@ const Index = () => {
     }
   };
 
-  const calculateAge = (dob: string | null) => {
-    if (!dob) return null;
-    const birthDate = new Date(dob);
-    const today = new Date();
-    let years = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      years--;
-    }
-    return years;
-  };
+  // UAT: Next Event must pull from Supabase reminders table.
+  useEffect(() => {
+    (async () => {
+      if (!user?.id || !selectedPet?.id) {
+        setNextEventLabel("—");
+        return;
+      }
+      try {
+        const todayISO = new Date().toISOString().slice(0, 10);
+        const res = await supabase
+          .from("reminders")
+          .select("id,pet_id,due_date,kind,reason")
+          .eq("owner_id", user.id)
+          .eq("pet_id", selectedPet.id)
+          .gte("due_date", todayISO)
+          .order("due_date", { ascending: true })
+          .limit(50);
+        if (res.error) throw res.error;
+        const reminders = (res.data ?? []) as PetReminder[];
+        const ev = computeNextEvent(selectedPet.dob, reminders);
+        setNextEventLabel(formatNextEventLabel(ev));
+      } catch (e) {
+        // If table isn't present yet on a dev instance, keep UI stable.
+        console.warn("[Index] failed to load reminders", e);
+        setNextEventLabel("—");
+      }
+    })();
+  }, [selectedPet?.dob, selectedPet?.id, user?.id]);
 
   // SPRINT 2: Case-insensitive species matching for wisdom tips
   const getRandomTip = (species: string) => {
@@ -272,9 +291,13 @@ const Index = () => {
                     animate={{ opacity: 1, y: 0 }}
                   >
                     <div className="text-left">
+                      {/*
+                        UAT: show age as computed, no duplicated per-page math.
+                        Keep existing label format.
+                      */}
                       <h2 className="text-2xl font-bold text-primary-foreground">
                         {selectedPet.name}
-                        {selectedPet.dob && `, ${calculateAge(selectedPet.dob)} Years Old`}
+                        {selectedPet.dob && `, ${computeAgeYears(selectedPet.dob)} Years Old`}
                       </h2>
                     </div>
                     <div className="flex gap-4 mt-2 text-primary-foreground/80 text-sm flex-wrap">
@@ -296,7 +319,7 @@ const Index = () => {
                       <div className="flex items-center gap-2 text-primary-foreground">
                         <Clock className="w-4 h-4" />
                         <span className="text-sm font-medium">
-                          {t("home.next_event")}: {t("home.next_event_sample")}
+                          {t("home.next_event")}: {nextEventLabel}
                         </span>
                       </div>
                     </div>

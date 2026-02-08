@@ -8,6 +8,7 @@ export type RootStackParamList = {
   Auth: undefined;
   Terms: undefined;
   Privacy: undefined;
+  PremiumPage: undefined;
   AccountSettings: undefined;
   PetProfile: { mode: "add" | "edit" } | undefined;
   UserProfile: undefined;

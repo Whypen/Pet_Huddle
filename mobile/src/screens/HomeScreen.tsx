@@ -5,15 +5,15 @@ import { Header } from "../components/Header";
 import { COLORS, LAYOUT, TYPO } from "../theme/tokens";
 import { HText } from "../components/HText";
 import type { RootStackParamList } from "../navigation/types";
-import { formatDDMMM } from "../lib/dates";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/useAuth";
+import { computeNextEvent, formatNextEventLabel, type PetReminder } from "../utils/petLogic";
 
 export function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { profile } = useAuth();
-  const [nextEvent, setNextEvent] = useState<{ date: Date; reason: string } | null>(null);
+  const [nextEventLabel, setNextEventLabel] = useState<string>("—");
 
   const today = useMemo(() => {
     const d = new Date();
@@ -24,33 +24,39 @@ export function HomeScreen() {
   useEffect(() => {
     (async () => {
       if (!profile?.id) return;
-      const res = await supabase
-        .from("pets")
-        .select("id,name,dob,next_vaccination_reminder")
-        .eq("owner_id", profile.id)
-        .order("created_at", { ascending: false })
-        .limit(25);
-      if (res.error) return;
+      try {
+        const petsRes = await supabase
+          .from("pets")
+          .select("id,name,dob")
+          .eq("owner_id", profile.id)
+          .order("created_at", { ascending: false })
+          .limit(25);
+        if (petsRes.error) throw petsRes.error;
 
-      const candidates: { date: Date; reason: string }[] = [];
+        const todayISO = new Date().toISOString().slice(0, 10);
+        const remRes = await supabase
+          .from("reminders")
+          .select("id,pet_id,due_date,kind,reason")
+          .eq("owner_id", profile.id)
+          .gte("due_date", todayISO)
+          .order("due_date", { ascending: true })
+          .limit(200);
 
-      for (const p of res.data ?? []) {
-        if (p.next_vaccination_reminder) {
-          const d = new Date(p.next_vaccination_reminder);
-          if (d >= today) candidates.push({ date: d, reason: "Vaccination" });
+        // If the reminders table isn't deployed yet, degrade gracefully.
+        const reminders = (remRes.error ? [] : (remRes.data ?? [])) as PetReminder[];
+
+        let best: { date: Date; reasons: string[] } | null = null;
+        for (const p of petsRes.data ?? []) {
+          const petRem = reminders.filter((r) => r.pet_id === p.id);
+          const ev = computeNextEvent(p.dob, petRem);
+          if (!ev) continue;
+          if (!best || ev.date.getTime() < best.date.getTime()) best = ev;
         }
-        if (p.dob) {
-          const dob = new Date(p.dob);
-          const nextBday = new Date(today);
-          nextBday.setMonth(dob.getMonth());
-          nextBday.setDate(dob.getDate());
-          if (nextBday < today) nextBday.setFullYear(nextBday.getFullYear() + 1);
-          candidates.push({ date: nextBday, reason: "Birthday" });
-        }
+        setNextEventLabel(formatNextEventLabel(best));
+      } catch (e) {
+        console.warn("[Home] failed to compute next event", e);
+        setNextEventLabel("—");
       }
-
-      candidates.sort((a, b) => a.date.getTime() - b.date.getTime());
-      setNextEvent(candidates[0] ?? null);
     })();
   }, [profile?.id, today]);
 
@@ -74,7 +80,7 @@ export function HomeScreen() {
             Next Event
           </HText>
           <HText variant="meta" style={{ color: COLORS.brandSubtext, marginTop: 4 }}>
-            {nextEvent ? `${formatDDMMM(nextEvent.date)}, ${nextEvent.reason}` : "No upcoming events"}
+            {nextEventLabel === "—" ? "No upcoming events" : nextEventLabel}
           </HText>
         </View>
 

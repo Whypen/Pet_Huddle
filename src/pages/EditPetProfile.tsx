@@ -372,6 +372,29 @@ const EditPetProfile = () => {
         updated_at: new Date().toISOString(),
       };
 
+      // UAT: Next Event must pull from Supabase reminders table.
+      // Persist the "Next Vaccination Reminder" as a canonical reminder row for this pet.
+      const syncVaccinationReminder = async (targetPetId: string) => {
+        try {
+          const kind = "Vaccination";
+          // Delete the previous canonical record so we don't accumulate duplicates.
+          await supabase.from("reminders").delete().eq("pet_id", targetPetId).eq("kind", kind);
+
+          if (formData.next_vaccination_reminder) {
+            await supabase.from("reminders").insert({
+              owner_id: user.id,
+              pet_id: targetPetId,
+              kind,
+              reason: "Vaccination/ Check-up Reminder",
+              due_date: formData.next_vaccination_reminder,
+            });
+          }
+        } catch (e) {
+          // If the table isn't deployed yet, don't block pet save.
+          console.warn("[EditPetProfile] reminders sync failed", e);
+        }
+      };
+
       if (isNewPet) {
         const { error } = await supabase
           .from("pets")
@@ -383,6 +406,7 @@ const EditPetProfile = () => {
           });
 
         if (error) throw error;
+        await syncVaccinationReminder(finalPetId);
         toast.success(t("Pet added!"));
         await queryClient.invalidateQueries({ queryKey: ["pets"] });
       } else {
@@ -392,6 +416,7 @@ const EditPetProfile = () => {
           .eq("id", petId);
 
         if (error) throw error;
+        await syncVaccinationReminder(finalPetId);
         toast.success(t("Pet profile updated!"));
         await queryClient.invalidateQueries({ queryKey: ["pets"] });
       }

@@ -278,6 +278,39 @@ const Chats = () => {
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
 
+  // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
+  const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
+  const discoveryKey = useMemo(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `discovery_seen_${y}-${m}-${day}`;
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(discoveryKey);
+      const n = raw ? Number(raw) : 0;
+      setDiscoverySeenToday(Number.isFinite(n) ? n : 0);
+    } catch {
+      setDiscoverySeenToday(0);
+    }
+  }, [discoveryKey]);
+
+  const bumpDiscoverySeen = () => {
+    if (isPremium) return;
+    setDiscoverySeenToday((prev) => {
+      const next = prev + 1;
+      try {
+        localStorage.setItem(discoveryKey, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!profile?.dob) return;
     const birthDate = new Date(profile.dob);
@@ -711,11 +744,12 @@ const Chats = () => {
 
         {/* Discovery Cards (embedded in Chats) */}
       <section className="px-5 pb-4">
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
+        {/* UAT: swipe right for more filtering (horizontal scroll), snap to center */}
+        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory">
           <select
             value={discoveryRole}
             onChange={(e) => setDiscoveryRole(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
           >
             <option value="playdates">{t("Playdates")}</option>
             <option value="nannies">{t("Nannies")}</option>
@@ -724,7 +758,7 @@ const Chats = () => {
           <select
             value={discoverySpecies}
             onChange={(e) => setDiscoverySpecies(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
           >
             {discoverySpeciesOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -735,14 +769,14 @@ const Chats = () => {
           <select
             value={discoveryGender}
             onChange={(e) => setDiscoveryGender(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
           >
             <option value="Any">{t("Any Gender")}</option>
             {["Male", "Female", "Non-binary", "PNA"].map((gender) => (
               <option key={gender} value={gender}>{gender}</option>
             ))}
           </select>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9 snap-center">
             <span className="text-[10px] text-muted-foreground">{t("Age")}</span>
             <input
               type="number"
@@ -762,7 +796,7 @@ const Chats = () => {
               className="w-12 bg-transparent text-[10px] outline-none"
             />
           </div>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-9">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-9 snap-center">
             <span className="text-[10px] text-muted-foreground">{discoveryDistance}km</span>
             <input
               type="range"
@@ -773,7 +807,7 @@ const Chats = () => {
               className="w-24 accent-primary"
             />
           </div>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9 snap-center">
             <span className="text-[10px] text-muted-foreground">{t("Pet Size")}</span>
             <select
               value={discoveryPetSize}
@@ -788,14 +822,16 @@ const Chats = () => {
           </div>
         </div>
 
-        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
+        {/* UAT: profile cards horizontal scroll + snap to center; card width 80% screen */}
+        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4">
           {discoveryLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" />
               {t("Loading discovery...")}
             </div>
           )}
-          {discoverySource.map((p) => {
+          {discoverySource.map((p, idx) => {
+            const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
             const age = p?.dob
               ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
               : "";
@@ -817,8 +853,13 @@ const Chats = () => {
             return (
               <div
                 key={p.id}
-                className="min-w-[260px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer"
+                className={cn(
+                  "w-[80vw] max-w-[320px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer snap-center",
+                  blocked && "cursor-not-allowed"
+                )}
                 onClick={() => {
+                  if (blocked) return;
+                  bumpDiscoverySeen();
                   setSelectedDiscovery(p);
                   setActiveAlbumIndex(0);
                   setShowDiscoveryModal(true);
@@ -835,6 +876,8 @@ const Chats = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (blocked) return;
+                      bumpDiscoverySeen();
                       toast.success(t("Wave sent"));
                     }}
                     className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
@@ -844,6 +887,8 @@ const Chats = () => {
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
+                      if (blocked) return;
+                      bumpDiscoverySeen();
                       const ok = await checkStarsAvailable();
                       if (!ok) {
                         toast.error(t("Buy a star pack to immediately chat with the user"));
@@ -865,6 +910,7 @@ const Chats = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (blocked) return;
                       setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
                     }}
                     className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
@@ -880,6 +926,24 @@ const Chats = () => {
                   </div>
                   <div className="text-xs text-white/80 mt-1">{t("Pet")}: {petSpecies}</div>
                 </div>
+
+                {blocked ? (
+                  <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
+                    <div className="px-4 text-center">
+                      <div className="text-sm font-bold text-brandText">Unlock Premium to see more users</div>
+                      <div className="text-xs text-brandText/70 mt-2">Free users can view up to 40 profiles per day.</div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsPremiumOpen(true);
+                        }}
+                        className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
+                      >
+                        Explore Premium
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}

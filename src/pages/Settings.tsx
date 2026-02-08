@@ -1,1203 +1,275 @@
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronRight, Crown, FileText, HelpCircle, LogOut, Shield, User, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  User,
-  Shield,
-  Lock,
-  Fingerprint,
-  Smartphone,
-  Eye,
-  EyeOff,
-  MapPin,
-  Bell,
-  BellOff,
-  Globe,
-  Bug,
-  FileText,
-  Scale,
-  LogOut,
-  Trash2,
-  AlertTriangle,
-  ChevronRight,
-  Crown,
-  Check,
-  Loader2,
-  LifeBuoy,
-} from "lucide-react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { useAuth, useIsAdmin } from "@/contexts/AuthContext";
-import { useLanguage, Language } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useUpsell } from "@/hooks/useUpsell";
-import { UpsellModal } from "@/components/monetization/UpsellModal";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
-const languageOptions: { value: Language; labelKey: string }[] = [
-  { value: "en", labelKey: "language.english" },
-  { value: "zh-TW", labelKey: "language.zh_tw" },
-  { value: "zh-CN", labelKey: "language.zh_cn" },
-];
+type Card = "premium" | "gold";
 
-const Settings = () => {
+export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, profile, signOut, refreshProfile } = useAuth();
-  const isAdmin = useIsAdmin();
-  const { t, language, setLanguage } = useLanguage();
-  const { upsellModal, closeUpsellModal, buyAddOn, checkFamilySlotsAvailable } = useUpsell();
+  const { t } = useLanguage();
+  const { profile, signOut, user } = useAuth();
 
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showBugReport, setShowBugReport] = useState(false);
-  const [showPasswordChange, setShowPasswordChange] = useState(false);
-  const [showBiometricSetup, setShowBiometricSetup] = useState(false);
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteUserId, setInviteUserId] = useState("");
-  const [inviteError, setInviteError] = useState("");
-  const [pendingInvite, setPendingInvite] = useState<{ id: string; inviterId: string; inviterName: string } | null>(null);
-  const [familyMembers, setFamilyMembers] = useState<{ id: string; name: string }[]>([]);
-  const [familyExpanded, setFamilyExpanded] = useState(false);
-  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [legalOpen, setLegalOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
-  const [supportSending, setSupportSending] = useState(false);
-  const [bugDescription, setBugDescription] = useState("");
-  const [pressTimer, setPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [sending, setSending] = useState(false);
 
-  // Password change state
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordVerified, setPasswordVerified] = useState(false);
-  const [passwordLoading, setPasswordLoading] = useState(false);
+  const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
 
-  // Biometric setup state
-  const [biometricStep, setBiometricStep] = useState(0);
-  const [biometricLoading, setBiometricLoading] = useState(false);
-
-  // FINAL: ID Verification state
-  const [showIDUpload, setShowIDUpload] = useState(false);
-  const [idFile, setIDFile] = useState<File | null>(null);
-  const [idUploading, setIdUploading] = useState(false);
-
-  // Toggle states
-  const [biometric, setBiometric] = useState(false);
-  const [twoFactor, setTwoFactor] = useState(false);
-  const [nonSocial, setNonSocial] = useState(false);
-  const [hideFromMap, setHideFromMap] = useState(false);
-  const [pauseNotif, setPauseNotif] = useState(false);
-  const [socialNotif, setSocialNotif] = useState(true);
-  const [safetyNotif, setSafetyNotif] = useState(true);
-  const [aiNotif, setAiNotif] = useState(true);
-  const [emailNotif, setEmailNotif] = useState(true);
-
-  const isVerified = profile?.is_verified;
-  const profileAge = profile?.dob
-    ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-    : null;
-  const isMinor = profileAge !== null && profileAge >= 13 && profileAge < 16;
-  const isGold = profile?.tier === "gold";
-  const isPremium = profile?.tier === "premium" || profile?.tier === "gold";
-  const currentFamilyCount = familyMembers.length;
-  const availableFamilySlots = Math.max(0, (profile?.family_slots || 0) - currentFamilyCount);
-
-  // Handle pause all notifications
-  const handlePauseAll = (checked: boolean) => {
-    setPauseNotif(checked);
-    if (checked) {
-      setSocialNotif(false);
-      setSafetyNotif(false);
-      setAiNotif(false);
-      setEmailNotif(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut();
-    navigate("/auth");
-  };
-
-  const handleVersionPressStart = () => {
-    if (pressTimer) return;
-    const timer = setTimeout(async () => {
-      if (isAdmin) {
-        navigate("/admin/control-center");
-        return;
-      }
-      const versionText = "huddle v1.5";
-      try {
-        await navigator.clipboard.writeText(versionText);
-        toast.success(t("Version copied to clipboard"));
-      } catch {
-        toast.success(t("Version copied to clipboard"));
-      }
-    }, 3000);
-    setPressTimer(timer);
-  };
-
-  const handleVersionPressEnd = () => {
-    if (pressTimer) {
-      clearTimeout(pressTimer);
-      setPressTimer(null);
-    }
-  };
-
-  const handleInvite = async () => {
-    if (!user) return;
-    setInviteError("");
-    const trimmed = inviteUserId.trim();
-    if (!/^\d{10}$/.test(trimmed)) {
-      setInviteError(t("User ID must be 10 digits"));
-      return;
-    }
-    if (availableFamilySlots <= 0) {
-      await checkFamilySlotsAvailable();
-      return;
-    }
-    const { data: target, error } = await supabase
-      .from("profiles")
-      .select("id, display_name, user_id")
-      .eq("user_id", trimmed)
-      .maybeSingle();
-    if (error || !target) {
-      setInviteError(t("Invalid User ID"));
-      return;
-    }
-    if (target.id === user.id) {
-      setInviteError(t("You cannot invite yourself"));
-      return;
-    }
-    const { error: inviteError } = await supabase
-      .from("family_members")
-      .insert({
-        inviter_user_id: user.id,
-        invitee_user_id: target.id,
-        status: "pending",
-      });
-    if (inviteError) {
-      toast.error(inviteError.message || t("Failed to send invite"));
-      return;
-    }
-    toast.success(t("Invite sent"));
-    setShowInviteModal(false);
-    setInviteUserId("");
-  };
-
-  const loadFamily = async () => {
-    if (!user) return;
-    const { data: accepted } = await supabase
-      .from("family_members")
-      .select(
-        "id, inviter_user_id, invitee_user_id, profiles:profiles!family_members_invitee_user_id_fkey(display_name), inviter:profiles!family_members_inviter_user_id_fkey(display_name)"
-      )
-      .eq("status", "accepted")
-      .or(`inviter_user_id.eq.${user.id},invitee_user_id.eq.${user.id}`);
-    const mapped = (accepted || []).map((row: {
-      id: string;
-      inviter_user_id: string;
-      invitee_user_id: string;
-      profiles?: { display_name: string | null } | null;
-      inviter?: { display_name: string | null } | null;
-    }) => {
-      const name =
-        row.inviter_user_id === user.id ? row.profiles?.display_name : row.inviter?.display_name;
-      return { id: row.id, name: name || t("Unknown") };
-    });
-    setFamilyMembers(mapped);
-  };
-
-  const loadPendingInvite = async () => {
-    if (!user) return;
-    const { data: pending } = await supabase
-      .from("family_members")
-      .select("id, inviter_user_id, inviter:profiles!family_members_inviter_user_id_fkey(display_name)")
-      .eq("invitee_user_id", user.id)
-      .eq("status", "pending")
-      .maybeSingle();
-    if (pending) {
-      setPendingInvite({
-        id: pending.id,
-        inviterId: pending.inviter_user_id,
-        inviterName: pending.inviter?.display_name || t("User"),
-      });
-    }
-  };
-
-  const handleInviteDecision = async (decision: "accepted" | "declined") => {
-    if (!pendingInvite) return;
-    await supabase
-      .from("family_members")
-      .update({ status: decision })
-      .eq("id", pendingInvite.id);
-    setPendingInvite(null);
-    await loadFamily();
-  };
-
-  useEffect(() => {
-    loadFamily();
-    loadPendingInvite();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  const handleDeleteAccount = () => {
-    toast.success(t("Account deletion requested. You will receive a confirmation email."));
-    setShowDeleteConfirm(false);
-  };
-
-  const handleBugSubmit = () => {
-    if (!bugDescription.trim()) {
-      toast.error(t("Please describe the bug"));
-      return;
-    }
-    toast.success(t("Bug report submitted. Thank you!"));
-    setBugDescription("");
-    setShowBugReport(false);
-  };
-
-  const handleSupportSubmit = async () => {
-    if (!user) return;
-    if (!supportMessage.trim()) {
-      toast.error(t("Please enter your message"));
-      return;
-    }
-    setSupportSending(true);
+  const cardTap = (c: Card) => {
+    setActiveCard(c);
     try {
-      const { error } = await supabase.functions.invoke("support-request", {
-        body: {
-          userId: user.id,
-          subject: supportSubject,
-          message: supportMessage,
-          email: profile?.email || user.email,
-        },
+      navigator.vibrate?.(10);
+    } catch {
+      // ignore
+    }
+    navigate("/premium");
+  };
+
+  const initials = useMemo(() => {
+    const name = profile?.display_name || "User";
+    return name.trim().slice(0, 1).toUpperCase();
+  }, [profile?.display_name]);
+
+  const sendSupport = async () => {
+    if (!user?.id) return;
+    if (!supportMessage.trim()) return;
+    setSending(true);
+    try {
+      const { error } = await supabase.from("support_requests").insert({
+        user_id: user.id,
+        subject: supportSubject.trim() || null,
+        message: supportMessage.trim(),
+        email: user.email ?? null,
       });
       if (error) throw error;
-      toast.success(t("Support request sent"));
-      setShowSupportModal(false);
       setSupportSubject("");
       setSupportMessage("");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(message || t("Failed to send support request"));
+      setSupportOpen(false);
+    } catch (e) {
+      console.warn("[Settings] support request failed", e);
     } finally {
-      setSupportSending(false);
+      setSending(false);
     }
   };
 
-  // Password change flow
-  const handleVerifyPassword = async () => {
-    if (!currentPassword || !user?.email) return;
-
-    setPasswordLoading(true);
-    try {
-      // Attempt to sign in with current password to verify
-      const { error } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
-      });
-
-      if (error) {
-        toast.error(t("Current password is incorrect"));
-      } else {
-        setPasswordVerified(true);
-        toast.success(t("Password verified"));
-      }
-    } catch (error) {
-      toast.error(t("Failed to verify password"));
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    if (newPassword.length < 8) {
-      toast.error(t("Password must be at least 8 characters"));
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error(t("Passwords do not match"));
-      return;
-    }
-
-    setPasswordLoading(true);
-    try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
-
-      toast.success(t("Password updated successfully"));
-      setShowPasswordChange(false);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setPasswordVerified(false);
-    } catch (error) {
-      toast.error(t("Failed to update password"));
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  // Biometric setup flow (mock)
-  const handleBiometricSetup = async () => {
-    setShowBiometricSetup(true);
-    setBiometricStep(1);
-    setBiometricLoading(true);
-
-    // Step 1: Place finger - 2 seconds
-    await new Promise((r) => setTimeout(r, 2000));
-    setBiometricStep(2);
-
-    // Step 2: Scanning - 2 seconds
-    await new Promise((r) => setTimeout(r, 2000));
-    setBiometricStep(3);
-
-    // Step 3: Success - 1 second then close
-    await new Promise((r) => setTimeout(r, 1000));
-    setBiometricLoading(false);
-    setBiometric(true);
-    setShowBiometricSetup(false);
-    setBiometricStep(0);
-    toast.success(t("Biometric authentication enabled"));
-  };
+  const Row = ({ icon: Icon, label, onClick, gold }: { icon: React.ElementType; label: string; onClick: () => void; gold?: boolean }) => (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full h-10 min-h-[44px] rounded-[12px] border px-4 flex items-center justify-between bg-white",
+        gold ? "border-brandGold/50" : "border-brandText/15",
+      )}
+    >
+      <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+        <Icon className={cn("w-5 h-5", gold ? "text-brandGold" : "text-brandText/70")} />
+        {label}
+      </span>
+      <ChevronRight className="w-5 h-5 text-brandText/50" />
+    </button>
+  );
 
   return (
-    <div className="min-h-screen bg-background pb-28">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+    <div className="min-h-screen bg-background pb-nav">
+      <GlobalHeader />
 
-      {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h1 className="text-xl font-bold">{t("settings.account_settings")}</h1>
-      </header>
-
-      <div className="overflow-y-auto scrollbar-visible" style={{ maxHeight: "calc(100vh - 140px)" }}>
-        {/* User Header in Settings */}
-        <section className="p-4 border-b border-border">
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              {profile?.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt={t("Profile")}
-                  className="w-16 h-16 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-                  <User className="w-8 h-8 text-muted-foreground" />
-                </div>
-              )}
-              {/* Badge */}
-              <div
-                className={cn(
-                  "absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center",
-                  isGold
-                    ? "bg-gradient-to-r from-amber-400 to-amber-500"
-                    : isVerified
-                      ? "bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706]"
-                      : "bg-muted"
-                )}
-              >
-                {isGold ? (
-                  <Crown className="w-3.5 h-3.5 text-amber-900" />
-                ) : isVerified ? (
-                  <Shield className="w-3.5 h-3.5 text-white" />
-                ) : (
-                  <Shield className="w-3.5 h-3.5 text-muted-foreground" />
-                )}
-              </div>
-            </div>
-            <div className="flex-1">
-              <h2 className="font-semibold text-lg">{profile?.display_name || t("User")}</h2>
-              <p className="text-sm text-muted-foreground">
-                {isVerified ? t("settings.verified_badge") : t("settings.pending")}
-              </p>
-              <span
-                className={cn(
-                  "inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full",
-                  isPremium
-                    ? isGold
-                      ? "bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800"
-                      : "bg-primary/10 text-primary"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                {isPremium ? (isGold ? t("Gold") : t("Premium")) : t("Free")}
-              </span>
-              {!isVerified && (
-                <button
-                  onClick={() => navigate("/verify-identity")}
-                  className="mt-2 inline-flex items-center rounded-full bg-[#3283ff] px-3 py-1 text-xs font-semibold text-white hover:opacity-90"
-                >
-                  {t("Verify Identity")}
-                </button>
-              )}
-            </div>
-            <button
-              onClick={() => navigate("/edit-profile")}
-              className="p-2 rounded-full hover:bg-muted"
-            >
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-          </div>
-        </section>
-
-        {/* Family Section */}
-        <section className="p-4 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold">{t("Family")}</h3>
-              <p className="text-xs text-muted-foreground">
-                {availableFamilySlots > 0
-                  ? t("invite.slots_available").replace("{count}", String(availableFamilySlots))
-                  : t("invite.no_slots")}
-              </p>
-            </div>
-            <Button
-              onClick={async () => {
-                if (!isGold) {
-                  setIsPremiumOpen(true);
-                  return;
-                }
-                if (availableFamilySlots > 0) {
-                  setShowInviteModal(true);
-                } else {
-                  await checkFamilySlotsAvailable();
-                }
-              }}
-              disabled={!isGold}
+      {/* UAT: PREMIUM + GOLD BANNER sticky on scroll */}
+      <div className="sticky top-12 z-10 bg-background/95 backdrop-blur-sm border-b border-border/50">
+        <div className="px-4 pt-3 pb-4">
+          <div className="flex gap-3 overflow-x-auto scrollbar-hide snap-x snap-mandatory">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => cardTap("premium")}
               className={cn(
-                "px-4",
-                isGold ? "bg-[#A6D539] text-white hover:bg-[#A6D539]/90" : "bg-muted text-muted-foreground"
+                "snap-center flex-shrink-0 w-[80vw] max-w-[360px] aspect-[1.8/1] rounded-[16px] border bg-white p-4 shadow-sm text-left",
+                activeCard === "premium" ? "border-brandGold border-2" : "border-brandBlue/40"
               )}
             >
-              {t("Invite")}
-            </Button>
-          </div>
-          <button
-            onClick={() => setFamilyExpanded((prev) => !prev)}
-            className="mt-3 text-xs text-primary underline"
-          >
-            {familyExpanded ? t("Hide Family") : t("View Family")}
-          </button>
-          {familyExpanded && (
-            <div className="mt-3 space-y-2">
-              {familyMembers.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("No family members yet")}</p>
-              ) : (
-                familyMembers.map((m) => (
-                  <div key={m.id} className="text-sm text-muted-foreground">
-                    {m.name}
-                  </div>
-                ))
+              <div className="text-base font-bold text-brandText">Unlock Premium</div>
+              <div className="text-sm text-brandText/70 mt-1">Best for Pet Lovers</div>
+              <div className="mt-3 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2">
+                Explore <ChevronRight className="w-4 h-4" />
+              </div>
+            </motion.button>
+
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => cardTap("gold")}
+              className={cn(
+                "snap-center flex-shrink-0 w-[80vw] max-w-[360px] aspect-[1.8/1] rounded-[16px] border bg-white p-4 shadow-sm text-left relative",
+                activeCard === "gold" ? "border-brandGold border-2" : "border-brandGold/40"
               )}
-            </div>
-          )}
-          {!isGold && (
-            <div className="mt-3 rounded-xl border border-amber-300/60 bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-100 p-4 text-center">
-              <p className="text-sm font-semibold text-amber-800">{t("Upgrade to Gold for Family Sharing.")}</p>
-              <p className="text-xs text-amber-700 mt-1">{t("family.upsell_body")}</p>
-              <Button
-                onClick={() => navigate("/manage-subscription")}
-                size="sm"
-                className="mt-3 h-8 px-3 bg-[#3283ff] hover:bg-[#3283ff]/90"
-              >
-                {t("Upgrade to Gold")}
-              </Button>
-            </div>
-          )}
-        </section>
-
-        {/* Account & Security */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.account_security")}
-          </h3>
-          <div className="space-y-1">
-            <button
-              onClick={() => navigate("/edit-profile")}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
             >
-              <div className="flex items-center gap-3">
-                <User className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.personal_info")}</span>
+              <span className="absolute -top-3 left-4 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
+                Recommended
+              </span>
+              <div className="text-base font-bold text-brandText">Unlock Gold</div>
+              <div className="text-sm text-brandText/70 mt-1">Ultimate Experience</div>
+              <div className="mt-3 w-full rounded-lg bg-brandGold text-white font-bold py-2 flex items-center justify-center gap-2">
+                Explore <ChevronRight className="w-4 h-4" />
               </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <button
-              onClick={() => setShowPasswordChange(true)}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Lock className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.password")}</span>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            {/* FINAL: ID Verification Upload */}
-            <button
-              onClick={() => setShowIDUpload(true)}
-              className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Shield className="w-5 h-5 text-muted-foreground" />
-                <div className="text-left">
-                  <span className="font-medium block">{t("Identity Verification")}</span>
-                  {isMinor && (
-                    <span className="text-xs text-muted-foreground">{t("Verified as Minor")}</span>
-                  )}
-                  {profile?.verification_status === 'pending' && (
-                    <span className="text-xs text-warning">{t("Waiting for Approval")}</span>
-                  )}
-                  {profile?.verification_status === 'approved' && profile?.is_verified && (
-                    <span className="text-xs text-primary flex items-center gap-1">
-                      <Check className="w-3 h-3" /> {t("Verified")}
-                    </span>
-                  )}
-                  {profile?.verification_status === 'rejected' && (
-                    <span className="text-xs text-destructive">{t("Verification Rejected")}</span>
-                  )}
-                  {(!profile?.verification_status || profile?.verification_status === 'not_submitted') && (
-                    <span className="text-xs text-muted-foreground">{t("Upload ID/Passport")}</span>
-                  )}
-                  {profile?.verification_status === 'rejected' && profile?.verification_comment && (
-                    <span className="text-[11px] text-muted-foreground block">
-                      {t("Review Note")}: {profile.verification_comment}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <ChevronRight className="w-5 h-5 text-muted-foreground" />
-            </button>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <Fingerprint className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.biometric")}</span>
-              </div>
-              <Switch
-                checked={biometric}
-                onCheckedChange={(checked) => {
-                  if (checked) {
-                    handleBiometricSetup();
-                  } else {
-                    setBiometric(false);
-                  }
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <Smartphone className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">{t("settings.2fa")}</span>
-              </div>
-              <Switch checked={twoFactor} onCheckedChange={setTwoFactor} />
-            </div>
+            </motion.button>
           </div>
-        </section>
+        </div>
+      </div>
 
-        {/* Privacy */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.privacy")}
-          </h3>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <EyeOff className="w-5 h-5 text-muted-foreground" />
-                <div>
-                  <span className="font-medium">{t("Non-Social")}</span>
-                  <p className="text-xs text-muted-foreground">{t("Hide from social discovery")}</p>
-                </div>
-              </div>
-              <Switch checked={nonSocial} onCheckedChange={setNonSocial} />
-            </div>
-
-            <div className="flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <MapPin className="w-5 h-5 text-muted-foreground" />
-                <div>
-                  <span className="font-medium">{t("Hide from Map")}</span>
-                  <p className="text-xs text-muted-foreground">{t("Don't show my location")}</p>
-                </div>
-              </div>
-              <Switch checked={hideFromMap} onCheckedChange={setHideFromMap} />
-            </div>
-
-          </div>
-        </section>
-
-        {/* Notifications */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.notifications")}
-          </h3>
-          <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
-            {t("Notifications are disabled in this build.")}
-          </div>
-        </section>
-
-        {/* Language */}
-        <section className="p-4 border-b border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-            {t("settings.language")}
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            {languageOptions.map((option) => (
-              <button
-                key={option.value}
-                onClick={() => setLanguage(option.value)}
-                className={cn(
-                  "px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-2",
-                  language === option.value
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-              >
-                {language === option.value && <Check className="w-4 h-4" />}
-                {t(option.labelKey)}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Manage Subscription - moved out of settings */}
-        <section className="p-4 border-b border-border">
-          <button
-            onClick={() => navigate("/premium")}
-            className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
+      <div className="px-4 py-4 space-y-3">
+        {/* UAT: remove 'identity pending' status text; keep badge on avatar */}
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "w-14 h-14 rounded-full flex items-center justify-center font-bold text-brandText bg-muted border-2",
+              isVerified ? "border-brandGold" : "border-gray-300"
+            )}
+            aria-label="Avatar"
           >
-            <div className="flex items-center gap-3">
-              <Crown className="w-5 h-5 text-primary" />
-              <span className="font-medium">{t("Manage Subscription")}</span>
-            </div>
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </section>
+            {initials}
+          </div>
+          <div className="flex-1">
+            <div className="text-base font-bold text-brandText">{t("settings.title")}</div>
+            <div className="text-xs text-brandText/70">{t("Profile, account security, subscription, legal.")}</div>
+          </div>
+        </div>
 
-        {/* Help & Support */}
-        <section className="p-4 border-b border-border">
-          <button
-            onClick={() => setShowSupportModal(true)}
-            className="flex items-center justify-between w-full p-3 rounded-xl hover:bg-muted transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <LifeBuoy className="w-5 h-5 text-primary" />
-              <span className="font-medium">{t("Help & Support")}</span>
-            </div>
-            <ChevronRight className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </section>
-
-        {/* Danger Zone */}
-        <section className="p-4 border-b border-border">
+        {/* UAT Structure */}
+        <div className="pt-2">
+          <div className="text-xs font-bold text-brandText/70 mb-2">Profiles</div>
           <div className="space-y-2">
-            <button
-              className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive"
-              onClick={() => toast.warning(t("To deactivate, contact support@huddle.app"))}
-            >
-              <EyeOff className="w-5 h-5" />
-              <span className="font-medium">{t("settings.deactivate")}</span>
-            </button>
-
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-destructive/10 transition-colors text-destructive"
-            >
-              <Trash2 className="w-5 h-5" />
-              <span className="font-medium">{t("settings.delete")}</span>
-            </button>
+            <Row icon={User} label="Edit User Profile" onClick={() => navigate("/edit-profile")} />
+            <Row icon={User} label="Edit Pet Profile" onClick={() => navigate("/edit-pet-profile")} />
           </div>
-        </section>
+        </div>
 
-        {/* UAT: remove version string display */}
-      </div>
+        <div className="pt-2">
+          <div className="text-xs font-bold text-brandText/70 mb-2">Account Settings</div>
+          <div className="space-y-2">
+            <Row icon={Shield} label="Account Security" onClick={() => navigate("/settings")} />
+            <Row icon={Shield} label="Identity Verification" onClick={() => navigate("/verify-identity")} gold />
+          </div>
+        </div>
 
-      {/* Pinned Logout */}
-      <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border px-4 py-3 pb-safe">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-muted transition-colors"
-        >
-          <LogOut className="w-5 h-5 text-muted-foreground" />
-          <span className="font-medium">{t("settings.logout")}</span>
-        </button>
-      </div>
+        <div className="pt-2">
+          <div className="text-xs font-bold text-brandText/70 mb-2">Subscription</div>
+          <div className="space-y-2">
+            <Row icon={Crown} label="Choose Your Privileges" onClick={() => navigate("/premium")} gold />
+          </div>
+        </div>
 
-      {/* Modals */}
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
-      <UpsellModal
-        isOpen={upsellModal.isOpen}
-        type={upsellModal.type}
-        title={upsellModal.title}
-        description={upsellModal.description}
-        price={upsellModal.price}
-        onClose={closeUpsellModal}
-        onBuy={() => buyAddOn(upsellModal.type)}
-      />
-      {/* Invite Modal */}
-      <AnimatePresence>
-        {showInviteModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setShowInviteModal(false)}
+        <div className="pt-2">
+          <button
+            onClick={() => setLegalOpen((v) => !v)}
+            className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-sm bg-card rounded-2xl p-6"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="text-lg font-semibold mb-2">{t("Invite Family Member")}</h3>
-              <p className="text-xs text-muted-foreground mb-4">
-                {t("Enter a 10-digit User ID to invite a family member.")}
-              </p>
-              <Input
-                value={inviteUserId}
-                onChange={(e) => setInviteUserId(e.target.value.replace(/[^\d]/g, "").slice(0, 10))}
-                placeholder={t("Enter 10-digit User ID")}
-                className="mb-2"
-              />
-              {inviteError && <p className="text-xs text-red-500 mb-2">{inviteError}</p>}
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowInviteModal(false)} className="flex-1">
-                  {t("common.cancel")}
-                </Button>
-                <Button onClick={handleInvite} className="flex-1">
-                  {t("Invite")}
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+              <FileText className="w-5 h-5 text-brandText/70" />
+              Legal Information
+            </span>
+            <ChevronRight className={cn("w-5 h-5 text-brandText/50 transition-transform", legalOpen && "rotate-90")} />
+          </button>
+          {legalOpen ? (
+            <div className="mt-2 space-y-2">
+              <Row icon={FileText} label="Terms of Service" onClick={() => navigate("/terms")} />
+              <Row icon={FileText} label="Privacy Policy" onClick={() => navigate("/privacy")} />
+            </div>
+          ) : null}
+        </div>
 
-      {/* Pending Invite Modal */}
-      <Dialog open={!!pendingInvite} onOpenChange={() => setPendingInvite(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("Family Invitation")}</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {pendingInvite
-              ? `${pendingInvite.inviterName} ${t("has invited you to join their family!")}`
-              : ""}
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => handleInviteDecision("declined")}>
-              {t("Decline")}
-            </Button>
-            <Button onClick={() => handleInviteDecision("accepted")}>
-              {t("Accept")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <div className="pt-2">
+          <div className="text-xs font-bold text-brandText/70 mb-2">Help & Support</div>
+          <div className="space-y-2">
+            <Row icon={HelpCircle} label="Help & Support" onClick={() => setSupportOpen(true)} />
+          </div>
+        </div>
+
+        {/* UAT: Logout destructive */}
+        <div className="pt-2">
+          <button
+            onClick={async () => {
+              await signOut();
+              navigate("/auth");
+            }}
+            className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandError/30 px-4 flex items-center justify-between bg-white"
+          >
+            <span className="flex items-center gap-3 text-sm font-bold text-brandError">
+              <LogOut className="w-5 h-5" />
+              Logout
+            </span>
+            <ChevronRight className="w-5 h-5 text-brandError/70" />
+          </button>
+        </div>
+      </div>
 
       {/* Help & Support Modal */}
-      <Dialog open={showSupportModal} onOpenChange={setShowSupportModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("Help & Support")}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Input
-              value={supportSubject}
-              onChange={(e) => setSupportSubject(e.target.value)}
-              placeholder={t("Subject")}
-            />
-            <Textarea
-              value={supportMessage}
-              onChange={(e) => setSupportMessage(e.target.value)}
-              placeholder={t("Describe your issue")}
-              className="min-h-[120px]"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSupportModal(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={handleSupportSubmit} disabled={supportSending}>
-              {supportSending ? t("Sending...") : t("Submit")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Password Change Modal */}
       <AnimatePresence>
-        {showPasswordChange && (
+        {supportOpen ? (
           <>
             <motion.div
+              className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-50"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowPasswordChange(false)}
-              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+              onClick={() => setSupportOpen(false)}
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
-            >
-              <h2 className="text-lg font-bold mb-4">{t("Change Password")}</h2>
-
-              {!passwordVerified ? (
-                <>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    {t("First, verify your current password")}
-                  </p>
-                  <Input
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    placeholder={t("Current password")}
-                    className="mb-4"
-                  />
-                  <div className="flex gap-3">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setShowPasswordChange(false)}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      className="flex-1"
-                      onClick={handleVerifyPassword}
-                      disabled={passwordLoading || !currentPassword}
-                    >
-                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Verify")}
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground mb-4">{t("Enter your new password")}</p>
-                  <Input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder={t("New password (min 8 characters)")}
-                    className="mb-3"
-                  />
-                  <Input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder={t("Confirm new password")}
-                    className="mb-4"
-                  />
-                  <div className="flex gap-3">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setShowPasswordChange(false);
-                        setPasswordVerified(false);
-                      }}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      className="flex-1"
-                      onClick={handleChangePassword}
-                      disabled={passwordLoading || !newPassword || !confirmPassword}
-                    >
-                      {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Update")}
-                    </Button>
-                  </div>
-                </>
-              )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Biometric Setup Modal */}
-      <AnimatePresence>
-        {showBiometricSetup && (
-          <>
-            <motion.div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
             >
-              <h2 className="text-lg font-bold mb-6 text-center">{t("Biometric Setup")}</h2>
-
-              {/* Progress Stepper */}
-              <div className="flex justify-center gap-2 mb-6">
-                {[1, 2, 3].map((step) => (
-                  <div
-                    key={step}
+              <motion.div
+                className="w-full max-w-sm bg-white rounded-2xl border border-brandText/15 shadow-elevated p-5"
+                initial={{ scale: 0.98, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.98, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-base font-bold text-brandText">Help & Support</div>
+                  <button onClick={() => setSupportOpen(false)} className="p-2 rounded-full hover:bg-muted">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="mt-3 space-y-3">
+                  <Input
+                    value={supportSubject}
+                    onChange={(e) => setSupportSubject(e.target.value)}
+                    placeholder="Subject (optional)"
+                  />
+                  <textarea
+                    value={supportMessage}
+                    onChange={(e) => setSupportMessage(e.target.value)}
+                    placeholder="Describe your issue"
+                    className="w-full min-h-[120px] rounded-[12px] border border-brandText/40 bg-white px-3 py-2 text-sm text-brandText placeholder:italic placeholder:text-gray-500/60 focus:outline-none focus:border-brandBlue focus:shadow-sm"
+                  />
+                  <button
+                    disabled={sending || !supportMessage.trim()}
+                    onClick={sendSupport}
                     className={cn(
-                      "w-3 h-3 rounded-full transition-all",
-                      biometricStep >= step ? "bg-primary" : "bg-muted"
+                      "w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2",
+                      (sending || !supportMessage.trim()) && "opacity-50"
                     )}
-                  />
-                ))}
-              </div>
-
-              <div className="text-center">
-                <div className="w-24 h-24 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
-                  {biometricStep === 3 ? (
-                    <Check className="w-12 h-12 text-accent" />
-                  ) : (
-                    <Fingerprint className="w-12 h-12 text-primary" />
-                  )}
-                </div>
-
-                <p className="font-medium">
-                  {biometricStep === 1 && t("Place your finger on the sensor")}
-                  {biometricStep === 2 && t("Scanning...")}
-                  {biometricStep === 3 && t("Success!")}
-                </p>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {biometricStep === 1 && t("Touch the fingerprint sensor")}
-                  {biometricStep === 2 && t("Keep your finger steady")}
-                  {biometricStep === 3 && t("Biometric authentication enabled")}
-                </p>
-
-                {biometricLoading && biometricStep < 3 && (
-                  <Loader2 className="w-6 h-6 animate-spin mx-auto mt-4 text-primary" />
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowDeleteConfirm(false)}
-              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
-            >
-              <div className="text-center mb-4">
-                <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
-                  <AlertTriangle className="w-8 h-8 text-destructive" />
-                </div>
-                <h2 className="text-lg font-bold mb-2">{t("settings.delete")}?</h2>
-                <p className="text-sm text-muted-foreground">
-                  {t("This action cannot be undone. All your data will be permanently deleted.")}
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => setShowDeleteConfirm(false)}
-                >
-                  {t("common.cancel")}
-                </Button>
-                <Button variant="destructive" className="flex-1" onClick={handleDeleteAccount}>
-                  {t("common.delete")}
-                </Button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Bug Report Modal */}
-      <AnimatePresence>
-        {showBugReport && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowBugReport(false)}
-              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-sm mx-auto bg-card rounded-2xl p-6 z-50 shadow-elevated"
-            >
-              <h2 className="text-lg font-bold mb-4">{t("settings.report_bug")}</h2>
-              <Textarea
-                value={bugDescription}
-                onChange={(e) => setBugDescription(e.target.value)}
-                placeholder={t("Describe the issue...")}
-                className="min-h-[120px] mb-4"
-              />
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1" onClick={() => setShowBugReport(false)}>
-                  {t("common.cancel")}
-                </Button>
-                <Button className="flex-1" onClick={handleBugSubmit}>
-                  {t("Submit")}
-                </Button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* FINAL: ID Upload Modal */}
-      <AnimatePresence>
-        {showIDUpload && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowIDUpload(false)}
-              className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-4 md:inset-auto md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-md bg-card rounded-2xl p-6 z-50 flex flex-col gap-4"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">{t("Identity Verification")}</h3>
-                <button onClick={() => setShowIDUpload(false)} className="p-2 rounded-full hover:bg-muted">
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  {t("Upload a government-issued ID or passport for review. Approval typically takes 24-48 hours.")}
-                </p>
-
-                {profile?.verification_status === 'pending' && (
-                  <div className="p-4 rounded-xl bg-warning/10 border border-warning/20">
-                    <p className="text-sm text-warning font-medium">{t("⏳ Waiting for Approval")}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{t("Your ID is under review")}</p>
+                  >
+                    {sending ? "Sending..." : "Submit"}
+                  </button>
+                  <div className="text-[10px] text-brandText/70">
+                    Your message is sent to the admin team for review.
                   </div>
-                )}
-
-                {profile?.verification_status === "approved" && profile?.is_verified && (
-                  <div className="p-4 rounded-xl bg-primary/10 border border-primary/20">
-                    <p className="text-sm text-primary font-medium flex items-center gap-2">
-                      <Check className="w-4 h-4" /> {t("Verified Huddler")}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">{t("Your identity is verified")}</p>
-                  </div>
-                )}
-
-                {(!profile?.verification_status || profile?.verification_status === 'not_submitted' || profile?.verification_status === 'rejected') && (
-                  <>
-                    <label className="block cursor-pointer">
-                      <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors">
-                        <Shield className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
-                        <p className="text-sm font-medium mb-1">
-                          {idFile ? idFile.name : t("Click to upload ID/Passport")}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{t("PNG, JPG, PDF up to 10MB")}</p>
-                      </div>
-                      <input
-                        type="file"
-                        accept="image/*,.pdf"
-                        onChange={(e) => setIDFile(e.target.files?.[0] || null)}
-                        className="hidden"
-                      />
-                    </label>
-
-                    <Button
-                      onClick={async () => {
-                        if (!idFile || !user) return;
-                        setIdUploading(true);
-                        try {
-                          const fileExt = idFile.name.split('.').pop();
-                          const fileName = `${user.id}/id-${Date.now()}.${fileExt}`;
-
-                          const { error: uploadError } = await supabase.storage
-                            .from('verification')
-                            .upload(fileName, idFile);
-
-                          if (uploadError) throw uploadError;
-
-                          const { data: { publicUrl } } = supabase.storage
-                            .from('verification')
-                            .getPublicUrl(fileName);
-
-                          const { error: updateError } = await supabase
-                            .from('profiles')
-                            .update({
-                              verification_document_url: publicUrl,
-                              verification_status: 'pending'
-                            })
-                            .eq('id', user.id);
-
-                          if (updateError) throw updateError;
-
-                          await refreshProfile();
-                          toast.success(t("ID uploaded! Waiting for approval"));
-                          setShowIDUpload(false);
-                          setIDFile(null);
-                        } catch (error: unknown) {
-                          const message = error instanceof Error ? error.message : String(error);
-                          toast.error(message || t("Upload failed"));
-                        } finally {
-                          setIdUploading(false);
-                        }
-                      }}
-                      disabled={!idFile || idUploading}
-                      className="w-full"
-                    >
-                      {idUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Upload & Submit")}
-                    </Button>
-                  </>
-                )}
-              </div>
+                </div>
+              </motion.div>
             </motion.div>
           </>
-        )}
+        ) : null}
       </AnimatePresence>
-      <div className="px-4 py-6 text-center text-xs text-muted-foreground select-none">
-        <span
-          onMouseDown={handleVersionPressStart}
-          onMouseUp={handleVersionPressEnd}
-          onMouseLeave={handleVersionPressEnd}
-          onTouchStart={handleVersionPressStart}
-          onTouchEnd={handleVersionPressEnd}
-          className="inline-block"
-        >
-          huddle v1.5
-        </span>
-      </div>
     </div>
   );
-};
+}
 
-export default Settings;

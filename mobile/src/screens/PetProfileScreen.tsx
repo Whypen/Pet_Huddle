@@ -105,10 +105,47 @@ export function PetProfileScreen() {
       if (mode === "add") {
         const ins = await supabase.from("pets").insert(payload).select("id").maybeSingle();
         if (ins.error) throw ins.error;
+        const petId = ins.data?.id;
+        if (petId) {
+          try {
+            // UAT: Next Event must pull from reminders table.
+            const kind = values.reminderType === "Others" ? (values.reminderOther || "Reminder") : values.reminderType;
+            await supabase.from("reminders").delete().eq("pet_id", petId).eq("kind", kind);
+            if (values.reminderDate) {
+              await supabase.from("reminders").insert({
+                owner_id: profile.id,
+                pet_id: petId,
+                kind,
+                reason: "Vaccination/ Check-up Reminder",
+                due_date: values.reminderDate.toISOString().slice(0, 10),
+              });
+            }
+          } catch (e) {
+            console.warn("[PetProfile] reminders sync failed", e);
+          }
+        }
       } else {
         // For edit mode we would need a pet id; for now treat as add-like.
         const ins = await supabase.from("pets").insert(payload).select("id").maybeSingle();
         if (ins.error) throw ins.error;
+        const petId = ins.data?.id;
+        if (petId) {
+          try {
+            const kind = values.reminderType === "Others" ? (values.reminderOther || "Reminder") : values.reminderType;
+            await supabase.from("reminders").delete().eq("pet_id", petId).eq("kind", kind);
+            if (values.reminderDate) {
+              await supabase.from("reminders").insert({
+                owner_id: profile.id,
+                pet_id: petId,
+                kind,
+                reason: "Vaccination/ Check-up Reminder",
+                due_date: values.reminderDate.toISOString().slice(0, 10),
+              });
+            }
+          } catch (e) {
+            console.warn("[PetProfile] reminders sync failed", e);
+          }
+        }
       }
 
       Alert.alert(mode === "add" ? "Pet added" : "Pet updated", "Saved to Supabase.");
