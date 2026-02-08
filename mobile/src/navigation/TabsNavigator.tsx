@@ -4,6 +4,7 @@ import { COLORS, LAYOUT } from "../theme/tokens";
 import type { TabsParamList } from "./types";
 import { HomeScreen } from "../screens/HomeScreen";
 import { ChatsScreen } from "../screens/ChatsScreen";
+import { MapScreen } from "../screens/MapScreen";
 import { PremiumScreen } from "../screens/PremiumScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 
@@ -27,6 +28,7 @@ export function TabsNavigator() {
           let icon: keyof typeof Ionicons.glyphMap = "home";
           if (route.name === "Pet") icon = "paw";
           if (route.name === "Chats") icon = "chatbubbles";
+          if (route.name === "Map") icon = "map";
           if (route.name === "Premium") icon = "diamond";
           if (route.name === "Settings") icon = "settings";
           return <Ionicons name={icon} size={s} color={c} />;
@@ -35,9 +37,9 @@ export function TabsNavigator() {
     >
       <Tab.Screen name="Pet" component={HomeScreen} />
       <Tab.Screen name="Chats" component={ChatsScreen} />
+      <Tab.Screen name="Map" component={MapScreen} />
       <Tab.Screen name="Premium" component={PremiumScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
-

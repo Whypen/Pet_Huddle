@@ -26,6 +26,7 @@ import Premium from "./pages/Premium";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import Notifications from "./pages/Notifications";
 import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/VerifyIdentity";
 import AdminDisputes from "./screens/AdminDisputes";
@@ -145,6 +146,17 @@ const App = () => (
                       <ProtectedRoute>
                         <div className="max-w-md mx-auto min-h-screen bg-background relative">
                           <Map />
+                          <BottomNav />
+                        </div>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/notifications"
+                    element={
+                      <ProtectedRoute>
+                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                          <Notifications />
                           <BottomNav />
                         </div>
                       </ProtectedRoute>

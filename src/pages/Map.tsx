@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   AlertTriangle, 
@@ -10,7 +10,6 @@ import {
   Loader2,
   Camera,
   Phone,
-  Navigation,
   Hospital,
   MapPin,
   Star
@@ -62,10 +61,26 @@ interface MapAlert {
   support_count: number;
   report_count: number;
   created_at: string;
+  expires_at?: string | null;
+  range_meters?: number | null;
   creator: {
     display_name: string | null;
     avatar_url: string | null;
   } | null;
+}
+
+interface FriendPin {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  dob: string | null;
+  relationship_status: string | null;
+  owns_pets: boolean | null;
+  pet_species: string[] | null;
+  location_name: string | null;
+  last_lat: number | null;
+  last_lng: number | null;
+  location_pinned_until: string | null;
 }
 
 interface VetClinic {
@@ -81,6 +96,22 @@ interface VetClinic {
   is24h: boolean;
 }
 
+type MapAlertsNearbyRow = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  alert_type: string;
+  description: string | null;
+  photo_url: string | null;
+  support_count: number | null;
+  report_count: number | null;
+  created_at: string;
+  expires_at: string | null;
+  range_meters: number | null;
+  creator_display_name: string | null;
+  creator_avatar_url: string | null;
+};
+
 const Map = () => {
   const { user, profile } = useAuth();
   const { t } = useLanguage();
@@ -91,8 +122,11 @@ const Map = () => {
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [mapTab, setMapTab] = useState<"Event" | "Friends">("Event");
+  const [visibleEnabled, setVisibleEnabled] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
   const [alerts, setAlerts] = useState<MapAlert[]>([]);
+  const [friendPins, setFriendPins] = useState<FriendPin[]>([]);
   const [vetClinics, setVetClinics] = useState<VetClinic[]>([]);
   const [loading, setLoading] = useState(true);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -106,6 +140,7 @@ const Map = () => {
   const [selectedAlert, setSelectedAlert] = useState<MapAlert | null>(null);
   const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
   const [selectedFriend, setSelectedFriend] = useState<DemoUser | null>(null);
+  const [selectedFriendPin, setSelectedFriendPin] = useState<FriendPin | null>(null);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
   const [pinning, setPinning] = useState(false);
   const [manualLat, setManualLat] = useState("");
@@ -119,10 +154,46 @@ const Map = () => {
   const [premiumFooterReason, setPremiumFooterReason] = useState<string>("broadcast_alert");
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
+  const profileRec = useMemo(() => {
+    if (profile && typeof profile === "object") return profile as Record<string, unknown>;
+    return null;
+  }, [profile]);
+
+  // Contract: broadcast creation dropdown gates (base vs add-on extended).
+  const [selectedRangeKm, setSelectedRangeKm] = useState<number | null>(null);
+  const [selectedDurationH, setSelectedDurationH] = useState<number | null>(null);
+  const [postOnThreads, setPostOnThreads] = useState(false);
+  const [extrasBroadcasts, setExtrasBroadcasts] = useState<number>(0);
+
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
   // Contract override: Broadcast radius (km): Free 10, Premium 25, Gold 50.
   const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
+  const viewRadiusMeters = 50000; // Contract: Map view limited to 50km
+
+  useEffect(() => {
+    const mv = profileRec ? profileRec["map_visible"] : null;
+    setVisibleEnabled(typeof mv === "boolean" ? mv : false);
+  }, [profileRec]);
+
+  const isPinned = useMemo(() => {
+    const until = profileRec ? profileRec["location_pinned_until"] : null;
+    if (typeof until !== "string") return false;
+    return new Date(until).getTime() > Date.now();
+  }, [profileRec]);
+
+  const loadQuotaSnapshot = useCallback(async () => {
+    if (!user) return;
+    const res = await supabase.rpc("get_quota_snapshot");
+    if (res.error) return;
+    const d = res.data && typeof res.data === "object" ? (res.data as Record<string, unknown>) : null;
+    const b = Number(d ? d["extras_broadcasts"] : 0);
+    setExtrasBroadcasts(Number.isFinite(b) ? b : 0);
+  }, [user]);
+
+  useEffect(() => {
+    void loadQuotaSnapshot();
+  }, [loadQuotaSnapshot]);
 
   useEffect(() => {
     if (searchParams.get("mode") === "broadcast") {
@@ -146,6 +217,11 @@ const Map = () => {
       toast.error(t("Geolocation is not supported on this device"));
       return;
     }
+    // Legal: explicit consent for location use on maps/alerts only (data minimization).
+    const ok = window.confirm(
+      "We use your location for maps and broadcast alerts only. Your pin is visible for 2 hours and retained for 12 hours to deliver alerts. Continue?"
+    );
+    if (!ok) return;
     setPinning(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -159,17 +235,20 @@ const Map = () => {
         const lng = pos.coords.longitude;
         setUserLocation({ lat, lng });
         const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-        const retentionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        const retentionExpires = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
         setPinExpiresAt(pinExpires);
         setRetentionExpiresAt(retentionExpires);
         if (user) {
+          // Contract: visible toggle implies consent for friend visibility while pinned.
+          await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
           await supabase.rpc("set_user_location", {
             p_lat: lat,
             p_lng: lng,
             p_pin_hours: 2,
-            p_retention_hours: 24,
+            p_retention_hours: 12,
           });
         }
+        setVisibleEnabled(true);
         setPinning(false);
       },
       () => {
@@ -177,6 +256,49 @@ const Map = () => {
         setPinning(false);
       }
     );
+  };
+
+  const handleUnpinMyLocation = async () => {
+    if (!user) {
+      toast.error(t("Please login to pin location"));
+      return;
+    }
+    const ok = window.confirm("Unpin my location? This will immediately stop showing you on the Friends map tab.");
+    if (!ok) return;
+    setPinExpiresAt(null);
+    setRetentionExpiresAt(null);
+    setUserLocation(null);
+    const res = await supabase
+      .from("profiles")
+      .update({
+        map_visible: false,
+        location_pinned_until: null,
+        location_retention_until: null,
+        last_lat: null,
+        last_lng: null,
+        location: null,
+        location_geog: null,
+      } as Record<string, unknown>)
+      .eq("id", user.id);
+    if (res.error) {
+      toast.error(t("Failed to unpin location"));
+      return;
+    }
+    setVisibleEnabled(false);
+    toast.success("Unpinned");
+  };
+
+  const toggleVisible = async () => {
+    if (!user) {
+      toast.error(t("Please login to enable visibility"));
+      return;
+    }
+    if (!visibleEnabled) {
+      // Turning on visibility: we pin now to match the contract behavior on web.
+      handlePinMyLocation();
+      return;
+    }
+    await handleUnpinMyLocation();
   };
 
   const handleManualPin = async () => {
@@ -188,17 +310,19 @@ const Map = () => {
     }
     setUserLocation({ lat, lng });
     const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    const retentionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const retentionExpires = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
     setPinExpiresAt(pinExpires);
     setRetentionExpiresAt(retentionExpires);
     if (user) {
+      await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
       await supabase.rpc("set_user_location", {
         p_lat: lat,
         p_lng: lng,
         p_pin_hours: 2,
-        p_retention_hours: 24,
+        p_retention_hours: 12,
       });
     }
+    setVisibleEnabled(true);
   };
 
   // Fetch HK Vet Clinics from Google Places (via Edge Function)
@@ -346,8 +470,12 @@ const Map = () => {
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
 
-    // Add vet clinic markers
-    if (activeFilter === "all") {
+    // Contract: Tabs. Event shows vets + alerts. Friends shows user pins only.
+    const showEvent = mapTab === "Event";
+    const showFriends = mapTab === "Friends";
+
+    // Add vet clinic markers (Event tab only)
+    if (showEvent && activeFilter === "all") {
       vetClinics.forEach((vet) => {
         // SPRINT 1: Null-check for lng/lat to prevent crash
         if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) {
@@ -396,15 +524,24 @@ const Map = () => {
       });
     }
 
-    // Add friend markers
-    if (activeFilter === "all" || activeFilter === "Friends") {
-      demoUsers.forEach((friend) => {
-        if (!friend.location?.lng || !friend.location?.lat ||
-            isNaN(friend.location.lng) || isNaN(friend.location.lat)) {
-          console.warn("Invalid user coordinates:", friend);
-          return;
-        }
+    // Add friend pins (Friends tab only). Fallback to demo users if none (contract: demo pins).
+    if (showFriends) {
+      const pins: Array<{ id: string; name: string; lat: number; lng: number }> = [];
+      friendPins.forEach((p) => {
+        if (typeof p.last_lng !== "number" || typeof p.last_lat !== "number") return;
+        pins.push({ id: p.id, name: p.display_name || "Friend", lat: p.last_lat, lng: p.last_lng });
+      });
+      if (pins.length === 0) {
+        demoUsers.slice(0, 10).forEach((friend) => {
+          if (!friend.location?.lng || !friend.location?.lat ||
+              isNaN(friend.location.lng) || isNaN(friend.location.lat)) {
+            return;
+          }
+          pins.push({ id: friend.id, name: friend.name, lat: friend.location.lat, lng: friend.location.lng });
+        });
+      }
 
+      pins.forEach((friend) => {
         const el = document.createElement("div");
         el.className = "user-marker";
         el.innerHTML = `
@@ -427,62 +564,73 @@ const Map = () => {
           </div>
         `;
 
-        el.addEventListener("click", () => setSelectedFriend(friend));
+        el.addEventListener("click", () => {
+          const demo = demoUsers.find((d) => d.id === friend.id);
+          if (demo) {
+            setSelectedFriend(demo);
+            return;
+          }
+          const pin = friendPins.find((p) => p.id === friend.id);
+          if (pin) setSelectedFriendPin(pin);
+        });
 
         const marker = new mapboxgl.Marker(el)
-          .setLngLat([friend.location.lng, friend.location.lat])
+          .setLngLat([friend.lng, friend.lat])
           .addTo(map.current!);
         markersRef.current.push(marker);
       });
     }
 
-    // Add demo alert markers
-    const filteredDemoAlerts = demoAlerts.filter((alert) => {
-      if (activeFilter === "all") return true;
-      return alert.type.toLowerCase() === activeFilter.toLowerCase();
-    });
+    // Add demo alert markers (Event tab only, contract: demo pins).
+    if (showEvent) {
+      const filteredDemoAlerts = demoAlerts.filter((alert) => {
+        if (activeFilter === "all") return true;
+        return alert.type.toLowerCase() === activeFilter.toLowerCase();
+      });
 
-    filteredDemoAlerts.forEach((alert) => {
-      // SPRINT 1: Null-check for alert location coordinates
-      if (!alert.location?.lng || !alert.location?.lat ||
-          isNaN(alert.location.lng) || isNaN(alert.location.lat)) {
-        console.warn("Invalid demo alert coordinates:", alert);
-        return;
-      }
+      filteredDemoAlerts.slice(0, 10).forEach((alert) => {
+        // SPRINT 1: Null-check for alert location coordinates
+        if (!alert.location?.lng || !alert.location?.lat ||
+            isNaN(alert.location.lng) || isNaN(alert.location.lat)) {
+          return;
+        }
 
-      const color = alertTypeColors[alert.type] || "#a1a4a9";
-      const el = document.createElement("div");
-      el.className = "demo-alert-marker";
-      el.innerHTML = `
-        <div style="
-          width: 36px;
-          height: 36px;
-          background-color: ${color};
-          border-radius: 50%;
-          border: 3px solid white;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          ${alert.type === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
-        ">
-          <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
-        </div>
-      `;
+        const color = alertTypeColors[alert.type] || "#a1a4a9";
+        const el = document.createElement("div");
+        el.className = "demo-alert-marker";
+        el.innerHTML = `
+          <div style="
+            width: 36px;
+            height: 36px;
+            background-color: ${color};
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            ${alert.type === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
+          ">
+            <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
+          </div>
+        `;
 
-      const marker = new mapboxgl.Marker(el)
-        .setLngLat([alert.location.lng, alert.location.lat])
-        .addTo(map.current!);
-      markersRef.current.push(marker);
-    });
+        const marker = new mapboxgl.Marker(el)
+          .setLngLat([alert.location.lng, alert.location.lat])
+          .addTo(map.current!);
+        markersRef.current.push(marker);
+      });
+    }
 
     // Add real alerts from database
-    const filteredAlerts = alerts.filter((alert) => {
-      if (hiddenAlerts.has(alert.id)) return false;
-      if (activeFilter === "all") return true;
-      return alert.alert_type === activeFilter;
-    });
+    const filteredAlerts = showEvent
+      ? alerts.filter((alert) => {
+          if (hiddenAlerts.has(alert.id)) return false;
+          if (activeFilter === "all") return true;
+          return alert.alert_type === activeFilter;
+        })
+      : [];
 
     filteredAlerts.forEach((alert) => {
       // SPRINT 1: Critical null-check for database alert coordinates
@@ -526,28 +674,87 @@ const Map = () => {
 
       markersRef.current.push(marker);
     });
-  }, [alerts, activeFilter, hiddenAlerts, mapLoaded, vetClinics]);
+  }, [alerts, activeFilter, friendPins, hiddenAlerts, mapLoaded, mapTab, vetClinics]);
 
   const fetchAlerts = async () => {
     try {
-      const { data, error } = await supabase
-        .from("map_alerts")
-        .select(`
-          id, latitude, longitude, alert_type, description, photo_url,
-          support_count, report_count, created_at,
-          creator:profiles!map_alerts_creator_id_fkey(display_name, avatar_url)
-        `)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setAlerts(data || []);
+      const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
+      const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
+      if (lat != null && lng != null) {
+        const { data, error } = await supabase.rpc("get_map_alerts_nearby", {
+          p_lat: lat,
+          p_lng: lng,
+          p_radius_m: viewRadiusMeters,
+        });
+        if (error) throw error;
+        const mapped = (Array.isArray(data) ? (data as MapAlertsNearbyRow[]) : []).map((row) => ({
+          id: row.id,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          alert_type: row.alert_type,
+          description: row.description,
+          photo_url: row.photo_url,
+          support_count: row.support_count ?? 0,
+          report_count: row.report_count ?? 0,
+          created_at: row.created_at,
+          creator: { display_name: row.creator_display_name, avatar_url: row.creator_avatar_url },
+          expires_at: row.expires_at,
+          range_meters: row.range_meters,
+        }));
+        setAlerts(mapped);
+      } else {
+        // Fallback: no user location yet
+        const { data, error } = await supabase
+          .from("map_alerts")
+          .select(`
+            id, latitude, longitude, alert_type, description, photo_url,
+            support_count, report_count, created_at,
+            creator:profiles!map_alerts_creator_id_fkey(display_name, avatar_url)
+          `)
+          .eq("is_active", true)
+          .lt("report_count", 10)
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (error) throw error;
+        setAlerts(data || []);
+      }
     } catch (error) {
       console.error("Error fetching alerts:", error);
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchFriendPins = async () => {
+    try {
+      if (!user) {
+        setFriendPins([]);
+        return;
+      }
+      if (!visibleEnabled) {
+        setFriendPins([]);
+        return;
+      }
+      const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
+      const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
+      if (lat == null || lng == null) return;
+      const { data, error } = await supabase.rpc("get_friend_pins_nearby", {
+        p_lat: lat,
+        p_lng: lng,
+        p_radius_m: viewRadiusMeters,
+      });
+      if (error) throw error;
+      setFriendPins((Array.isArray(data) ? data : []) as FriendPin[]);
+    } catch (e) {
+      console.warn("[Map] fetchFriendPins failed", e);
+      setFriendPins([]);
+    }
+  };
+
+  useEffect(() => {
+    if (mapTab !== "Friends") return;
+    void fetchFriendPins();
+  }, [mapTab, visibleEnabled, userLocation?.lat, userLocation?.lng, profile?.last_lat, profile?.last_lng]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -564,14 +771,6 @@ const Map = () => {
   const handleCreateAlert = async () => {
     if (!user || !selectedLocation) {
       toast.error(t("Please select a location on the map"));
-      return;
-    }
-    const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
-      action_type: "broadcast_alert",
-    });
-    if (allowed === false) {
-      setPremiumFooterReason("broadcast_alert");
-      setIsPremiumFooterOpen(true);
       return;
     }
 
@@ -597,21 +796,58 @@ const Map = () => {
         photoUrl = publicUrl;
       }
 
-      const { error } = await supabase.from("map_alerts").insert({
+      const rangeKm = selectedRangeKm ?? broadcastRange;
+      const durH = selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
+      const expiresAt = new Date(Date.now() + durH * 60 * 60 * 1000).toISOString();
+
+      const { data: inserted, error } = await supabase
+        .from("map_alerts")
+        .insert({
         creator_id: user.id,
         latitude: selectedLocation.lat,
         longitude: selectedLocation.lng,
         alert_type: alertType,
         description: description.trim() || null,
         photo_url: photoUrl,
-      });
+        range_meters: Math.round(rangeKm * 1000),
+        expires_at: expiresAt,
+      })
+        .select("id")
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        const errObj = (typeof error === "object" && error !== null) ? (error as Record<string, unknown>) : null;
+        const msg = typeof (errObj?.message) === "string" ? (errObj.message as string) : "";
+        if (msg.includes("quota_exceeded")) {
+          setPremiumFooterReason("broadcast_alert");
+          setIsPremiumFooterOpen(true);
+          return;
+        }
+        throw error;
+      }
 
       toast.success(t("Alert broadcasted!"));
 
+      // Contract: optional "Post on Threads" (best-effort).
+      if (postOnThreads) {
+        const quota = await supabase.rpc("check_and_increment_quota", { action_type: "thread_post" });
+        if (quota.data === true) {
+          await supabase.from("threads").insert({
+            user_id: user.id,
+            title: `Broadcast (${alertType})`,
+            content: description.trim() || "",
+            tags: ["News"],
+            hashtags: [],
+            images: photoUrl ? [photoUrl] : [],
+          });
+        } else {
+          toast.info("Thread post limit reached. Your broadcast is still live.");
+        }
+      }
+
       resetCreateForm();
       fetchAlerts();
+      void loadQuotaSnapshot();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       toast.error(message || t("map.create_alert_failed"));
@@ -727,20 +963,69 @@ const Map = () => {
       <header className="px-4 pt-4 pb-3 bg-card z-10 flex-shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
-            <h1 className="text-xl font-bold">{t("Map")}</h1>
+            <h1 className="text-xl font-bold text-brandText">{t("Map")}</h1>
             <p className="text-xs text-muted-foreground mt-1">
-              Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings.
+              Available on map for 2 hours and stay in system for 12 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings.
             </p>
           </div>
-          <Button
-            onClick={handlePinMyLocation}
-            disabled={pinning}
-            className="h-10 rounded-xl bg-primary text-primary-foreground"
-          >
-            <MapPin className="w-4 h-4 mr-2" />
-            {pinning ? t("Pinning...") : t("Pin my Location")}
-          </Button>
         </div>
+
+        {/* Contract: Tabs + Visible toggle + Pin button */}
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 bg-black/5 rounded-full p-1">
+            {(["Event", "Friends"] as const).map((tab) => {
+              const active = mapTab === tab;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    if (tab === "Friends" && !visibleEnabled) {
+                      toast.info("Turn on Visible to see friends nearby.");
+                      return;
+                    }
+                    setMapTab(tab);
+                  }}
+                  className={cn(
+                    "px-4 py-2 rounded-full text-sm font-bold transition-colors",
+                    active ? "bg-white text-brandText shadow-sm" : "text-brandText/70 hover:text-brandText"
+                  )}
+                >
+                  {tab}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void toggleVisible()}
+              className={cn(
+                "h-10 px-4 rounded-full border text-sm font-bold transition-colors",
+                visibleEnabled ? "border-brandGold text-brandGold bg-brandGold/10" : "border-gray-300 text-brandText/70 bg-white"
+              )}
+              aria-label="Visible toggle"
+            >
+              {visibleEnabled ? "Visible: On" : "Visible: Off"}
+            </button>
+
+            <Button
+              onClick={() => {
+                if (isPinned) {
+                  void handleUnpinMyLocation();
+                } else {
+                  handlePinMyLocation();
+                }
+              }}
+              disabled={pinning}
+              className="h-10 rounded-full bg-primary text-primary-foreground"
+            >
+              <MapPin className="w-4 h-4 mr-2" />
+              {pinning ? t("Pinning...") : isPinned ? "Unpin" : t("Pin my Location")}
+            </Button>
+          </div>
+        </div>
+
+        {/* Manual input for location (contract: tap map/manual input). */}
         <div className="mt-3 grid grid-cols-[1fr,1fr,auto] gap-2">
           <input
             type="number"
@@ -768,24 +1053,32 @@ const Map = () => {
       </header>
 
       {/* Filter Chips */}
-      <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
-        <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-          {filterChips.map((chip) => (
-            <button
-              key={chip.id}
-              onClick={() => setActiveFilter(chip.id)}
-              className={cn(
-                "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
-                activeFilter === chip.id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              )}
-            >
-              {chip.label}
-            </button>
-          ))}
+      {mapTab === "Event" ? (
+        <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+            {filterChips.map((chip) => (
+              <button
+                key={chip.id}
+                onClick={() => setActiveFilter(chip.id)}
+                className={cn(
+                  "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
+                  activeFilter === chip.id
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                )}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
+          <p className="text-xs text-muted-foreground">
+            Friends pins show only when users have Visible on and are within 50km.
+          </p>
+        </div>
+      )}
 
       {/* Map Container */}
       <div className="flex-1 relative min-h-0">
@@ -824,7 +1117,12 @@ const Map = () => {
               </p>
               <motion.button
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setIsCreateOpen(true)}
+                onClick={() => {
+                  setSelectedRangeKm(broadcastRange);
+                  setSelectedDurationH(effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
+                  setPostOnThreads(false);
+                  setIsCreateOpen(true);
+                }}
                 className="w-full bg-primary text-primary-foreground rounded-xl px-4 py-3 shadow-elevated flex items-center justify-center gap-2 font-semibold"
               >
                 <AlertTriangle className="w-5 h-5" />
@@ -894,6 +1192,46 @@ const Map = () => {
                   <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                 </label>
               )}
+
+              {/* Contract: Range/Duration gated dropdowns + "Post on Threads" */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Range</div>
+                  <select
+                    value={String(selectedRangeKm ?? broadcastRange)}
+                    onChange={(e) => setSelectedRangeKm(Number(e.target.value))}
+                    className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
+                  >
+                    <option value="10" disabled={broadcastRange < 10}>10km</option>
+                    <option value="25" disabled={broadcastRange < 25}>25km</option>
+                    <option value="50" disabled={broadcastRange < 50}>50km</option>
+                    <option value="150" disabled={extrasBroadcasts <= 0}>150km (Add-on)</option>
+                  </select>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Duration</div>
+                  <select
+                    value={String(selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12))}
+                    onChange={(e) => setSelectedDurationH(Number(e.target.value))}
+                    className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
+                  >
+                    <option value="12" disabled={(effectiveTier === "premium" || effectiveTier === "gold") ? false : false}>12h</option>
+                    <option value="24" disabled={!isPremium}>24h</option>
+                    <option value="48" disabled={effectiveTier !== "gold"}>48h</option>
+                    <option value="72" disabled={extrasBroadcasts <= 0}>72h (Add-on)</option>
+                  </select>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={postOnThreads}
+                  onChange={(e) => setPostOnThreads(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                Post on Threads
+              </label>
               
               {/* Submit */}
               <Button
@@ -978,7 +1316,8 @@ const Map = () => {
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              {/* Contract: no navigation button (timely ops changes not guaranteed). */}
+              <div className="grid grid-cols-1 gap-3">
                 <Button
                   onClick={() => {
                     if (selectedVet.phone) {
@@ -991,16 +1330,6 @@ const Map = () => {
                 >
                   <Phone className="w-5 h-5 mr-2" />
                   {t("map.call_now")}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedVet.lat},${selectedVet.lng}`);
-                  }}
-                  className="h-12 rounded-xl"
-                >
-                  <Navigation className="w-5 h-5 mr-2" />
-                  {t("map.navigate")}
                 </Button>
               </div>
             </motion.div>
@@ -1130,6 +1459,52 @@ const Map = () => {
               <div className="text-xs text-muted-foreground">
                 {(selectedFriend.pets || []).length > 0
                   ? selectedFriend.pets.map((pet) => `${pet.name} (${pet.species})`).join(", ")
+                  : t("No pets listed")}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Friend Pin Modal (real pins from RPC) */}
+      <AnimatePresence>
+        {selectedFriendPin && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2100] bg-black/50 flex items-end"
+            onClick={() => setSelectedFriendPin(null)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-card rounded-t-3xl p-6 max-h-[70vh] overflow-auto"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-brandText">
+                    {selectedFriendPin.display_name || "Friend"}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedFriendPin.location_name || "Nearby"}
+                  </p>
+                </div>
+                <button onClick={() => setSelectedFriendPin(null)} aria-label="Close">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="text-sm text-muted-foreground mb-3">
+                {selectedFriendPin.relationship_status ? `Status: ${selectedFriendPin.relationship_status}` : " "}
+              </div>
+
+              <div className="text-sm font-medium mb-1">{t("Pets")}</div>
+              <div className="text-xs text-muted-foreground">
+                {(selectedFriendPin.pet_species || []).length > 0
+                  ? (selectedFriendPin.pet_species || []).join(", ")
                   : t("No pets listed")}
               </div>
             </motion.div>

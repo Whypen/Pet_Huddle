@@ -13,12 +13,23 @@ import { HText } from "../components/HText";
 import { COLORS, LAYOUT } from "../theme/tokens";
 import { supabase } from "../lib/supabase";
 
-const schema = z.object({
+const signInSchema = z.object({
   email: z.string().email("Enter a valid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-type Form = z.infer<typeof schema>;
+const signUpSchema = z.object({
+  email: z.string().email("Enter a valid email"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  // Contract: phone required at signup (DB enforces profiles_phone_required).
+  phone: z.string().regex(/^\+?[1-9]\\d{7,14}$/, "Enter a valid phone number (E.164)"),
+});
+
+type Form = {
+  email: string;
+  password: string;
+  phone?: string;
+};
 
 const BIOMETRIC_PREF_KEY = "huddle_biometrics_enabled";
 
@@ -34,9 +45,9 @@ export function AuthScreen() {
     handleSubmit,
     formState: { isValid },
   } = useForm<Form>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(mode === "signup" ? signUpSchema : signInSchema),
     mode: "onChange",
-    defaultValues: { email: "", password: "" },
+    defaultValues: { email: "", password: "", phone: "" },
   });
 
   useEffect(() => {
@@ -45,7 +56,7 @@ export function AuthScreen() {
       .catch(() => setBiometricsEnabled(false));
   }, []);
 
-  const onSubmit = handleSubmit(async ({ email, password }) => {
+  const onSubmit = handleSubmit(async ({ email, password, phone }) => {
     setBusy(true);
     try {
       if (mode === "signup") {
@@ -53,12 +64,41 @@ export function AuthScreen() {
           Alert.alert("Agreement required", "Please agree to the Terms of Service and Privacy Policy to continue.");
           return;
         }
-        const res = await supabase.auth.signUp({ email, password });
+        const acceptedAt = new Date().toISOString();
+        const res = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              phone,
+              consent_terms_privacy_at: acceptedAt,
+              consent_version: "v2.0",
+            },
+          },
+        });
         if (res.error) throw res.error;
+        // Best-effort consent audit log when a session exists.
+        if (res.data?.user?.id) {
+          try {
+            await supabase.from("consent_logs").insert({
+              user_id: res.data.user.id,
+              consent_type: "terms_privacy",
+              consent_version: "v2.0",
+              accepted_at: acceptedAt,
+              metadata: { source: "mobile_signup" },
+            });
+          } catch {
+            // best-effort only
+          }
+        }
         Alert.alert("Check your email", "Confirm your email to finish signup.");
       } else {
         const res = await supabase.auth.signInWithPassword({ email, password });
         if (res.error) throw res.error;
+        const uid = res.data?.user?.id;
+        if (uid) {
+          await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed";
@@ -114,6 +154,22 @@ export function AuthScreen() {
             />
           )}
         />
+        {mode === "signup" ? (
+          <Controller
+            control={control}
+            name="phone"
+            render={({ field: { value, onChange }, fieldState: { error } }) => (
+              <InputField
+                label="Phone"
+                placeholder="+852..."
+                value={value}
+                onChangeText={onChange}
+                autoCapitalize="none"
+                error={error?.message}
+              />
+            )}
+          />
+        ) : null}
 
         <Pressable onPress={toggleBiometrics} style={{ paddingVertical: 6 }}>
           <HText variant="body" style={{ color: COLORS.brandText, fontWeight: "600" }}>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Settings } from "lucide-react";
+import { Bell, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const { user } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Fetch user's pets
   useEffect(() => {
@@ -52,6 +53,45 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     }
   };
 
+  // Contract: Notification Hub bell + red dot when unread > 0.
+  useEffect(() => {
+    if (!user) {
+      setUnreadCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshUnread = async () => {
+      const res = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("read", false);
+      if (cancelled) return;
+      setUnreadCount(res.count ?? 0);
+    };
+
+    const channel = supabase
+      .channel(`notifications:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => {
+          // Re-fetch unread count on any change.
+          void refreshUnread();
+        }
+      )
+      .subscribe();
+
+    void refreshUnread();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   const handleLogoClick = () => {
     navigate('/');
   };
@@ -70,8 +110,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   return (
     <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
       <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
-        {/* Contract override: center logo only (no left 'huddle' wordmark). Keep spacer for centering. */}
-        <div className="w-9 h-9" aria-hidden="true" />
+        {/* Left: Notification Bell */}
+        <button
+          onClick={() => navigate("/notifications")}
+          className="relative p-2 rounded-full hover:bg-muted transition-colors"
+          aria-label={t("Notifications")}
+        >
+          <Bell className="w-5 h-5 text-muted-foreground" />
+          {unreadCount > 0 ? (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+          ) : null}
+        </button>
 
         {/* Centered Logo */}
         <button

@@ -128,36 +128,48 @@ export default function PremiumPage() {
   }, [billing, cartTotal, pricing, tab]);
 
   const secureCheckout = async () => {
-    if (!user) {
-      navigate("/auth");
-      return;
-    }
-    if (tab === "Add-on") {
-      if (!cartItems.length) return;
-      // UAT: cart multi-select; server-side checkout handled by Edge Function.
-      await supabase.functions.invoke("create-checkout-session", {
+    try {
+      if (!user) {
+        navigate("/auth");
+        return;
+      }
+      if (tab === "Add-on") {
+        if (!cartItems.length) return;
+        // UAT: cart multi-select; server-side checkout handled by Edge Function.
+        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+          body: {
+            userId: user.id,
+            mode: "payment",
+            items: cartItems.map((i) => ({ type: i.id, quantity: i.qty })),
+            amount: Math.round(cartTotal * 100),
+            successUrl: `${window.location.origin}/premium`,
+            cancelUrl: `${window.location.origin}/premium`,
+          },
+        });
+        if (error) throw error;
+        const url = (data as { url?: string } | null)?.url;
+        if (url) window.location.assign(url);
+        return;
+      }
+
+      const type = `${tab === "Gold" ? "gold" : "premium"}_${billing === "monthly" ? "monthly" : "annual"}`;
+      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
-          mode: "payment",
-          items: cartItems.map((i) => ({ type: i.id, quantity: i.qty })),
-          amount: Math.round(cartTotal * 100),
+          mode: "subscription",
+          type,
           successUrl: `${window.location.origin}/premium`,
           cancelUrl: `${window.location.origin}/premium`,
         },
       });
-      return;
+      if (error) throw error;
+      const url = (data as { url?: string } | null)?.url;
+      if (url) window.location.assign(url);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[Premium] checkout failed", e);
+      window.alert(msg || "Checkout failed. Please try again.");
     }
-
-    const type = `${tab === "Gold" ? "gold" : "premium"}_${billing === "monthly" ? "monthly" : "annual"}`;
-    await supabase.functions.invoke("create-checkout-session", {
-      body: {
-        userId: user.id,
-        mode: "subscription",
-        type,
-        successUrl: `${window.location.origin}/premium`,
-        cancelUrl: `${window.location.origin}/premium`,
-      },
-    });
   };
 
   const TierTabs = (

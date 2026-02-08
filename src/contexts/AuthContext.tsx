@@ -70,7 +70,8 @@ interface AuthContextType {
     email: string,
     password: string,
     displayName: string,
-    phone: string
+    phone: string,
+    consent?: { acceptedAtIso: string; version: string }
   ) => Promise<{ error: Error | null }>;
   signIn: (email: string, password: string, phone?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -184,7 +185,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     email: string,
     password: string,
     displayName: string,
-    phone: string
+    phone: string,
+    consent?: { acceptedAtIso: string; version: string }
   ) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
     console.log("Attempting Signup to:", supabaseUrl);
@@ -201,6 +203,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           data: {
             display_name: displayName || email.split("@")[0],
             phone,
+            ...(consent?.acceptedAtIso
+              ? {
+                  consent_terms_privacy_at: consent.acceptedAtIso,
+                  consent_version: consent.version,
+                }
+              : {}),
           },
         },
       });
@@ -219,6 +227,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           display_name: displayName || email.split("@")[0],
           phone,
         });
+
+      // Best-effort consent audit log. This will succeed when a session exists.
+      if (consent?.acceptedAtIso) {
+        await supabase
+          .from("consent_logs")
+          .insert({
+            user_id: data.user.id,
+            consent_type: "terms_privacy",
+            consent_version: consent.version,
+            accepted_at: consent.acceptedAtIso,
+            metadata: { source: "web_signup" },
+          })
+          .throwOnError()
+          .catch(() => {
+            // If email confirmation is required, the user may not have an active session yet.
+          });
+      }
     }
 
     return { error: error as Error | null };
@@ -234,6 +259,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           phone,
           password,
         });
+        if (!error) {
+          const { data } = await supabase.auth.getUser();
+          const uid = data?.user?.id;
+          if (uid) {
+            await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+          }
+        }
         return { error: error as Error | null };
       }
 
@@ -241,6 +273,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         email,
         password,
       });
+
+      if (!error) {
+        const { data } = await supabase.auth.getUser();
+        const uid = data?.user?.id;
+        if (uid) {
+          await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+        }
+      }
 
       return { error: error as Error | null };
     } catch (e: unknown) {

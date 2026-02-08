@@ -9,6 +9,7 @@ export type RootStackParamList = {
   Terms: undefined;
   Privacy: undefined;
   PremiumPage: undefined;
+  Notifications: undefined;
   AccountSettings: undefined;
   PetProfile: { mode: "add" | "edit" } | undefined;
   UserProfile: undefined;
@@ -18,6 +19,7 @@ export type RootStackParamList = {
 export type TabsParamList = {
   Pet: undefined;
   Chats: undefined;
+  Map: undefined;
   Premium: undefined;
   Settings: undefined;
 };

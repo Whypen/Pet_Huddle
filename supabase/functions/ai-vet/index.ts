@@ -18,10 +18,13 @@ const json = (body: unknown, status = 200) =>
 async function getTier(userId: string) {
   const { data } = await supabase
     .from("profiles")
-    .select("tier")
+    .select("*")
     .eq("id", userId)
     .maybeSingle();
-  return data?.tier || "free";
+  const rec = (typeof data === "object" && data !== null) ? (data as Record<string, unknown>) : {};
+  const effective = typeof rec.effective_tier === "string" ? rec.effective_tier : null;
+  const tier = typeof rec.tier === "string" ? rec.tier : null;
+  return (effective || tier || "free").toLowerCase();
 }
 
 async function getTokenBucket(userId: string) {
@@ -31,17 +34,19 @@ async function getTokenBucket(userId: string) {
     .select("tokens, last_refill")
     .eq("user_id", userId)
     .maybeSingle();
+  const tier = await getTier(userId);
+  const capacity = tier === "gold" ? 300 : tier === "premium" ? 200 : 50;
   if (!data) {
-    await supabase.from("ai_vet_rate_limits").insert({ user_id: userId, tokens: 50 });
-    return { tokens: 50 };
+    await supabase.from("ai_vet_rate_limits").insert({ user_id: userId, tokens: capacity });
+    return { tokens: capacity };
   }
   const lastRefill = new Date(data.last_refill);
   if (now.getTime() - lastRefill.getTime() >= 24 * 60 * 60 * 1000) {
     await supabase
       .from("ai_vet_rate_limits")
-      .update({ tokens: 50, last_refill: now.toISOString() })
+      .update({ tokens: capacity, last_refill: now.toISOString() })
       .eq("user_id", userId);
-    return { tokens: 50 };
+    return { tokens: capacity };
   }
   return { tokens: data.tokens ?? 0 };
 }
@@ -157,29 +162,30 @@ serve(async (req: Request) => {
     if (!userId) return json({ error: "Missing userId" }, 400);
 
     const tier = await getTier(userId);
-    if (tier === "premium" || tier === "gold") {
-      return json({ data: { remaining: null, tier } }, 200);
-    }
-
     const bucket = await getTokenBucket(userId);
+    // Remaining is request budget (rate limit), not upload quota.
     return json({ data: { remaining: bucket.tokens ?? 0, tier } }, 200);
   }
 
   if (req.method === "POST" && path.endsWith("/chat")) {
-    const { conversationId, message, petProfile, userId, imageBase64 } = await req.json();
+    const { conversationId, message, petProfile, userId, imageBase64, priority } = await req.json();
     if (!userId || !message) return json({ error: "Missing userId or message" }, 400);
 
     const tier = await getTier(userId);
     let remaining: number | null = null;
-    if (tier !== "premium" && tier !== "gold") {
-      const bucket = await consumeTokenBucket(userId);
-      if (!bucket.allowed) return json({ error: "Quota Exceeded" }, 429);
-      remaining = bucket.remaining;
-    }
+    const bucket = await consumeTokenBucket(userId);
+    if (!bucket.allowed) return json({ error: "Quota Exceeded" }, 429);
+    remaining = bucket.remaining;
 
     if (imageBase64) {
-      const vision = await consumeToken(userId, "ai_vision");
-      if (!vision.allowed) return json({ error: "Quota Exceeded" }, 429);
+      // Contract: AI Vet uploads are gated by QMS (Free=0, Premium=10/day, Gold=20/day pooled).
+      const upload = await consumeToken(userId, "ai_vet_upload");
+      if (!upload.allowed) return json({ error: "Quota Exceeded" }, 429);
+      // Gold-only: priority analyses (5/month pooled). Only consume when explicitly requested.
+      if (tier === "gold" && priority === true) {
+        const pri = await consumeToken(userId, "ai_vet_priority");
+        if (!pri.allowed) return json({ error: "Quota Exceeded" }, 429);
+      }
     }
 
     try {
@@ -207,7 +213,7 @@ serve(async (req: Request) => {
           .eq("id", conversationId);
       }
 
-      return json({ data: { message: aiMessage, triage, remaining } }, 200);
+      return json({ data: { message: aiMessage, triage, remaining, tier } }, 200);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const msg = message.toLowerCase();

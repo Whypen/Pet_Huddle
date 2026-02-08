@@ -12,6 +12,9 @@ Tooling notes:
 
 ## Verified Implementations (Evidence Pointers)
 
+Note:
+- The authoritative execution proof for this sweep is in `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/SWEEP_LOG.md` (commands + outputs + UAT JSON).
+
 1. Chats runtime error fix ("useMemo is not defined")
 - Evidence: `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/src/pages/Chats.tsx` now imports `useMemo`.
 
@@ -21,7 +24,7 @@ Tooling notes:
   - `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/mobile/src/screens/PremiumScreen.tsx` add-on ids: `star_pack`, `emergency_alert`, `vet_media`
   - `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/supabase/functions/create-checkout-session/index.ts` expects `star_pack`, `emergency_alert`, `vet_media`
 
-3. Contract QMS (Quota Management System) migration prepared (not yet pushed when this file was authored)
+3. Contract QMS (Quota Management System) migration pushed + verified via UAT script
 - Evidence: `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/supabase/migrations/20260208160000_qms_v2_full_override.sql`
 - Provides:
   - `public.user_quotas` (contract counters + extras)
@@ -63,4 +66,3 @@ Tooling notes:
 
 3. MASTER_SPEC contract section insertion pending
 - Requirement: `## 11. Contract Requirements` (verbatim override block + rendered perks table) must be added to `/Users/hyphen/Documents/Whypen/Huddle App/Pet_Huddle/MASTER_SPEC.md`.
-

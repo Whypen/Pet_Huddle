@@ -10,6 +10,7 @@ import { PetProfileScreen } from "../screens/PetProfileScreen";
 import { UserProfileScreen } from "../screens/UserProfileScreen";
 import { CreateThreadScreen } from "../screens/CreateThreadScreen";
 import { PremiumScreen } from "../screens/PremiumScreen";
+import { NotificationsScreen } from "../screens/NotificationsScreen";
 import { useAuth } from "../contexts/useAuth";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -24,6 +25,7 @@ export function RootNavigator() {
         <Stack.Screen name="Terms" component={TermsScreen} />
         <Stack.Screen name="Privacy" component={PrivacyScreen} />
         <Stack.Screen name="PremiumPage" component={PremiumScreen} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
         <Stack.Screen name="PetProfile" component={PetProfileScreen} />
         <Stack.Screen name="UserProfile" component={UserProfileScreen} />

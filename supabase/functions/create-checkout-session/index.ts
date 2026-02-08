@@ -13,6 +13,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
 });
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") as string;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -55,7 +56,7 @@ const ADDON_DEFAULTS: Record<string, number> = {
 serve(async (req: Request) => {
   try {
     const {
-      userId,
+      userId: bodyUserId,
       type,
       mode,
       items,
@@ -65,25 +66,51 @@ serve(async (req: Request) => {
       cancelUrl,
     } = await req.json();
 
-    if (!userId || !mode || (!type && !items)) {
+    // Enforce auth: require a valid JWT and bind user_id to auth.uid.
+    const authHeader = req.headers.get("Authorization") || "";
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const u = await userClient.auth.getUser();
+    const authedUserId = u.data?.user?.id || null;
+    if (!authedUserId) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!mode || (!type && !items)) {
       return new Response(
         JSON.stringify({ error: "Missing required parameters" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
+    if (bodyUserId && bodyUserId !== authedUserId) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const userId = authedUserId;
+
     // Get or create Stripe customer
     const { data: profile } = await supabase
       .from("profiles")
-      .select("stripe_customer_id, email")
+      .select("stripe_customer_id")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
     let customerId = profile?.stripe_customer_id;
 
     if (!customerId) {
+      const authUser = await supabase.auth.admin.getUserById(userId);
+      const email = authUser.data?.user?.email || undefined;
       const customer = await stripe.customers.create({
-        email: profile?.email,
+        email,
         metadata: { user_id: userId },
       });
 
@@ -96,7 +123,7 @@ serve(async (req: Request) => {
     }
 
     // Generate idempotency key
-    const idempotencyKey = `${userId}-${type || "cart"}-${Date.now()}`;
+    const idempotencyKey = `${userId}-${type || "cart"}-${crypto.randomUUID()}`;
 
     // Create checkout session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {

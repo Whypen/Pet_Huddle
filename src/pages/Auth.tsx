@@ -168,7 +168,10 @@ const Auth = () => {
           toast.success(t("auth.welcome_back"));
         }
       } else {
-        const { error } = await signUp(signupEmail, password, displayName, signupPhone);
+        const { error } = await signUp(signupEmail, password, displayName, signupPhone, {
+          acceptedAtIso: new Date().toISOString(),
+          version: "v2.0",
+        });
         if (error) {
           if (error.message.includes("User already registered")) {
             toast.error(t("auth.errors.account_exists"));

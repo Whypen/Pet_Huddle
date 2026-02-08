@@ -48,14 +48,17 @@ const ExpoStorageAdapter = {
   },
 };
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+// Public fallback values so dev builds never hard-crash when EXPO_PUBLIC_* isn't wired
+// into the runtime environment. (Anon keys are public by design.)
+const FALLBACK_SUPABASE_URL = "https://ztrbourwcnhrpmzwlrcn.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNTQ2NDMsImV4cCI6MjA4NDkzMDY0M30.ehK3oSGq6AFdtuSovXTi02aMB_ht4suO16HJ8RecIvg";
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  // Keep this as a runtime error so we never silently "work" with missing auth.
-  console.warn(
-    "Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY. Auth will not work."
-  );
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
+
+if (!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
+  console.warn("Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY. Using fallback values.");
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {

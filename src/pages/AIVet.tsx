@@ -58,11 +58,8 @@ const AIVet = () => {
   const [showEmergencyPrompt, setShowEmergencyPrompt] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const [mediaCredits, setMediaCredits] = useState<number | null>(null);
-
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  const hasMediaCredits = (mediaCredits ?? profile?.media_credits ?? 0) > 0;
 
   // Fetch user's pets
   useEffect(() => {
@@ -72,19 +69,8 @@ const AIVet = () => {
     }
   }, [user]);
 
-  useEffect(() => {
-    const loadMediaCredits = async () => {
-      if (!user) return;
-      const ownerId = profile?.family_owner_id || user.id;
-      const { data } = await supabase
-        .from("profiles")
-        .select("media_credits")
-        .eq("id", ownerId)
-        .maybeSingle();
-      if (data) setMediaCredits(data.media_credits ?? 0);
-    };
-    loadMediaCredits();
-  }, [user, profile?.family_owner_id]);
+  // Contract override: AI Vet media is gated by QMS on upload. UI allows attach for Premium/Gold
+  // and relies on the Edge Function to enforce per-tier daily limits.
 
   // Add initial greeting when conversation starts
   useEffect(() => {
@@ -233,19 +219,10 @@ const AIVet = () => {
   const handleMediaAccess = async () => {
     try {
       if (!user) return;
-      const ownerId = profile?.family_owner_id || user.id;
-      const { data: currentProfile } = await supabase
-        .from("profiles")
-        .select("media_credits, tier")
-        .eq("id", ownerId)
-        .single();
-
-      const mediaCredits = currentProfile?.media_credits ?? 0;
-      if (mediaCredits <= 0) {
+      if (!isPremium) {
         setIsPremiumOpen(true);
         return;
       }
-      setMediaCredits(mediaCredits);
       imageInputRef.current?.click();
     } catch (error) {
       console.error("Failed to refresh media credits:", error);

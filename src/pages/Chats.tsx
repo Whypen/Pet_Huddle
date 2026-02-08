@@ -890,7 +890,23 @@ const Chats = () => {
                       if (blocked) return;
                       const ok = await bumpDiscoverySeen();
                       if (!ok) return;
-                      toast.success(t("Wave sent"));
+                      try {
+                        if (profile?.id) {
+                          await supabase
+                            .from("waves")
+                            .insert({ from_user_id: profile.id, to_user_id: p.id })
+                            .throwOnError();
+                        }
+                        toast.success(t("Wave sent"));
+                      } catch (err: unknown) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        // Unique constraint (already waved)
+                        if (msg.includes("duplicate") || msg.includes("23505")) {
+                          toast.info(t("Wave already sent"));
+                        } else {
+                          toast.error(t("Failed to send wave"));
+                        }
+                      }
                     }}
                     className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
                   >

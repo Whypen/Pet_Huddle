@@ -6,6 +6,7 @@ type Variant = "heading" | "body" | "meta";
 type Props = TextProps & {
   variant?: Variant;
   color?: string;
+  className?: string;
 };
 
 const sans =
@@ -14,6 +15,7 @@ const sans =
     : "Microsoft YaHei UI";
 
 export function HText({ variant = "body", color, style, ...rest }: Props) {
+  const { className, ...textProps } = rest;
   const base =
     variant === "heading"
       ? { fontSize: TYPO.headingSize, fontWeight: TYPO.headingWeight }
@@ -24,14 +26,16 @@ export function HText({ variant = "body", color, style, ...rest }: Props) {
   return (
     <Text
       allowFontScaling
+      // NativeWind support (kept optional to allow gradual migration).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      {...({ className } as any)}
       style={[
         { color: color ?? COLORS.brandText, fontFamily: sans },
         base,
         // keep styles last for overrides
         style,
       ]}
-      {...rest}
+      {...textProps}
     />
   );
 }
-
