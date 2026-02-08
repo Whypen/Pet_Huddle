@@ -2,7 +2,7 @@
 
 **Audience:** New full‑stack developer rebuilding from scratch.
 
-**Source of Truth:** This document supersedes all previous specs. No other spec files exist in repo. Any change requires version bump and changelog entry in this file.
+**Source of Truth:** This document supersedes all previous specs and is the sole source of truth for product behavior and implementation. Other documents may exist in the repo, but they are non-authoritative. Changes must be made by editing this file in place.
 
 ---
 
@@ -373,8 +373,44 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - Map with pins
 
 ## 13) `Settings.tsx`
-**UI Elements:**
-- Account settings, toggles
+**UI Elements (Gear Logo CTA, UAT):**
+- Top row: Avatar + `profiles.display_name` + verification badge.
+  - Badge: gold rim if verified (`verification_status='approved'` or `is_verified=true`), gray if pending.
+- Premium/Gold blocks: placed between Avatar row and profile actions.
+  - Layout: `flex-row`, `flex-1`, `width: 100%`, no overflow, approx 30% shorter height than v1.1 cards.
+  - CTA behavior:
+    - Click "Unlock Premium" -> `/premium` with Premium tab selected.
+    - Click "Unlock Gold" -> `/premium` with Gold tab selected (web: `?tab=Gold`; mobile: route param `initialTab='Gold'`).
+- Remove border for all Session Names (section headers). Keep tight spacing (small gaps between list items).
+- Rows (no section sub-headers like "Profiles / Account Settings / Subscription / Help & Support"):
+  - Edit User Profile
+  - Edit Pet Profile (uses pet paw icon)
+  - Account Setting (routes to Account Settings page/screen)
+  - Identity Verification
+  - Manage Subscription (routes to Premium page)
+  - Legal Information accordion (Terms + Privacy)
+  - Help & Support
+  - Logout (destructive)
+
+**Navigation:**
+- Gear icon opens Settings (web route `/settings`, mobile Settings tab).
+- "Account Setting" opens Account Settings screen/page (web route `/account-settings`, mobile `AccountSettingsScreen`).
+
+## 13a) `AccountSettings.tsx` / `AccountSettingsScreen.tsx` (UAT)
+**Purpose:** Centralize account settings, notification preferences, and delete-account.
+
+**Notification settings (profiles.prefs):**
+- Persist user notification preferences in `profiles.prefs` (JSON).
+- Keys:
+  - `push_notifications_enabled: boolean`
+  - `email_notifications_enabled: boolean`
+
+**Delete account (RLS enforced):**
+- Button: "Delete Account"
+- Confirmation: "Are you sure? This is permanent."
+- Action:
+  - `DELETE FROM profiles WHERE id = auth.uid()` (RLS: user may only delete self)
+  - `supabase.auth.signOut()`
 
 ## 14) `Admin.tsx`
 **UI Elements:**
@@ -392,7 +428,13 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - 404 screen
 
 ## 18) `Premium.tsx`
-- Subscription UI, add‑ons
+**Header:** "Manage Subscription"
+
+**Tabs:** "Premium" | "Gold" | "Add-on"
+
+**Deep link behavior (UAT):**
+- Web: `/premium?tab=Gold` (or `Premium`/`Add-on`) preselects the corresponding tab.
+- Mobile: navigation param `initialTab` preselects tab.
 
 ## 19) `Subscription.tsx`
 - Redirects to Premium
