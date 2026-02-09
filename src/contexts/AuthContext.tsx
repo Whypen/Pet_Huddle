@@ -250,9 +250,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string, phone?: string) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    console.log("Attempting Login to:", supabaseUrl, "with key starting with:", anonKey?.substring(0, 10));
     // Support both email and phone login
     try {
       if (phone) {
