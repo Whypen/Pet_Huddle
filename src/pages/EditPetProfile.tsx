@@ -496,7 +496,7 @@ const EditPetProfile = () => {
           {/* Species */}
           <div>
             <label className="text-sm font-medium mb-2 block">{t("Species *")}</label>
-            <div className={cn("flex flex-wrap gap-2 mb-2", fieldErrors.species && "rounded-xl border border-red-500 p-2")}>
+            <div className={cn("flex flex-wrap gap-[5px] m-[0_4px_8px_0]", fieldErrors.species && "rounded-xl border border-red-500 p-2")}>
               {speciesOptions.map((species) => (
                 <button
                   key={species.id}
