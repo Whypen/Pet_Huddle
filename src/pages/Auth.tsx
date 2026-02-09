@@ -66,14 +66,17 @@ const Auth = () => {
   }, []);
 
   // Redirect if already authenticated
-  if (user) {
-    if (profile?.onboarding_completed) {
-      navigate("/", { replace: true });
-    } else {
-      navigate("/onboarding", { replace: true });
+  useEffect(() => {
+    if (user) {
+      if (profile?.onboarding_completed) {
+        navigate("/", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
     }
-    return null;
-  }
+  }, [user, profile, navigate]);
+
+  if (user) return null;
 
   const validateForm = () => {
     const newErrors: {
