@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  AlertTriangle, 
+import {
+  AlertTriangle,
   X,
   ThumbsUp,
   Flag,
+  Eye,
   EyeOff,
   Ban,
   Loader2,
@@ -51,7 +52,7 @@ const alertTypeColors: Record<string, string> = {
   others: "#A1A4A9",
 };
 
-const MAX_ALERT_WORDS = 20;
+const MAX_ALERT_CHARS = 1000;
 
 interface MapAlert {
   id: string;
@@ -171,8 +172,8 @@ const Map = () => {
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  // v1.9 override: Broadcast radius (km): Free 2, Premium 10, Gold 20.
-  const broadcastRange = effectiveTier === "gold" ? 20 : isPremium ? 10 : 2;
+  // Spec: Broadcast range — Free max 10km, Premium max 25km, Gold max 50km.
+  const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
   const viewRadiusMeters = 50000; // Contract: Map view limited to 50km
 
   useEffect(() => {
@@ -1029,12 +1030,12 @@ const Map = () => {
             <button
               onClick={() => void toggleVisible()}
               className={cn(
-                "h-10 px-4 rounded-full border text-sm font-bold transition-colors",
+                "w-10 h-10 rounded-full border flex items-center justify-center transition-colors",
                 visibleEnabled ? "border-brandGold text-brandGold bg-brandGold/10" : "border-gray-300 text-brandText/70 bg-white"
               )}
-              aria-label="Visible toggle"
+              aria-label={visibleEnabled ? "Visible: On" : "Visible: Off"}
             >
-              {visibleEnabled ? "Visible: On" : "Visible: Off"}
+              {visibleEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </button>
 
             <Button
@@ -1054,26 +1055,7 @@ const Map = () => {
           </div>
         </div>
 
-        {/* Manual input for location (contract: tap map/manual input). */}
-        <div className="mt-3 grid grid-cols-[1fr,1fr,auto] gap-2">
-          <input
-            type="number"
-            value={manualLat}
-            onChange={(e) => setManualLat(e.target.value)}
-            placeholder={t("Latitude")}
-            className="h-9 rounded-lg bg-muted border border-border px-3 text-xs"
-          />
-          <input
-            type="number"
-            value={manualLng}
-            onChange={(e) => setManualLng(e.target.value)}
-            placeholder={t("Longitude")}
-            className="h-9 rounded-lg bg-muted border border-border px-3 text-xs"
-          />
-          <Button onClick={handleManualPin} variant="outline" className="h-9 rounded-lg px-3">
-            {t("Pin")}
-          </Button>
-        </div>
+        {/* Manual lat/lng input removed — use Mapbox geocode for location name only */}
         {pinExpiresAt && (
           <p className="text-xs text-muted-foreground mt-2">
             {t("Pinned until")}: {new Date(pinExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -1181,25 +1163,20 @@ const Map = () => {
                 ))}
               </div>
               
-              {/* Description */}
+              {/* Description — max 1000 chars per spec */}
               <div className="space-y-1">
                 <Textarea
-                  placeholder={t("Brief description (max 20 words)...")}
+                  placeholder={t("Description (max 1000 chars)...")}
                   value={description}
                   onChange={(e) => {
-                    const words = e.target.value.trim().split(/\s+/).filter(Boolean);
-                    if (words.length <= MAX_ALERT_WORDS) {
+                    if (e.target.value.length <= MAX_ALERT_CHARS) {
                       setDescription(e.target.value);
                     }
                   }}
                   className="rounded-xl min-h-[60px]"
                 />
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>
-                    {t("map.word_count")
-                      .replace("{count}", String(description.trim().split(/\s+/).filter(Boolean).length))
-                      .replace("{max}", String(MAX_ALERT_WORDS))}
-                  </span>
+                <div className="flex items-center justify-end text-xs text-muted-foreground">
+                  <span>{description.length}/{MAX_ALERT_CHARS}</span>
                 </div>
               </div>
               
@@ -1223,6 +1200,7 @@ const Map = () => {
               )}
 
               {/* Contract: Range/Duration gated dropdowns + "Post on Threads" */}
+              {/* Spec: Range — Free max 10km, Premium max 25km, Gold max 50km. Duration — Free 12h, Premium 24h, Gold 48h, Add-on 72h. */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">Range</div>
@@ -1231,11 +1209,12 @@ const Map = () => {
                     onChange={(e) => setSelectedRangeKm(Number(e.target.value))}
                     className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
                   >
-                    <option value="2" disabled={broadcastRange < 2}>2km</option>
-                    <option value="10" disabled={broadcastRange < 10}>10km</option>
-                    <option value="20" disabled={broadcastRange < 20 && extraBroadcast72h <= 0}>
-                      {broadcastRange >= 20 ? "20km" : "20km (Add-on)"}
-                    </option>
+                    <option value="2">2km</option>
+                    <option value="10" disabled={broadcastRange < 10}>10km{broadcastRange < 10 ? " (Premium)" : ""}</option>
+                    <option value="20" disabled={broadcastRange < 20}>20km{broadcastRange < 20 ? " (Premium)" : ""}</option>
+                    <option value="25" disabled={broadcastRange < 25}>25km{broadcastRange < 25 ? " (Gold)" : ""}</option>
+                    <option value="50" disabled={broadcastRange < 50}>50km{broadcastRange < 50 ? " (Gold)" : ""}</option>
+                    <option value="150" disabled={extraBroadcast72h <= 0}>150km (Add-on)</option>
                   </select>
                 </div>
                 <div>
@@ -1246,8 +1225,8 @@ const Map = () => {
                     className="w-full h-9 rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                   >
                     <option value="12">12h</option>
-                    <option value="24" disabled={!isPremium}>24h</option>
-                    <option value="48" disabled={effectiveTier !== "gold"}>48h</option>
+                    <option value="24" disabled={!isPremium}>24h{!isPremium ? " (Premium)" : ""}</option>
+                    <option value="48" disabled={effectiveTier !== "gold"}>48h{effectiveTier !== "gold" ? " (Gold)" : ""}</option>
                     <option value="72" disabled={extraBroadcast72h <= 0}>72h (Add-on)</option>
                   </select>
                 </div>

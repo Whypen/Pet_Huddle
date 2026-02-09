@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -234,6 +234,10 @@ const Chats = () => {
   const [groupVisibleCount, setGroupVisibleCount] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [profileSheetUser, setProfileSheetUser] = useState<{ id: string; name: string; avatarUrl?: string | null } | null>(null);
+  const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
+  const [profileSheetLoading, setProfileSheetLoading] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -648,6 +652,26 @@ const Chats = () => {
     navigate(`/chat-dialogue?id=${group.id}&name=${encodeURIComponent(group.name)}`);
   };
 
+  // Tap user profile — open right-side sheet showing public fields; block if non_social
+  const handleProfileTap = async (userId: string, displayName: string, avatarUrl?: string | null) => {
+    setProfileSheetUser({ id: userId, name: displayName, avatarUrl });
+    setProfileSheetData(null);
+    setProfileSheetLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species")
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) throw error;
+      setProfileSheetData(data as Record<string, unknown> | null);
+    } catch {
+      setProfileSheetData(null);
+    } finally {
+      setProfileSheetLoading(false);
+    }
+  };
+
   // Nanny Booking: Open modal
   const handleNannyBookClick = (e: React.MouseEvent, chat: ChatUser) => {
     e.stopPropagation(); // Don't navigate to chat
@@ -728,6 +752,14 @@ const Chats = () => {
       <header className="flex items-center justify-between px-5 pt-4 pb-2">
         <h1 className="text-2xl font-bold">{t("chats.title")}</h1>
         <div className="flex items-center gap-2">
+          {/* Filter Button */}
+          <button
+            onClick={() => setIsFilterModalOpen(true)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+            aria-label="Filter"
+          >
+            <SlidersHorizontal className="w-5 h-5 text-muted-foreground" />
+          </button>
           {/* Search Button */}
           <button
             onClick={() => setIsSearchOpen(!isSearchOpen)}
@@ -1099,7 +1131,13 @@ const Chats = () => {
                     }}
                     className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
                   >
-                    <div className="relative">
+                    <div
+                      className="relative cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProfileTap(chat.id, chat.name, chat.avatarUrl);
+                      }}
+                    >
                       <UserAvatar
                         avatarUrl={chat.avatarUrl}
                         name={chat.name}
@@ -1185,12 +1223,7 @@ const Chats = () => {
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-semibold">{t(group.name)}</h4>
-                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                          {group.memberCount} members
-                        </span>
-                      </div>
+                      <h4 className="font-semibold">{t(group.name)}</h4>
                       <span className="text-xs text-muted-foreground">{t(group.time)}</span>
                     </div>
                     <p className="text-sm text-muted-foreground truncate mt-1">
@@ -1578,6 +1611,212 @@ const Chats = () => {
                   )}
                 </button>
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      {/* Profile Sheet — right-side drawer when tapping user avatar in chat list */}
+      <AnimatePresence>
+        {profileSheetUser && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black/40 z-[80]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setProfileSheetUser(null)}
+            />
+            <motion.div
+              className="fixed top-0 right-0 bottom-0 w-80 max-w-[85vw] bg-card z-[81] shadow-2xl overflow-y-auto"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            >
+              <div className="flex items-center justify-between px-4 pt-5 pb-3 border-b border-border">
+                <h3 className="text-base font-bold text-brandText">Profile</h3>
+                <button
+                  onClick={() => setProfileSheetUser(null)}
+                  className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4">
+                {profileSheetLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 animate-spin text-brandBlue" />
+                  </div>
+                ) : profileSheetData?.non_social === true ? (
+                  /* Non-social users: show blocked overlay */
+                  <div className="relative rounded-xl border border-border bg-muted/50 p-6 text-center">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
+                      <User className="w-8 h-8 text-muted-foreground" />
+                    </div>
+                    <div className="text-sm font-semibold text-brandText">{profileSheetUser.name}</div>
+                    <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
+                      This user has enabled Non-Social mode and is not available for discovery or chat.
+                    </div>
+                  </div>
+                ) : profileSheetData ? (
+                  /* Public profile view */
+                  <div className="space-y-4">
+                    <div className="flex flex-col items-center">
+                      <UserAvatar
+                        avatarUrl={(profileSheetData.avatar_url as string) || profileSheetUser.avatarUrl || null}
+                        name={(profileSheetData.display_name as string) || profileSheetUser.name}
+                        isVerified={!!profileSheetData.is_verified}
+                        hasCar={false}
+                        size="xl"
+                        showBadges={true}
+                      />
+                      <div className="mt-3 text-lg font-bold text-brandText">{(profileSheetData.display_name as string) || profileSheetUser.name}</div>
+                      {profileSheetData.show_age !== false && profileSheetData.dob && (
+                        <div className="text-sm text-muted-foreground">
+                          {Math.floor((Date.now() - new Date(profileSheetData.dob as string).getTime()) / (1000 * 60 * 60 * 24 * 365.25))} years old
+                        </div>
+                      )}
+                      {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
+                        <div className="text-sm text-muted-foreground">{profileSheetData.relationship_status as string}</div>
+                      )}
+                    </div>
+
+                    {profileSheetData.location_name && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Location</div>
+                        <div className="text-sm text-brandText">{profileSheetData.location_name as string}</div>
+                      </div>
+                    )}
+
+                    {profileSheetData.show_bio !== false && profileSheetData.bio && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Bio</div>
+                        <div className="text-sm text-brandText">{profileSheetData.bio as string}</div>
+                      </div>
+                    )}
+
+                    {profileSheetData.show_gender !== false && profileSheetData.gender_genre && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Gender</div>
+                        <div className="text-sm text-brandText">{profileSheetData.gender_genre as string}</div>
+                      </div>
+                    )}
+
+                    {profileSheetData.show_orientation !== false && profileSheetData.orientation && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Orientation</div>
+                        <div className="text-sm text-brandText">{profileSheetData.orientation as string}</div>
+                      </div>
+                    )}
+
+                    {profileSheetData.show_occupation !== false && profileSheetData.occupation && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Job</div>
+                        <div className="text-sm text-brandText">{profileSheetData.occupation as string}</div>
+                      </div>
+                    )}
+
+                    {profileSheetData.show_academic !== false && (profileSheetData.school || profileSheetData.major) && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Education</div>
+                        <div className="text-sm text-brandText">{[profileSheetData.school, profileSheetData.major].filter(Boolean).join(" • ")}</div>
+                      </div>
+                    )}
+
+                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
+                      <div className="rounded-lg bg-muted/50 p-3">
+                        <div className="text-xs font-semibold text-brandText/70 mb-1">Pets</div>
+                        <div className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-sm text-muted-foreground">Profile not found</div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Discovery Filter Modal (tier-gated checkboxes) */}
+      <AnimatePresence>
+        {isFilterModalOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[70]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsFilterModalOpen(false)}
+            />
+            <motion.div
+              className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
+                className="w-full max-w-sm bg-white rounded-2xl border border-brandText/15 shadow-elevated p-5 max-h-[80vh] overflow-y-auto"
+                initial={{ scale: 0.98, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.98, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-base font-bold text-brandText">Discovery Filters</div>
+                  <button onClick={() => setIsFilterModalOpen(false)} className="p-2 rounded-full hover:bg-muted">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {([
+                    { label: "Age Range", tier: "free" },
+                    { label: "Gender", tier: "free" },
+                    { label: "Distance", tier: "free" },
+                    { label: "Species", tier: "free" },
+                    { label: "Social Role", tier: "free" },
+                    { label: "Height Range", tier: "premium" },
+                    { label: "Sexual Orientation", tier: "premium" },
+                    { label: "Highest Degree", tier: "premium" },
+                    { label: "Relationship Status", tier: "premium" },
+                    { label: "Car Badge", tier: "premium" },
+                    { label: "Pet Experience", tier: "premium" },
+                    { label: "Language", tier: "premium" },
+                    { label: "Verified Users Only", tier: "premium" },
+                    { label: "Who waved at you", tier: "gold" },
+                    { label: "Active users only", tier: "gold" },
+                  ] as const).map((filter) => {
+                    const userTier = effectiveTier;
+                    const tiers = ["free", "premium", "gold"];
+                    const userIdx = tiers.indexOf(userTier);
+                    const filterIdx = tiers.indexOf(filter.tier);
+                    const isLocked = userIdx < filterIdx;
+                    const requiredTier = filter.tier === "gold" ? "Gold" : "Premium";
+
+                    return (
+                      <button
+                        key={filter.label}
+                        onClick={() => {
+                          if (isLocked) {
+                            toast.info(`Unlock ${requiredTier} to use this filter.`);
+                          }
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors text-left",
+                          isLocked
+                            ? "border-brandText/10 bg-gray-50 text-brandText/40 cursor-not-allowed"
+                            : "border-brandText/15 bg-white text-brandText hover:bg-muted"
+                        )}
+                      >
+                        <span className="text-sm font-medium">{filter.label}</span>
+                        {isLocked && <Lock className="w-4 h-4 text-brandText/30" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
             </motion.div>
           </>
         )}

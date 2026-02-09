@@ -71,6 +71,8 @@ const AIVet = () => {
 
   // Contract override: AI Vet media is gated by QMS on upload. UI allows attach for Premium/Gold
   // and relies on the Edge Function to enforce per-tier daily limits.
+  // Free=0 uploads, Premium=10/day, Gold=20/day (spec). UI gate: show lock if not premium/gold.
+  const hasMediaCredits = isPremium;
 
   // Add initial greeting when conversation starts
   useEffect(() => {

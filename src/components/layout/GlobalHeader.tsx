@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Bell, Diamond, Settings, Star, User as UserIcon } from "lucide-react";
+import { Bell, ChevronRight, Diamond, FileText, LogOut, Settings, Shield, Star, User as UserIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,6 +31,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
 
   const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
   const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
+  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const tierLabel = effectiveTier === "gold" ? "Gold" : effectiveTier === "premium" ? "Premium" : "Free";
   const initials = useMemo(() => {
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
@@ -160,9 +162,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
               <Settings className="w-5 h-5 text-muted-foreground" />
             </button>
           </SheetTrigger>
-          <SheetContent className="p-4 w-[320px] sm:max-w-sm">
-            {/* Menu order (UAT): Avatar/Name/Badge -> Unlock blocks -> Profile link */}
-            <div className="space-y-3">
+          <SheetContent className="p-4 w-[320px] sm:max-w-sm flex flex-col">
+            {/* Menu order: Avatar/Name/Badge → Unlock blocks → Profile → Account Setting → Privacy → Terms → Logout */}
+            <div className="space-y-3 flex-1">
+              {/* 1. Avatar / Name / Badge */}
               <div className="flex items-center gap-3">
                 <div
                   className={cn(
@@ -178,58 +181,119 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                     <div className="text-base font-extrabold text-brandText truncate">
                       {profile?.display_name || "User"}
                     </div>
-                    <span
-                      className={cn(
-                        "inline-flex items-center justify-center w-5 h-5 rounded-full border-2 flex-shrink-0",
-                        isVerified ? "border-brandGold" : "border-gray-300",
-                      )}
-                      aria-label={isVerified ? "Verified" : isPending ? "Pending" : "Not verified"}
-                    />
+                    <span className={cn(
+                      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold",
+                      tierLabel === "Gold" ? "bg-brandGold/20 text-brandGold" : tierLabel === "Premium" ? "bg-brandBlue/20 text-brandBlue" : "bg-gray-100 text-brandText/60"
+                    )}>
+                      {tierLabel}
+                    </span>
                   </div>
                   <div className="text-xs text-brandText/60 truncate">{user?.email || ""}</div>
                 </div>
               </div>
 
-              <div className="flex gap-3 w-full">
-                <SheetClose asChild>
-                  <button
-                    onClick={() => navigate("/premium?tab=Premium")}
-                    className="flex-1 min-w-0 rounded-[16px] bg-brandBlue text-white p-3 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Diamond className="w-4 h-4 text-white" />
-                      <div className="text-sm font-extrabold">Unlock Premium</div>
-                    </div>
-                  </button>
-                </SheetClose>
+              {/* 2. Unlock Premium block */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/premium?tab=Premium")}
+                  className="w-full rounded-[16px] bg-brandBlue text-white p-3 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Diamond className="w-4 h-4 text-white" />
+                    <div className="text-sm font-extrabold">Unlock Premium</div>
+                  </div>
+                  <div className="text-xs text-white/80 mt-1">Manage your privileges</div>
+                </button>
+              </SheetClose>
 
-                <SheetClose asChild>
-                  <button
-                    onClick={() => navigate("/premium?tab=Gold")}
-                    className="flex-1 min-w-0 rounded-[16px] bg-brandGold text-white p-3 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Star className="w-4 h-4 text-white" />
-                      <div className="text-sm font-extrabold">Unlock Gold</div>
-                    </div>
-                  </button>
-                </SheetClose>
-              </div>
+              {/* 3. Unlock Gold block */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/premium?tab=Gold")}
+                  className="w-full rounded-[16px] bg-brandGold text-white p-3 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Star className="w-4 h-4 text-white" />
+                    <div className="text-sm font-extrabold">Unlock Gold</div>
+                  </div>
+                  <div className="text-xs text-white/80 mt-1">Manage your privileges</div>
+                </button>
+              </SheetClose>
 
-              <div className="pt-1">
-                <SheetClose asChild>
-                  <button
-                    onClick={() => navigate("/edit-profile")}
-                    className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
-                  >
-                    <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
-                      <UserIcon className="w-5 h-5 text-brandText/70" />
-                      Profile
-                    </span>
-                    <span className="text-brandText/50">&rsaquo;</span>
-                  </button>
-                </SheetClose>
-              </div>
+              {/* 4. Profile */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/edit-profile")}
+                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+                    <UserIcon className="w-5 h-5 text-brandText/70" />
+                    Profile
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-brandText/50" />
+                </button>
+              </SheetClose>
+
+              {/* 5. Account Setting */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/account-settings")}
+                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+                    <Shield className="w-5 h-5 text-brandText/70" />
+                    Account Setting
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-brandText/50" />
+                </button>
+              </SheetClose>
+
+              {/* 6. Privacy & Policy */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/privacy")}
+                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+                    <FileText className="w-5 h-5 text-brandText/70" />
+                    Privacy & Policy
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-brandText/50" />
+                </button>
+              </SheetClose>
+
+              {/* 7. Terms of Service */}
+              <SheetClose asChild>
+                <button
+                  onClick={() => navigate("/terms")}
+                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
+                    <FileText className="w-5 h-5 text-brandText/70" />
+                    Terms of Service
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-brandText/50" />
+                </button>
+              </SheetClose>
+            </div>
+
+            {/* 8. Logout — pinned low, just above bottom nav */}
+            <div className="pt-2 pb-nav">
+              <SheetClose asChild>
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    navigate("/auth");
+                  }}
+                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-red-300 px-4 flex items-center justify-between bg-white"
+                >
+                  <span className="flex items-center gap-3 text-sm font-bold text-red-500">
+                    <LogOut className="w-5 h-5" />
+                    Logout
+                  </span>
+                  <ChevronRight className="w-5 h-5 text-red-400" />
+                </button>
+              </SheetClose>
             </div>
           </SheetContent>
         </Sheet>

@@ -38,7 +38,7 @@ These requirements are a zero-bullshit release gate. Implement in code (web + mo
 8. **Re-audit & UAT**: Scan `/src` for keywords (`input`, `Unlock Premium`, `Unlock Gold`, icon usage) and UAT by roles (Free/Premium/Gold): verify input height/align, menu order, redirects, and that no padding bloat remains.
 9. **Sync & Push**: If any schema/config is affected, sync Supabase first. Then commit with message **"Global UI Fixes"** and push to GitHub `main`. Run **3x verify**: lint/build/test.
 10. **Legal Check**: Subscription redirects must have clear intent (no hidden fees). Taps to Manage Subscription must not auto-purchase; pricing and checkout confirmation must be shown before payment.
-11. **Update header logo with attached logo**: All headers must use the attached **huddle transparent logo.png** as the primary app logo (centered). Use appropriate sizing for the wordmark (width auto, constrained height).
+11. **Update header logo**: All headers use `huddle-name-transparent.png` (bear + "uddle" wordmark) as the primary app logo (centered). Auth/Onboarding/FounderMessage screens retain the bear icon only (`huddle-logo-transparent.png`). Width auto, constrained height.
 
 ---
 
@@ -100,12 +100,14 @@ When the user taps **Submit** in `/verify-identity`:
   - `extra_stars`, `extra_media_10`, `extra_broadcast_72h`
 - **Function:** `check_and_increment_quota(action_type TEXT)` (security definer; server source-of-truth)
 - **Snapshot RPC:** `get_quota_snapshot()` for UI (read-only)
-- **v1.9 Limits (Contractual):**
-  - **Thread posts/day:** Free `1`, Premium `5`, Gold `20` (Gold is pooled via family owner)
+- **v1.9 Limits (Contractual — matches Final Override table):**
+  - **Thread posts/day:** Free `3`, Premium `15`, Gold `30` (Gold is pooled via family owner)
   - **Discovery profiles/day:** Free `40` (blurry upsell after), Premium/Gold unlimited
-  - **Media/day (AI Vet/Chats/Threads/Broadcast images):** Free `0` (block), Premium `10`, Gold `50` (add-on `extra_media_10` consumes after base)
-  - **Stars/cycle:** Gold `3` (add-on `extra_stars` consumes after base; can be purchased on any tier)
-  - **Broadcast alerts/week:** Free `5`, Premium/Gold `20` (enforced by `map_alerts` trigger to support add-on semantics)
+  - **AI Vet uploads/day:** Free `0` (block), Premium `10`, Gold `20` (pooled) + 5 priority analyses/month
+  - **Chat/Thread images:** Unlimited for all tiers
+  - **Stars/month:** Free `0`, Premium `0`, Gold `10` (pooled; add-on `extra_stars` consumes after base; can be purchased on any tier)
+  - **Broadcast alerts:** Free `3/week` 12h visible 10km, Premium `30/month` 24h visible 25km, Gold `50/month` 48h visible 50km (pooled; enforced by `map_alerts` trigger)
+  - **Video Upload:** Free/Premium `0` (block), Gold unlimited (<500MB compressed)
 - **Family pooling (Gold):** `family_members(status='accepted')` shares pool owner’s counters/limits.
 - **Upsell UI:** On server-deny (RPC returns `false` or trigger raises `quota_exceeded`), show sticky upsell banner (white bg, gold border) with CTA to `/premium` (and preselect add-on when applicable).
 
@@ -142,6 +144,12 @@ When the user taps **Submit** in `/verify-identity`:
 - Horizontal cards show Name, Age, Status, Pet Species
 - Overlay icons: Wave (match), Star (direct chat + quota), X (skip)
 - Expand Search: shows button when stack ends → adds +15km, clears local `hiddenDiscoveryIds`
+
+**Discovery Ranking Algorithm:**
+- Score = sum(filter weights) where species match = +100, verification = +50, compatibility = +30, logistics/skills = +30, activity = +20, connection = +20
+- Sort: `ORDER BY (score + priority * 1000) DESC` where Free=1, Premium=2, Gold=3
+- Premium/Gold get top 20% discovery slots (priority ranking)
+- Free users get standard score-based ranking
 
 **Discovery State Machine (Invisible Logic):**
 - `hiddenDiscoveryIds` is a Set in `Chats.tsx` storing skipped IDs
@@ -297,12 +305,16 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 ## 4) `Chats.tsx`
 **UI Elements:**
 - Discovery row (cards, Wave/Star/X)
-- Search, filters, Create Group (premium+verified)
-- Chat list tabs
+- Search, discovery filter button (SlidersHorizontal icon), Create Group (premium+verified)
+- Chat list tabs (Chats / Groups)
+- Filter sub-tabs (Nannies / Playdates / Animal Lovers)
 - Booking modal with Safe Harbor modal
+- Discovery Filter Modal (15 tier-gated filter checkboxes, see 13c)
+- Profile Sheet (right-side drawer on avatar tap, see 13d)
 
 **State:**
 - `hiddenDiscoveryIds`, `discoveryDistance`, `booking*` states
+- `isFilterModalOpen`, `profileSheetUser`, `profileSheetData`
 - Uses `AuthContext`, `useUpsell`
 
 **Flow:**
@@ -311,6 +323,8 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - X → skip + add to hiddenDiscoveryIds
 - Expand Search → +15km, clears hiddenDiscoveryIds
 - Booking → Safe Harbor modal → booking modal → Stripe checkout
+- Tap avatar → fetch profile → right-side sheet (non_social blocked)
+- Filter icon → tier-gated filter modal
 
 ## 5) `ChatDialogue.tsx`
 **UI Elements:**
@@ -385,7 +399,26 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 12) `Map.tsx`
 **UI Elements:**
-- Map with pins
+- Mapbox GL map with user pins, vet clinic pins, stray/lost pins
+- Broadcast Alert form: title, description (max 1000 chars), range dropdown, duration dropdown, visibility toggle (Eye/EyeOff icon)
+- "Pin my Location" with subtext: "Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings."
+
+**Broadcast Range by Tier:**
+- Free: 10km max, 12h visible, 3/week
+- Premium: 25km max, 24h visible, 30/month
+- Gold: 50km max, 48h visible, 50/month (pooled)
+- Add-on: 72h/150km
+
+**Range Dropdown Options:** 2km, 10km, 20km, 25km (Premium+), 50km (Gold+), 150km (Add-on)
+**Duration Dropdown Options:** 12h, 24h (Premium+), 48h (Gold+), 72h (Add-on)
+
+**Visibility Toggle:** Eye/EyeOff icon button replaces the text "Visible: On/Off"
+
+**HK Vet Clinics:** Auto-loaded, white icon with green/red dot (open/closed). Subtext: "Timely reflection of any changes of operations of the Vet Clinic is not guaranteed". 5-star rating (verified users only).
+
+**Pin Colors:** Stray = blue, Lost = red, Friends = default
+
+**Performance:** PostGIS ST_DWithin for radius queries, GIST index on profiles.location
 
 ## 13) `Settings.tsx`
 **UI Elements (Gear Logo CTA, UAT):**
@@ -413,23 +446,98 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 **Navigation:**
 - Gear icon opens Settings (web route `/settings`, mobile Settings tab).
 - "Account Setting" opens Account Settings screen/page (web route `/account-settings`, mobile `AccountSettingsScreen`).
-  - Gear menu (popover/drawer) must show: Avatar/Name/Badge -> Unlock Premium/Gold blocks -> Profile link.
+  - Gear menu (popover/drawer) order: Avatar/Name/Badge → Unlock Premium → Unlock Gold → Profile → Account Setting → Privacy & Policy → Terms of Service → Logout (pinned low). See section 13b for full details.
 
 ## 13a) `AccountSettings.tsx` / `AccountSettingsScreen.tsx` (UAT)
-**Purpose:** Centralize account settings, notification preferences, and delete-account.
+**Purpose:** Centralize account settings, notification preferences, privacy toggles, and delete-account.
 
-**Notification settings (profiles.prefs):**
-- Persist user notification preferences in `profiles.prefs` (JSON).
-- Keys:
-  - `push_notifications_enabled: boolean`
-  - `email_notifications_enabled: boolean`
+**Layout (top to bottom, no user card at top):**
+1. **Family** section (Gold-gated):
+   - Family Sharing card with linked member name or "No members linked"
+   - Gold: green "Invite" button → `/family-invite`
+   - Non-Gold: grey text "Upgrade to Gold for Family Sharing" + gold "Upgrade to Gold" button → `/premium?tab=Gold`
+2. **Security** section:
+   - Password → `/change-password`
+   - Identity Verification → `/verify-identity`
+   - Biometric Login (toggle, saved in prefs)
+   - Two-Factor Auth (toggle, saved in prefs)
+3. **Privacy** section:
+   - Non-Social toggle (separate `profiles.non_social` column, not JSON prefs)
+   - Hide from Map toggle (separate `profiles.hide_from_map` column, not JSON prefs)
+4. **Notifications** section:
+   - Pause All Notifications (toggle)
+   - Social (Waves/Matches) (toggle, default on)
+   - Safety (Alerts) (toggle, default on)
+   - Dr. Huddle (toggle, default on)
+   - Email Notifications (toggle)
+5. **Language** selector: English | 繁體中文 | 简体中文
+6. **Manage Subscription** → `/premium`
+7. **Delete Account** (red, with confirmation dialog: "Are you sure? This is permanent and cannot be undone.")
+8. **Logout** (red)
+
+**Non-Social Toggle behavior:**
+- When enabled: user excluded from discovery results, profile frozen with 80% overlay in social contexts
+- Saved as `profiles.non_social BOOLEAN` (separate column, not in prefs JSON)
+
+**Hide from Map Toggle behavior:**
+- When enabled: user excluded from map pins, cannot pin own location
+- Saved as `profiles.hide_from_map BOOLEAN` (separate column, not in prefs JSON)
 
 **Delete account (RLS enforced):**
 - Button: "Delete Account"
-- Confirmation: "Are you sure? This is permanent."
+- Confirmation: "Are you sure? This is permanent and cannot be undone."
 - Action:
   - `DELETE FROM profiles WHERE id = auth.uid()` (RLS: user may only delete self)
   - `supabase.auth.signOut()`
+
+## 13b) Menu Drawer (GlobalHeader gear icon)
+
+**Menu order (top to bottom):**
+1. Avatar + Display Name + Tier Badge pill (e.g., "Free", "Premium", "Gold")
+2. Unlock Premium block (brandBlue bg, white text, diamond icon, whole block clickable → `/premium?tab=Premium`)
+3. Unlock Gold block (brandGold bg, white text, star icon, whole block clickable → `/premium?tab=Gold`)
+4. Profile → `/edit-profile`
+5. Account Setting → `/account-settings`
+6. Privacy & Policy → `/privacy`
+7. Terms of Service → `/terms`
+8. Logout (pinned low, red text, calls `supabase.auth.signOut()` then navigates to `/auth`)
+
+## 13c) Chats Discovery Filters (Filter Modal)
+
+**Access:** SlidersHorizontal icon button next to Search button in Chats header.
+
+**Filter rows (tier-gated):**
+
+| Filter | Required Tier |
+|---|---|
+| Age Range | Free |
+| Gender | Free |
+| Distance | Free |
+| Species | Free |
+| Social Role | Free |
+| Height Range | Premium |
+| Sexual Orientation | Premium |
+| Highest Degree | Premium |
+| Relationship Status | Premium |
+| Car Badge | Premium |
+| Pet Experience | Premium |
+| Language | Premium |
+| Verified Users Only | Premium |
+| Who waved at you | Gold |
+| Active users only | Gold |
+
+- Locked filters show Lock icon and toast: "Unlock [Premium/Gold] to use this filter."
+
+## 13d) Profile Tap in Chats
+
+**Behavior:** Tapping a user's avatar in the chat list opens a scrollable right-side sheet.
+
+**Content shown (public fields only, respects `show_*` toggles):**
+- Avatar, display name, age (if show_age), relationship status (if show_relationship_status)
+- Location, bio (if show_bio), gender (if show_gender), orientation (if show_orientation)
+- Job (if show_occupation), education (if show_academic), pet species
+
+**Non-Social block:** If `profiles.non_social = true`, show a blocked card: "This user has enabled Non-Social mode and is not available for discovery or chat."
 
 ## 14) `Admin.tsx`
 **UI Elements:**
@@ -463,6 +571,43 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 21) `HazardScanner.tsx`
 - Hazard scan UI
+
+---
+
+## 9a. Popup Messages (Exact Text)
+
+**Quota Exceeded — Threads (Free):**
+> "You've reached your daily thread limit. Upgrade to Premium for 15 posts/day or Gold for 30 posts/day."
+
+**Quota Exceeded — Threads (Premium):**
+> "You've reached your daily thread limit. Upgrade to Gold for 30 posts/day."
+
+**Quota Exceeded — Threads (Gold):**
+> "You've reached your daily thread limit. Try again tomorrow."
+
+**Quota Exceeded — AI Vet Image (Free):**
+> "Image uploads require Premium. Upgrade now to unlock 10 uploads/day."
+
+**Quota Exceeded — AI Vet Image (Gold):**
+> "We've temporarily limited image upload... try tomorrow."
+
+**Quota Exceeded — Stars (Gold):**
+> "No stars remaining this month. Purchase a Star Pack or wait for monthly reset."
+
+**Quota Exceeded — Discovery (Free at 40):**
+> "Unlock Premium to see more users. Free users can view up to 40 profiles per day."
+
+**Non-Social Profile Tap:**
+> "This user has enabled Non-Social mode and is not available for discovery or chat."
+
+**Locked Filter:**
+> "Unlock [Premium/Gold] to use this filter."
+
+**Family Invite (non-Gold):**
+> "Upgrade to Gold for Family Sharing."
+
+**Family Invite Received:**
+> "(Display Name) has invited you to join their family!" [Accept] [Decline]
 
 ---
 
@@ -707,17 +852,21 @@ This subsection is the **authoritative** v1.9 contract for perks and quota enfor
 
 | Feature | Free | Premium ($9.99/month) | Gold ($19.99/month) |
 |---|---|---|---|
-| Thread posts | 1/day | 5/day | 20/day |
-| Discovery profiles/day | 40 max (blurry upsell after) | Unlimited | Unlimited |
-| Filtering | Basic (age, gender, distance, species, role) | Advanced (+height, sexual orientation, highest degree, relationship status, Car badge, pet experience, language, verified-only) | Advanced (same) |
-| Media/Images (AI Vet/Chats/Threads/Broadcast) | 0 (block) | 10/day | 50/day |
-| Stars (direct chat) | 0 | 0 | 3/cycle |
-| Broadcast Alerts | 5/week, 12h map visible, 2km range | 20/week, 24h visible, 10km range | 20/week, 48h visible, 20km range |
-| Family Member | 0 | 0 | 1 (quota inheritance; Gold pooling) |
+| Thread posts | 3/day | 15/day | 30/day (pooled with family) |
+| Discovery profiles/day | 40 max (blurry upsell after) | Unlimited + standard ranking (score-based sort) | Unlimited + priority ranking (top slots, seen more) |
+| Filtering | Basic (age, gender, distance, species, role) | Advanced (+height, orientation, degree, relationship status, car badge, pet experience, language, verified-only) | Advanced + "Who waved at you" (blue pill), "Active users only" (last_login < 24h) |
+| AI Vet uploads | 0 (block) | 10/day | 20/day (pooled) + 5 priority analyses/month |
+| Chat/Thread images | Unlimited | Unlimited | Unlimited |
+| Stars (direct chat triggers) | 0 | 0 | 10/month (pooled) |
+| Broadcast Alerts | 3/week, visible 12h, radius 10km | 30/month, visible 24h, radius 25km | 50/month, visible 48h, radius 50km (pooled) |
+| Family Member | 0 | 0 | 1 (shared billing/profiles, pooled quotas for AI Vet/threads/stars/broadcasts; both get Gold badge/unlimited discovery/priority/filters/video upload) |
+| Video Upload (Chats/Threads) | 0 (block) | 0 | Yes (exclusive, unlimited, <500MB compressed) |
 
-- Add-ons (any tier, Stripe Checkout): `+3 Stars`, `+10 Media`, `+1 Broadcast (72h/20km)`; implemented via extras columns in `user_quotas`.
-- Enforcement: QMS in `user_quotas` via `check_and_increment_quota(action_type TEXT)`; Broadcast quotas enforced in `map_alerts` trigger (supports add-on semantics).
-- Upsell: On exceed/gate, show sticky banner (white bg, gold border) with CTA to `/premium` (and preselect add-on when applicable).
+- **Add-ons** (any tier, Stripe Checkout): `+3 Stars`, `+10 Media` (for AI Vet only — chats/threads unlimited), `+1 Broadcast (72h/150km)`; implemented via extras columns in `user_quotas`. UI: `/Premium` checkboxes/qty/real-time total.
+- **Enforcement:** QMS in `user_quotas` via `check_and_increment_quota(action_type TEXT)`; Broadcast quotas enforced in `map_alerts` trigger (supports add-on semantics).
+- **Resets:** Daily (00:00 UTC) for day; Weekly (Monday) for week; Monthly on anniversary for month/priority analyses.
+- **Family pooling (Gold):** `family_members(status='accepted')` shares pool owner's counters/limits. Both get Gold badge, unlimited discovery, priority ranking, all filters, video upload.
+- **Upsell:** On exceed/gate, show popup modal with tier-specific text and CTA to `/premium` (except Gold exhaustion — no CTA, just wait message). Haptic feedback + subtle shake animation.
 
 ### Archived / Superseded Contract Text (Kept for Traceability)
 
@@ -737,7 +886,7 @@ This subsection is the **authoritative** v1.9 contract for perks and quota enfor
 
 ### Add-ons (Any Tier, Stripe Checkout)
 
-Add-ons (any tier, Stripe Checkout): +3 Stars, +10 Media (for AI Vet only, chats/threads unlimited), +1 Broadcast (72h/150km). Extras columns in user_quotas; UI: /Premium checkboxes/qty/real-time total.
+Add-ons (any tier, Stripe Checkout): +3 Stars "Superpower to trigger chats immediately", +10 Media "Additional 10 media usage across Social, Chats and AI Vet" (for AI Vet only — chats/threads unlimited), +1 Broadcast (72h/150km) "Additional broadcast alert". Extras columns in user_quotas; UI: /Premium checkboxes/qty/real-time total. Remove verified badge purchase.
 
 ### QMS (Quota Management System) Enforcement
 
