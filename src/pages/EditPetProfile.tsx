@@ -672,7 +672,7 @@ const EditPetProfile = () => {
                 <select
                   value={vaccinationInput.name}
                   onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
-                  className="flex-1 h-9 rounded-[12px] bg-white border border-[#e2e4e6] px-2 py-0 text-sm text-left"
+                  className="flex-1 h-9 rounded-[12px] bg-white border border-[#e2e4e6] px-2 py-1 text-sm text-left"
                 >
                   <option value="">{t("Select vaccine...")}</option>
                   {VACCINATION_OPTIONS.map(v => (
