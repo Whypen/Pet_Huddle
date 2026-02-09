@@ -498,13 +498,13 @@ const Auth = () => {
       {/* Footer */}
       <div className="py-8 text-center">
         <div className="text-xs text-muted-foreground">
-          <div className="text-[10px] inline-block">{t("auth.by_continuing")}</div>{" "}
-          <Link to="/terms" className="text-brandBlue text-[10px] mx-0.5 inline-block">
-            {t("Terms")}
+          <div className="text-[10px] inline">By continuing, you agree to our</div>{" "}
+          <Link to="/terms" className="text-brandBlue text-[10px] mx-[2px] inline">
+            Terms
           </Link>{" "}
-          <div className="text-[10px] inline-block">{t("auth.and")}</div>{" "}
-          <Link to="/privacy" className="text-brandBlue text-[10px] mx-0.5 inline-block">
-            {t("auth.privacy")}
+          <div className="text-[10px] inline">and</div>{" "}
+          <Link to="/privacy" className="text-brandBlue text-[10px] mx-[2px] inline">
+            Privacy Policy
           </Link>
         </div>
       </div>
