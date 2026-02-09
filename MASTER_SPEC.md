@@ -304,22 +304,24 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 4) `Chats.tsx`
 **UI Elements:**
-- **Collapsible Discovery section** (default expanded): toggle header "Discovery" with ChevronUp/Down, AnimatePresence expand/collapse animation. Contains single-card paging discovery row with badge overlays (Verified/Car) on card image (see 13f)
-- **Collapsible Chats section** (default collapsed): toggle header "Chats" with ChevronUp/Down, AnimatePresence expand/collapse. Contains unified tabs + chat/group list
+- **Collapsible Discovery section** (default expanded): toggle header "Discovery" with ChevronUp/Down, `borderBottom: 1px solid #E0E0E0` + `boxShadow: 0 1px 3px rgba(0,0,0,0.1)` on header. AnimatePresence expand/collapse animation. Contains single-card paging discovery row with 3:4 vertical images (aspectRatio: 3/4, object-contain, centered) and badge overlays (see 13f)
+- **Collapsible Chats section** (default collapsed): toggle header "Chats" with same underline border + shadow. AnimatePresence expand/collapse. Contains unified tabs + chat/group list
 - Search, discovery filter button (SlidersHorizontal icon), Create Group (premium+verified)
-- Unified tabs inside Chats section: Nannies | Play Dates | Animal Lovers | Groups (see 13e)
-- Booking modal with Safe Harbor modal
+- Unified tabs inside Chats section: **Play Dates | Nannies | Animal Lovers | Groups** (Play Dates default). Active tab: underlined blue (brandBlue 2px bottom bar), no rounded pill. (see 13e)
+- Booking modal (Safe Harbor removed — disclaimer now inside ChatDialogue)
 - Discovery Filter Modal: chevron rows with per-filter selection UIs, summary text, defaults, reset (see 13c)
-- **Profile Sheet**: right-side drawer with 3:4 hero image, gradient overlay, Verified/Tier badge overlays, PawPrint pet icon overlay (bottom-right), name+age at bottom-left, public fields list layout. Non-social block for non_social users. (see 13d)
-- Swipe-to-delete on chat items with red bin icon and confirmation
-- **Group Manage modal**: group image + name + member count header, scrollable members list with "Remove" per member, "Invite from Mutual Waves" section with invite button per user, "Change Image" button
-- **Chat preview**: green "Book Now" pill for nanny chats (replaces $ icon), grey unread badge, bold social availability subtext
+- **Profile Sheet**: **full-screen scrollable modal** (fixed inset-0) with 3:4 hero image at top, horizontal images fit to container. Overlays at bottom of image: Name, Age, Social Role, Pet Species, Verified + Car Badge. Pet icon section below image if user owns pet. Vertical field list: Bio, Pet Species, Pet Experience, Location, Gender, Orientation, Relationship Status, Academic, Language, Social Album (3-column grid thumbnails). Non-social users show blocked card. (see 13d)
+- Swipe-to-delete on chat items: outlined red bin icon appears **only during swipe** (not static background), popup confirmation dialog
+- **Group Manage modal**: working group image upload (Supabase storage), scrollable members list with **working Remove** (deletes from chat_room_members), **Invite from Mutual Waves** with real notification insertion (receiver gets "Do you want to join?" notification), Change Image with file input
+- **Chat preview**: grey bold subtext closer to bottom border (text-[#6B7280] mt-1.5). No "Book Now" pill in preview (moved to ChatDialogue). Unread badge: **grey in chats**, **blue (brandBlue) in groups**
 
 **State:**
 - `hiddenDiscoveryIds`, `filters` (DiscoveryFilters object), `booking*` states
 - `isFilterModalOpen`, `activeFilterRow`, `profileSheetUser`, `profileSheetData`
-- `groupManageId`, `swipeDeleteId`
+- `groupManageId`, `swipeDeleteId`, `deleteConfirmId`
+- `groupImageUploading`, `groupMembers`, `mutualWaves`
 - `discoveryExpanded` (default `true`), `chatsExpanded` (default `false`)
+- `mainTab` default: `"playdates"`
 - Uses `AuthContext`, `useUpsell`
 
 **Flow:**
@@ -327,25 +329,31 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - Star → direct chat + quota
 - X → skip + add to hiddenDiscoveryIds
 - Expand Search → +15km (via filters.maxDistanceKm), clears hiddenDiscoveryIds
-- Booking → Safe Harbor modal → booking modal → Stripe checkout
-- Tap avatar → fetch profile → right-side sheet with 3:4 hero image (non_social blocked)
+- Booking → booking modal → Stripe checkout (no Safe Harbor popup)
+- Tap avatar → fetch profile → full-screen scrollable modal with 3:4 hero image (non_social excluded from discovery query)
 - Filter icon → tier-gated filter modal with per-filter selection UIs
-- Swipe left on chat → red bin → confirm delete (blocked if active transaction)
+- Swipe left on chat → outlined bin appears during swipe → popup confirm delete (blocked if active transaction)
 - Tap "Discovery" header → toggle discovery section expand/collapse
 - Tap "Chats" header → toggle chats section expand/collapse
+- Group manage → load members from chat_room_members + mutual waves → Remove works (DB delete), Invite sends notification
 
 ## 5) `ChatDialogue.tsx`
 **UI Elements:**
-- Messages list
+- Messages list with realtime subscription
 - Input text, send button
-- Media upload button
+- Media upload button (**no quota check** — media unlimited for all tiers in chats)
+- **Nanny chats**: green "Book Now" pill in header (top-right), pinned disclaimer banner below header (different text if current user is a nanny vs client)
+- **Group chats**: group avatar icon in header, "Manage" pill in header
+- URL params: `id`, `name`, `type` (playdates | nannies | animal-lovers | group)
 
 **State:**
-- Messages array
+- Messages array, chatType from URL params
 
 **Flow:**
 - Send message → insert into chat_messages
-- Media upload → QMS check `chat_image` → upload → insert message
+- Media upload → compress → upload to storage → insert message (no QMS gate — unlimited)
+- Book Now → navigate back to /chats with booking params
+- Nanny disclaimer: "Book verified Pet Nannies for safety..." for clients; "You are offering nanny services..." for nannies
 
 ## 6) `Social.tsx` (Threads)
 **UI Elements:**
@@ -576,52 +584,59 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 13d) Profile Tap in Chats / Discovery
 
-**Behavior:** Tapping a user's avatar in the chat list or discovery card opens a scrollable right-side sheet (w-80, max-w-[85vw]).
+**Behavior:** Tapping a user's avatar in the chat list or discovery card opens a **full-screen scrollable modal** (fixed inset-0, z-[81]).
 
-**Layout (3:4 hero image design):**
-1. **Hero image** (aspect-ratio 3:4, object-cover) — user's avatar fills the top. Gradient overlay at bottom (black/70 → transparent).
-2. **Badge overlays** (top-left): Verified (gold pill), Premium/Gold tier badge
-3. **PawPrint pet icon** (bottom-right of image): white circle with blue PawPrint icon, shown if user has pets
-4. **Name + age** (bottom-left of image, over gradient): bold white text
-5. **Public fields list** (below image, p-4): label-value rows (Status, Location, Bio, Gender, Orientation, Job, Education, Pets). Each row: grey label (w-20) + text value. Bio is full-width block.
-6. Close button: absolute top-right, black/40 circle with white X
+**Layout (3:4 hero image, full-screen scrollable):**
+1. **Hero image** (aspect-ratio 3:4, object-cover) — user's avatar fills top. Horizontal images fit to 4:3 container. Gradient overlay at bottom (h-32, black/80 → transparent).
+2. **Overlays at bottom of image:**
+   - Verified badge (gold pill) + Car badge (blue pill) — row above name
+   - Name + Age (bold white text)
+   - Social Role + Pet Species line below (xs text, white/80)
+3. **Pet icon section** (below image): PawPrint icon + "Pet Owner" text in a border-b row, shown only if user has pets
+4. **Vertical field list** (divide-y divider): Bio (full-width block), Pet Species, Pet Experience (years), Location, Gender, Orientation, Relationship Status, Academic, Language. Each row: grey label (w-28) + text value. Respects `show_*` toggles.
+5. **Social Album** (below fields): 3-column grid of square thumbnails (max 9), shown if social_album has entries
+6. Close button: absolute top-right, black/50 circle with white X
 
-**Respects `show_*` toggles:** Only render fields where the corresponding `show_*` flag is not false.
+**Non-Social users:** `profiles.non_social = true` users are **completely excluded from the discovery query** (filtered server-side). If profile is opened directly and non_social is true, show a centered blocked card.
 
-**Non-Social block:** If `profiles.non_social = true`, show a blocked card with User icon, name, and message: "This user has enabled Non-Social mode and is not available for discovery or chat."
-
-**Backend:** `SELECT ... FROM profiles WHERE id = target_id AND visible_from_discovery = true`
-RLS: `visible_from_discovery = true OR auth.uid() = owner`
+**Backend:** `SELECT ... FROM profiles WHERE id = target_id`; discovery query: `WHERE non_social IS NOT TRUE`
+Profile query includes: `display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, social_album, show_*, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role`
 
 ## 13e) Chats Preview List & Group Changes
 
 **Collapsible sections:**
-- **Discovery section** (default expanded): "Discovery" header with ChevronUp/Down toggle. AnimatePresence height animation (0.25s easeInOut). Contains discovery cards.
-- **Chats section** (default collapsed): "Chats" header with ChevronUp/Down toggle. Same animation. Contains unified tabs + chat/group list.
+- **Discovery section** (default expanded): "Discovery" header with ChevronUp/Down toggle + `borderBottom: 1px solid #E0E0E0` + `boxShadow: 0 1px 3px rgba(0,0,0,0.1)`. AnimatePresence height animation (0.25s easeInOut). Contains discovery cards.
+- **Chats section** (default collapsed): "Chats" header with same underline border + shadow styling. Same animation. Contains unified tabs + chat/group list.
 
 **Unified tab system (inside Chats section):**
-- Tabs: Nannies | Play Dates | Animal Lovers | Groups
-- All chats and groups rendered inside the collapsible Chats section
+- Tab order: **Play Dates | Nannies | Animal Lovers | Groups** (Play Dates is default)
+- Active tab: **underlined blue** (2px brandBlue bottom bar), text-brandBlue. Inactive: text-muted-foreground. No rounded pill backgrounds. Tabs sit on a border-b border-border line.
 
 **Chat preview layout:**
 1. Name (bold) + timestamp (right-aligned)
 2. One-line message preview (truncate with "..." if long)
-3. Social availability in bold blue subtext below (e.g., "Pet Nanny", "Playdate", "Animal Lover")
+3. **Grey bold subtext** closer to bottom border (text-[#6B7280] font-bold mt-1.5): "Pet Nanny", "Playdate", "Animal Lover"
 
 **Right-side actions:**
-- **Nannies:** Green "Book Now" pill button (bg #A6D539, white text, rounded-full, text-[10px] font-bold) — opens Safe Harbor → booking modal
-- **Unread badge:** Grey circle (bg-muted-foreground/70) with white count text
+- **No "Book Now" pill** in chat preview (moved to ChatDialogue header)
+- **Unread badge (chats):** Grey circle (bg-muted-foreground/70) with white count text
+- **Unread badge (groups):** Blue circle (bg-brandBlue) with white count text
 
-**Swipe left on chat:** Show red rubbish bin icon (WhatsApp style) → confirm "Conversation will be deleted". Conversations with active transactions cannot be deleted.
+**Swipe-to-delete:** Outlined red bin icon appears **only during active swipe** (not as a static background). On release past threshold → **popup confirmation dialog** (Dialog component): "This conversation will be permanently deleted. Are you sure?" with Cancel + Delete buttons. Conversations with active transactions cannot be deleted.
 
 **Groups:**
 - No badge on avatar
 - Under group name show "X members" (static)
 - Group creator only: blue pill "Manage" (right-aligned next to group name)
-- Tap Manage → modal with: group image header (w-14 circle), group name + member count, scrollable member list with "Remove" per member, "Invite from Mutual Waves" section listing chat contacts with "Invite" button each, "Change Image" button
+- Tap Manage → modal with:
+  - **Group Image**: displayed avatar (from avatarUrl) or gradient placeholder. **Working "Change Image"** button with file input → compress → upload to Supabase storage → update local state + DB
+  - Group name + member count
+  - **Members list**: fetched from `chat_room_members` joined with `profiles`. **Working "Remove"** button: deletes from `chat_room_members`, updates local state + member count
+  - **Invite from Mutual Waves**: fetched from `waves` table (mutual = both directions). Each user shown with avatar + name + "Invite" button. Invite inserts a `notifications` row (`type: "group_invite"`) for the receiver with group details. Receiver sees "Do you want to join [Group]?" notification.
 
 ## 13f) Discovery Profile Card UI
 
+**Card image:** 3:4 vertical aspect ratio (`aspectRatio: 3/4`, `object-contain`, centered on muted background)
 **Shows:** Name, Age, Social Role/Availability, Pet Species, Verified Badge + Car Badge overlay on card image
 **Single card visible at a time:** Horizontal scroll with `scrollSnapType: "x mandatory"`, card width = calc(100vw - 40px)
 **Action icons overlay:** Wave (match), Star (direct chat + quota), X (skip)

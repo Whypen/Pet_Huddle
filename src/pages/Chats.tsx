@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, ChevronDown, ChevronUp, Trash2, PawPrint } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, ChevronDown, ChevronUp, Trash2, PawPrint, DollarSign } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -151,8 +151,8 @@ type DiscoveryProfile = {
 
 type MainTab = "nannies" | "playdates" | "animal-lovers" | "groups";
 const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
-  { id: "nannies", label: "Nannies", icon: MessageSquare },
   { id: "playdates", label: "Play Dates", icon: MessageSquare },
+  { id: "nannies", label: "Nannies", icon: MessageSquare },
   { id: "animal-lovers", label: "Animal Lovers", icon: MessageSquare },
   { id: "groups", label: "Groups", icon: Users },
 ];
@@ -320,7 +320,7 @@ const Chats = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("nannies");
+  const [mainTab, setMainTab] = useState<MainTab>("playdates");
   const [chats, setChats] = useState<ChatUser[]>(mockChats);
   const [groups, setGroups] = useState<Group[]>(mockGroups);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
@@ -336,6 +336,10 @@ const Chats = () => {
   // Group management
   const [groupManageId, setGroupManageId] = useState<string | null>(null);
   const [swipeDeleteId, setSwipeDeleteId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [groupImageUploading, setGroupImageUploading] = useState(false);
+  const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -479,6 +483,59 @@ const Chats = () => {
       setServiceEndDate(serviceDate);
     }
   }, [serviceDate]);
+
+  // Load group members + mutual waves when group manage modal opens
+  useEffect(() => {
+    if (!groupManageId || !profile?.id) return;
+    const load = async () => {
+      // Fetch members for this group
+      try {
+        const { data: members } = await supabase
+          .from("chat_room_members")
+          .select("user_id, profiles!inner(id, display_name, avatar_url)")
+          .eq("room_id", groupManageId);
+        if (members) {
+          setGroupMembers(
+            members.map((m: { user_id: string; profiles: { id: string; display_name: string | null; avatar_url: string | null } }) => ({
+              id: m.user_id,
+              name: m.profiles?.display_name || "User",
+              avatarUrl: m.profiles?.avatar_url || null,
+            }))
+          );
+        }
+      } catch {
+        // Fallback — show owner only
+        setGroupMembers([{ id: profile.id, name: profile.display_name || "You", avatarUrl: profile.avatar_url || null }]);
+      }
+      // Fetch mutual waves for invite
+      try {
+        const { data: waves } = await supabase
+          .from("waves")
+          .select("from_user_id, to_user_id")
+          .or(`from_user_id.eq.${profile.id},to_user_id.eq.${profile.id}`);
+        if (waves) {
+          // Mutual: both directions exist
+          const sent = new Set(waves.filter((w: { from_user_id: string }) => w.from_user_id === profile.id).map((w: { to_user_id: string }) => w.to_user_id));
+          const received = waves.filter((w: { to_user_id: string; from_user_id: string }) => w.to_user_id === profile.id && sent.has(w.from_user_id)).map((w: { from_user_id: string }) => w.from_user_id);
+          if (received.length > 0) {
+            const { data: profiles } = await supabase.from("profiles").select("id, display_name, avatar_url").in("id", received);
+            if (profiles) {
+              setMutualWaves(profiles.map((p: { id: string; display_name: string | null; avatar_url: string | null }) => ({
+                id: p.id,
+                name: p.display_name || "User",
+                avatarUrl: p.avatar_url || null,
+              })));
+            }
+          } else {
+            setMutualWaves([]);
+          }
+        }
+      } catch {
+        setMutualWaves([]);
+      }
+    };
+    load();
+  }, [groupManageId, profile?.id]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -711,8 +768,8 @@ const Chats = () => {
     setChats(prev => prev.map(c =>
       c.id === chat.id ? { ...c, unread: 0 } : c
     ));
-    // Navigate to ChatDialogue with id + name params
-    navigate(`/chat-dialogue?id=${chat.id}&name=${encodeURIComponent(chat.name)}`);
+    // Navigate to ChatDialogue with id + name + type params
+    navigate(`/chat-dialogue?id=${chat.id}&name=${encodeURIComponent(chat.name)}&type=${chat.type}`);
   };
 
   const handleRemoveChat = (chat: ChatUser) => {
@@ -730,7 +787,7 @@ const Chats = () => {
       g.id === group.id ? { ...g, unread: 0 } : g
     ));
     // Navigate to ChatDialogue for group
-    navigate(`/chat-dialogue?id=${group.id}&name=${encodeURIComponent(group.name)}`);
+    navigate(`/chat-dialogue?id=${group.id}&name=${encodeURIComponent(group.name)}&type=group`);
   };
 
   // Tap user profile — open right-side sheet showing public fields; block if non_social
@@ -741,7 +798,7 @@ const Chats = () => {
     try {
       const { data, error } = await (supabase as any)
         .from("profiles")
-        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species")
+        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role")
         .eq("id", userId)
         .maybeSingle();
       if (error) throw error;
@@ -753,11 +810,10 @@ const Chats = () => {
     }
   };
 
-  // Nanny Booking: Open modal
-  const handleNannyBookClick = (e: React.MouseEvent, chat: ChatUser) => {
-    e.stopPropagation(); // Don't navigate to chat
+  // Nanny Booking: Open modal (no Safe Harbor popup — disclaimer is inside ChatDialogue)
+  const handleNannyBookClick = (chat: ChatUser) => {
     setSelectedNanny(chat);
-    setShowSafeHarborModal(true);
+    setNannyBookingOpen(true);
   };
 
   // Nanny Booking: Trigger Stripe Checkout via Edge Function
@@ -870,6 +926,7 @@ const Chats = () => {
         <button
           onClick={() => setDiscoveryExpanded((v) => !v)}
           className="w-full flex items-center justify-between py-2"
+          style={{ borderBottom: "1px solid #E0E0E0", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
         >
           <span className="text-sm font-bold text-brandText">Discovery</span>
           {discoveryExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
@@ -931,9 +988,9 @@ const Chats = () => {
                       }}
                     >
                       {cover ? (
-                        <img src={cover} alt={p.display_name || ""} className="h-52 w-full object-cover" loading="lazy" />
+                        <img src={cover} alt={p.display_name || ""} className="w-full object-contain bg-muted" style={{ aspectRatio: "3/4" }} loading="lazy" />
                       ) : (
-                        <div className="h-52 w-full bg-muted" />
+                        <div className="w-full bg-muted" style={{ aspectRatio: "3/4" }} />
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
 
@@ -1092,6 +1149,7 @@ const Chats = () => {
         <button
           onClick={() => setChatsExpanded((v) => !v)}
           className="w-full flex items-center justify-between py-2"
+          style={{ borderBottom: "1px solid #E0E0E0", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
         >
           <span className="text-sm font-bold text-brandText">Chats</span>
           {chatsExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
@@ -1107,21 +1165,24 @@ const Chats = () => {
               className="overflow-hidden"
             >
 
-      {/* Unified Tabs: Nannies / Play Dates / Animal Lovers / Groups */}
+      {/* Unified Tabs: Play Dates / Nannies / Animal Lovers / Groups */}
       <div className="py-2">
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-1 overflow-x-auto scrollbar-hide border-b border-border">
           {mainTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setMainTab(tab.id)}
               className={cn(
-                "px-3.5 py-2 rounded-full text-xs font-medium transition-colors whitespace-nowrap",
+                "px-3.5 py-2 text-xs font-medium transition-colors whitespace-nowrap relative",
                 mainTab === tab.id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  ? "text-brandBlue"
+                  : "text-muted-foreground hover:text-brandText"
               )}
             >
               {t(tab.label)}
+              {mainTab === tab.id && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-brandBlue rounded-t" />
+              )}
             </button>
           ))}
         </div>
@@ -1130,15 +1191,7 @@ const Chats = () => {
       {/* Chats View (Nannies / Playdates / Animal Lovers) */}
       {mainTab !== "groups" && (
         <>
-          {mainTab === "nannies" && (
-            <div className="mb-2">
-              <div className="rounded-xl bg-muted/50 border border-border px-3 py-2 text-xs text-muted-foreground">
-                Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses.
-              </div>
-            </div>
-          )}
-
-          {/* Chat List */}
+          {/* Chat List — Nanny disclaimer moved inside ChatDialogue */}
           <div>
             <div className="space-y-2">
               {filteredChats.length === 0 ? (
@@ -1149,10 +1202,6 @@ const Chats = () => {
               ) : (
                 filteredChats.slice(0, chatVisibleCount).map((chat, index) => (
                   <div key={chat.id} className="relative overflow-hidden rounded-xl">
-                    {/* Swipe-to-delete red bin background */}
-                    <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center rounded-r-xl">
-                      <Trash2 className="w-5 h-5 text-white" />
-                    </div>
                     <motion.div
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -1161,13 +1210,16 @@ const Chats = () => {
                       drag="x"
                       dragConstraints={{ left: -80, right: 0 }}
                       dragElastic={0.1}
+                      onDrag={(_, info) => {
+                        setSwipeDeleteId(info.offset.x < -30 ? chat.id : null);
+                      }}
                       onDragEnd={(_, info) => {
+                        setSwipeDeleteId(null);
                         if (info.offset.x < -60) {
                           if (chat.hasTransaction) {
                             toast.error(t("Cannot remove conversations with active transactions"));
                           } else {
-                            const ok = window.confirm("Conversation will be deleted");
-                            if (ok) handleRemoveChat(chat);
+                            setDeleteConfirmId(chat.id);
                           }
                         }
                       }}
@@ -1199,24 +1251,19 @@ const Chats = () => {
                           <span className="text-xs text-muted-foreground">{t(chat.time)}</span>
                         </div>
                         <p className="text-sm text-muted-foreground truncate mt-0.5">{t(chat.lastMessage)}</p>
-                        {/* Social availability subtext (bold) */}
-                        <p className="text-xs font-bold text-brandBlue mt-0.5">
+                        {/* Grey bold subtext closer to bottom border */}
+                        <p className="text-xs font-bold text-[#6B7280] mt-1.5">
                           {chat.type === "nannies" ? "Pet Nanny" : chat.type === "playdates" ? "Playdate" : "Animal Lover"}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {/* Green "Book Now" pill for nanny-type chats */}
-                        {chat.type === "nannies" && (
-                          <button
-                            onClick={(e) => handleNannyBookClick(e, chat)}
-                            className="px-2.5 py-1 rounded-full text-[10px] font-bold text-white shadow-sm transition-transform hover:scale-105"
-                            style={{ backgroundColor: "#A6D539" }}
-                            title={t("Book Nanny")}
-                          >
-                            Book Now
-                          </button>
+                        {/* Outlined red bin — only visible during swipe */}
+                        {swipeDeleteId === chat.id && (
+                          <div className="w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center">
+                            <Trash2 className="w-4 h-4 text-red-500" />
+                          </div>
                         )}
-                        {/* Grey unread badge */}
+                        {/* Grey unread badge for chats */}
                         {chat.unread > 0 && (
                           <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
                             {chat.unread}
@@ -1296,7 +1343,7 @@ const Chats = () => {
                   </div>
 
                   {group.unread > 0 && (
-                    <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium flex-shrink-0">
+                    <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium flex-shrink-0">
                       {group.unread > 9 ? "9+" : group.unread}
                     </span>
                   )}
@@ -1322,18 +1369,43 @@ const Chats = () => {
         </AnimatePresence>
       </section>
 
-      {/* Group Manage Modal — members list, invite from mutual waves, remove, group image */}
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={() => setDeleteConfirmId(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>{t("Delete Conversation")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t("This conversation will be permanently deleted. Are you sure?")}</p>
+          <DialogFooter className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>{t("Cancel")}</Button>
+            <Button variant="destructive" size="sm" onClick={() => {
+              const chat = chats.find((c) => c.id === deleteConfirmId);
+              if (chat) handleRemoveChat(chat);
+              setDeleteConfirmId(null);
+            }}>{t("Delete")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group Manage Modal — group image upload, members list with Remove, invite from mutual waves */}
       <Dialog open={!!groupManageId} onOpenChange={() => setGroupManageId(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Manage Group</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Group Image */}
+            {/* Group Image — working upload */}
             <div className="flex items-center gap-3">
-              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
-                <Users className="w-6 h-6 text-primary" />
-              </div>
+              {(() => {
+                const grp = groups.find((g) => g.id === groupManageId);
+                return grp?.avatarUrl ? (
+                  <img src={grp.avatarUrl} alt={grp.name} className="w-14 h-14 rounded-full object-cover flex-shrink-0" />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                    <Users className="w-6 h-6 text-primary" />
+                  </div>
+                );
+              })()}
               <div className="flex-1">
                 <div className="text-sm font-semibold text-brandText">
                   {groups.find((g) => g.id === groupManageId)?.name || "Group"}
@@ -1342,52 +1414,117 @@ const Chats = () => {
                   {groups.find((g) => g.id === groupManageId)?.memberCount || 0} members
                 </div>
               </div>
-              <Button size="sm" variant="outline" className="text-xs" onClick={() => { toast.info("Group image upload — coming soon"); }}>
-                Change Image
-              </Button>
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file || !groupManageId || !profile?.id) return;
+                    setGroupImageUploading(true);
+                    try {
+                      const { default: compress } = await import("browser-image-compression");
+                      const compressed = await compress(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
+                      const ext = compressed.name.split(".").pop() || "jpg";
+                      const path = `groups/${groupManageId}/${Date.now()}.${ext}`;
+                      const { error: uploadErr } = await supabase.storage.from("notices").upload(path, compressed);
+                      if (uploadErr) throw uploadErr;
+                      const { data: pub } = supabase.storage.from("notices").getPublicUrl(path);
+                      const url = pub.publicUrl;
+                      // Update group avatar in local state
+                      setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url } : g));
+                      // Persist to DB if groups table exists
+                      await supabase.from("chat_rooms").update({ avatar_url: url }).eq("id", groupManageId);
+                      toast.success(t("Group image updated"));
+                    } catch (err) {
+                      console.error("Group image upload failed:", err);
+                      toast.error(t("Failed to upload group image"));
+                    } finally {
+                      setGroupImageUploading(false);
+                      e.target.value = "";
+                    }
+                  }}
+                />
+                <Button size="sm" variant="outline" className="text-xs pointer-events-none" disabled={groupImageUploading}>
+                  {groupImageUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                  Change Image
+                </Button>
+              </label>
             </div>
 
-            {/* Members List */}
+            {/* Members List — fetched from backend, with working Remove */}
             <div>
               <div className="text-xs font-semibold text-brandText/70 mb-2">Members</div>
               <div className="space-y-2 max-h-40 overflow-y-auto">
-                {/* Demo members — in production, fetched from backend */}
-                {["You (Owner)", "Marcus", "Sarah"].map((name, i) => (
-                  <div key={i} className="flex items-center justify-between py-1.5">
+                {groupMembers.length > 0 ? groupMembers.map((m) => (
+                  <div key={m.id} className="flex items-center justify-between py-1.5">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground">
-                        {name.charAt(0)}
-                      </div>
-                      <span className="text-sm text-brandText">{name}</span>
+                      <UserAvatar avatarUrl={m.avatarUrl} name={m.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                      <span className="text-sm text-brandText">{m.id === profile?.id ? `${m.name} (You)` : m.name}</span>
                     </div>
-                    {i > 0 && (
+                    {m.id !== profile?.id && (
                       <button
-                        onClick={() => toast.info(`Remove ${name} — coming soon`)}
+                        onClick={async () => {
+                          try {
+                            await supabase.from("chat_room_members").delete().eq("room_id", groupManageId!).eq("user_id", m.id);
+                            setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
+                            setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g));
+                            toast.success(`${m.name} removed`);
+                          } catch {
+                            toast.error(t("Failed to remove member"));
+                          }
+                        }}
                         className="text-[10px] font-medium text-red-500 hover:underline"
                       >
                         Remove
                       </button>
                     )}
                   </div>
-                ))}
+                )) : (
+                  <div className="text-xs text-muted-foreground py-2">Loading members...</div>
+                )}
               </div>
             </div>
 
-            {/* Invite from Mutual Waves */}
+            {/* Invite from Mutual Waves — real notification flow */}
             <div>
               <div className="text-xs font-semibold text-brandText/70 mb-2">Invite from Mutual Waves</div>
               <div className="space-y-2 max-h-32 overflow-y-auto">
-                {chats.slice(0, 3).map((c) => (
-                  <div key={c.id} className="flex items-center justify-between py-1.5">
+                {mutualWaves.length > 0 ? mutualWaves.map((w) => (
+                  <div key={w.id} className="flex items-center justify-between py-1.5">
                     <div className="flex items-center gap-2">
-                      <UserAvatar avatarUrl={c.avatarUrl} name={c.name} isVerified={c.isVerified} hasCar={false} size="sm" showBadges={false} />
-                      <span className="text-sm text-brandText">{c.name}</span>
+                      <UserAvatar avatarUrl={w.avatarUrl} name={w.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                      <span className="text-sm text-brandText">{w.name}</span>
                     </div>
-                    <Button size="sm" className="h-6 text-[10px] px-2" onClick={() => toast.success(`Invited ${c.name}`)}>
+                    <Button
+                      size="sm"
+                      className="h-6 text-[10px] px-2"
+                      onClick={async () => {
+                        if (!profile?.id || !groupManageId) return;
+                        try {
+                          // Insert notification for receiver: "Do you want to join [Group]?"
+                          await supabase.from("notifications").insert({
+                            user_id: w.id,
+                            type: "group_invite",
+                            title: "Group Invite",
+                            body: `${profile.display_name || "Someone"} invited you to join "${groups.find((g) => g.id === groupManageId)?.name || "a group"}"`,
+                            data: { group_id: groupManageId, inviter_id: profile.id },
+                          });
+                          toast.success(`Invite sent to ${w.name}`);
+                          // Remove from invite list to prevent duplicate
+                          setMutualWaves((prev) => prev.filter((x) => x.id !== w.id));
+                        } catch {
+                          toast.error(t("Failed to send invite"));
+                        }
+                      }}
+                    >
                       Invite
                     </Button>
                   </div>
-                ))}
+                )) : (
+                  <div className="text-xs text-muted-foreground py-2">No mutual waves available</div>
+                )}
               </div>
             </div>
           </div>
@@ -1543,33 +1680,7 @@ const Chats = () => {
       />
       </div>
 
-      <Dialog open={showSafeHarborModal} onOpenChange={setShowSafeHarborModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Safe Harbor Agreement</DialogTitle>
-          </DialogHeader>
-          <label className="text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={safeHarborAccepted}
-              onChange={(e) => setSafeHarborAccepted(e.target.checked)}
-              className="mr-2 align-middle"
-            />
-            I acknowledge that 'huddle' is a marketplace platform and sitters are independent contractors, not employees of 'huddle'. 'huddle' is not responsible for any injury, property damage, or loss occurring during a booking. I agree to use the in-app dispute resolution system before contacting any financial institution for a chargeback.
-          </label>
-          <DialogFooter>
-            <Button
-              disabled={!safeHarborAccepted}
-              onClick={() => {
-                setShowSafeHarborModal(false);
-                setNannyBookingOpen(true);
-              }}
-            >
-              Continue
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Safe Harbor modal removed — disclaimer is now inside ChatDialogue */}
 
       {/* Nanny Booking Modal */}
       <AnimatePresence>
@@ -1756,40 +1867,39 @@ const Chats = () => {
           </>
         )}
       </AnimatePresence>
-      {/* Profile Sheet — right-side drawer with 3:4 hero image, overlays, pet icon, public fields */}
+      {/* Profile Sheet — Full-screen scrollable with 3:4 hero, overlays, pet icon, vertical fields, social album */}
       <AnimatePresence>
         {profileSheetUser && (
           <>
             <motion.div
-              className="fixed inset-0 bg-black/40 z-[80]"
+              className="fixed inset-0 bg-black/60 z-[80]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setProfileSheetUser(null)}
             />
             <motion.div
-              className="fixed top-0 right-0 bottom-0 w-80 max-w-[85vw] bg-card z-[81] shadow-2xl overflow-y-auto"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
+              className="fixed inset-0 z-[81] bg-card overflow-y-auto"
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
             >
-              {/* Close button on top */}
+              {/* Close button */}
               <button
                 onClick={() => setProfileSheetUser(null)}
-                className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center"
+                className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
               >
                 <X className="w-5 h-5 text-white" />
               </button>
 
               {profileSheetLoading ? (
-                <div className="flex items-center justify-center py-24">
+                <div className="flex items-center justify-center h-full">
                   <Loader2 className="w-6 h-6 animate-spin text-brandBlue" />
                 </div>
               ) : profileSheetData?.non_social === true ? (
-                /* Non-social users: show blocked overlay */
-                <div className="p-6">
-                  <div className="relative rounded-xl border border-border bg-muted/50 p-6 text-center mt-8">
+                <div className="flex items-center justify-center h-full p-6">
+                  <div className="rounded-xl border border-border bg-muted/50 p-6 text-center max-w-xs">
                     <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
                       <User className="w-8 h-8 text-muted-foreground" />
                     </div>
@@ -1800,9 +1910,8 @@ const Chats = () => {
                   </div>
                 </div>
               ) : profileSheetData ? (
-                /* Public profile view with 3:4 hero image */
-                <div>
-                  {/* 3:4 Hero Image */}
+                <div className="pb-8">
+                  {/* 3:4 Hero Image — horizontal images fit to 4:3 container */}
                   <div className="relative w-full" style={{ aspectRatio: "3/4" }}>
                     {(profileSheetData.avatar_url || profileSheetUser.avatarUrl) ? (
                       <img
@@ -1815,31 +1924,19 @@ const Chats = () => {
                         <User className="w-16 h-16 text-muted-foreground/40" />
                       </div>
                     )}
-                    {/* Gradient overlay at bottom */}
-                    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/70 to-transparent" />
+                    {/* Gradient overlay at bottom of image */}
+                    <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/80 to-transparent" />
 
-                    {/* Badge overlays — Verified + Tier */}
-                    <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                      {profileSheetData.is_verified && (
-                        <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
-                      )}
-                      {(profileSheetData.effective_tier === "premium" || profileSheetData.tier === "premium") && (
-                        <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Premium</span>
-                      )}
-                      {(profileSheetData.effective_tier === "gold" || profileSheetData.tier === "gold") && (
-                        <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Gold</span>
-                      )}
-                    </div>
-
-                    {/* Pet icon overlay — bottom-right of image */}
-                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                      <div className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center shadow-md">
-                        <PawPrint className="w-5 h-5 text-brandBlue" />
+                    {/* Overlays at bottom of image: Name, Age, Social Role, Pet Species, Verified + Car Badge */}
+                    <div className="absolute bottom-3 left-3 right-3 text-white">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        {profileSheetData.is_verified && (
+                          <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
+                        )}
+                        {profileSheetData.has_car && (
+                          <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
+                        )}
                       </div>
-                    )}
-
-                    {/* Name + age overlay at bottom-left */}
-                    <div className="absolute bottom-3 left-3 text-white">
                       <div className="text-lg font-bold leading-tight">
                         {(profileSheetData.display_name as string) || profileSheetUser.name}
                         {profileSheetData.show_age !== false && profileSheetData.dob && (
@@ -1848,70 +1945,110 @@ const Chats = () => {
                           </span>
                         )}
                       </div>
+                      <div className="text-xs text-white/80 mt-0.5">
+                        {profileSheetData.social_role ? (profileSheetData.social_role === "nannies" ? "Nanny" : profileSheetData.social_role === "animal-lovers" ? "Animal Lover" : "Playdate") : ""}
+                        {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
+                          <> • {(profileSheetData.pet_species as string[]).join(", ")}</>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Public fields list */}
-                  <div className="p-4 space-y-3">
-                    {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Status</span>
-                        <span className="text-sm text-brandText">{profileSheetData.relationship_status as string}</span>
-                      </div>
-                    )}
+                  {/* Pet icon below image if owns pet */}
+                  {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
+                    <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+                      <PawPrint className="w-5 h-5 text-brandBlue" />
+                      <span className="text-sm font-medium text-brandText">Pet Owner</span>
+                    </div>
+                  )}
 
-                    {profileSheetData.location_name && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Location</span>
-                        <span className="text-sm text-brandText">{profileSheetData.location_name as string}</span>
-                      </div>
-                    )}
-
+                  {/* Vertical field list: Bio, Pet Species, Pet Experience, Location, Gender, Orientation, Relationship Status, Academic, Language, Social Album */}
+                  <div className="divide-y divide-border">
                     {profileSheetData.show_bio !== false && profileSheetData.bio && (
-                      <div className="py-1.5">
+                      <div className="px-4 py-3">
                         <span className="text-xs font-semibold text-brandText/60 block mb-1">Bio</span>
                         <p className="text-sm text-brandText leading-relaxed">{profileSheetData.bio as string}</p>
                       </div>
                     )}
 
+                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Pet Species</span>
+                        <span className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</span>
+                      </div>
+                    )}
+
+                    {profileSheetData.pet_experience_years != null && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Pet Experience</span>
+                        <span className="text-sm text-brandText">{profileSheetData.pet_experience_years as number} years</span>
+                      </div>
+                    )}
+
+                    {profileSheetData.location_name && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Location</span>
+                        <span className="text-sm text-brandText">{profileSheetData.location_name as string}</span>
+                      </div>
+                    )}
+
                     {profileSheetData.show_gender !== false && profileSheetData.gender_genre && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Gender</span>
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Gender</span>
                         <span className="text-sm text-brandText">{profileSheetData.gender_genre as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_orientation !== false && profileSheetData.orientation && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Orientation</span>
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Orientation</span>
                         <span className="text-sm text-brandText">{profileSheetData.orientation as string}</span>
                       </div>
                     )}
 
-                    {profileSheetData.show_occupation !== false && profileSheetData.occupation && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Job</span>
-                        <span className="text-sm text-brandText">{profileSheetData.occupation as string}</span>
+                    {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Relationship</span>
+                        <span className="text-sm text-brandText">{profileSheetData.relationship_status as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_academic !== false && (profileSheetData.school || profileSheetData.major) && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Education</span>
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Academic</span>
                         <span className="text-sm text-brandText">{[profileSheetData.school, profileSheetData.major].filter(Boolean).join(" • ")}</span>
                       </div>
                     )}
 
-                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                      <div className="flex items-center gap-3 py-1.5">
-                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Pets</span>
-                        <span className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</span>
+                    {Array.isArray(profileSheetData.languages) && (profileSheetData.languages as string[]).length > 0 && (
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Language</span>
+                        <span className="text-sm text-brandText">{(profileSheetData.languages as string[]).join(", ")}</span>
+                      </div>
+                    )}
+
+                    {/* Social Album — thumbnail grid */}
+                    {Array.isArray(profileSheetData.social_album) && (profileSheetData.social_album as string[]).length > 0 && (
+                      <div className="px-4 py-3">
+                        <span className="text-xs font-semibold text-brandText/60 block mb-2">Social Album</span>
+                        <div className="grid grid-cols-3 gap-2">
+                          {(profileSheetData.social_album as string[]).slice(0, 9).map((url: string, idx: number) => (
+                            <img
+                              key={`album-${idx}`}
+                              src={url.startsWith("http") ? url : ""}
+                              alt={`Album ${idx + 1}`}
+                              className="w-full rounded-lg object-cover"
+                              style={{ aspectRatio: "1/1" }}
+                              loading="lazy"
+                            />
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-24 text-sm text-muted-foreground">Profile not found</div>
+                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Profile not found</div>
               )}
             </motion.div>
           </>

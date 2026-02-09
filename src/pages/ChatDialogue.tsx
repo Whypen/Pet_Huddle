@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback, ChangeEvent } from "react";
+import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Send, Image as ImageIcon, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Image as ImageIcon, Loader2, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -26,6 +26,7 @@ const ChatDialogue = () => {
   const [searchParams] = useSearchParams();
   const chatId = searchParams.get("id");
   const chatName = searchParams.get("name") || t("Chat");
+  const chatType = searchParams.get("type") || "playdates"; // playdates | nannies | animal-lovers | group
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -34,6 +35,12 @@ const ChatDialogue = () => {
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+
+  // Nanny booking state
+  const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
+
+  // Determine if current user is a nanny
+  const isNanny = profile?.social_role === "nannies" || profile?.user_role === "sitter";
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,7 +53,7 @@ const ChatDialogue = () => {
     // Ensure current user is a member of the room (required for RLS)
     if (user?.id) {
       const ensureMembership = async () => {
-        const { error } = await (supabase as any)
+        const { error } = await supabase
           .from("chat_room_members")
           .upsert({ room_id: chatId, user_id: user.id });
 
@@ -89,7 +96,7 @@ const ChatDialogue = () => {
 
     const loadMessages = async () => {
       try {
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from("chat_messages")
           .select("id, content, sender_id, created_at")
           .eq("room_id", chatId)
@@ -97,7 +104,7 @@ const ChatDialogue = () => {
           .limit(100);
 
         if (!error && data) {
-          const mapped: Message[] = (data as any[]).map((m: any) => ({
+          const mapped: Message[] = data.map((m: { id: string; content: string; sender_id: string; created_at: string }) => ({
             id: m.id,
             content: m.content,
             senderId: m.sender_id,
@@ -129,7 +136,7 @@ const ChatDialogue = () => {
 
     try {
       // Persist to Supabase — realtime will broadcast to other clients
-      const { error } = await (supabase as any)
+      const { error } = await supabase
         .from("chat_messages")
         .insert({
           room_id: chatId,
@@ -150,6 +157,7 @@ const ChatDialogue = () => {
     }
   };
 
+  // Media upload — unlimited for all tiers in chats (no quota check)
   const handleMediaSelected = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !chatId || !user?.id) return;
@@ -163,15 +171,7 @@ const ChatDialogue = () => {
         e.target.value = "";
         return;
       }
-      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-        action_type: "chat_image",
-      });
-      if (allowed === false) {
-        toast.error(t("Quota Exceeded"));
-        setIsLoading(false);
-        e.target.value = "";
-        return;
-      }
+      // No quota check — media is unlimited for all tiers in chats
       const ext = compressed.name.split(".").pop() || "jpg";
       const path = `${user.id}/chat/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("notices").upload(path, compressed);
@@ -188,7 +188,7 @@ const ChatDialogue = () => {
       };
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      const { error } = await (supabase as any).from("chat_messages").insert({
+      const { error } = await supabase.from("chat_messages").insert({
         room_id: chatId,
         sender_id: user.id,
         content: mediaUrl,
@@ -215,14 +215,53 @@ const ChatDialogue = () => {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <UserAvatar name={chatName} size="sm" />
+        {chatType === "group" ? (
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+            <Users className="w-5 h-5 text-primary" />
+          </div>
+        ) : (
+          <UserAvatar name={chatName} size="sm" />
+        )}
         <div className="flex-1">
           <h2 className="font-semibold">{chatName}</h2>
-          <p className="text-xs text-muted-foreground">{t("Online")}</p>
+          <p className="text-xs text-muted-foreground">
+            {chatType === "group" ? t("Group") : t("Online")}
+          </p>
         </div>
+        {/* Green "Book Now" pill — top-right for nanny chats only */}
+        {chatType === "nannies" && (
+          <button
+            onClick={() => {
+              // Navigate back to chats and trigger booking for this nanny
+              navigate(`/chats?book=${chatId}&name=${encodeURIComponent(chatName)}`);
+            }}
+            className="px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+            style={{ backgroundColor: "#A6D539" }}
+          >
+            Book Now
+          </button>
+        )}
+        {/* Group: Manage pill */}
+        {chatType === "group" && (
+          <button
+            onClick={() => navigate(`/chats?manage=${chatId}`)}
+            className="px-2.5 py-1 rounded-full bg-brandBlue text-white text-[10px] font-bold"
+          >
+            Manage
+          </button>
+        )}
       </div>
 
-      {/* SPRINT 3: Chat Messages - AI Vet UI Pattern */}
+      {/* Nanny Disclaimer — pinned top banner inside ChatDialogue */}
+      {chatType === "nannies" && (
+        <div className="bg-muted/50 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+          {isNanny
+            ? "You are offering nanny services. All bookings are processed through secure escrow. Maintain professional conduct at all times."
+            : "Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses."}
+        </div>
+      )}
+
+      {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-24">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center py-12">
@@ -286,18 +325,12 @@ const ChatDialogue = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - AI Vet Pattern */}
+      {/* Input Area */}
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
           <button
             onClick={() => {
-              const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-              const isFree = effectiveTier === "free";
-              const mediaCredits = profile?.media_credits || 0;
-              if (isFree && mediaCredits <= 0) {
-                setIsPremiumFooterOpen(true);
-                return;
-              }
+              // Media unlimited for all tiers in chats — no upsell gate
               mediaInputRef.current?.click();
             }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
