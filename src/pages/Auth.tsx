@@ -425,7 +425,7 @@ const Auth = () => {
                   id="rememberMe"
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a] text-[12px] leading-[12px]"
                 />
                 <label
                   htmlFor="rememberMe"
@@ -442,7 +442,7 @@ const Auth = () => {
                   id="consent"
                   checked={consentAccepted}
                   onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
-                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a] text-[12px] leading-[12px]"
                 />
                 <label htmlFor="consent" className="text-xs text-brandText leading-4 cursor-pointer ml-1">
                   I have read and agree to the{" "}
