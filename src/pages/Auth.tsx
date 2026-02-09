@@ -202,10 +202,18 @@ const Auth = () => {
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="font-normal leading-[30px] text-brandText lowercase shadow-[1px_1px_3px_0px_rgba(0,0,0,1)]"
+          className="font-normal text-brandText lowercase flex flex-col"
         >
-          <p>
-            <strong>huddle</strong>
+          <p className="mx-auto">
+            <div
+              className="inline text-[#2145cf]"
+              style={{
+                textShadow: "1px 1px 2px rgba(155, 155, 155, 1)",
+                font: "900 20px 'Varela Round', sans-serif"
+              }}
+            >
+              huddle
+            </div>
           </p>
         </motion.h1>
         {/* Subheadline intentionally removed per spec */}
