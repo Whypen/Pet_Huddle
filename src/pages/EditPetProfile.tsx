@@ -440,7 +440,7 @@ const EditPetProfile = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-nav">
+    <div className="min-h-screen bg-background flex flex-col pb-nav border border-[#e2e4e6]">
       <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
 
       {/* Page Header */}
@@ -476,7 +476,7 @@ const EditPetProfile = () => {
 
           {/* Name */}
           <div>
-            <label className="text-sm font-medium mb-0.5 block">{t("Pet Name *")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Pet Name *")}</label>
             <Input
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
@@ -487,15 +487,15 @@ const EditPetProfile = () => {
                 }));
               }}
               placeholder={t("Pet's name")}
-              className="rounded-[12px]"
+              className="rounded-[12px] h-[30px]"
               aria-invalid={Boolean(fieldErrors.name)}
             />
             {fieldErrors.name && <ErrorLabel message={fieldErrors.name} />}
           </div>
 
           {/* Species */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">{t("Species *")}</label>
+          <div className="h-[64px] flex flex-col justify-start items-start">
+            <label className="text-sm font-medium mb-1 block">{t("Species *")}</label>
             <div className={cn("flex flex-wrap gap-[5px] m-[0_4px_8px_0]", fieldErrors.species && "rounded-xl border border-red-500 p-2")}>
               {speciesOptions.map((species) => (
                 <button
@@ -538,11 +538,11 @@ const EditPetProfile = () => {
           {/* Breed */}
           {formData.species !== "others" && (
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
+              <label className="text-sm font-medium mb-1 block">{t("Breed")}</label>
               <select
                 value={formData.breed}
                 onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
-                className="h-9 w-full rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left"
+                className="h-9 w-full rounded-[12px] border border-[#e2e4e6] bg-white px-2 py-1 text-sm text-left"
               >
                 <option value="">{t("Select breed")}</option>
                 {(speciesBreeds[formData.species] || ["Other"]).map((breed) => (
@@ -557,7 +557,7 @@ const EditPetProfile = () => {
           {/* Gender & Neutered/Spayed */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("Gender")}</label>
+              <label className="text-sm font-medium mb-1 block">{t("Gender")}</label>
               <div className="flex gap-2">
                 {genderOptions.map((gender) => (
                   <button
@@ -591,7 +591,7 @@ const EditPetProfile = () => {
 
           {/* DOB */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Date of Birth")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Date of Birth")}</label>
             <Input
               type="date"
               value={formData.dob}
@@ -616,7 +616,7 @@ const EditPetProfile = () => {
 
           {/* Weight */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Weight")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Weight")}</label>
             <div className="flex gap-2">
               <Input
                 type="number"
@@ -652,8 +652,8 @@ const EditPetProfile = () => {
           </div>
 
           {/* Vaccinations */}
-          <div className="p-4 rounded-xl bg-muted/50 space-y-4">
-            <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
+          <div className="p-4 rounded-xl bg-muted/50 space-y-4 border border-white">
+            <h3 className="text-sm font-semibold">{t("Last Vaccination / Veterinary Visit")}</h3>
             {formData.vaccinations.map((vax, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
                 <div className="flex-1">
@@ -665,12 +665,12 @@ const EditPetProfile = () => {
                 </button>
               </div>
             ))}
-            <div className="relative pb-6">
+            <div className="relative mt-[15px] pb-6">
               <div className="flex gap-2">
                 <select
                   value={vaccinationInput.name}
                   onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
-                  className="flex-1 h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                  className="flex-1 h-9 rounded-[12px] bg-white border border-[#e2e4e6] px-2 py-0 text-sm text-left"
                 >
                   <option value="">{t("Select vaccine...")}</option>
                   {VACCINATION_OPTIONS.map(v => (
@@ -700,9 +700,6 @@ const EditPetProfile = () => {
                   <Plus className="w-4 h-4" />
                 </Button>
               </div>
-              <p className="absolute left-0 -bottom-1 text-xs text-brandSubtext">
-                {t("Input last vaccination dates for better tracking")}
-              </p>
               {fieldErrors.vaccinationDate && (
                 <ErrorLabel message={fieldErrors.vaccinationDate} />
               )}
@@ -710,7 +707,7 @@ const EditPetProfile = () => {
 
             {/* Next Vaccination Reminder */}
             <div className="pt-3 border-t border-border">
-              <label className="text-xs font-medium mb-2 block">{t("Next Vaccination Reminder")}</label>
+              <label className="text-sm font-medium h-5 mb-2 block">{t("Next Visit Reminder")}</label>
               <Input
                 type="date"
                 value={formData.next_vaccination_reminder}
@@ -737,7 +734,7 @@ const EditPetProfile = () => {
           </div>
 
           {/* Medications */}
-          <div className="p-4 rounded-xl bg-muted/50 space-y-4">
+          <div className="p-4 rounded-xl bg-muted/50 space-y-4 h-[140px]">
             <h3 className="text-sm font-semibold">{t("Medications")}</h3>
             {formData.medications.map((med, index) => (
               <div key={index} className="flex items-center gap-2 bg-card rounded-lg p-2">
@@ -757,7 +754,7 @@ const EditPetProfile = () => {
                 value={medicationInput.name}
                 onChange={(e) => setMedicationInput(prev => ({ ...prev, name: e.target.value }))}
                 placeholder={t("Medication name")}
-                className="rounded-[12px]"
+                className="rounded-[12px] h-[30px]"
               />
               <div className="flex gap-2">
                 <Input
@@ -781,7 +778,7 @@ const EditPetProfile = () => {
 
           {/* Temperament */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Temperament")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Temperament")}</label>
             <div className="flex flex-wrap gap-2">
               {TEMPERAMENT_OPTIONS.map((temp) => (
                 <button
@@ -807,27 +804,27 @@ const EditPetProfile = () => {
               value={formData.clinic_name}
               onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
               placeholder={t("Clinic name")}
-              className="rounded-[12px]"
+              className="rounded-[12px] mt-1"
             />
             <Input
               value={formData.preferred_vet}
               onChange={(e) => setFormData(prev => ({ ...prev, preferred_vet: e.target.value }))}
               placeholder={t("Preferred vet")}
-              className="rounded-[12px]"
+              className="rounded-[12px] my-1"
             />
             <PhoneInput
               international
               defaultCountry="HK"
               value={formData.phone_no}
               onChange={(value) => setFormData(prev => ({ ...prev, phone_no: value || "" }))}
-              className="phone-input-auth h-9 rounded-[12px] bg-white border border-brandText/40 px-2 py-1 text-left"
+              className="phone-input-auth h-9 rounded-[12px] bg-white border border-[#e2e4e6] px-2 py-1 text-left my-1"
               placeholder={t("Clinic phone (+XXX)")}
             />
           </div>
 
           {/* Microchip ID */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Microchip ID")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Microchip ID")}</label>
             <Input
               value={formData.microchip_id}
               onChange={(e) => setFormData(prev => ({ ...prev, microchip_id: validateMicrochip(e.target.value) }))}
@@ -846,29 +843,29 @@ const EditPetProfile = () => {
             {fieldErrors.microchipId ? (
               <ErrorLabel message={fieldErrors.microchipId} />
             ) : (
-              <p className="text-xs text-muted-foreground mt-1">{formData.microchip_id.length}/15 digits</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{formData.microchip_id.length}/15 digits</p>
             )}
           </div>
 
           {/* Bio */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Pet Bio")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Pet Bio")}</label>
             <Textarea
               value={formData.bio}
               onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
               placeholder={t("Tell us about your pet...")}
-              className="min-h-[100px] rounded-xl"
+              className="min-h-[100px] rounded-[24px] border-[#e2e4e6]"
             />
           </div>
 
           {/* Routine */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Daily Routine")}</label>
+            <label className="text-sm font-medium mb-1 block">{t("Daily Routine")}</label>
             <Textarea
               value={formData.routine}
               onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
               placeholder={t("Feeding times, walks, play schedule...")}
-              className="min-h-[80px] rounded-xl"
+              className="min-h-[80px] rounded-[24px] border-[#e2e4e6]"
             />
           </div>
 
@@ -886,8 +883,8 @@ const EditPetProfile = () => {
             </div>
             <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
               <div>
-                <span className="text-sm font-medium">{t("Public Profile")}</span>
-                <p className="text-xs text-muted-foreground">{t("Show this pet publicly")}</p>
+                <span className="text-sm font-medium">{t("Social Profile")}</span>
+                <p className="text-xs text-muted-foreground">{t("Show this pet to your profile")}</p>
               </div>
               <Switch
                 checked={formData.is_public}
