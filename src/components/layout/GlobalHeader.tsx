@@ -2,7 +2,6 @@ import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bell, ChevronRight, Diamond, FileText, LogOut, Settings, Shield, Star, User as UserIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
