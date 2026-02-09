@@ -2,42 +2,15 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") : rawSupabaseUrl;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_URL = "https://ztrbourwcnhrpmzwlrcn.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNTQ2NDMsImV4cCI6MjA4NDkzMDY0M30.ehK3oSGq6AFdtuSovXTi02aMB_ht4suO16HJ8RecIvg";
 
-if (!SUPABASE_ANON_KEY) {
-  console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
-}
-
-console.log("Supabase Diagnostics:", {
-  hasUrl: !!SUPABASE_URL,
-  url: SUPABASE_URL,
-  urlMatchesRef: SUPABASE_URL?.includes("ztrbourwcnhrpmzwlrcn"),
-  keyPrefix: SUPABASE_ANON_KEY?.substring(0, 15),
-  keyLength: SUPABASE_ANON_KEY?.length,
-  isSbKey: SUPABASE_ANON_KEY?.startsWith('sb_')
-});
-
-// Log project ID mismatch if possible to help debugging
-try {
-  const urlProject = SUPABASE_URL?.match(/https:\/\/(.*?)\.supabase/)?.[1];
-  if (urlProject && SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.startsWith('sb_')) {
-    const keyPayload = JSON.parse(atob(SUPABASE_ANON_KEY.split('.')[1]));
-    if (keyPayload.ref && keyPayload.ref !== urlProject) {
-      console.error("Supabase Project ID Mismatch detected:", { urlProject, keyRef: keyPayload.ref });
-    }
-  }
-} catch (e) {
-  // Ignore decoding errors for non-JWT keys
-}
-
-console.log("Supabase Client initialized for project:", SUPABASE_URL);
+console.log("Supabase Client HARDCODED for project:", SUPABASE_URL);
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY || "", {
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: localStorage,
     persistSession: true,
