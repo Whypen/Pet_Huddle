@@ -99,9 +99,17 @@ const Auth = () => {
       }
     }
 
-    const passwordResult = passwordSchema.safeParse(password);
-    if (!passwordResult.success) {
-      newErrors.password = passwordResult.error.errors[0].message;
+    // Only enforce strict password rules on signup
+    if (!isLogin) {
+      const passwordResult = passwordSchema.safeParse(password);
+      if (!passwordResult.success) {
+        newErrors.password = passwordResult.error.errors[0].message;
+      }
+    } else {
+      // For login, just check if it's not empty
+      if (!password) {
+        newErrors.password = t("auth.errors.password_required") || "Password is required";
+      }
     }
 
     if (!isLogin) {
@@ -233,6 +241,7 @@ const Auth = () => {
               onClick={() => {
                 setIsLogin(true);
                 setConsentAccepted(false);
+                setErrors({});
               }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 isLogin
@@ -246,6 +255,7 @@ const Auth = () => {
               onClick={() => {
                 setIsLogin(false);
                 setConsentAccepted(false);
+                setErrors({});
               }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 !isLogin
