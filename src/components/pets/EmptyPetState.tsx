@@ -26,7 +26,7 @@ export const EmptyPetState = ({ onAddPet }: EmptyPetStateProps) => {
         </h6>
       </div>
       <div className="text-[#4a4a4a] font-normal leading-5 mb-6 text-[12px]">
-        <p>
+        <p className="text-[14px]">
           Add your furry friend to connect fully—or enjoy sightings and shares
           as an animal lover right away.
         </p>
