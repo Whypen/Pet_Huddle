@@ -359,7 +359,7 @@ const Auth = () => {
                     setLoginMethod((prev) => (prev === "email" ? "phone" : "email"));
                     setErrors((prev) => ({ ...prev, loginEmail: undefined, loginPhone: undefined }));
                   }}
-                  className="text-xs text-primary mt-1 ml-1 hover:underline"
+                  className="text-xs text-muted-foreground mt-1 ml-1 hover:underline underline"
                 >
                   {loginMethod === "email" ? t("Use phone instead") : t("Use email instead")}
                 </button>
