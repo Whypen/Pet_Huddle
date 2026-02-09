@@ -487,7 +487,7 @@ const EditPetProfile = () => {
                 }));
               }}
               placeholder={t("Pet's name")}
-              className="rounded-[12px] h-[30px]"
+              className="rounded-[12px]"
               aria-invalid={Boolean(fieldErrors.name)}
             />
             {fieldErrors.name && <ErrorLabel message={fieldErrors.name} />}
@@ -756,7 +756,7 @@ const EditPetProfile = () => {
                 value={medicationInput.name}
                 onChange={(e) => setMedicationInput(prev => ({ ...prev, name: e.target.value }))}
                 placeholder={t("Medication name")}
-                className="rounded-[12px] h-[30px]"
+                className="rounded-[12px]"
               />
               <div className="flex gap-2">
                 <Input
