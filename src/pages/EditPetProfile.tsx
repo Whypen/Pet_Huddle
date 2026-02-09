@@ -559,17 +559,7 @@ const EditPetProfile = () => {
             <div className="self-stretch">
               <label className="text-sm font-medium mb-1 block">{t("Gender")}</label>
 
-              <div className="flex flex-col gap-2">
-                {/* Neutered/Spayed Toggle - Compacted */}
-                <div className="inline-flex items-center justify-between h-[36px] w-[220px] bg-[#f6f7f9] rounded-full px-4 py-2">
-                  <span className="text-sm font-medium">{t("Neutered/Spayed")}</span>
-                  <Switch
-                    checked={formData.neutered_spayed}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
-                    className="scale-75"
-                  />
-                </div>
-
+              <div className="flex flex-row items-center gap-2">
                 {/* Gender Options */}
                 <div className="inline-flex items-center gap-2 h-[36px]">
                   {genderOptions.map((gender) => (
@@ -586,6 +576,16 @@ const EditPetProfile = () => {
                       {gender}
                     </button>
                   ))}
+                </div>
+
+                {/* Neutered/Spayed Toggle - Compacted */}
+                <div className="inline-flex items-center justify-between h-[36px] flex-1 bg-[#f6f7f9] rounded-full px-4 py-2">
+                  <span className="text-sm font-medium whitespace-nowrap">{t("Neutered/Spayed")}</span>
+                  <Switch
+                    checked={formData.neutered_spayed}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
+                    className="scale-75"
+                  />
                 </div>
               </div>
             </div>
