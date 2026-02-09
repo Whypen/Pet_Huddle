@@ -442,12 +442,12 @@ const Auth = () => {
                   id="consent"
                   checked={consentAccepted}
                   onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
-                  className="rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
-                <label htmlFor="consent" className="text-xs text-[#4a4a4a] leading-snug cursor-pointer ml-2">
+                <label htmlFor="consent" className="text-xs text-brandText leading-4 cursor-pointer ml-1">
                   I have read and agree to the{" "}
                   <Link to="/terms" className="text-primary underline underline-offset-2">
-                    Terms of Service
+                    Terms
                   </Link>{" "}
                   and{" "}
                   <Link to="/privacy" className="text-primary underline underline-offset-2">
