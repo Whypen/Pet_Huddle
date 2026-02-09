@@ -294,7 +294,7 @@ const Auth = () => {
                         setSignupEmail(e.target.value);
                         setErrors((prev) => ({ ...prev, signupEmail: undefined }));
                       }}
-                      className={`pl-12 ${errors.signupEmail ? "border-destructive" : "border-border"}`}
+                      className={`pl-12 ${errors.signupEmail ? "border-destructive" : "border-[#e2e4e9]"}`}
                     />
                   </div>
                   {errors.signupEmail && (
@@ -336,7 +336,7 @@ const Auth = () => {
                           setLoginEmail(e.target.value);
                           setErrors((prev) => ({ ...prev, loginEmail: undefined }));
                         }}
-                        className={`pl-12 ${errors.loginEmail ? "border-destructive" : "border-border"}`}
+                        className={`pl-12 ${errors.loginEmail ? "border-destructive" : "border-[#e2e4e9]"}`}
                       />
                     </>
                   ) : (
@@ -383,7 +383,7 @@ const Auth = () => {
                     setPassword(e.target.value);
                     setErrors((prev) => ({ ...prev, password: undefined }));
                   }}
-                  className={`pl-12 pr-12 ${errors.password ? "border-destructive" : "border-border"}`}
+                  className={`pl-12 pr-12 ${errors.password ? "border-destructive" : "border-[#e2e4e9]"}`}
                 />
                 <button
                   type="button"
