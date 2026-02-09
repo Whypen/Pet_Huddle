@@ -555,37 +555,39 @@ const EditPetProfile = () => {
           )}
 
           {/* Gender & Neutered/Spayed */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+          <div className="flex flex-col gap-4">
+            <div className="self-stretch">
               <label className="text-sm font-medium mb-1 block">{t("Gender")}</label>
-              <div className="flex gap-2">
-                {genderOptions.map((gender) => (
-                  <button
-                    key={gender}
-                    onClick={() => setFormData(prev => ({ ...prev, gender }))}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                      formData.gender === gender
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    )}
-                  >
-                    {gender}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {/* Neutered/Spayed Toggle - Positioned next to Gender */}
-            <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
-              <div>
-                <label className="font-medium text-sm">{t("Neutered/Spayed")}</label>
-                <p className="text-xs text-muted-foreground">{t("Fixed?")}</p>
+              <div className="flex flex-col gap-2">
+                {/* Neutered/Spayed Toggle - Compacted */}
+                <div className="inline-flex items-center justify-between h-[36px] w-[220px] bg-[#f6f7f9] rounded-full px-4 py-2">
+                  <span className="text-sm font-medium">{t("Neutered/Spayed")}</span>
+                  <Switch
+                    checked={formData.neutered_spayed}
+                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
+                    className="scale-75"
+                  />
+                </div>
+
+                {/* Gender Options */}
+                <div className="inline-flex items-center gap-2 h-[36px]">
+                  {genderOptions.map((gender) => (
+                    <button
+                      key={gender}
+                      onClick={() => setFormData(prev => ({ ...prev, gender }))}
+                      className={cn(
+                        "h-full px-4 rounded-full text-sm font-medium transition-all",
+                        formData.gender === gender
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      )}
+                    >
+                      {gender}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <Switch
-                checked={formData.neutered_spayed}
-                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, neutered_spayed: checked }))}
-              />
             </div>
           </div>
 
