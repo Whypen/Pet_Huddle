@@ -12,8 +12,9 @@ if (!SUPABASE_ANON_KEY) {
 
 console.log("Supabase Diagnostics:", {
   hasUrl: !!SUPABASE_URL,
+  url: SUPABASE_URL,
   urlMatchesRef: SUPABASE_URL?.includes("ztrbourwcnhrpmzwlrcn"),
-  keyPrefix: SUPABASE_ANON_KEY?.substring(0, 10),
+  keyPrefix: SUPABASE_ANON_KEY?.substring(0, 15),
   keyLength: SUPABASE_ANON_KEY?.length,
   isSbKey: SUPABASE_ANON_KEY?.startsWith('sb_')
 });
