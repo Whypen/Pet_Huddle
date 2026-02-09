@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, Trash2, Settings } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, ChevronDown, ChevronUp, Trash2, PawPrint } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -345,6 +345,10 @@ const Chats = () => {
   const [activeAlbumIndex, setActiveAlbumIndex] = useState(0);
   const [albumUrls, setAlbumUrls] = useState<Record<string, string[]>>({});
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+
+  // Collapsible sections
+  const [discoveryExpanded, setDiscoveryExpanded] = useState(true);
+  const [chatsExpanded, setChatsExpanded] = useState(false);
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -861,175 +865,195 @@ const Chats = () => {
         </div>
       </header>
 
-        {/* Discovery Cards (embedded in Chats) — single-card paging */}
-      <section className="px-5 pb-4">
-        {/* Discovery cards — single card visible, horizontal scroll with paging */}
-        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4" style={{ scrollSnapType: "x mandatory" }}>
-          {discoveryLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t("Loading discovery...")}
-            </div>
-          )}
-          {discoverySource.map((p, idx) => {
-            const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
-            const age = p?.dob
-              ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-              : "";
-            const petSpeciesList = Array.isArray(p?.pet_species)
-              ? p.pet_species
-              : Array.isArray(p?.pets) && p.pets.length > 0
-              ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
-              : [];
-            const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
-            const roleBadge = p.social_role === "nannies" ? "Nannies" : p.social_role === "animal-lovers" ? "Animal Lovers" : "Playdates";
-            const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
-              ? albumUrls[p.id]
-              : Array.isArray(p?.social_album) && p.social_album.length > 0
-              ? p.social_album
-              : p.avatar_url
-              ? [p.avatar_url]
-              : [];
-            const cover = album[0];
+        {/* ── Collapsible Discovery Section ── */}
+      <section className="px-5 pb-2">
+        <button
+          onClick={() => setDiscoveryExpanded((v) => !v)}
+          className="w-full flex items-center justify-between py-2"
+        >
+          <span className="text-sm font-bold text-brandText">Discovery</span>
+          {discoveryExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </button>
 
-            return (
-              <div
-                key={p.id}
-                className={cn(
-                  "w-[calc(100vw-40px)] max-w-[380px] flex-shrink-0 rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer",
-                  blocked && "cursor-not-allowed"
-                )}
-                style={{ scrollSnapAlign: "center" }}
-                onClick={async () => {
-                  if (blocked) return;
-                  const ok = await bumpDiscoverySeen();
-                  if (!ok) return;
-                  setSelectedDiscovery(p);
-                  setActiveAlbumIndex(0);
-                  setShowDiscoveryModal(true);
-                }}
-              >
-                {cover ? (
-                  <img src={cover} alt={p.display_name || ""} className="h-52 w-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="h-52 w-full bg-muted" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
-
-                {/* Badge overlays on card image — Verified + Car */}
-                <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                  {p.is_verified && (
-                    <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
-                  )}
-                  {p.has_car && (
-                    <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
-                  )}
-                </div>
-
-                {/* Action icons overlay — Wave / Star / X */}
-                <div className="absolute top-3 right-3 flex gap-1">
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (blocked) return;
-                      const ok = await bumpDiscoverySeen();
-                      if (!ok) return;
-                      try {
-                        if (profile?.id) {
-                          await supabase
-                            .from("waves")
-                            .insert({ from_user_id: profile.id, to_user_id: p.id })
-                            .throwOnError();
-                        }
-                        toast.success(t("Wave sent"));
-                      } catch (err: unknown) {
-                        const msg = err instanceof Error ? err.message : String(err);
-                        if (msg.includes("duplicate") || msg.includes("23505")) {
-                          toast.info(t("Wave already sent"));
-                        } else {
-                          toast.error(t("Failed to send wave"));
-                        }
-                      }
-                    }}
-                    className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
-                  >
-                    <HandMetal className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (blocked) return;
-                      const okSeen = await bumpDiscoverySeen();
-                      if (!okSeen) return;
-                      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
-                        action_type: "star",
-                      });
-                      if (allowed === false) {
-                        toast.error(t("No stars remaining"));
-                        return;
-                      }
-                      navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
-                    }}
-                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
-                  >
-                    <Star className="w-4 h-4 text-brandBlue" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (blocked) return;
-                      setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
-                    }}
-                    className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
-                  >
-                    <X className="w-4 h-4 text-muted-foreground" />
-                  </button>
-                </div>
-
-                {/* Bottom info: Name, Age, Social Role, Pet Species */}
-                <div className="absolute bottom-3 left-3 right-3 text-white">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base font-bold">{p.display_name}</span>
-                    {age && <span className="text-sm font-medium">{String(age)}</span>}
+        <AnimatePresence initial={false}>
+          {discoveryExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+              {/* Discovery cards — single card visible, horizontal scroll with paging */}
+              <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4" style={{ scrollSnapType: "x mandatory" }}>
+                {discoveryLoading && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {t("Loading discovery...")}
                   </div>
-                  <div className="text-xs text-white/80 mt-0.5">{roleBadge} • {petSpecies}</div>
-                </div>
+                )}
+                {discoverySource.map((p, idx) => {
+                  const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
+                  const age = p?.dob
+                    ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
+                    : "";
+                  const petSpeciesList = Array.isArray(p?.pet_species)
+                    ? p.pet_species
+                    : Array.isArray(p?.pets) && p.pets.length > 0
+                    ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
+                    : [];
+                  const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
+                  const roleBadge = p.social_role === "nannies" ? "Nannies" : p.social_role === "animal-lovers" ? "Animal Lovers" : "Playdates";
+                  const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
+                    ? albumUrls[p.id]
+                    : Array.isArray(p?.social_album) && p.social_album.length > 0
+                    ? p.social_album
+                    : p.avatar_url
+                    ? [p.avatar_url]
+                    : [];
+                  const cover = album[0];
 
-                {blocked ? (
-                  <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
-                    <div className="px-4 text-center">
-                      <div className="text-sm font-bold text-brandText">Unlock Premium to see more users</div>
-                      <div className="text-xs text-brandText/70 mt-2">Free users can view up to 40 profiles per day.</div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsPremiumOpen(true);
-                        }}
-                        className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
-                      >
-                        Explore Premium
-                      </button>
+                  return (
+                    <div
+                      key={p.id}
+                      className={cn(
+                        "w-[calc(100vw-40px)] max-w-[380px] flex-shrink-0 rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer",
+                        blocked && "cursor-not-allowed"
+                      )}
+                      style={{ scrollSnapAlign: "center" }}
+                      onClick={async () => {
+                        if (blocked) return;
+                        const ok = await bumpDiscoverySeen();
+                        if (!ok) return;
+                        setSelectedDiscovery(p);
+                        setActiveAlbumIndex(0);
+                        setShowDiscoveryModal(true);
+                      }}
+                    >
+                      {cover ? (
+                        <img src={cover} alt={p.display_name || ""} className="h-52 w-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="h-52 w-full bg-muted" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
+
+                      {/* Badge overlays on card image — Verified + Car */}
+                      <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                        {p.is_verified && (
+                          <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
+                        )}
+                        {p.has_car && (
+                          <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
+                        )}
+                      </div>
+
+                      {/* Action icons overlay — Wave / Star / X */}
+                      <div className="absolute top-3 right-3 flex gap-1">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (blocked) return;
+                            const ok = await bumpDiscoverySeen();
+                            if (!ok) return;
+                            try {
+                              if (profile?.id) {
+                                await supabase
+                                  .from("waves")
+                                  .insert({ from_user_id: profile.id, to_user_id: p.id })
+                                  .throwOnError();
+                              }
+                              toast.success(t("Wave sent"));
+                            } catch (err: unknown) {
+                              const msg = err instanceof Error ? err.message : String(err);
+                              if (msg.includes("duplicate") || msg.includes("23505")) {
+                                toast.info(t("Wave already sent"));
+                              } else {
+                                toast.error(t("Failed to send wave"));
+                              }
+                            }
+                          }}
+                          className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+                        >
+                          <HandMetal className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (blocked) return;
+                            const okSeen = await bumpDiscoverySeen();
+                            if (!okSeen) return;
+                            const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+                              action_type: "star",
+                            });
+                            if (allowed === false) {
+                              toast.error(t("No stars remaining"));
+                              return;
+                            }
+                            navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
+                          }}
+                          className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                        >
+                          <Star className="w-4 h-4 text-brandBlue" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (blocked) return;
+                            setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
+                          }}
+                          className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
+                        >
+                          <X className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      </div>
+
+                      {/* Bottom info: Name, Age, Social Role, Pet Species */}
+                      <div className="absolute bottom-3 left-3 right-3 text-white">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-bold">{p.display_name}</span>
+                          {age && <span className="text-sm font-medium">{String(age)}</span>}
+                        </div>
+                        <div className="text-xs text-white/80 mt-0.5">{roleBadge} • {petSpecies}</div>
+                      </div>
+
+                      {blocked ? (
+                        <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
+                          <div className="px-4 text-center">
+                            <div className="text-sm font-bold text-brandText">Unlock Premium to see more users</div>
+                            <div className="text-xs text-brandText/70 mt-2">Free users can view up to 40 profiles per day.</div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsPremiumOpen(true);
+                              }}
+                              className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
+                            >
+                              Explore Premium
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                ) : null}
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
 
-        {discoveryProfiles.length > 0 && discoverySource.length === 0 && (
-            <div className="mt-2">
-              <button
-                onClick={() => {
-                  setFilters((f) => ({ ...f, maxDistanceKm: Math.min(150, f.maxDistanceKm + 15) }));
-                  setHiddenDiscoveryIds(new Set());
-                }}
-                className="text-xs font-medium text-[#3283ff] underline"
-              >
-                {t("Run out of huddlers? Expand search.")}
-              </button>
-            </div>
+              {discoveryProfiles.length > 0 && discoverySource.length === 0 && (
+                <div className="mt-2">
+                  <button
+                    onClick={() => {
+                      setFilters((f) => ({ ...f, maxDistanceKm: Math.min(150, f.maxDistanceKm + 15) }));
+                      setHiddenDiscoveryIds(new Set());
+                    }}
+                    className="text-xs font-medium text-[#3283ff] underline"
+                  >
+                    {t("Run out of huddlers? Expand search.")}
+                  </button>
+                </div>
+              )}
+            </motion.div>
           )}
+        </AnimatePresence>
       </section>
 
       {/* Search Bar */}
@@ -1063,8 +1087,28 @@ const Chats = () => {
         )}
       </AnimatePresence>
 
+      {/* ── Collapsible Chats Section (default collapsed) ── */}
+      <section className="px-5">
+        <button
+          onClick={() => setChatsExpanded((v) => !v)}
+          className="w-full flex items-center justify-between py-2"
+        >
+          <span className="text-sm font-bold text-brandText">Chats</span>
+          {chatsExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+        </button>
+
+        <AnimatePresence initial={false}>
+          {chatsExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+
       {/* Unified Tabs: Nannies / Play Dates / Animal Lovers / Groups */}
-      <section className="px-5 py-2">
+      <div className="py-2">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
           {mainTabs.map((tab) => (
             <button
@@ -1081,21 +1125,21 @@ const Chats = () => {
             </button>
           ))}
         </div>
-      </section>
+      </div>
 
       {/* Chats View (Nannies / Playdates / Animal Lovers) */}
       {mainTab !== "groups" && (
         <>
           {mainTab === "nannies" && (
-            <section className="px-5">
+            <div className="mb-2">
               <div className="rounded-xl bg-muted/50 border border-border px-3 py-2 text-xs text-muted-foreground">
                 Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses.
               </div>
-            </section>
+            </div>
           )}
 
           {/* Chat List */}
-          <section className="px-5">
+          <div>
             <div className="space-y-2">
               {filteredChats.length === 0 ? (
                 <div className="text-center py-8">
@@ -1161,19 +1205,20 @@ const Chats = () => {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {/* $ icon for nanny-type chats — opens booking modal */}
+                        {/* Green "Book Now" pill for nanny-type chats */}
                         {chat.type === "nannies" && (
                           <button
                             onClick={(e) => handleNannyBookClick(e, chat)}
-                            className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
+                            className="px-2.5 py-1 rounded-full text-[10px] font-bold text-white shadow-sm transition-transform hover:scale-105"
                             style={{ backgroundColor: "#A6D539" }}
                             title={t("Book Nanny")}
                           >
-                            <DollarSign className="w-4 h-4 text-white" />
+                            Book Now
                           </button>
                         )}
+                        {/* Grey unread badge */}
                         {chat.unread > 0 && (
-                          <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
+                          <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
                             {chat.unread}
                           </span>
                         )}
@@ -1193,13 +1238,13 @@ const Chats = () => {
                 </button>
               </div>
             )}
-          </section>
+          </div>
         </>
       )}
 
       {/* Groups View */}
       {mainTab === "groups" && (
-        <section className="px-5 pt-2">
+        <div className="pt-2">
           <div className="space-y-2">
             {filteredGroups.length === 0 ? (
               <div className="text-center py-8">
@@ -1269,26 +1314,82 @@ const Chats = () => {
               </button>
             </div>
           )}
-        </section>
+        </div>
       )}
 
-      {/* Group Manage Modal */}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </section>
+
+      {/* Group Manage Modal — members list, invite from mutual waves, remove, group image */}
       <Dialog open={!!groupManageId} onOpenChange={() => setGroupManageId(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Manage Group</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="text-sm font-semibold text-brandText">Members</div>
-            <div className="text-xs text-muted-foreground">Member list would load from backend</div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => { toast.info("Invite flow not yet wired"); }}>
-                Invite
+          <div className="space-y-4">
+            {/* Group Image */}
+            <div className="flex items-center gap-3">
+              <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                <Users className="w-6 h-6 text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-brandText">
+                  {groups.find((g) => g.id === groupManageId)?.name || "Group"}
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  {groups.find((g) => g.id === groupManageId)?.memberCount || 0} members
+                </div>
+              </div>
+              <Button size="sm" variant="outline" className="text-xs" onClick={() => { toast.info("Group image upload — coming soon"); }}>
+                Change Image
               </Button>
             </div>
-            <Button size="sm" variant="outline" onClick={() => { toast.info("Group image upload not yet wired"); }}>
-              Group Image
-            </Button>
+
+            {/* Members List */}
+            <div>
+              <div className="text-xs font-semibold text-brandText/70 mb-2">Members</div>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {/* Demo members — in production, fetched from backend */}
+                {["You (Owner)", "Marcus", "Sarah"].map((name, i) => (
+                  <div key={i} className="flex items-center justify-between py-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground">
+                        {name.charAt(0)}
+                      </div>
+                      <span className="text-sm text-brandText">{name}</span>
+                    </div>
+                    {i > 0 && (
+                      <button
+                        onClick={() => toast.info(`Remove ${name} — coming soon`)}
+                        className="text-[10px] font-medium text-red-500 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Invite from Mutual Waves */}
+            <div>
+              <div className="text-xs font-semibold text-brandText/70 mb-2">Invite from Mutual Waves</div>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {chats.slice(0, 3).map((c) => (
+                  <div key={c.id} className="flex items-center justify-between py-1.5">
+                    <div className="flex items-center gap-2">
+                      <UserAvatar avatarUrl={c.avatarUrl} name={c.name} isVerified={c.isVerified} hasCar={false} size="sm" showBadges={false} />
+                      <span className="text-sm text-brandText">{c.name}</span>
+                    </div>
+                    <Button size="sm" className="h-6 text-[10px] px-2" onClick={() => toast.success(`Invited ${c.name}`)}>
+                      Invite
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -1655,7 +1756,7 @@ const Chats = () => {
           </>
         )}
       </AnimatePresence>
-      {/* Profile Sheet — right-side drawer when tapping user avatar in chat list */}
+      {/* Profile Sheet — right-side drawer with 3:4 hero image, overlays, pet icon, public fields */}
       <AnimatePresence>
         {profileSheetUser && (
           <>
@@ -1673,24 +1774,22 @@ const Chats = () => {
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
             >
-              <div className="flex items-center justify-between px-4 pt-5 pb-3 border-b border-border">
-                <h3 className="text-base font-bold text-brandText">Profile</h3>
-                <button
-                  onClick={() => setProfileSheetUser(null)}
-                  className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+              {/* Close button on top */}
+              <button
+                onClick={() => setProfileSheetUser(null)}
+                className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center"
+              >
+                <X className="w-5 h-5 text-white" />
+              </button>
 
-              <div className="p-4">
-                {profileSheetLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-6 h-6 animate-spin text-brandBlue" />
-                  </div>
-                ) : profileSheetData?.non_social === true ? (
-                  /* Non-social users: show blocked overlay */
-                  <div className="relative rounded-xl border border-border bg-muted/50 p-6 text-center">
+              {profileSheetLoading ? (
+                <div className="flex items-center justify-center py-24">
+                  <Loader2 className="w-6 h-6 animate-spin text-brandBlue" />
+                </div>
+              ) : profileSheetData?.non_social === true ? (
+                /* Non-social users: show blocked overlay */
+                <div className="p-6">
+                  <div className="relative rounded-xl border border-border bg-muted/50 p-6 text-center mt-8">
                     <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
                       <User className="w-8 h-8 text-muted-foreground" />
                     </div>
@@ -1699,82 +1798,121 @@ const Chats = () => {
                       This user has enabled Non-Social mode and is not available for discovery or chat.
                     </div>
                   </div>
-                ) : profileSheetData ? (
-                  /* Public profile view */
-                  <div className="space-y-4">
-                    <div className="flex flex-col items-center">
-                      <UserAvatar
-                        avatarUrl={(profileSheetData.avatar_url as string) || profileSheetUser.avatarUrl || null}
-                        name={(profileSheetData.display_name as string) || profileSheetUser.name}
-                        isVerified={!!profileSheetData.is_verified}
-                        hasCar={false}
-                        size="xl"
-                        showBadges={true}
+                </div>
+              ) : profileSheetData ? (
+                /* Public profile view with 3:4 hero image */
+                <div>
+                  {/* 3:4 Hero Image */}
+                  <div className="relative w-full" style={{ aspectRatio: "3/4" }}>
+                    {(profileSheetData.avatar_url || profileSheetUser.avatarUrl) ? (
+                      <img
+                        src={(profileSheetData.avatar_url as string) || profileSheetUser.avatarUrl || ""}
+                        alt={(profileSheetData.display_name as string) || profileSheetUser.name}
+                        className="w-full h-full object-cover"
                       />
-                      <div className="mt-3 text-lg font-bold text-brandText">{(profileSheetData.display_name as string) || profileSheetUser.name}</div>
-                      {profileSheetData.show_age !== false && profileSheetData.dob && (
-                        <div className="text-sm text-muted-foreground">
-                          {Math.floor((Date.now() - new Date(profileSheetData.dob as string).getTime()) / (1000 * 60 * 60 * 24 * 365.25))} years old
-                        </div>
+                    ) : (
+                      <div className="w-full h-full bg-muted flex items-center justify-center">
+                        <User className="w-16 h-16 text-muted-foreground/40" />
+                      </div>
+                    )}
+                    {/* Gradient overlay at bottom */}
+                    <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/70 to-transparent" />
+
+                    {/* Badge overlays — Verified + Tier */}
+                    <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                      {profileSheetData.is_verified && (
+                        <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
                       )}
-                      {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
-                        <div className="text-sm text-muted-foreground">{profileSheetData.relationship_status as string}</div>
+                      {(profileSheetData.effective_tier === "premium" || profileSheetData.tier === "premium") && (
+                        <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Premium</span>
+                      )}
+                      {(profileSheetData.effective_tier === "gold" || profileSheetData.tier === "gold") && (
+                        <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Gold</span>
                       )}
                     </div>
 
+                    {/* Pet icon overlay — bottom-right of image */}
+                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
+                      <div className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-white/90 flex items-center justify-center shadow-md">
+                        <PawPrint className="w-5 h-5 text-brandBlue" />
+                      </div>
+                    )}
+
+                    {/* Name + age overlay at bottom-left */}
+                    <div className="absolute bottom-3 left-3 text-white">
+                      <div className="text-lg font-bold leading-tight">
+                        {(profileSheetData.display_name as string) || profileSheetUser.name}
+                        {profileSheetData.show_age !== false && profileSheetData.dob && (
+                          <span className="ml-1.5 text-base font-medium">
+                            {Math.floor((Date.now() - new Date(profileSheetData.dob as string).getTime()) / (1000 * 60 * 60 * 24 * 365.25))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Public fields list */}
+                  <div className="p-4 space-y-3">
+                    {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Status</span>
+                        <span className="text-sm text-brandText">{profileSheetData.relationship_status as string}</span>
+                      </div>
+                    )}
+
                     {profileSheetData.location_name && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Location</div>
-                        <div className="text-sm text-brandText">{profileSheetData.location_name as string}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Location</span>
+                        <span className="text-sm text-brandText">{profileSheetData.location_name as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_bio !== false && profileSheetData.bio && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Bio</div>
-                        <div className="text-sm text-brandText">{profileSheetData.bio as string}</div>
+                      <div className="py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 block mb-1">Bio</span>
+                        <p className="text-sm text-brandText leading-relaxed">{profileSheetData.bio as string}</p>
                       </div>
                     )}
 
                     {profileSheetData.show_gender !== false && profileSheetData.gender_genre && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Gender</div>
-                        <div className="text-sm text-brandText">{profileSheetData.gender_genre as string}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Gender</span>
+                        <span className="text-sm text-brandText">{profileSheetData.gender_genre as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_orientation !== false && profileSheetData.orientation && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Orientation</div>
-                        <div className="text-sm text-brandText">{profileSheetData.orientation as string}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Orientation</span>
+                        <span className="text-sm text-brandText">{profileSheetData.orientation as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_occupation !== false && profileSheetData.occupation && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Job</div>
-                        <div className="text-sm text-brandText">{profileSheetData.occupation as string}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Job</span>
+                        <span className="text-sm text-brandText">{profileSheetData.occupation as string}</span>
                       </div>
                     )}
 
                     {profileSheetData.show_academic !== false && (profileSheetData.school || profileSheetData.major) && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Education</div>
-                        <div className="text-sm text-brandText">{[profileSheetData.school, profileSheetData.major].filter(Boolean).join(" • ")}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Education</span>
+                        <span className="text-sm text-brandText">{[profileSheetData.school, profileSheetData.major].filter(Boolean).join(" • ")}</span>
                       </div>
                     )}
 
                     {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <div className="text-xs font-semibold text-brandText/70 mb-1">Pets</div>
-                        <div className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</div>
+                      <div className="flex items-center gap-3 py-1.5">
+                        <span className="text-xs font-semibold text-brandText/60 w-20 flex-shrink-0">Pets</span>
+                        <span className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</span>
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="text-center py-12 text-sm text-muted-foreground">Profile not found</div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="text-center py-24 text-sm text-muted-foreground">Profile not found</div>
+              )}
             </motion.div>
           </>
         )}
