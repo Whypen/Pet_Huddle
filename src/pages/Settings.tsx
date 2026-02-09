@@ -46,7 +46,7 @@ export default function SettingsPage() {
     if (!supportMessage.trim()) return;
     setSending(true);
     try {
-      const { error } = await supabase.from("support_requests").insert({
+      const { error } = await (supabase as any).from("support_requests").insert({
         user_id: user.id,
         subject: supportSubject.trim() || null,
         message: supportMessage.trim(),

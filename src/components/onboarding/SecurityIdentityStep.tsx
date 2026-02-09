@@ -33,7 +33,7 @@ export const SecurityIdentityStep = ({
   const { t } = useLanguage();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "pending" | "skipped">("idle");
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "verified" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({ legalName: "", phone: "" });
   const [legalConsent, setLegalConsent] = useState(false);
@@ -194,7 +194,7 @@ export const SecurityIdentityStep = ({
               className="w-full h-11 rounded-xl"
               disabled={!legalName.trim() || !phone.trim()}
             >
-              {verificationStatus === "verifying" ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Start Verification")}
+              {t("Start Verification")}
             </Button>
           </>
         )}
