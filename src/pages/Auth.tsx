@@ -311,7 +311,7 @@ const Auth = () => {
                         setSignupPhone(value || "");
                         setErrors((prev) => ({ ...prev, phone: undefined }));
                       }}
-                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.phone ? "border-destructive" : "border-brandText/40"} pl-12 pr-2 py-1 text-left`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.phone ? "border-destructive" : "border-[#e2e4e9]"} pl-12 pr-2 py-1 text-left`}
                       placeholder={t("Phone (+XXX)")}
                     />
                   </div>
@@ -348,7 +348,7 @@ const Auth = () => {
                         setLoginPhone(value || "");
                         setErrors((prev) => ({ ...prev, loginPhone: undefined }));
                       }}
-                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.loginPhone ? "border-destructive" : "border-brandText/40"} px-2 py-1 text-left`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.loginPhone ? "border-destructive" : "border-[#e2e4e9]"} px-2 py-1 text-left`}
                       placeholder={t("Mobile Number")}
                     />
                   )}
