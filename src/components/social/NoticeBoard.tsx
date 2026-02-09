@@ -129,7 +129,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         setLoadingMore(true);
       }
 
-      let query = supabase
+      let query = (supabase as any)
         .from("threads")
         .select(`
           id,
@@ -166,15 +166,15 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       const { data, error } = await query;
 
       if (error) throw error;
-      const newNotices = data || [];
+      const newNotices = (data || []) as any[];
       if (reset) {
-        setNotices(newNotices);
+        setNotices(newNotices as Thread[]);
       } else {
-        setNotices(prev => [...prev, ...newNotices]);
+        setNotices(prev => [...prev, ...(newNotices as Thread[])]);
       }
-      const ids = newNotices.map((n) => n.id);
+      const ids = newNotices.map((n: any) => n.id);
       if (ids.length > 0) {
-        const { data: comments } = await supabase
+        const { data: comments } = await (supabase as any)
           .from("thread_comments")
           .select(`
             id,
@@ -188,12 +188,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           .in("thread_id", ids)
           .order("created_at", { ascending: true });
         const grouped: Record<string, ThreadComment[]> = {};
-        (comments || []).forEach((c) => {
-          grouped[c.thread_id] = [...(grouped[c.thread_id] || []), c];
+        ((comments || []) as any[]).forEach((c: any) => {
+          grouped[c.thread_id] = [...(grouped[c.thread_id] || []), c as ThreadComment];
         });
         setCommentsByThread((prev) => ({ ...prev, ...grouped }));
       }
-      const last = newNotices[newNotices.length - 1];
+      const last = newNotices[newNotices.length - 1] as any;
       if (last?.created_at) {
         setLastCreatedAt(last.created_at);
       }
@@ -289,7 +289,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       const { data: { publicUrl } } = supabase.storage.from("notices").getPublicUrl(fileName);
       uploadedUrl = publicUrl;
     }
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from("thread_comments")
       .insert({
         thread_id: thread.id,
@@ -360,7 +360,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
       const hashtagList = hashtags.slice(0, 3);
 
-      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
         action_type: "thread_post",
       });
       if (allowed === false) {
@@ -368,7 +368,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         return;
       }
 
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from("threads")
         .insert({
           user_id: user.id,

@@ -58,7 +58,7 @@ const PetDetails = () => {
         .single();
 
       if (error) throw error;
-      setPet(data);
+      setPet(data as any);
     } catch (error) {
       console.error("Error fetching pet:", error);
       toast.error(t("Failed to load pet details"));

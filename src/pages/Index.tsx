@@ -136,7 +136,7 @@ const Index = () => {
       }
       try {
         const todayISO = new Date().toISOString().slice(0, 10);
-        const res = await supabase
+        const res = await (supabase as any)
           .from("reminders")
           .select("id,pet_id,due_date,kind,reason")
           .eq("owner_id", user.id)

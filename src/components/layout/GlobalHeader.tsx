@@ -74,7 +74,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     let cancelled = false;
 
     const refreshUnread = async () => {
-      const res = await supabase
+      const res = await (supabase as any)
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id)

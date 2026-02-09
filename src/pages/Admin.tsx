@@ -29,7 +29,7 @@ const Admin = () => {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("verification_uploads")
       .select(`
         id,
@@ -58,22 +58,7 @@ const Admin = () => {
       return;
     }
 
-    const mapped = (data || []).map((row: {
-      id: string;
-      user_id: string;
-      document_url: string | null;
-      selfie_url: string | null;
-      country: string | null;
-      document_type: string | null;
-      profiles?: {
-        id?: string | null;
-        display_name?: string | null;
-        legal_name?: string | null;
-        verification_status?: string | null;
-        verification_comment?: string | null;
-        avatar_url?: string | null;
-      } | null;
-    }) => ({
+    const mapped = ((data || []) as any[]).map((row: any) => ({
       upload_id: row.id,
       id: row.profiles?.id ?? row.user_id,
       display_name: row.profiles?.display_name ?? null,
@@ -127,7 +112,7 @@ const Admin = () => {
       })
       .eq("id", id);
     if (uploadId) {
-      await supabase
+      await (supabase as any)
         .from("verification_uploads")
         .update({
           status,

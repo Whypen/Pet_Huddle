@@ -160,7 +160,7 @@ const Map = () => {
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const profileRec = useMemo(() => {
-    if (profile && typeof profile === "object") return profile as Record<string, unknown>;
+    if (profile && typeof profile === "object") return profile as unknown as Record<string, unknown>;
     return null;
   }, [profile]);
 
@@ -189,7 +189,7 @@ const Map = () => {
 
   const loadQuotaSnapshot = useCallback(async () => {
     if (!user) return;
-    const res = await supabase.rpc("get_quota_snapshot");
+    const res = await (supabase as any).rpc("get_quota_snapshot");
     if (res.error) return;
     const row =
       Array.isArray(res.data) ? (res.data[0] as Record<string, unknown> | undefined) : (res.data as Record<string, unknown> | null);
@@ -247,8 +247,8 @@ const Map = () => {
         setRetentionExpiresAt(retentionExpires);
         if (user) {
           // Contract: visible toggle implies consent for friend visibility while pinned.
-          await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
-          await supabase.rpc("set_user_location", {
+          await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+          await (supabase as any).rpc("set_user_location", {
             p_lat: lat,
             p_lng: lng,
             p_pin_hours: 2,
@@ -321,8 +321,8 @@ const Map = () => {
     setPinExpiresAt(pinExpires);
     setRetentionExpiresAt(retentionExpires);
     if (user) {
-      await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
-      await supabase.rpc("set_user_location", {
+      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+      await (supabase as any).rpc("set_user_location", {
         p_lat: lat,
         p_lng: lng,
         p_pin_hours: 2,
@@ -380,7 +380,7 @@ const Map = () => {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v12",
-      center: initialCenter,
+      center: initialCenter as [number, number],
       zoom: userLocation ? 14 : 11,
     });
 
@@ -466,7 +466,7 @@ const Map = () => {
       .setLngLat([userLocation.lng, userLocation.lat])
       .addTo(map.current);
 
-    return () => marker.remove();
+    return () => { marker.remove(); };
   }, [userLocation, mapLoaded, user]);
 
   // Update markers
@@ -595,8 +595,7 @@ const Map = () => {
         return alert.type.toLowerCase() === activeFilter.toLowerCase();
       });
 
-      filteredDemoAlerts.slice(0, 10).forEach((alert) => {
-        // SPRINT 1: Null-check for alert location coordinates
+      filteredDemoAlerts.slice(0, 10).forEach((alert: any) => {
         if (!alert.location?.lng || !alert.location?.lat ||
             isNaN(alert.location.lng) || isNaN(alert.location.lat)) {
           return;
@@ -617,9 +616,9 @@ const Map = () => {
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            ${alert.type === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
+            ${String(alert.type).toLowerCase() === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
           ">
-            <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
+            <span style="font-size: 16px;">${String(alert.type).toLowerCase() === "lost" ? "🚨" : String(alert.type).toLowerCase() === "stray" ? "🐾" : "ℹ️"}</span>
           </div>
         `;
 
@@ -688,7 +687,7 @@ const Map = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat != null && lng != null) {
-        const { data, error } = await supabase.rpc("get_map_alerts_nearby", {
+        const { data, error } = await (supabase as any).rpc("get_map_alerts_nearby", {
           p_lat: lat,
           p_lng: lng,
           p_radius_m: viewRadiusMeters,
@@ -745,7 +744,7 @@ const Map = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat == null || lng == null) return;
-      const { data, error } = await supabase.rpc("get_friend_pins_nearby", {
+      const { data, error } = await (supabase as any).rpc("get_friend_pins_nearby", {
         p_lat: lat,
         p_lng: lng,
         p_radius_m: viewRadiusMeters,
@@ -788,7 +787,7 @@ const Map = () => {
 
       if (imageFile) {
         // v1.9 override: broadcast media deducts from Media quota (Free=0, Premium=10/day, Gold=50/day).
-        const q = await supabase.rpc("check_and_increment_quota", { action_type: "media" });
+        const q = await (supabase as any).rpc("check_and_increment_quota", { action_type: "media" });
         if (q.data !== true) {
           showUpsellBanner({
             message: "Limited. Upgrade or add +10 Media to continue uploading images today.",
@@ -840,7 +839,7 @@ const Map = () => {
         .maybeSingle();
 
       if (error) {
-        const errObj = (typeof error === "object" && error !== null) ? (error as Record<string, unknown>) : null;
+        const errObj = (typeof error === "object" && error !== null) ? (error as unknown as Record<string, unknown>) : null;
         const msg = typeof (errObj?.message) === "string" ? (errObj.message as string) : "";
         if (msg.includes("quota_exceeded")) {
           showUpsellBanner({
@@ -860,9 +859,9 @@ const Map = () => {
 
       // Contract: optional "Post on Threads" (best-effort).
       if (postOnThreads) {
-        const quota = await supabase.rpc("check_and_increment_quota", { action_type: "thread_post" });
+        const quota = await (supabase as any).rpc("check_and_increment_quota", { action_type: "thread_post" });
         if (quota.data === true) {
-          await supabase.from("threads").insert({
+          await (supabase as any).from("threads").insert({
             user_id: user.id,
             title: `Broadcast (${alertType})`,
             content: description.trim() || "",
