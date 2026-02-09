@@ -4,26 +4,22 @@ import type { Database } from './types';
 
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") : rawSupabaseUrl;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+// Prefer the publishable key if it looks like the new format (sb_publishable_...)
+const SUPABASE_ANON_KEY = (
+  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.startsWith('sb_publishable_') ? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY : null) ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+);
 
 if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
 }
 
-// Log project ID mismatch if possible to help debugging
-try {
-  const urlProject = SUPABASE_URL?.match(/https:\/\/(.*?)\.supabase/)?.[1];
-  if (urlProject && SUPABASE_ANON_KEY) {
-    const keyPayload = JSON.parse(atob(SUPABASE_ANON_KEY.split('.')[1]));
-    if (keyPayload.ref && keyPayload.ref !== urlProject) {
-      console.warn("Supabase Project ID Mismatch detected:", { urlProject, keyRef: keyPayload.ref });
-    }
-  }
-} catch (e) {
-  // Ignore decoding errors
-}
-
-console.log("Supabase URL initialized as:", SUPABASE_URL);
+console.log("Supabase Client initialized:", {
+  url: SUPABASE_URL,
+  keyPrefix: SUPABASE_ANON_KEY ? `${SUPABASE_ANON_KEY.substring(0, 15)}...` : 'missing'
+});
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
