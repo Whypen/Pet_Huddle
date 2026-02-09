@@ -6,11 +6,15 @@ const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") : rawSupabaseUrl;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+console.log("Supabase Client Initialization:", {
+  url: SUPABASE_URL,
+  keyPrefix: SUPABASE_ANON_KEY?.substring(0, 10),
+  keyLength: SUPABASE_ANON_KEY?.length
+});
+
 if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
 }
-
-console.log("Supabase Client initialized for project:", SUPABASE_URL);
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
