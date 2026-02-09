@@ -413,28 +413,96 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - Text → Gemini Flash
 - Image → QMS check `ai_vision` → Gemini Pro
 
-## 12) `Map.tsx`
-**UI Elements:**
-- Mapbox GL map with user pins, vet clinic pins, stray/lost pins
-- Broadcast Alert form: title, description (max 1000 chars), range dropdown, duration dropdown, visibility toggle (Eye/EyeOff icon)
-- "Pin my Location" with subtext: "Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings."
+## 12) `Map.tsx` — Map & Broadcast Alert (Final Specification, Overpass API Edition)
 
-**Broadcast Range by Tier:**
-- Free: 10km max, 12h visible, 3/week
-- Premium: 25km max, 24h visible, 30/month
-- Gold: 50km max, 48h visible, 50/month (pooled)
-- Add-on: 72h/150km
+### 12a) Overall Purpose & Controls
+The map is the central real-time location-based hub:
+- Showing visible users (friend pins — green name-initial icons)
+- Displaying nearby vet clinics & pet shops (static layer from `poi_locations` table, always visible in BOTH tabs)
+- Creating and receiving broadcast alerts (lost pets, stray sightings, general notices)
 
-**Range Dropdown Options:** 2km, 10km, 20km, 25km (Premium+), 50km (Gold+), 150km (Add-on)
-**Duration Dropdown Options:** 12h, 24h (Premium+), 48h (Gold+), 72h (Add-on)
+**Hard view restriction:** Only pins and alerts within **50 km** of user are ever shown.
+**Location source priority:** 1) Currently pinned location, 2) Live phone location (Visible ON), 3) Profile district fallback (geocoded).
 
-**Visibility Toggle:** Eye/EyeOff icon button replaces the text "Visible: On/Off"
+### 12b) Tabs Overlay (on map)
+- **80% transparent floating box**, positioned top-left overlay ON the map (not in header)
+- **"Event" tab**: displays Vet & Pet Shop pins + Lost/Stray/Others broadcast alerts
+- **"Friends" tab**: displays other visible users' green name-initial pins
+- Vet & Pet Shop static layer is **always visible in both tabs** (no toggle to hide)
+- **Subtext** (only when "Event" tab active, below tabs): "Stay visible or pin your location to see the nearby events"
 
-**HK Vet Clinics:** Auto-loaded, white icon with green/red dot (open/closed). Subtext: "Timely reflection of any changes of operations of the Vet Clinic is not guaranteed". 5-star rating (verified users only).
+### 12c) Always-Visible Controls
+- **Visible toggle**: icon-only, styled as **blue pin icon** (MapPin). Open eye / green tint = ON, Closed eye / grey tint = OFF.
+  - ON: enables location service → auto-pin at current live position + user can manually drag pin
+  - OFF: removes active pin + user becomes invisible (no pins visible, still receives alerts within system retention)
+- **Refresh CTA**: grey pill button labeled "Refresh" (overlay on map). Tap → forces immediate update. Also auto-refreshes on screen enter. Lazy-loading of map tiles.
+- **Broadcast FAB**: floating button on map (always visible, no extra text box above it)
 
-**Pin Colors:** Stray = blue, Lost = red, Friends = default
+### 12d) Pin Location Flow
+1. Visible toggle must be ON for pinning
+2. System auto-pins at current live location
+3. User can manually drag/tap to move pin
+4. On drop → **confirmation popup**: "Available on map for 2 hours and stay in system for 12 hours to receive broadcast alert." + "Confirm" CTA + "<" return arrow
+5. On Confirm → pin saved, green name-initial icon visible for **exactly 2 hours**
+6. After 2h: pin disappears, location stays in system for additional 10h (total 12h) for alert delivery
+7. Unpin (toggle OFF): popup "Unpin location? You will not be able to see Friends & it will affect the pet care location result" → Yes = pin removed immediately
 
-**Performance:** PostGIS ST_DWithin for radius queries, GIST index on profiles.location
+**Dual timers per pin:** `Visible_Duration = 2h` (map display), `System_Duration = 12h` (alert reception)
+**Hide from Map toggle** (Account Settings): ON = pin mode disabled + any pin removed; OFF = re-enabled
+
+### 12e) Broadcast Alert Creation
+Full-screen modal on tap of broadcast FAB:
+- **Topic**: "Stray" / "Lost" / "Others" (segmented buttons)
+- **Title**: short text (required, max 100 chars)
+- **Short Description**: longer text (max 500 chars)
+- **Image**: optional upload (gallery or camera), shrink to fit preview
+- **Checkbox** (only for Stray/Lost): "Post on Threads to allow updates from other users"
+- **Range**: slider (0 km to tier max)
+- **Duration**: slider (1h to tier max)
+- **"Broadcast" button** at bottom
+
+**Tier Gating (strict):**
+- Free: max 10 km range, max 12h duration
+- Premium: max 25 km, max 24h
+- Gold: max 50 km, max 48h
+- Add-on (purchased separately): 150 km range, 72h duration
+
+**Pin colors:** Stray = **yellow paw** 🐾, Lost = **red alert** 🚨, Others = **grey paw** 🐾, Friends = **green name-initial**
+
+### 12f) Full View Modal (tapping any pin)
+Shows: Topic (bold), Title, full description (500 chars), image (if uploaded), "Reply on Threads" button (if creator checked Post on Threads), "Report abuse" button.
+Abuse counter > 10 → pin auto-hidden for all users.
+
+**Creator controls:** Can always edit title/description/image. Range + duration locked after creation. Lost topic → extra "Remove" button with confirmation.
+
+### 12g) Vet & Pet Shop Layer (Overpass API + Monthly Harvest)
+- Data from `poi_locations` table (harvested by Supabase Edge Function `overpass-harvest`)
+- Edge Function queries `https://overpass-api.de/api/interpreter` for `amenity=veterinary` OR `shop=pet` within 50km
+- Mapping: `name` → tags.name, `address` → tags["addr:full"], `phone` → tags.phone, `opening_hours` → tags.opening_hours
+- Reconciliation: missing → `active=false`, changed → UPDATE, new → INSERT
+- `pg_cron` runs every 30 days
+- Client queries `poi_locations` with PostGIS `ST_DWithin` (<100ms)
+- Pin appearance: hospital/store emoji with green dot (open) / red dot (closed)
+- Full view: address, phone, hours, "Call" button only (no navigation)
+- Legal subtext: "Data provided by third-party sources. Information may not be current; please verify directly with the clinic."
+
+### 12h) Notifications
+- Lost/stray alerts → push notifications: "💡: Furry friend sighting reported in [District]!" / "🚨: A furry friend is missing in [District]!"
+- In-app: bell icon shows red dot for unread
+- Admin can send manual notifications
+
+### 12i) Automatic Cleanup
+- Daily midnight (00:00 UTC): delete all expired alerts
+- Pins disappear immediately when expired
+
+### 12j) Edge Cases
+- Hide from Map ON → no alerts, no pins, pin mode disabled
+- No location permission → toast "Enable location to use map features", still shows vets/pet shops
+- Quota exceeded → creation blocked + tier-specific upsell
+- Abuse reports > 10 → auto-hidden
+- Offline → cached alerts + "You're offline: Results may be out of date. Please refresh when back online."
+
+**Performance:** PostGIS ST_DWithin for radius queries, GIST index on profiles.location, poi_locations.geog
 
 ## 13) `Settings.tsx`
 **UI Elements (Gear Logo CTA, UAT):**
