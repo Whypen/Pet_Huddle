@@ -425,10 +425,11 @@ const Auth = () => {
                   id="rememberMe"
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                  className="rounded-[4px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
                 <label
                   htmlFor="rememberMe"
-                  className="text-sm text-muted-foreground cursor-pointer"
+                  className="text-sm text-[#4a4a4a] cursor-pointer ml-2"
                 >
                   {t("auth.remember")}
                 </label>
@@ -441,8 +442,9 @@ const Auth = () => {
                   id="consent"
                   checked={consentAccepted}
                   onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
+                  className="rounded-[4px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
-                <label htmlFor="consent" className="text-xs text-muted-foreground leading-snug cursor-pointer">
+                <label htmlFor="consent" className="text-xs text-[#4a4a4a] leading-snug cursor-pointer ml-2">
                   I have read and agree to the{" "}
                   <Link to="/terms" className="text-primary underline underline-offset-2">
                     Terms of Service
