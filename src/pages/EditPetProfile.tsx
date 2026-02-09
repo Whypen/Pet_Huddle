@@ -708,7 +708,7 @@ const EditPetProfile = () => {
             </div>
 
             {/* Next Vaccination Reminder */}
-            <div className="pt-3 border-t border-border">
+            <div className="mt-4">
               <label className="text-sm font-medium h-5 mb-2 block">{t("Next Visit Reminder")}</label>
               <Input
                 type="date"
