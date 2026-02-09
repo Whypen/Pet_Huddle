@@ -548,7 +548,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-sm truncate">
+                          <span className="font-semibold text-sm truncate">
                             {notice.author?.display_name || t("Anonymous")}
                           </span>
                           {notice.author?.is_verified && (
@@ -560,7 +560,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             <span
                               key={tag}
                               className={cn(
-                                "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
+                                "h-[20px] px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0 font-semibold",
                                 getTagStyle(tag)
                               )}
                             >
@@ -568,9 +568,9 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             </span>
                           ))}
                         </div>
-                        <p className="text-sm font-semibold">{notice.title}</p>
+                        <p className="text-[14px] font-semibold">{notice.title}</p>
                         <div
-                          className="text-sm text-foreground"
+                          className="text-[13px] text-foreground"
                           dangerouslySetInnerHTML={{ __html: renderMarkdown(notice.content) }}
                         />
                         {(notice.hashtags || []).length > 0 && (
