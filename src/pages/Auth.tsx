@@ -188,9 +188,9 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft flex flex-col">
+    <div className="min-h-[20px] bg-gradient-to-b from-[#e9edfc] via-white to-[#e9edfc] flex flex-col">
       {/* Header */}
-      <div className="pt-12 pb-8 text-center">
+      <div className="pt-12 pb-12 text-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -202,14 +202,14 @@ const Auth = () => {
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="font-normal text-brandText lowercase flex flex-col"
+          className="font-normal text-brandText lowercase flex flex-col h-0"
         >
           <p className="mx-auto">
             <div
               className="inline text-[#2145cf]"
               style={{
                 textShadow: "1px 1px 2px rgba(155, 155, 155, 1)",
-                font: "900 20px 'Varela Round', sans-serif"
+                font: "900 24px 'Varela Round', sans-serif"
               }}
             >
               huddle
@@ -257,7 +257,7 @@ const Auth = () => {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
             <AnimatePresence mode="wait">
               {!isLogin && (
                 <motion.div
@@ -359,7 +359,7 @@ const Auth = () => {
                     setLoginMethod((prev) => (prev === "email" ? "phone" : "email"));
                     setErrors((prev) => ({ ...prev, loginEmail: undefined, loginPhone: undefined }));
                   }}
-                  className="text-xs text-muted-foreground mt-1 ml-1 hover:underline underline"
+                  className="text-xs text-muted-foreground mt-1.5 ml-1 hover:underline underline self-center"
                 >
                   {loginMethod === "email" ? t("Use phone instead") : t("Use email instead")}
                 </button>
@@ -425,11 +425,11 @@ const Auth = () => {
                   id="rememberMe"
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                  className="rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
                 <label
                   htmlFor="rememberMe"
-                  className="text-sm text-[#4a4a4a] cursor-pointer ml-2 leading-5"
+                  className="text-xs text-brandText cursor-pointer ml-1 leading-4"
                 >
                   {t("auth.remember")}
                 </label>
@@ -461,7 +461,7 @@ const Auth = () => {
             <Button
               type="submit"
               disabled={loading || (!isLogin && !consentAccepted)}
-              className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+              className="w-full h-9 rounded-3xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold mt-[10px] mx-auto"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -475,7 +475,7 @@ const Auth = () => {
 
           {isLogin && (
             <button
-              className="w-full text-center text-sm text-primary mt-4 hover:underline"
+              className="w-full text-center text-xs text-brandText mt-4 hover:underline"
               onClick={async () => {
                 if (!loginEmail || !loginEmail.includes("@")) {
                   toast.error(t("auth.reset_enter_email"));
@@ -497,16 +497,16 @@ const Auth = () => {
 
       {/* Footer */}
       <div className="py-8 text-center">
-        <p className="text-xs text-muted-foreground">
-          {t("auth.by_continuing")}{" "}
-          <Link to="/terms" className="text-brandBlue hover:underline">
-            {t("auth.terms")}
+        <div className="text-xs text-muted-foreground">
+          <div className="text-[10px] inline-block">{t("auth.by_continuing")}</div>{" "}
+          <Link to="/terms" className="text-brandBlue text-[10px] mx-0.5 inline-block">
+            {t("Terms")}
           </Link>{" "}
-          {t("auth.and")}{" "}
-          <Link to="/privacy" className="text-brandBlue hover:underline">
+          <div className="text-[10px] inline-block">{t("auth.and")}</div>{" "}
+          <Link to="/privacy" className="text-brandBlue text-[10px] mx-0.5 inline-block">
             {t("auth.privacy")}
           </Link>
-        </p>
+        </div>
       </div>
     </div>
   );
