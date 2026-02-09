@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User } from "lucide-react";
+import { Users, MessageSquare, Search, X, DollarSign, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, Trash2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -18,6 +19,98 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { demoUsers } from "@/lib/demoData";
+
+/* ── Discovery Filter Types & Defaults ── */
+const ALL_GENDERS = ["Male", "Female", "Non-binary", "PNA"] as const;
+const ALL_SPECIES = ["dog", "cat", "bird", "rabbit", "reptile", "hamster", "others"] as const;
+const ALL_SOCIAL_ROLES = ["playdates", "nannies", "animal-lovers"] as const;
+const ALL_ORIENTATIONS = ["Straight", "Gay", "Lesbian", "Bisexual", "Pansexual", "Asexual", "PNA"] as const;
+const ALL_DEGREES = ["High School", "Bachelor", "Master", "PhD", "Other"] as const;
+const ALL_RELATIONSHIP_STATUSES = ["Single", "In relationship", "Married", "Open", "Divorced", "PNA"] as const;
+const ALL_LANGUAGES = ["English", "Cantonese", "Mandarin", "Japanese", "Korean", "French", "Spanish", "Other"] as const;
+
+type DiscoveryFilters = {
+  ageMin: number;
+  ageMax: number;
+  genders: string[];
+  maxDistanceKm: number;
+  species: string[];
+  socialRoles: string[];
+  heightMin: number;
+  heightMax: number;
+  orientations: string[];
+  degrees: string[];
+  relationshipStatuses: string[];
+  hasCar: boolean;
+  hasPetExperience: boolean;
+  languages: string[];
+  verifiedOnly: boolean;
+  whoWavedAtMe: boolean;
+  activeOnly: boolean;
+};
+
+const DEFAULT_FILTERS: DiscoveryFilters = {
+  ageMin: 18,
+  ageMax: 99,
+  genders: [...ALL_GENDERS],
+  maxDistanceKm: 150,
+  species: [...ALL_SPECIES],
+  socialRoles: [...ALL_SOCIAL_ROLES],
+  heightMin: 100,
+  heightMax: 300,
+  orientations: [...ALL_ORIENTATIONS],
+  degrees: [...ALL_DEGREES],
+  relationshipStatuses: [...ALL_RELATIONSHIP_STATUSES],
+  hasCar: true,
+  hasPetExperience: true,
+  languages: [...ALL_LANGUAGES],
+  verifiedOnly: true,
+  whoWavedAtMe: true,
+  activeOnly: true,
+};
+
+type FilterKey = keyof DiscoveryFilters;
+type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "premium" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
+
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: "ageMin", label: "Age Range", tier: "free", type: "range" },
+  { key: "genders", label: "Gender", tier: "free", type: "multi" },
+  { key: "maxDistanceKm", label: "Distance", tier: "free", type: "slider" },
+  { key: "species", label: "Species", tier: "free", type: "multi" },
+  { key: "socialRoles", label: "Social Role", tier: "free", type: "multi" },
+  { key: "heightMin", label: "Height Range", tier: "premium", type: "range" },
+  { key: "orientations", label: "Sexual Orientation", tier: "premium", type: "multi" },
+  { key: "degrees", label: "Highest Degree", tier: "premium", type: "multi" },
+  { key: "relationshipStatuses", label: "Relationship Status", tier: "premium", type: "multi" },
+  { key: "hasCar", label: "Car Badge", tier: "premium", type: "toggle" },
+  { key: "hasPetExperience", label: "Pet Experience", tier: "premium", type: "toggle" },
+  { key: "languages", label: "Language", tier: "premium", type: "multi" },
+  { key: "verifiedOnly", label: "Verified Users Only", tier: "premium", type: "toggle" },
+  { key: "whoWavedAtMe", label: "Who waved at you", tier: "gold", type: "toggle" },
+  { key: "activeOnly", label: "Active Users only", tier: "gold", type: "toggle" },
+];
+
+/** Build a short summary for a filter row */
+function filterSummary(filters: DiscoveryFilters, row: FilterRowDef): string {
+  switch (row.key) {
+    case "ageMin": return `${filters.ageMin}–${filters.ageMax}`;
+    case "genders": return filters.genders.length === ALL_GENDERS.length ? "All" : filters.genders.join(", ");
+    case "maxDistanceKm": return `${filters.maxDistanceKm} km`;
+    case "species": return filters.species.length === ALL_SPECIES.length ? "All" : filters.species.join(", ");
+    case "socialRoles": return filters.socialRoles.length === ALL_SOCIAL_ROLES.length ? "All" : filters.socialRoles.map(r => r === "playdates" ? "Pet Parents" : r === "nannies" ? "Nannies" : "Animal Lovers").join(", ");
+    case "heightMin": return `${filters.heightMin}–${filters.heightMax} cm`;
+    case "orientations": return filters.orientations.length === ALL_ORIENTATIONS.length ? "All" : filters.orientations.slice(0, 2).join(", ") + (filters.orientations.length > 2 ? "…" : "");
+    case "degrees": return filters.degrees.length === ALL_DEGREES.length ? "All" : filters.degrees.slice(0, 2).join(", ") + (filters.degrees.length > 2 ? "…" : "");
+    case "relationshipStatuses": return filters.relationshipStatuses.length === ALL_RELATIONSHIP_STATUSES.length ? "All" : filters.relationshipStatuses.slice(0, 2).join(", ") + (filters.relationshipStatuses.length > 2 ? "…" : "");
+    case "hasCar": return filters.hasCar ? "Y" : "N";
+    case "hasPetExperience": return filters.hasPetExperience ? "Y" : "N";
+    case "languages": return filters.languages.length === ALL_LANGUAGES.length ? "All" : filters.languages.slice(0, 2).join(", ") + (filters.languages.length > 2 ? "…" : "");
+    case "verifiedOnly": return filters.verifiedOnly ? "Y" : "N";
+    case "whoWavedAtMe": return filters.whoWavedAtMe ? "Y" : "N";
+    case "activeOnly": return filters.activeOnly ? "Y" : "N";
+    default: return "";
+  }
+}
 
 type DiscoveryPet = {
   species?: string | null;
@@ -56,11 +149,12 @@ type DiscoveryProfile = {
   social_role?: string | null;
 };
 
-type MainTab = "chats" | "groups";
-const filterTabs = [
-  { id: "nannies", labelKey: "social.nannies" },
-  { id: "playdates", labelKey: "social.playdates" },
-  { id: "animal-lovers", labelKey: "social.animal_lovers" },
+type MainTab = "nannies" | "playdates" | "animal-lovers" | "groups";
+const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
+  { id: "nannies", label: "Nannies", icon: MessageSquare },
+  { id: "playdates", label: "Play Dates", icon: MessageSquare },
+  { id: "animal-lovers", label: "Animal Lovers", icon: MessageSquare },
+  { id: "groups", label: "Groups", icon: Users },
 ];
 const discoverySpeciesOptions = [
   { value: "Any", label: "Any Species" },
@@ -226,8 +320,7 @@ const Chats = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("chats");
-  const [activeFilterTab, setActiveFilterTab] = useState("nannies");
+  const [mainTab, setMainTab] = useState<MainTab>("nannies");
   const [chats, setChats] = useState<ChatUser[]>(mockChats);
   const [groups, setGroups] = useState<Group[]>(mockGroups);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
@@ -235,19 +328,17 @@ const Chats = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [activeFilterRow, setActiveFilterRow] = useState<FilterRowDef | null>(null);
+  const [filters, setFilters] = useState<DiscoveryFilters>({ ...DEFAULT_FILTERS });
   const [profileSheetUser, setProfileSheetUser] = useState<{ id: string; name: string; avatarUrl?: string | null } | null>(null);
   const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
   const [profileSheetLoading, setProfileSheetLoading] = useState(false);
+  // Group management
+  const [groupManageId, setGroupManageId] = useState<string | null>(null);
+  const [swipeDeleteId, setSwipeDeleteId] = useState<string | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
-  const [discoveryRole, setDiscoveryRole] = useState("playdates");
-  const [discoveryDistance, setDiscoveryDistance] = useState(10);
-  const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
-  const [discoveryGender, setDiscoveryGender] = useState("Any");
-  const [discoverySpecies, setDiscoverySpecies] = useState("Any");
-  const [discoveryMinAge, setDiscoveryMinAge] = useState(18);
-  const [discoveryMaxAge, setDiscoveryMaxAge] = useState(99);
   const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
   const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryProfile | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
@@ -325,18 +416,7 @@ const Chats = () => {
     return true;
   };
 
-  useEffect(() => {
-    if (!profile?.dob) return;
-    const birthDate = new Date(profile.dob);
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    setDiscoveryMinAge(Math.max(18, age - 3));
-    setDiscoveryMaxAge(Math.min(99, age + 3));
-  }, [profile?.dob]);
+  // Filters are now managed in the filters state object with sensible defaults
 
   // Fetch user pets when the nanny booking modal opens
   useEffect(() => {
@@ -412,26 +492,34 @@ const Chats = () => {
     loadConversations();
   }, []);
 
-  // Discovery cards (embedded in Chats)
+  // Discovery cards (embedded in Chats) — send full filter payload
   useEffect(() => {
     const runDiscovery = async () => {
       if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
       setDiscoveryLoading(true);
       try {
-        const minAge = Math.max(16, discoveryMinAge || 16);
-        const maxAge = Math.max(minAge, discoveryMaxAge || 99);
         const payload = {
           userId: profile.id,
           lat: profile.last_lat,
           lng: profile.last_lng,
-          radiusKm: discoveryDistance,
-          role: discoveryRole,
-          gender: discoveryGender !== "Any" ? discoveryGender : null,
-          species: discoverySpecies !== "Any" ? [discoverySpecies] : null,
-          petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
-          minAge,
-          maxAge,
-          // Premium/Gold get advanced filters; free uses basic only
+          // Full filter payload — backend validates tier gating
+          age_min: filters.ageMin,
+          age_max: filters.ageMax,
+          genders: filters.genders,
+          max_distance_km: filters.maxDistanceKm,
+          species: filters.species,
+          social_roles: filters.socialRoles,
+          height_min_cm: isPremium ? filters.heightMin : undefined,
+          height_max_cm: isPremium ? filters.heightMax : undefined,
+          orientations: isPremium ? filters.orientations : undefined,
+          degrees: isPremium ? filters.degrees : undefined,
+          relationship_statuses: isPremium ? filters.relationshipStatuses : undefined,
+          has_car: isPremium ? filters.hasCar : undefined,
+          has_pet_experience: isPremium ? filters.hasPetExperience : undefined,
+          languages: isPremium ? filters.languages : undefined,
+          verified_only: isPremium ? filters.verifiedOnly : undefined,
+          who_waved_at_me: effectiveTier === "gold" ? filters.whoWavedAtMe : undefined,
+          active_only: effectiveTier === "gold" ? filters.activeOnly : undefined,
           advanced: isPremium,
         };
         const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
@@ -448,14 +536,9 @@ const Chats = () => {
     profile?.id,
     profile?.last_lat,
     profile?.last_lng,
-    discoveryDistance,
-    discoveryRole,
-    discoveryPetSize,
-    discoveryGender,
-    discoverySpecies,
-    discoveryMinAge,
-    discoveryMaxAge,
-    isPremium
+    filters,
+    isPremium,
+    effectiveTier,
   ]);
 
   useEffect(() => {
@@ -514,17 +597,12 @@ const Chats = () => {
     });
   }, [onOnlineStatus]);
 
-  // Filter chats based on active tab and search
+  // Filter chats based on active tab and search (unified tab system)
   const filteredChats = chats.filter(chat => {
-    const matchesTab =
-      activeFilterTab === "nannies" ? chat.type === "nannies" :
-      activeFilterTab === "playdates" ? chat.type === "playdates" :
-      activeFilterTab === "animal-lovers" ? chat.type === "animal-lovers" : true;
-
+    const matchesTab = mainTab === "groups" ? false : chat.type === mainTab;
     const matchesSearch = !searchQuery ||
       chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
-
     return matchesTab && matchesSearch;
   });
 
@@ -579,20 +657,19 @@ const Chats = () => {
   };
 
   const filteredDemoProfiles = demoProfiles.filter((p) => {
-    if (discoveryRole && p.social_role !== discoveryRole) return false;
-    if (discoverySpecies !== "Any") {
+    // Apply filter state
+    if (filters.socialRoles.length > 0 && p.social_role && !filters.socialRoles.includes(p.social_role)) return false;
+    if (filters.species.length > 0 && filters.species.length < ALL_SPECIES.length) {
       const species = (p.pet_species || []).map((s: string) => s.toLowerCase());
-      if (!species.includes(discoverySpecies.toLowerCase())) return false;
+      if (!species.some(s => filters.species.includes(s))) return false;
     }
-    if (discoveryGender !== "Any" && p.gender_genre !== discoveryGender) return false;
+    if (filters.genders.length > 0 && filters.genders.length < ALL_GENDERS.length && p.gender_genre) {
+      if (!filters.genders.includes(p.gender_genre)) return false;
+    }
     const age = p.dob
       ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
       : null;
-    if (age !== null && (age < discoveryMinAge || age > discoveryMaxAge)) return false;
-    if (discoveryPetSize !== "Any") {
-      const size = resolveDemoPetSize(p);
-      if (!size || size !== discoveryPetSize) return false;
-    }
+    if (age !== null && (age < filters.ageMin || age > filters.ageMax)) return false;
     return true;
   });
 
@@ -784,88 +861,10 @@ const Chats = () => {
         </div>
       </header>
 
-        {/* Discovery Cards (embedded in Chats) */}
+        {/* Discovery Cards (embedded in Chats) — single-card paging */}
       <section className="px-5 pb-4">
-        {/* UAT: swipe right for more filtering (horizontal scroll), snap to center */}
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2 snap-x snap-mandatory">
-          <select
-            value={discoveryRole}
-            onChange={(e) => setDiscoveryRole(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
-          >
-            <option value="playdates">{t("Playdates")}</option>
-            <option value="nannies">{t("Nannies")}</option>
-            <option value="animal-lovers">{t("Animal Lovers")}</option>
-          </select>
-          <select
-            value={discoverySpecies}
-            onChange={(e) => setDiscoverySpecies(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
-          >
-            {discoverySpeciesOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {t(opt.label)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={discoveryGender}
-            onChange={(e) => setDiscoveryGender(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-xs snap-center"
-          >
-            <option value="Any">{t("Any Gender")}</option>
-            {["Male", "Female", "Non-binary", "PNA"].map((gender) => (
-              <option key={gender} value={gender}>{gender}</option>
-            ))}
-          </select>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9 snap-center">
-            <span className="text-[10px] text-muted-foreground">{t("Age")}</span>
-            <input
-              type="number"
-              min={16}
-              max={99}
-              value={discoveryMinAge}
-              onChange={(e) => setDiscoveryMinAge(Number(e.target.value || 16))}
-              className="w-12 bg-transparent text-[10px] outline-none"
-            />
-            <span className="text-[10px] text-muted-foreground">-</span>
-            <input
-              type="number"
-              min={16}
-              max={99}
-              value={discoveryMaxAge}
-              onChange={(e) => setDiscoveryMaxAge(Number(e.target.value || 99))}
-              className="w-12 bg-transparent text-[10px] outline-none"
-            />
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-9 snap-center">
-            <span className="text-[10px] text-muted-foreground">{discoveryDistance}km</span>
-            <input
-              type="range"
-              min={0}
-              max={150}
-              value={discoveryDistance}
-              onChange={(e) => setDiscoveryDistance(Number(e.target.value))}
-              className="w-24 accent-primary"
-            />
-          </div>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9 snap-center">
-            <span className="text-[10px] text-muted-foreground">{t("Pet Size")}</span>
-            <select
-              value={discoveryPetSize}
-              onChange={(e) => setDiscoveryPetSize(e.target.value)}
-              className="bg-transparent text-xs outline-none"
-              aria-label={t("Pet Size")}
-            >
-              {["Any", "Small", "Medium", "Large"].map((size) => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* UAT: profile cards horizontal scroll + snap to center; card width 80% screen */}
-        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4">
+        {/* Discovery cards — single card visible, horizontal scroll with paging */}
+        <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4" style={{ scrollSnapType: "x mandatory" }}>
           {discoveryLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -883,6 +882,7 @@ const Chats = () => {
               ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
               : [];
             const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
+            const roleBadge = p.social_role === "nannies" ? "Nannies" : p.social_role === "animal-lovers" ? "Animal Lovers" : "Playdates";
             const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
               ? albumUrls[p.id]
               : Array.isArray(p?.social_album) && p.social_album.length > 0
@@ -896,9 +896,10 @@ const Chats = () => {
               <div
                 key={p.id}
                 className={cn(
-                  "w-[80vw] max-w-[320px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer snap-center",
+                  "w-[calc(100vw-40px)] max-w-[380px] flex-shrink-0 rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer",
                   blocked && "cursor-not-allowed"
                 )}
+                style={{ scrollSnapAlign: "center" }}
                 onClick={async () => {
                   if (blocked) return;
                   const ok = await bumpDiscoverySeen();
@@ -909,13 +910,24 @@ const Chats = () => {
                 }}
               >
                 {cover ? (
-                  <img src={cover} alt={p.display_name || ""} className="h-44 w-full object-cover" loading="lazy" />
+                  <img src={cover} alt={p.display_name || ""} className="h-52 w-full object-cover" loading="lazy" />
                 ) : (
-                  <div className="h-44 w-full bg-muted" />
+                  <div className="h-52 w-full bg-muted" />
                 )}
                 <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
 
-                <div className="absolute top-2 right-2 flex gap-1">
+                {/* Badge overlays on card image — Verified + Car */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                  {p.is_verified && (
+                    <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
+                  )}
+                  {p.has_car && (
+                    <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
+                  )}
+                </div>
+
+                {/* Action icons overlay — Wave / Star / X */}
+                <div className="absolute top-3 right-3 flex gap-1">
                   <button
                     onClick={async (e) => {
                       e.stopPropagation();
@@ -932,7 +944,6 @@ const Chats = () => {
                         toast.success(t("Wave sent"));
                       } catch (err: unknown) {
                         const msg = err instanceof Error ? err.message : String(err);
-                        // Unique constraint (already waved)
                         if (msg.includes("duplicate") || msg.includes("23505")) {
                           toast.info(t("Wave already sent"));
                         } else {
@@ -975,12 +986,13 @@ const Chats = () => {
                   </button>
                 </div>
 
+                {/* Bottom info: Name, Age, Social Role, Pet Species */}
                 <div className="absolute bottom-3 left-3 right-3 text-white">
-                  <div className="text-sm font-semibold">{p.display_name}</div>
-                  <div className="text-xs text-white/80">
-                    {age ? `${age} • ${p.relationship_status || "—"}` : p.relationship_status || "—"}
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-bold">{p.display_name}</span>
+                    {age && <span className="text-sm font-medium">{String(age)}</span>}
                   </div>
-                  <div className="text-xs text-white/80 mt-1">{t("Pet")}: {petSpecies}</div>
+                  <div className="text-xs text-white/80 mt-0.5">{roleBadge} • {petSpecies}</div>
                 </div>
 
                 {blocked ? (
@@ -1009,7 +1021,7 @@ const Chats = () => {
             <div className="mt-2">
               <button
                 onClick={() => {
-                  setDiscoveryDistance((prev) => Math.min(150, prev + 15));
+                  setFilters((f) => ({ ...f, maxDistanceKm: Math.min(150, f.maxDistanceKm + 15) }));
                   setHiddenDiscoveryIds(new Set());
                 }}
                 className="text-xs font-medium text-[#3283ff] underline"
@@ -1051,54 +1063,30 @@ const Chats = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Tabs - Chats / Groups */}
+      {/* Unified Tabs: Nannies / Play Dates / Animal Lovers / Groups */}
       <section className="px-5 py-2">
-        <div className="flex gap-2 p-1 bg-muted rounded-xl">
-          {[
-            { id: "chats" as MainTab, labelKey: "chats.tab.chats", icon: MessageSquare },
-            { id: "groups" as MainTab, labelKey: "chats.tab.groups", icon: Users },
-          ].map((tab) => (
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
+          {mainTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setMainTab(tab.id)}
               className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all",
+                "px-3.5 py-2 rounded-full text-xs font-medium transition-colors whitespace-nowrap",
                 mainTab === tab.id
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
               )}
             >
-              <tab.icon className="w-4 h-4" />
-              {t(tab.labelKey)}
+              {t(tab.label)}
             </button>
           ))}
         </div>
       </section>
 
-      {/* Chats View */}
-      {mainTab === "chats" && (
+      {/* Chats View (Nannies / Playdates / Animal Lovers) */}
+      {mainTab !== "groups" && (
         <>
-          {/* Filter Tabs */}
-          <section className="px-5 py-2">
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-              {filterTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveFilterTab(tab.id)}
-                  className={cn(
-                    "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
-                    activeFilterTab === tab.id
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  )}
-                >
-                  {t(tab.labelKey)}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {activeFilterTab === "nannies" && (
+          {mainTab === "nannies" && (
             <section className="px-5">
               <div className="rounded-xl bg-muted/50 border border-border px-3 py-2 text-xs text-muted-foreground">
                 Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses.
@@ -1116,67 +1104,82 @@ const Chats = () => {
                 </div>
               ) : (
                 filteredChats.slice(0, chatVisibleCount).map((chat, index) => (
-                  <motion.div
-                    key={chat.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    onClick={() => handleChatClick(chat)}
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    onDragEnd={(_, info) => {
-                      if (info.offset.x < -120) {
-                        handleRemoveChat(chat);
-                      }
-                    }}
-                    className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
-                  >
-                    <div
-                      className="relative cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProfileTap(chat.id, chat.name, chat.avatarUrl);
+                  <div key={chat.id} className="relative overflow-hidden rounded-xl">
+                    {/* Swipe-to-delete red bin background */}
+                    <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center rounded-r-xl">
+                      <Trash2 className="w-5 h-5 text-white" />
+                    </div>
+                    <motion.div
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      onClick={() => handleChatClick(chat)}
+                      drag="x"
+                      dragConstraints={{ left: -80, right: 0 }}
+                      dragElastic={0.1}
+                      onDragEnd={(_, info) => {
+                        if (info.offset.x < -60) {
+                          if (chat.hasTransaction) {
+                            toast.error(t("Cannot remove conversations with active transactions"));
+                          } else {
+                            const ok = window.confirm("Conversation will be deleted");
+                            if (ok) handleRemoveChat(chat);
+                          }
+                        }
                       }}
+                      className="relative flex items-center gap-4 p-4 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
                     >
-                      <UserAvatar
-                        avatarUrl={chat.avatarUrl}
-                        name={chat.name}
-                        isVerified={chat.isVerified}
-                        hasCar={chat.hasCar}
-                        size="lg"
-                        showBadges={true}
-                      />
-                      {/* Online indicator */}
-                      {(chat.isOnline || onlineUsers.has(chat.id)) && (
-                        <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-semibold">{t(chat.name)}</h4>
-                        <span className="text-xs text-muted-foreground">{t(chat.time)}</span>
+                      <div
+                        className="relative cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleProfileTap(chat.id, chat.name, chat.avatarUrl);
+                        }}
+                      >
+                        <UserAvatar
+                          avatarUrl={chat.avatarUrl}
+                          name={chat.name}
+                          isVerified={chat.isVerified}
+                          hasCar={chat.hasCar}
+                          size="lg"
+                          showBadges={true}
+                        />
+                        {/* Online indicator */}
+                        {(chat.isOnline || onlineUsers.has(chat.id)) && (
+                          <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
+                        )}
                       </div>
-                      <p className="text-sm text-muted-foreground truncate mt-1">{t(chat.lastMessage)}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* Blue $ icon for nanny-type chats — opens booking modal */}
-                      {chat.type === "nannies" && (
-                        <button
-                          onClick={(e) => handleNannyBookClick(e, chat)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
-                          style={{ backgroundColor: "#A6D539" }}
-                          title={t("Book Nanny")}
-                        >
-                          <DollarSign className="w-4 h-4 text-white" />
-                        </button>
-                      )}
-                      {chat.unread > 0 && (
-                        <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
-                          {chat.unread}
-                        </span>
-                      )}
-                    </div>
-                  </motion.div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-semibold">{t(chat.name)}</h4>
+                          <span className="text-xs text-muted-foreground">{t(chat.time)}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate mt-0.5">{t(chat.lastMessage)}</p>
+                        {/* Social availability subtext (bold) */}
+                        <p className="text-xs font-bold text-brandBlue mt-0.5">
+                          {chat.type === "nannies" ? "Pet Nanny" : chat.type === "playdates" ? "Playdate" : "Animal Lover"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {/* $ icon for nanny-type chats — opens booking modal */}
+                        {chat.type === "nannies" && (
+                          <button
+                            onClick={(e) => handleNannyBookClick(e, chat)}
+                            className="w-7 h-7 rounded-full flex items-center justify-center shadow-sm transition-transform hover:scale-110"
+                            style={{ backgroundColor: "#A6D539" }}
+                            title={t("Book Nanny")}
+                          >
+                            <DollarSign className="w-4 h-4 text-white" />
+                          </button>
+                        )}
+                        {chat.unread > 0 && (
+                          <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-medium">
+                            {chat.unread}
+                          </span>
+                        )}
+                      </div>
+                    </motion.div>
+                  </div>
                 ))
               )}
             </div>
@@ -1216,17 +1219,33 @@ const Chats = () => {
                   onClick={() => handleGroupClick(group)}
                   className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
                 >
-                  {/* Group Avatar */}
+                  {/* Group Avatar — no badge */}
                   <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
                     <Users className="w-6 h-6 text-primary" />
                   </div>
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
-                      <h4 className="font-semibold">{t(group.name)}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-semibold">{t(group.name)}</h4>
+                        {/* Group creator only: Manage pill */}
+                        {profile?.id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setGroupManageId(group.id);
+                            }}
+                            className="px-2 py-0.5 rounded-full bg-brandBlue text-white text-[10px] font-bold"
+                          >
+                            Manage
+                          </button>
+                        )}
+                      </div>
                       <span className="text-xs text-muted-foreground">{t(group.time)}</span>
                     </div>
-                    <p className="text-sm text-muted-foreground truncate mt-1">
+                    {/* Static member count under group name */}
+                    <p className="text-[10px] text-muted-foreground">{group.memberCount} members</p>
+                    <p className="text-sm text-muted-foreground truncate mt-0.5">
                       <span className="font-medium">{t(group.lastMessageSender)}:</span> {t(group.lastMessage)}
                     </p>
                   </div>
@@ -1252,6 +1271,27 @@ const Chats = () => {
           )}
         </section>
       )}
+
+      {/* Group Manage Modal */}
+      <Dialog open={!!groupManageId} onOpenChange={() => setGroupManageId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Manage Group</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="text-sm font-semibold text-brandText">Members</div>
+            <div className="text-xs text-muted-foreground">Member list would load from backend</div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => { toast.info("Invite flow not yet wired"); }}>
+                Invite
+              </Button>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => { toast.info("Group image upload not yet wired"); }}>
+              Group Image
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Connection Status */}
       {!isConnected && (
@@ -1740,7 +1780,7 @@ const Chats = () => {
         )}
       </AnimatePresence>
 
-      {/* Discovery Filter Modal (tier-gated checkboxes) */}
+      {/* Discovery Filter Modal — chevron rows with per-filter selection UIs */}
       <AnimatePresence>
         {isFilterModalOpen && (
           <>
@@ -1749,74 +1789,274 @@ const Chats = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsFilterModalOpen(false)}
+              onClick={() => { setIsFilterModalOpen(false); setActiveFilterRow(null); }}
             />
             <motion.div
-              className="fixed inset-0 z-[70] flex items-center justify-center p-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-card rounded-t-3xl z-[71] shadow-2xl overflow-y-auto"
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
             >
-              <motion.div
-                className="w-full max-w-sm bg-white rounded-2xl border border-brandText/15 shadow-elevated p-5 max-h-[80vh] overflow-y-auto"
-                initial={{ scale: 0.98, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.98, opacity: 0 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-base font-bold text-brandText">Discovery Filters</div>
-                  <button onClick={() => setIsFilterModalOpen(false)} className="p-2 rounded-full hover:bg-muted">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {([
-                    { label: "Age Range", tier: "free" },
-                    { label: "Gender", tier: "free" },
-                    { label: "Distance", tier: "free" },
-                    { label: "Species", tier: "free" },
-                    { label: "Social Role", tier: "free" },
-                    { label: "Height Range", tier: "premium" },
-                    { label: "Sexual Orientation", tier: "premium" },
-                    { label: "Highest Degree", tier: "premium" },
-                    { label: "Relationship Status", tier: "premium" },
-                    { label: "Car Badge", tier: "premium" },
-                    { label: "Pet Experience", tier: "premium" },
-                    { label: "Language", tier: "premium" },
-                    { label: "Verified Users Only", tier: "premium" },
-                    { label: "Who waved at you", tier: "gold" },
-                    { label: "Active users only", tier: "gold" },
-                  ] as const).map((filter) => {
-                    const userTier = effectiveTier;
-                    const tiers = ["free", "premium", "gold"];
-                    const userIdx = tiers.indexOf(userTier);
-                    const filterIdx = tiers.indexOf(filter.tier);
-                    const isLocked = userIdx < filterIdx;
-                    const requiredTier = filter.tier === "gold" ? "Gold" : "Premium";
+              <div className="sticky top-0 z-10 flex items-center justify-between px-5 pt-5 pb-3 bg-card border-b border-border">
+                <h3 className="text-base font-bold text-brandText">
+                  {activeFilterRow ? activeFilterRow.label : t("Discovery Filters")}
+                </h3>
+                <button
+                  onClick={() => {
+                    if (activeFilterRow) { setActiveFilterRow(null); } else { setIsFilterModalOpen(false); }
+                  }}
+                  className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center"
+                >
+                  {activeFilterRow ? <ChevronRight className="w-5 h-5 rotate-180" /> : <X className="w-5 h-5" />}
+                </button>
+              </div>
 
+              {/* Main list of filter rows */}
+              {!activeFilterRow && (
+                <div className="divide-y divide-border">
+                  {FILTER_ROWS.map((row) => {
+                    const locked =
+                      (row.tier === "premium" && effectiveTier === "free") ||
+                      (row.tier === "gold" && effectiveTier !== "gold");
                     return (
                       <button
-                        key={filter.label}
+                        key={row.key}
+                        className="w-full flex items-center justify-between px-5 py-3.5 text-sm"
                         onClick={() => {
-                          if (isLocked) {
-                            toast.info(`Unlock ${requiredTier} to use this filter.`);
+                          if (locked) {
+                            const target = row.tier === "gold" ? "Gold" : "Premium";
+                            toast.error(`Unlock ${target} to use this filter`);
+                            return;
                           }
+                          setActiveFilterRow(row);
                         }}
-                        className={cn(
-                          "w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors text-left",
-                          isLocked
-                            ? "border-brandText/10 bg-gray-50 text-brandText/40 cursor-not-allowed"
-                            : "border-brandText/15 bg-white text-brandText hover:bg-muted"
-                        )}
                       >
-                        <span className="text-sm font-medium">{filter.label}</span>
-                        {isLocked && <Lock className="w-4 h-4 text-brandText/30" />}
+                        <div className="flex items-center gap-2.5">
+                          {locked && <Lock className="w-4 h-4 text-muted-foreground" />}
+                          <span className={cn("font-medium", locked ? "text-muted-foreground" : "text-brandText")}>
+                            {row.label}
+                          </span>
+                          {locked && (
+                            <span className={cn(
+                              "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white",
+                              row.tier === "gold" ? "bg-brandGold" : "bg-brandBlue"
+                            )}>
+                              {row.tier === "gold" ? "Gold" : "Premium"}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!locked && (
+                            <span className="text-xs text-muted-foreground max-w-[120px] truncate text-right">
+                              {filterSummary(filters, row)}
+                            </span>
+                          )}
+                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                        </div>
                       </button>
                     );
                   })}
                 </div>
-              </motion.div>
+              )}
+
+              {/* Per-filter selection UI */}
+              {activeFilterRow && (
+                <div className="p-5 space-y-4">
+                  {/* Age Range */}
+                  {activeFilterRow.key === "ageMin" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Min Age</label>
+                          <input type="number" min={18} max={99} value={filters.ageMin}
+                            onChange={(e) => setFilters((f) => ({ ...f, ageMin: Math.max(18, Math.min(99, Number(e.target.value))) }))}
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                        </div>
+                        <span className="text-muted-foreground mt-5">–</span>
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Max Age</label>
+                          <input type="number" min={18} max={99} value={filters.ageMax}
+                            onChange={(e) => setFilters((f) => ({ ...f, ageMax: Math.max(f.ageMin, Math.min(99, Number(e.target.value))) }))}
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground text-center">{filters.ageMin} – {filters.ageMax} years old</div>
+                    </div>
+                  )}
+                  {/* Height Range */}
+                  {activeFilterRow.key === "heightMin" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Min (cm)</label>
+                          <input type="number" min={100} max={300} value={filters.heightMin}
+                            onChange={(e) => setFilters((f) => ({ ...f, heightMin: Math.max(100, Math.min(300, Number(e.target.value))) }))}
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                        </div>
+                        <span className="text-muted-foreground mt-5">–</span>
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Max (cm)</label>
+                          <input type="number" min={100} max={300} value={filters.heightMax}
+                            onChange={(e) => setFilters((f) => ({ ...f, heightMax: Math.max(f.heightMin, Math.min(300, Number(e.target.value))) }))}
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground text-center">{filters.heightMin} – {filters.heightMax} cm</div>
+                    </div>
+                  )}
+                  {/* Distance slider */}
+                  {activeFilterRow.key === "maxDistanceKm" && (
+                    <div className="space-y-4">
+                      <div className="text-center text-2xl font-bold text-brandBlue">{filters.maxDistanceKm} km</div>
+                      <input type="range" min={0} max={150} value={filters.maxDistanceKm}
+                        onChange={(e) => setFilters((f) => ({ ...f, maxDistanceKm: Number(e.target.value) }))}
+                        className="w-full accent-primary" />
+                      <div className="flex justify-between text-xs text-muted-foreground"><span>0 km</span><span>150 km</span></div>
+                    </div>
+                  )}
+                  {/* Multi-select: Gender */}
+                  {activeFilterRow.key === "genders" && (
+                    <div className="space-y-2">
+                      {[...ALL_GENDERS].map((g) => (
+                        <label key={g} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer">
+                          <input type="checkbox" checked={filters.genders.includes(g)}
+                            onChange={(e) => setFilters((f) => ({ ...f, genders: e.target.checked ? [...f.genders, g] : f.genders.filter((x) => x !== g) }))}
+                            className="w-4 h-4 accent-primary rounded" />
+                          <span className="text-sm text-brandText">{g}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-select: Species (chips) */}
+                  {activeFilterRow.key === "species" && (
+                    <div className="flex flex-wrap gap-2">
+                      {[...ALL_SPECIES].map((s) => (
+                        <button key={s}
+                          onClick={() => setFilters((f) => ({ ...f, species: f.species.includes(s) ? f.species.filter((x) => x !== s) : [...f.species, s] }))}
+                          className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                            filters.species.includes(s) ? "bg-brandBlue text-white border-brandBlue" : "bg-white text-brandText border-border")}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Social Role (pill toggles) */}
+                  {activeFilterRow.key === "socialRoles" && (
+                    <div className="flex flex-wrap gap-2">
+                      {([["playdates", "Pet Parents"], ["nannies", "Nannies"], ["animal-lovers", "Animal Lovers"]] as const).map(([val, label]) => (
+                        <button key={val}
+                          onClick={() => setFilters((f) => ({ ...f, socialRoles: f.socialRoles.includes(val) ? f.socialRoles.filter((x) => x !== val) : [...f.socialRoles, val] }))}
+                          className={cn("px-4 py-2 rounded-full text-sm font-medium border transition-colors",
+                            filters.socialRoles.includes(val) ? "bg-brandBlue text-white border-brandBlue" : "bg-white text-brandText border-border")}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-select: Orientations */}
+                  {activeFilterRow.key === "orientations" && (
+                    <div className="space-y-2">
+                      {[...ALL_ORIENTATIONS].map((o) => (
+                        <label key={o} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer">
+                          <input type="checkbox" checked={filters.orientations.includes(o)}
+                            onChange={(e) => setFilters((f) => ({ ...f, orientations: e.target.checked ? [...f.orientations, o] : f.orientations.filter((x) => x !== o) }))}
+                            className="w-4 h-4 accent-primary rounded" />
+                          <span className="text-sm text-brandText">{o}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-select: Degrees */}
+                  {activeFilterRow.key === "degrees" && (
+                    <div className="space-y-2">
+                      {[...ALL_DEGREES].map((d) => (
+                        <label key={d} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer">
+                          <input type="checkbox" checked={filters.degrees.includes(d)}
+                            onChange={(e) => setFilters((f) => ({ ...f, degrees: e.target.checked ? [...f.degrees, d] : f.degrees.filter((x) => x !== d) }))}
+                            className="w-4 h-4 accent-primary rounded" />
+                          <span className="text-sm text-brandText">{d}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-select: Relationship Status */}
+                  {activeFilterRow.key === "relationshipStatuses" && (
+                    <div className="space-y-2">
+                      {[...ALL_RELATIONSHIP_STATUSES].map((rs) => (
+                        <label key={rs} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer">
+                          <input type="checkbox" checked={filters.relationshipStatuses.includes(rs)}
+                            onChange={(e) => setFilters((f) => ({ ...f, relationshipStatuses: e.target.checked ? [...f.relationshipStatuses, rs] : f.relationshipStatuses.filter((x) => x !== rs) }))}
+                            className="w-4 h-4 accent-primary rounded" />
+                          <span className="text-sm text-brandText">{rs}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Multi-select: Languages */}
+                  {activeFilterRow.key === "languages" && (
+                    <div className="space-y-2">
+                      {[...ALL_LANGUAGES].map((lang) => (
+                        <label key={lang} className="flex items-center gap-3 py-2 px-2 rounded-lg hover:bg-muted/50 cursor-pointer">
+                          <input type="checkbox" checked={filters.languages.includes(lang)}
+                            onChange={(e) => setFilters((f) => ({ ...f, languages: e.target.checked ? [...f.languages, lang] : f.languages.filter((x) => x !== lang) }))}
+                            className="w-4 h-4 accent-primary rounded" />
+                          <span className="text-sm text-brandText">{lang}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Toggle filters */}
+                  {activeFilterRow.key === "hasCar" && (
+                    <div className="flex items-center justify-between py-3">
+                      <span className="text-sm font-medium text-brandText">Show users with Car Badge</span>
+                      <Switch checked={filters.hasCar} onCheckedChange={(v) => setFilters((f) => ({ ...f, hasCar: v }))} />
+                    </div>
+                  )}
+                  {activeFilterRow.key === "hasPetExperience" && (
+                    <div className="flex items-center justify-between py-3">
+                      <span className="text-sm font-medium text-brandText">Show users with Pet Experience</span>
+                      <Switch checked={filters.hasPetExperience} onCheckedChange={(v) => setFilters((f) => ({ ...f, hasPetExperience: v }))} />
+                    </div>
+                  )}
+                  {activeFilterRow.key === "verifiedOnly" && (
+                    <div className="flex items-center justify-between py-3">
+                      <span className="text-sm font-medium text-brandText">Show only Verified Users</span>
+                      <Switch checked={filters.verifiedOnly} onCheckedChange={(v) => setFilters((f) => ({ ...f, verifiedOnly: v }))} />
+                    </div>
+                  )}
+                  {activeFilterRow.key === "whoWavedAtMe" && (
+                    <div className="flex items-center justify-between py-3">
+                      <span className="text-sm font-medium text-brandText">Show users who waved at you</span>
+                      <Switch checked={filters.whoWavedAtMe} onCheckedChange={(v) => setFilters((f) => ({ ...f, whoWavedAtMe: v }))} />
+                    </div>
+                  )}
+                  {activeFilterRow.key === "activeOnly" && (
+                    <div className="flex items-center justify-between py-3">
+                      <span className="text-sm font-medium text-brandText">Show Active Users only (24h)</span>
+                      <Switch checked={filters.activeOnly} onCheckedChange={(v) => setFilters((f) => ({ ...f, activeOnly: v }))} />
+                    </div>
+                  )}
+                  <button className="w-full rounded-xl bg-brandBlue text-white font-bold py-3 text-sm mt-4"
+                    onClick={() => setActiveFilterRow(null)}>
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {/* Apply / Reset buttons */}
+              {!activeFilterRow && (
+                <div className="p-5 space-y-2">
+                  <button className="w-full rounded-xl bg-brandBlue text-white font-bold py-3 text-sm"
+                    onClick={() => { setIsFilterModalOpen(false); toast.success(t("Filters applied")); }}>
+                    {t("Apply Filters")}
+                  </button>
+                  <button className="w-full rounded-xl bg-muted text-muted-foreground font-medium py-3 text-sm"
+                    onClick={() => { setFilters({ ...DEFAULT_FILTERS }); toast.info(t("Filters reset to defaults")); }}>
+                    Reset to Defaults
+                  </button>
+                </div>
+              )}
             </motion.div>
           </>
         )}

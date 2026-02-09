@@ -304,27 +304,30 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 4) `Chats.tsx`
 **UI Elements:**
-- Discovery row (cards, Wave/Star/X)
+- Discovery row: single-card paging, badge overlays (Verified/Car) on card image (see 13f)
 - Search, discovery filter button (SlidersHorizontal icon), Create Group (premium+verified)
-- Chat list tabs (Chats / Groups)
-- Filter sub-tabs (Nannies / Playdates / Animal Lovers)
+- Unified tabs: Nannies | Play Dates | Animal Lovers | Groups (see 13e)
 - Booking modal with Safe Harbor modal
-- Discovery Filter Modal (15 tier-gated filter checkboxes, see 13c)
-- Profile Sheet (right-side drawer on avatar tap, see 13d)
+- Discovery Filter Modal: chevron rows with per-filter selection UIs, summary text, defaults, reset (see 13c)
+- Profile Sheet: right-side drawer on avatar tap with public fields and non_social block (see 13d)
+- Swipe-to-delete on chat items with red bin icon and confirmation
+- Group Manage modal with member list, invite, remove, group image
 
 **State:**
-- `hiddenDiscoveryIds`, `discoveryDistance`, `booking*` states
-- `isFilterModalOpen`, `profileSheetUser`, `profileSheetData`
+- `hiddenDiscoveryIds`, `filters` (DiscoveryFilters object), `booking*` states
+- `isFilterModalOpen`, `activeFilterRow`, `profileSheetUser`, `profileSheetData`
+- `groupManageId`, `swipeDeleteId`
 - Uses `AuthContext`, `useUpsell`
 
 **Flow:**
 - Wave → match
 - Star → direct chat + quota
 - X → skip + add to hiddenDiscoveryIds
-- Expand Search → +15km, clears hiddenDiscoveryIds
+- Expand Search → +15km (via filters.maxDistanceKm), clears hiddenDiscoveryIds
 - Booking → Safe Harbor modal → booking modal → Stripe checkout
 - Tap avatar → fetch profile → right-side sheet (non_social blocked)
-- Filter icon → tier-gated filter modal
+- Filter icon → tier-gated filter modal with per-filter selection UIs
+- Swipe left on chat → red bin → confirm delete (blocked if active transaction)
 
 ## 5) `ChatDialogue.tsx`
 **UI Elements:**
@@ -502,42 +505,112 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 7. Terms of Service → `/terms`
 8. Logout (pinned low, red text, calls `supabase.auth.signOut()` then navigates to `/auth`)
 
-## 13c) Chats Discovery Filters (Filter Modal)
+## 13c) Chats Discovery Filters (Full Filter System)
 
 **Access:** SlidersHorizontal icon button next to Search button in Chats header.
 
-**Filter rows (tier-gated):**
+### UI Behavior — Filter Modal
+- Each filter is a row: `[Filter Name] [summary]  >`
+- `>` is a ChevronRight icon, always right-aligned
+- Tap entire row → opens specific selection UI for that filter
+- After selection → row shows summary (e.g., "18–35", "Male + Female", "50 km") instead of just name
+- All filters default to: max range, toggled ON (Y), ALL options selected
 
-| Filter | Required Tier |
-|---|---|
-| Age Range | Free |
-| Gender | Free |
-| Distance | Free |
-| Species | Free |
-| Social Role | Free |
-| Height Range | Premium |
-| Sexual Orientation | Premium |
-| Highest Degree | Premium |
-| Relationship Status | Premium |
-| Car Badge | Premium |
-| Pet Experience | Premium |
-| Language | Premium |
-| Verified Users Only | Premium |
-| Who waved at you | Gold |
-| Active users only | Gold |
+### Filter rows (tier-gated):
 
-- Locked filters show Lock icon and toast: "Unlock [Premium/Gold] to use this filter."
+| Filter | Required Tier | Type | Default |
+|---|---|---|---|
+| Age Range | Free | Two-number picker (18–99) | 18–99 |
+| Gender | Free | Multi-select checkboxes | All |
+| Distance | Free | Slider 0–150km | 150 km |
+| Species | Free | Multi-select chips | All |
+| Social Role | Free | 3 pill toggles (Pet Parents, Nannies, Animal Lovers) | All |
+| Height Range | Premium | Two-number picker (100–300cm) | 100–300 |
+| Sexual Orientation | Premium | Multi-select checkboxes | All |
+| Highest Degree | Premium | Multi-select checkboxes | All |
+| Relationship Status | Premium | Multi-select checkboxes | All |
+| Car Badge | Premium | Toggle Y/N | Y |
+| Pet Experience | Premium | Toggle Y/N | Y |
+| Language | Premium | Multi-select checkboxes | All |
+| Verified Users Only | Premium | Toggle Y/N | Y |
+| Who waved at you | Gold | Toggle Y/N | Y |
+| Active Users only | Gold | Toggle Y/N | Y |
 
-## 13d) Profile Tap in Chats
+- Locked filters show Lock icon + tier badge pill and toast: "Unlock [Premium/Gold] to use this filter."
+- "Reset to Defaults" button resets all filters to above defaults.
 
-**Behavior:** Tapping a user's avatar in the chat list opens a scrollable right-side sheet.
+### Backend Wiring — How Filters Are Applied
+
+**Frontend:**
+- On Chats mount / filter change → build payload from local `DiscoveryFilters` state
+- Call Edge Function `social_discovery` with full payload
+- Tier-gated fields only sent if user has the required tier (frontend gate + backend validation)
+
+**Example payload:**
+```json
+{
+  "age_min": 18, "age_max": 99,
+  "genders": ["Male", "Female", "Non-binary", "PNA"],
+  "max_distance_km": 150,
+  "species": ["dog", "cat", "bird", "rabbit", "reptile", "hamster", "others"],
+  "social_roles": ["playdates", "nannies", "animal-lovers"],
+  "height_min_cm": 100, "height_max_cm": 300,
+  "orientations": ["Straight", "Gay", "Lesbian", "Bisexual", "Pansexual", "Asexual", "PNA"],
+  "degrees": ["High School", "Bachelor", "Master", "PhD", "Other"],
+  "relationship_statuses": ["Single", "In relationship", "Married", "Open", "Divorced", "PNA"],
+  "has_car": true, "has_pet_experience": true,
+  "languages": ["English", "Cantonese", "Mandarin", "Japanese", "Korean", "French", "Spanish", "Other"],
+  "verified_only": true, "who_waved_at_me": true, "active_only": true
+}
+```
+
+**Backend (Edge Function `social_discovery`):**
+- Receives payload, validates tier gating (Free user sent "who_waved_at_me": true → ignore)
+- Builds dynamic SQL with `ST_DWithin`, `WHERE` clauses for each filter, `ORDER BY (score + priority * 1000) DESC`
+- Returns sorted, filtered profiles (LIMIT 20)
+
+## 13d) Profile Tap in Chats / Discovery
+
+**Behavior:** Tapping a user's avatar in the chat list or discovery card opens a scrollable right-side sheet.
 
 **Content shown (public fields only, respects `show_*` toggles):**
-- Avatar, display name, age (if show_age), relationship status (if show_relationship_status)
+- Top: Avatar (XL), display name, age (if show_age), relationship status (if show_relationship_status)
+- Verified Badge + Car Badge overlay on profile image
 - Location, bio (if show_bio), gender (if show_gender), orientation (if show_orientation)
 - Job (if show_occupation), education (if show_academic), pet species
+- Social Album carousel (if available)
 
-**Non-Social block:** If `profiles.non_social = true`, show a blocked card: "This user has enabled Non-Social mode and is not available for discovery or chat."
+**Non-Social block:** If `profiles.non_social = true`, show a blocked card: "This user has enabled Non-Social mode and is not available for discovery or chat." Toast: "This user is invisible" on tap.
+
+**Backend:** `SELECT ... FROM profiles WHERE id = target_id AND visible_from_discovery = true`
+RLS: `visible_from_discovery = true OR auth.uid() = owner`
+
+## 13e) Chats Preview List & Group Changes
+
+**Unified tab system (replaces old Chats/Groups toggle):**
+- Tabs at top: Nannies | Play Dates | Animal Lovers | Groups
+- All chats and groups in one collapsible/expandable section
+
+**Chat preview layout:**
+1. Name (bold)
+2. One-line message preview (truncate with "..." if long)
+3. Social availability in bold subtext below (e.g., "Pet Nanny", "Playdate", "Animal Lover")
+
+**Swipe left on chat:** Show red rubbish bin icon (WhatsApp style) → confirm "Conversation will be deleted". Conversations with active transactions cannot be deleted.
+
+**Nannies preview:** Show unread message count badge
+
+**Groups:**
+- No badge on avatar
+- Under group name show "X members" (static)
+- Group creator only: blue pill "Manage" (right-aligned next to group name)
+- Tap Manage → modal with: Member list, "Invite" button (select from Chat List), "Remove" button per member, "Group Image" button (upload/replace group image)
+
+## 13f) Discovery Profile Card UI
+
+**Shows:** Name, Age, Social Role/Availability, Pet Species, Verified Badge + Car Badge overlay on card image
+**Single card visible at a time:** Horizontal scroll with `scrollSnapType: "x mandatory"`, card width = calc(100vw - 40px)
+**Action icons overlay:** Wave (match), Star (direct chat + quota), X (skip)
 
 ## 14) `Admin.tsx`
 **UI Elements:**
