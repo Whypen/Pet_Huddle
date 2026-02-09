@@ -476,7 +476,7 @@ const EditPetProfile = () => {
 
           {/* Name */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Pet Name *")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Pet Name *")}</label>
             <Input
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
@@ -495,7 +495,7 @@ const EditPetProfile = () => {
 
           {/* Species */}
           <div className="h-[64px] flex flex-col justify-start items-start">
-            <label className="text-sm font-medium mb-1 block">{t("Species *")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Species *")}</label>
             <div className={cn("flex flex-wrap gap-[5px] m-[0_4px_8px_0]", fieldErrors.species && "rounded-xl border border-red-500 p-2")}>
               {speciesOptions.map((species) => (
                 <button
@@ -538,7 +538,7 @@ const EditPetProfile = () => {
           {/* Breed */}
           {formData.species !== "others" && (
             <div>
-              <label className="text-sm font-medium mb-1 block">{t("Breed")}</label>
+              <label className="text-sm font-medium py-1 mb-1 block">{t("Breed")}</label>
               <select
                 value={formData.breed}
                 onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
@@ -557,7 +557,7 @@ const EditPetProfile = () => {
           {/* Gender & Neutered/Spayed */}
           <div className="flex flex-col gap-4">
             <div className="self-stretch">
-              <label className="text-sm font-medium mb-1 block">{t("Gender")}</label>
+              <label className="text-sm font-medium py-1 mb-1 block">{t("Gender")}</label>
 
               <div className="flex flex-row items-center gap-2">
                 {/* Gender Options */}
@@ -593,7 +593,7 @@ const EditPetProfile = () => {
 
           {/* DOB */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Date of Birth")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Date of Birth")}</label>
             <Input
               type="date"
               value={formData.dob}
@@ -618,7 +618,7 @@ const EditPetProfile = () => {
 
           {/* Weight */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Weight")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Weight")}</label>
             <div className="flex gap-2">
               <Input
                 type="number"
@@ -709,7 +709,7 @@ const EditPetProfile = () => {
 
             {/* Next Vaccination Reminder */}
             <div className="mt-4">
-              <label className="text-sm font-medium h-5 mb-2 block">{t("Next Visit Reminder")}</label>
+              <label className="text-sm font-medium py-1 h-auto mb-2 block">{t("Next Visit Reminder")}</label>
               <Input
                 type="date"
                 value={formData.next_vaccination_reminder}
@@ -780,7 +780,7 @@ const EditPetProfile = () => {
 
           {/* Temperament */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Temperament")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Temperament")}</label>
             <div className="flex flex-wrap gap-2">
               {TEMPERAMENT_OPTIONS.map((temp) => (
                 <button
@@ -801,7 +801,7 @@ const EditPetProfile = () => {
 
           {/* Vet Contact */}
           <div className="space-y-3">
-            <label className="text-sm font-medium block">{t("Vet Contact")}</label>
+            <label className="text-sm font-medium py-1 block">{t("Vet Contact")}</label>
             <Input
               value={formData.clinic_name}
               onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
@@ -826,7 +826,7 @@ const EditPetProfile = () => {
 
           {/* Microchip ID */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Microchip ID")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Microchip ID")}</label>
             <Input
               value={formData.microchip_id}
               onChange={(e) => setFormData(prev => ({ ...prev, microchip_id: validateMicrochip(e.target.value) }))}
@@ -851,7 +851,7 @@ const EditPetProfile = () => {
 
           {/* Bio */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Pet Bio")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Pet Bio")}</label>
             <Textarea
               value={formData.bio}
               onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
@@ -862,7 +862,7 @@ const EditPetProfile = () => {
 
           {/* Routine */}
           <div>
-            <label className="text-sm font-medium mb-1 block">{t("Daily Routine")}</label>
+            <label className="text-sm font-medium py-1 mb-1 block">{t("Daily Routine")}</label>
             <Textarea
               value={formData.routine}
               onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
