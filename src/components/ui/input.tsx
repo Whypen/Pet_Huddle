@@ -11,7 +11,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
         className={cn(
           // UAT v1.1 input styling
           // Global UI override (compact): 36px height, padding v4/h8, placeholders and text left-aligned.
-          "flex h-9 w-full rounded-[12px] border bg-white px-2 py-1 text-base text-left ring-offset-background",
+          "flex h-9 w-full rounded-[12px] border bg-white px-2 py-0 text-base text-left ring-offset-background",
           "border-[#e2e4e9] placeholder:italic placeholder:text-gray-500/60",
           "focus-visible:outline-none focus-visible:border-brandBlue focus-visible:shadow-sm focus-visible:ring-0",
           "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-[#f0f0f0]",
