@@ -139,9 +139,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
           className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
         >
           <img
-            src={huddleLogo}
+            src="https://1fc8684de71f4e01867ae9424aa21a33-br-00bd575072a24ce2a2d1367da.fly.dev/src/assets/huddle-name-transparent.png"
             alt={t("huddle")}
-            className="h-7 w-auto max-w-[140px] object-contain"
+            loading="lazy"
+            className="h-[55px] w-auto max-w-[500px] object-contain mt-[15px]"
           />
         </button>
 
