@@ -445,12 +445,12 @@ const Auth = () => {
                   className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a] text-[12px] leading-[12px]"
                 />
                 <label htmlFor="consent" className="text-xs text-brandText leading-4 cursor-pointer ml-1">
-                  I have read and agree to the{" "}
-                  <Link to="/terms" className="text-primary underline underline-offset-2">
+                  By continuing, you agree to the{" "}
+                  <Link to="/terms" className="text-primary underline underline-offset-2 mx-[1px]">
                     Terms
                   </Link>{" "}
                   and{" "}
-                  <Link to="/privacy" className="text-primary underline underline-offset-2">
+                  <Link to="/privacy" className="text-primary underline underline-offset-2 mx-[1px]">
                     Privacy Policy
                   </Link>
                   .
