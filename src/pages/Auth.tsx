@@ -204,8 +204,8 @@ const Auth = () => {
           transition={{ delay: 0.1 }}
           className="font-normal text-brandText lowercase flex flex-col h-0"
         >
-          <p className="mx-auto">
-            <div
+          <span className="mx-auto">
+            <span
               className="inline text-[#2145cf]"
               style={{
                 textShadow: "1px 1px 2px rgba(155, 155, 155, 1)",
@@ -213,8 +213,8 @@ const Auth = () => {
               }}
             >
               huddle
-            </div>
-          </p>
+            </span>
+          </span>
         </motion.h1>
         {/* Subheadline intentionally removed per spec */}
       </div>
