@@ -2,15 +2,20 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = "https://ztrbourwcnhrpmzwlrcn.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_dYtq3ElQLDg1OnxGTHlB0w_WoZEi2fh";
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") : rawSupabaseUrl;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-console.log("Supabase Client HARDCODED (Publishable Key) for project:", SUPABASE_URL);
+if (!SUPABASE_ANON_KEY) {
+  console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
+}
+
+console.log("Supabase Client initialized for project:", SUPABASE_URL);
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY || "", {
   auth: {
     storage: localStorage,
     persistSession: true,
