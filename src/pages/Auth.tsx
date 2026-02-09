@@ -143,14 +143,19 @@ const Auth = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Form submitted. isLogin:", isLogin, "loginMethod:", loginMethod);
 
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      console.log("Validation failed", errors);
+      return;
+    }
 
     setLoading(true);
 
     try {
       if (isLogin) {
         const loginIdentifier = loginMethod === "email" ? loginEmail : loginPhone;
+        console.log("Attempting sign-in with:", loginMethod, loginIdentifier);
         const { error } = await signIn(
           loginMethod === "email" ? loginIdentifier : "",
           password,
@@ -158,12 +163,14 @@ const Auth = () => {
         );
 
         if (error) {
+          console.error("Sign-in error:", error);
           if (error.message.includes("Invalid login credentials")) {
             toast.error(t("auth.errors.invalid"));
           } else {
             toast.error(error.message);
           }
         } else {
+          console.log("Sign-in successful");
           if (rememberMe) {
             localStorage.setItem("rememberMe", "true");
             localStorage.setItem("rememberedLoginMethod", loginMethod);
