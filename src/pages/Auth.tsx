@@ -156,6 +156,10 @@ const Auth = () => {
       if (isLogin) {
         const loginIdentifier = loginMethod === "email" ? loginEmail : loginPhone;
         console.log("Attempting sign-in with:", loginMethod, loginIdentifier);
+        console.log("Supabase Client auth config:", {
+          url: (supabase as any).supabaseUrl,
+          hasAuth: !!supabase.auth
+        });
         const { error } = await signIn(
           loginMethod === "email" ? loginIdentifier : "",
           password,
