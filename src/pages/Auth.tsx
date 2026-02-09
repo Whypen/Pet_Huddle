@@ -420,16 +420,16 @@ const Auth = () => {
 
             {/* Remember Me Checkbox - Login only */}
             {isLogin && (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center mt-4">
                 <Checkbox
                   id="rememberMe"
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                  className="rounded-[4px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
                 <label
                   htmlFor="rememberMe"
-                  className="text-sm text-[#4a4a4a] cursor-pointer ml-2"
+                  className="text-sm text-[#4a4a4a] cursor-pointer ml-2 leading-5"
                 >
                   {t("auth.remember")}
                 </label>
@@ -437,12 +437,12 @@ const Auth = () => {
             )}
 
             {!isLogin && (
-              <div className="flex items-start space-x-2">
+              <div className="flex items-start mt-4">
                 <Checkbox
                   id="consent"
                   checked={consentAccepted}
                   onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
-                  className="rounded-[4px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
+                  className="rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a]"
                 />
                 <label htmlFor="consent" className="text-xs text-[#4a4a4a] leading-snug cursor-pointer ml-2">
                   I have read and agree to the{" "}
