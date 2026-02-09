@@ -398,7 +398,7 @@ const Chats = () => {
   const bumpDiscoverySeen = async (): Promise<boolean> => {
     if (isPremium) return true;
     try {
-      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
         action_type: "discovery_profile",
       });
       if (allowed === false) {
@@ -438,12 +438,12 @@ const Chats = () => {
           (profile.last_lat && profile.last_lng ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}` : "")
       );
       if (selectedNanny?.id) {
-        supabase
+        (supabase as any)
           .from("sitter_profiles")
           .select("hourly_rate")
           .eq("user_id", selectedNanny.id)
           .maybeSingle()
-          .then(({ data }) => {
+          .then(({ data }: any) => {
             setSitterHourlyRate(data?.hourly_rate || null);
           });
       }
@@ -484,7 +484,7 @@ const Chats = () => {
   useEffect(() => {
     const loadConversations = async () => {
       try {
-        const data = await getConversations();
+        const data = await getConversations() as any;
         if (data && data.chats) {
           // Map backend data to our format
           // For now, we'll use mock data
@@ -739,7 +739,7 @@ const Chats = () => {
     setProfileSheetData(null);
     setProfileSheetLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("profiles")
         .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species")
         .eq("id", userId)
@@ -957,7 +957,7 @@ const Chats = () => {
                             if (!ok) return;
                             try {
                               if (profile?.id) {
-                                await supabase
+                                await (supabase as any)
                                   .from("waves")
                                   .insert({ from_user_id: profile.id, to_user_id: p.id })
                                   .throwOnError();
@@ -982,7 +982,7 @@ const Chats = () => {
                             if (blocked) return;
                             const okSeen = await bumpDiscoverySeen();
                             if (!okSeen) return;
-                            const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+                            const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
                               action_type: "star",
                             });
                             if (allowed === false) {

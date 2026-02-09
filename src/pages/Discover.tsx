@@ -397,7 +397,7 @@ const Discover = () => {
                           toast.error(t("Buy a star pack to immediately chat with the user"));
                           return;
                         }
-                        const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+                        const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
                           action_type: "star",
                         });
                         if (allowed === false) {

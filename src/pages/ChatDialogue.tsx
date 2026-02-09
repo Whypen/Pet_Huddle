@@ -46,7 +46,7 @@ const ChatDialogue = () => {
     // Ensure current user is a member of the room (required for RLS)
     if (user?.id) {
       const ensureMembership = async () => {
-        const { error } = await supabase
+        const { error } = await (supabase as any)
           .from("chat_room_members")
           .upsert({ room_id: chatId, user_id: user.id });
 
@@ -89,7 +89,7 @@ const ChatDialogue = () => {
 
     const loadMessages = async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await (supabase as any)
           .from("chat_messages")
           .select("id, content, sender_id, created_at")
           .eq("room_id", chatId)
@@ -97,7 +97,7 @@ const ChatDialogue = () => {
           .limit(100);
 
         if (!error && data) {
-          const mapped: Message[] = data.map((m: { id: string; content: string; sender_id: string; created_at: string }) => ({
+          const mapped: Message[] = (data as any[]).map((m: any) => ({
             id: m.id,
             content: m.content,
             senderId: m.sender_id,
@@ -129,7 +129,7 @@ const ChatDialogue = () => {
 
     try {
       // Persist to Supabase — realtime will broadcast to other clients
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from("chat_messages")
         .insert({
           room_id: chatId,
@@ -163,7 +163,7 @@ const ChatDialogue = () => {
         e.target.value = "";
         return;
       }
-      const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
         action_type: "chat_image",
       });
       if (allowed === false) {
@@ -188,7 +188,7 @@ const ChatDialogue = () => {
       };
       setMessages((prev) => [...prev, optimisticMessage]);
 
-      const { error } = await supabase.from("chat_messages").insert({
+      const { error } = await (supabase as any).from("chat_messages").insert({
         room_id: chatId,
         sender_id: user.id,
         content: mediaUrl,

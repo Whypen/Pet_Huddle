@@ -19,7 +19,7 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
   useEffect(() => {
     const fetchMessage = async () => {
       try {
-        const result = await getFounderMessage();
+        const result = await getFounderMessage() as any;
         if (result.success && result.data?.message) {
           setMessage(result.data.message);
         } else {
