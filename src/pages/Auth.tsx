@@ -196,15 +196,17 @@ const Auth = () => {
           animate={{ scale: 1, opacity: 1 }}
           className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
         >
-          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-contain" />
+          <img src="https://cdn.builder.io/api/v1/image/assets%2F0519ad415994445d9a166fdca307b95e%2F703582ff26564e56ab4630167c8d5e13" alt={t("app.name")} className="w-full h-full object-contain mr-auto" />
         </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="text-3xl font-bold text-brandText lowercase"
+          className="font-normal leading-[30px] text-brandText lowercase shadow-[1px_1px_3px_0px_rgba(0,0,0,1)]"
         >
-          {t("app.name")}
+          <p>
+            <strong>huddle</strong>
+          </p>
         </motion.h1>
         {/* Subheadline intentionally removed per spec */}
       </div>
