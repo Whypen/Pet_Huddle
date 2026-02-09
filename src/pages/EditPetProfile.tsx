@@ -476,7 +476,7 @@ const EditPetProfile = () => {
 
           {/* Name */}
           <div>
-            <label className="text-sm font-medium mb-2 block">{t("Pet Name *")}</label>
+            <label className="text-sm font-medium mb-0.5 block">{t("Pet Name *")}</label>
             <Input
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
