@@ -10,6 +10,14 @@ if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
 }
 
+console.log("Supabase Diagnostics:", {
+  hasUrl: !!SUPABASE_URL,
+  urlMatchesRef: SUPABASE_URL?.includes("ztrbourwcnhrpmzwlrcn"),
+  keyPrefix: SUPABASE_ANON_KEY?.substring(0, 10),
+  keyLength: SUPABASE_ANON_KEY?.length,
+  isSbKey: SUPABASE_ANON_KEY?.startsWith('sb_')
+});
+
 // Log project ID mismatch if possible to help debugging
 try {
   const urlProject = SUPABASE_URL?.match(/https:\/\/(.*?)\.supabase/)?.[1];
