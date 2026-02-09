@@ -4,5 +4,5 @@ interface ErrorLabelProps {
 
 export const ErrorLabel = ({ message }: ErrorLabelProps) => {
   if (!message) return null;
-  return <p className="text-xs text-red-500 mt-1">{message}</p>;
+  return <p className="text-xs text-red-500">{message}</p>;
 };

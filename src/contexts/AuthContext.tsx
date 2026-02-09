@@ -250,8 +250,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string, phone?: string) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    console.log("Attempting Login to:", supabaseUrl);
     // Support both email and phone login
     try {
       if (phone) {

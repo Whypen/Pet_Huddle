@@ -458,12 +458,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
           placeholder={t("Search")}
-          className="flex-1 h-10 rounded-xl border border-border bg-muted px-3 text-sm"
+          className="flex-1 h-[30px] rounded-full border border-[#e2e4e9] bg-[#f6f7f9] px-3 text-[12px]"
         />
         <select
           value={topicFilter}
           onChange={(e) => setTopicFilter(e.target.value)}
-          className="h-10 rounded-xl border border-border bg-muted px-2 text-sm"
+          className="h-[30px] rounded-full border border-[#e2e4e9] bg-[#f6f7f9] px-2 text-[12px]"
         >
           <option value="All">{t("All")}</option>
           {tags.map((tg) => (
@@ -475,7 +475,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         <select
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value as "Trending" | "Latest")}
-          className="h-10 rounded-xl border border-border bg-muted px-2 text-sm"
+          className="h-[30px] rounded-full border border-[#e2e4e9] bg-[#f6f7f9] px-2 text-[12px]"
         >
           <option value="Trending">{t("Trending")}</option>
           <option value="Latest">{t("Latest")}</option>
@@ -498,8 +498,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         <div className="flex items-center gap-3">
           <Button
             onClick={() => setIsCreateOpen(true)}
-            size="sm"
-            className="rounded-full bg-primary hover:bg-primary/90 text-white"
+            className="h-[20px] rounded-full bg-[#2043cf] hover:bg-[#2043cf]/90 text-white font-semibold text-[12px] py-0 px-3"
           >
             {t("Post")}
           </Button>
@@ -549,7 +548,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-sm truncate">
+                          <span className="font-semibold text-sm truncate">
                             {notice.author?.display_name || t("Anonymous")}
                           </span>
                           {notice.author?.is_verified && (
@@ -561,7 +560,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             <span
                               key={tag}
                               className={cn(
-                                "px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0",
+                                "h-[20px] px-2 py-0.5 rounded-full text-xs text-white flex-shrink-0 font-semibold",
                                 getTagStyle(tag)
                               )}
                             >
@@ -569,9 +568,9 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                             </span>
                           ))}
                         </div>
-                        <p className="text-sm font-semibold">{notice.title}</p>
+                        <p className="text-[14px] font-semibold">{notice.title}</p>
                         <div
-                          className="text-sm text-foreground"
+                          className="text-[13px] text-foreground"
                           dangerouslySetInnerHTML={{ __html: renderMarkdown(notice.content) }}
                         />
                         {(notice.hashtags || []).length > 0 && (

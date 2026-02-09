@@ -2,7 +2,6 @@ import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bell, ChevronRight, Diamond, FileText, LogOut, Settings, Shield, Star, User as UserIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -139,9 +138,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
           className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
         >
           <img
-            src={huddleLogo}
+            src="https://1fc8684de71f4e01867ae9424aa21a33-br-00bd575072a24ce2a2d1367da.fly.dev/src/assets/huddle-name-transparent.png"
             alt={t("huddle")}
-            className="h-7 w-auto max-w-[140px] object-contain"
+            loading="lazy"
+            className="h-[55px] w-auto max-w-[500px] object-contain mt-[15px]"
           />
         </button>
 

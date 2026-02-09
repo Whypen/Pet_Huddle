@@ -66,14 +66,17 @@ const Auth = () => {
   }, []);
 
   // Redirect if already authenticated
-  if (user) {
-    if (profile?.onboarding_completed) {
-      navigate("/", { replace: true });
-    } else {
-      navigate("/onboarding", { replace: true });
+  useEffect(() => {
+    if (user) {
+      if (profile?.onboarding_completed) {
+        navigate("/", { replace: true });
+      } else {
+        navigate("/onboarding", { replace: true });
+      }
     }
-    return null;
-  }
+  }, [user, profile, navigate]);
+
+  if (user) return null;
 
   const validateForm = () => {
     const newErrors: {
@@ -99,9 +102,17 @@ const Auth = () => {
       }
     }
 
-    const passwordResult = passwordSchema.safeParse(password);
-    if (!passwordResult.success) {
-      newErrors.password = passwordResult.error.errors[0].message;
+    // Only enforce strict password rules on signup
+    if (!isLogin) {
+      const passwordResult = passwordSchema.safeParse(password);
+      if (!passwordResult.success) {
+        newErrors.password = passwordResult.error.errors[0].message;
+      }
+    } else {
+      // For login, just check if it's not empty
+      if (!password) {
+        newErrors.password = t("auth.errors.password_required") || "Password is required";
+      }
     }
 
     if (!isLogin) {
@@ -188,23 +199,33 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft flex flex-col">
+    <div className="min-h-[20px] bg-gradient-to-b from-[#e9edfc] via-white to-[#e9edfc] flex flex-col">
       {/* Header */}
-      <div className="pt-12 pb-8 text-center">
+      <div className="pt-12 pb-12 text-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-white shadow-elevated mb-4 overflow-hidden"
         >
-          <img src={huddleLogo} alt={t("app.name")} className="w-full h-full object-contain" />
+          <img src="https://cdn.builder.io/api/v1/image/assets%2F0519ad415994445d9a166fdca307b95e%2F703582ff26564e56ab4630167c8d5e13" alt={t("app.name")} className="w-full h-full object-contain mr-auto" />
         </motion.div>
         <motion.h1
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="text-3xl font-bold text-brandText lowercase"
+          className="font-normal text-brandText lowercase flex flex-col h-0"
         >
-          {t("app.name")}
+          <span className="mx-auto">
+            <span
+              className="inline text-[#2145cf]"
+              style={{
+                textShadow: "1px 1px 2px rgba(155, 155, 155, 1)",
+                font: "900 24px 'Varela Round', sans-serif"
+              }}
+            >
+              huddle
+            </span>
+          </span>
         </motion.h1>
         {/* Subheadline intentionally removed per spec */}
       </div>
@@ -223,6 +244,7 @@ const Auth = () => {
               onClick={() => {
                 setIsLogin(true);
                 setConsentAccepted(false);
+                setErrors({});
               }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 isLogin
@@ -236,6 +258,7 @@ const Auth = () => {
               onClick={() => {
                 setIsLogin(false);
                 setConsentAccepted(false);
+                setErrors({});
               }}
               className={`flex-1 py-2.5 rounded-full text-sm font-medium transition-all ${
                 !isLogin
@@ -247,7 +270,7 @@ const Auth = () => {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
             <AnimatePresence mode="wait">
               {!isLogin && (
                 <motion.div
@@ -284,7 +307,7 @@ const Auth = () => {
                         setSignupEmail(e.target.value);
                         setErrors((prev) => ({ ...prev, signupEmail: undefined }));
                       }}
-                      className={`pl-12 ${errors.signupEmail ? "border-destructive" : "border-border"}`}
+                      className={`pl-12 ${errors.signupEmail ? "border-destructive" : "border-[#e2e4e9]"}`}
                     />
                   </div>
                   {errors.signupEmail && (
@@ -301,7 +324,7 @@ const Auth = () => {
                         setSignupPhone(value || "");
                         setErrors((prev) => ({ ...prev, phone: undefined }));
                       }}
-                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.phone ? "border-destructive" : "border-brandText/40"} pl-12 pr-2 py-1 text-left`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.phone ? "border-destructive" : "border-[#e2e4e9]"} pl-12 pr-2 py-1 text-left`}
                       placeholder={t("Phone (+XXX)")}
                     />
                   </div>
@@ -326,7 +349,7 @@ const Auth = () => {
                           setLoginEmail(e.target.value);
                           setErrors((prev) => ({ ...prev, loginEmail: undefined }));
                         }}
-                        className={`pl-12 ${errors.loginEmail ? "border-destructive" : "border-border"}`}
+                        className={`pl-12 ${errors.loginEmail ? "border-destructive" : "border-[#e2e4e9]"}`}
                       />
                     </>
                   ) : (
@@ -338,7 +361,7 @@ const Auth = () => {
                         setLoginPhone(value || "");
                         setErrors((prev) => ({ ...prev, loginPhone: undefined }));
                       }}
-                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.loginPhone ? "border-destructive" : "border-brandText/40"} px-2 py-1 text-left`}
+                      className={`phone-input-auth h-9 rounded-[12px] bg-white border ${errors.loginPhone ? "border-destructive" : "border-[#e2e4e9]"} px-2 py-1 text-left`}
                       placeholder={t("Mobile Number")}
                     />
                   )}
@@ -349,7 +372,7 @@ const Auth = () => {
                     setLoginMethod((prev) => (prev === "email" ? "phone" : "email"));
                     setErrors((prev) => ({ ...prev, loginEmail: undefined, loginPhone: undefined }));
                   }}
-                  className="text-xs text-primary mt-1 ml-1 hover:underline"
+                  className="text-xs text-muted-foreground mt-1.5 ml-1 hover:underline underline self-center"
                 >
                   {loginMethod === "email" ? t("Use phone instead") : t("Use email instead")}
                 </button>
@@ -373,7 +396,7 @@ const Auth = () => {
                     setPassword(e.target.value);
                     setErrors((prev) => ({ ...prev, password: undefined }));
                   }}
-                  className={`pl-12 pr-12 ${errors.password ? "border-destructive" : "border-border"}`}
+                  className={`pl-12 pr-12 ${errors.password ? "border-destructive" : "border-[#e2e4e9]"}`}
                 />
                 <button
                   type="button"
@@ -410,15 +433,16 @@ const Auth = () => {
 
             {/* Remember Me Checkbox - Login only */}
             {isLogin && (
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center mt-4">
                 <Checkbox
                   id="rememberMe"
                   checked={rememberMe}
                   onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a] text-[12px] leading-[12px]"
                 />
                 <label
                   htmlFor="rememberMe"
-                  className="text-sm text-muted-foreground cursor-pointer"
+                  className="text-xs text-brandText cursor-pointer ml-1 leading-4"
                 >
                   {t("auth.remember")}
                 </label>
@@ -426,19 +450,20 @@ const Auth = () => {
             )}
 
             {!isLogin && (
-              <div className="flex items-start space-x-2">
+              <div className="flex items-start mt-4">
                 <Checkbox
                   id="consent"
                   checked={consentAccepted}
                   onCheckedChange={(checked) => setConsentAccepted(Boolean(checked))}
+                  className="h-3 w-3 rounded-[12px] border-[#4a4a4a] data-[state=checked]:bg-[#4a4a4a] data-[state=checked]:border-[#4a4a4a] text-[12px] leading-[12px]"
                 />
-                <label htmlFor="consent" className="text-xs text-muted-foreground leading-snug cursor-pointer">
-                  I have read and agree to the{" "}
-                  <Link to="/terms" className="text-primary underline underline-offset-2">
-                    Terms of Service
+                <label htmlFor="consent" className="text-xs text-brandText leading-4 cursor-pointer ml-1">
+                  By continuing, you agree to the{" "}
+                  <Link to="/terms" className="text-primary underline underline-offset-2 mx-[1px]">
+                    Terms
                   </Link>{" "}
                   and{" "}
-                  <Link to="/privacy" className="text-primary underline underline-offset-2">
+                  <Link to="/privacy" className="text-primary underline underline-offset-2 mx-[1px]">
                     Privacy Policy
                   </Link>
                   .
@@ -449,7 +474,7 @@ const Auth = () => {
             <Button
               type="submit"
               disabled={loading || (!isLogin && !consentAccepted)}
-              className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
+              className="w-full h-9 rounded-3xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold mt-[10px] mx-auto"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -463,7 +488,7 @@ const Auth = () => {
 
           {isLogin && (
             <button
-              className="w-full text-center text-sm text-primary mt-4 hover:underline"
+              className="w-full text-center text-xs text-brandText mt-4 hover:underline"
               onClick={async () => {
                 if (!loginEmail || !loginEmail.includes("@")) {
                   toast.error(t("auth.reset_enter_email"));
@@ -485,16 +510,16 @@ const Auth = () => {
 
       {/* Footer */}
       <div className="py-8 text-center">
-        <p className="text-xs text-muted-foreground">
-          {t("auth.by_continuing")}{" "}
-          <Link to="/terms" className="text-brandBlue hover:underline">
-            {t("auth.terms")}
+        <div className="text-xs text-muted-foreground">
+          <div className="text-[10px] inline">By continuing, you agree to our</div>{" "}
+          <Link to="/terms" className="text-brandBlue text-[10px] mx-[1px] inline">
+            Terms
           </Link>{" "}
-          {t("auth.and")}{" "}
-          <Link to="/privacy" className="text-brandBlue hover:underline">
-            {t("auth.privacy")}
+          <div className="text-[10px] inline">and</div>{" "}
+          <Link to="/privacy" className="text-brandBlue text-[10px] mx-[1px] inline">
+            Privacy Policy
           </Link>
-        </p>
+        </div>
       </div>
     </div>
   );
