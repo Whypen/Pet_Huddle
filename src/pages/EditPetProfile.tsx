@@ -456,7 +456,7 @@ const EditPetProfile = () => {
       </header>
 
       <StyledScrollArea className="flex-1 px-4 py-6" maxHeight="calc(100vh - 180px)">
-        <div className="space-y-6">
+        <div className="space-y-[60px]">
           {/* Photo Upload - Circular 100px */}
           <div className="flex justify-center">
             <label className="relative cursor-pointer group">
