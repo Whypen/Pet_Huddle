@@ -120,6 +120,20 @@ type MapAlertsNearbyRow = {
 // Harvested monthly via Edge Function + pg_cron
 // ==========================================================================
 
+// Format OSM opening_hours abbreviations to readable form
+function formatOpeningHours(hours: string): string {
+  if (!hours) return "";
+  return hours
+    .replace(/\bMo\b/g, "Mon")
+    .replace(/\bTu\b/g, "Tue")
+    .replace(/\bWe\b/g, "Wed")
+    .replace(/\bTh\b/g, "Thu")
+    .replace(/\bFr\b/g, "Fri")
+    .replace(/\bSa\b/g, "Sat")
+    .replace(/\bSu\b/g, "Sun")
+    .replace(/\bPH\b/g, "Public Holidays");
+}
+
 // ==========================================================================
 // Main Map Component
 // ==========================================================================
@@ -432,14 +446,21 @@ const Map = () => {
     const initial = typeof displayName === "string" ? displayName.charAt(0).toUpperCase() : "M";
     el.innerHTML = `
       <div style="
-        width: 40px; height: 40px;
-        background-color: #A6D539; border-radius: 50%;
-        border: 3px solid white;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        width: 48px; height: 48px;
+        background-color: #2145CF; border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        cursor: pointer; font-size: 14px; font-weight: bold; color: white;
+        box-shadow: 0 4px 12px rgba(33,69,207,0.4);
+        cursor: pointer;
       ">
-        ${initial}
+        <div style="
+          width: 38px; height: 38px;
+          background-color: #A6D539; border-radius: 50%;
+          border: 3px solid white;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 14px; font-weight: bold; color: white;
+        ">
+          ${initial}
+        </div>
       </div>
     `;
     const marker = new mapboxgl.Marker(el)
@@ -464,7 +485,7 @@ const Map = () => {
       if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) return;
 
       const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
-      const emoji = vet.type === "pet_shop" ? "🛍️" : vet.type === "pet_grooming" ? "✂️" : "🏥";
+      const emoji = vet.type === "veterinary" ? "🏥" : "🛍️";
       const el = document.createElement("div");
       el.className = "vet-marker";
       el.innerHTML = `
@@ -499,8 +520,8 @@ const Map = () => {
       markersRef.current.push(marker);
     });
 
-    // Friends tab
-    if (showFriends) {
+    // Friends tab — PRIVACY GATE: unpinned users see NO friend pins
+    if (showFriends && isPinned) {
       const pins: Array<{ id: string; name: string; lat: number; lng: number }> = [];
       friendPins.forEach((p) => {
         if (typeof p.last_lng !== "number" || typeof p.last_lat !== "number") return;
@@ -528,6 +549,8 @@ const Map = () => {
           </div>
         `;
         el.addEventListener("click", () => {
+          // Zoom snap on friend pin click
+          map.current?.flyTo({ center: [friend.lng, friend.lat], zoom: 14 });
           const demo = demoUsers.find((d) => d.id === friend.id);
           if (demo) { setSelectedFriend(demo); return; }
           const pin = friendPins.find((p) => p.id === friend.id);
@@ -776,10 +799,6 @@ const Map = () => {
                 <button
                   key={tab}
                   onClick={() => {
-                    if (tab === "Friends" && !visibleEnabled) {
-                      toast.info("Turn on Visible to see friends nearby.");
-                      return;
-                    }
                     setMapTab(tab);
                   }}
                   className={cn(
@@ -869,10 +888,15 @@ const Map = () => {
         {/* BOTTOM: Subtext + Broadcast CTA                                  */}
         {/* ================================================================ */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
-          {/* Subtext: only when Event tab AND Visible is OFF AND not pinning */}
+          {/* Subtext: context-dependent privacy message */}
           {mapTab === "Event" && !pinningActive && !visibleEnabled && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              Stay visible or pin your location to see the nearby events
+              Stay visible or pin your location to see accurate events &amp; friends nearby.
+            </p>
+          )}
+          {mapTab === "Friends" && !pinningActive && !isPinned && (
+            <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
+              Pin your location to see friends nearby. Your location is only visible while pinned.
             </p>
           )}
 
@@ -1065,7 +1089,7 @@ const Map = () => {
             >
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-2xl">
-                  {selectedVet.type === "pet_shop" ? "🛍️" : selectedVet.type === "pet_grooming" ? "✂️" : "🏥"}
+                  {selectedVet.type === "veterinary" ? "🏥" : "🛍️"}
                 </div>
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
@@ -1094,9 +1118,11 @@ const Map = () => {
 
               <div className="space-y-1 text-xs text-muted-foreground mb-4">
                 {selectedVet.address && <p>{selectedVet.address}</p>}
-                {selectedVet.openingHours && <p>{t("Hours")}: {selectedVet.openingHours}</p>}
+                {selectedVet.openingHours && <p>{t("Hours")}: {formatOpeningHours(selectedVet.openingHours)}</p>}
                 {selectedVet.phone && <p>{t("Phone")}: {selectedVet.phone}</p>}
-                <p>{t("Timely reflection of any changes of operations of the Vet Clinic is not guaranteed")}</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-2">
+                  Data sourced from OpenStreetMap contributors. Timely reflection of any changes of operations is not guaranteed.
+                </p>
               </div>
 
               {/* Spec: Blue "Call" button — HIDDEN when phone is NULL */}
@@ -1186,7 +1212,7 @@ const Map = () => {
         )}
       </AnimatePresence>
 
-      {/* Friend Pin Modal (real pins from RPC) */}
+      {/* Friend Pin Modal (real pins from RPC) — UserProfile-style view */}
       <AnimatePresence>
         {selectedFriendPin && (
           <motion.div
@@ -1201,29 +1227,66 @@ const Map = () => {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-card rounded-t-3xl p-6 max-h-[70vh] overflow-auto"
+              className="w-full bg-card rounded-t-3xl overflow-hidden max-h-[75vh]"
             >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-brandText">
+              {/* Profile header with avatar */}
+              <div className="relative w-full h-48 bg-gradient-to-b from-[#A6D539] to-[#7DA828] flex items-center justify-center">
+                {selectedFriendPin.avatar_url ? (
+                  <img
+                    src={selectedFriendPin.avatar_url}
+                    alt={selectedFriendPin.display_name || "Friend"}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-6xl font-bold text-white">
+                    {(selectedFriendPin.display_name || "F").charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <button
+                  onClick={() => setSelectedFriendPin(null)}
+                  className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center"
+                >
+                  <X className="w-5 h-5 text-white" />
+                </button>
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-4">
+                  <h3 className="text-xl font-bold text-white">
                     {selectedFriendPin.display_name || "Friend"}
                   </h3>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-white/80">
                     {selectedFriendPin.location_name || "Nearby"}
                   </p>
                 </div>
-                <button onClick={() => setSelectedFriendPin(null)} aria-label="Close">
-                  <X className="w-6 h-6" />
-                </button>
               </div>
-              <div className="text-sm text-muted-foreground mb-3">
-                {selectedFriendPin.relationship_status ? `Status: ${selectedFriendPin.relationship_status}` : " "}
-              </div>
-              <div className="text-sm font-medium mb-1">{t("Pets")}</div>
-              <div className="text-xs text-muted-foreground">
-                {(selectedFriendPin.pet_species || []).length > 0
-                  ? (selectedFriendPin.pet_species || []).join(", ")
-                  : t("No pets listed")}
+
+              {/* Details */}
+              <div className="p-5 space-y-3">
+                {selectedFriendPin.relationship_status && (
+                  <div className="text-sm text-muted-foreground">
+                    Status: {selectedFriendPin.relationship_status}
+                  </div>
+                )}
+                <div>
+                  <div className="text-sm font-medium mb-1">{t("Pets")}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(selectedFriendPin.pet_species || []).length > 0
+                      ? (selectedFriendPin.pet_species || []).map((species, i) => (
+                          <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded-full">
+                            {species === "dog" ? "🐕" : species === "cat" ? "🐱" : "🐾"} {species}
+                          </span>
+                        ))
+                      : <span className="text-xs text-muted-foreground">{t("No pets listed")}</span>
+                    }
+                  </div>
+                </div>
+                <Button
+                  onClick={() => {
+                    setSelectedFriendPin(null);
+                    navigate(`/discover?user=${selectedFriendPin.id}`);
+                  }}
+                  className="w-full h-11 rounded-xl bg-brandBlue hover:bg-brandBlue/90 text-white mt-2"
+                >
+                  View Full Profile
+                </Button>
               </div>
             </motion.div>
           </motion.div>

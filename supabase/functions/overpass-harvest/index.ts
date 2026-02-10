@@ -35,16 +35,22 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Overpass QL query: fetch veterinary clinics, pet shops, pet grooming within Hong Kong bbox
-    // Expanded coverage: amenity=veterinary, healthcare:speciality=veterinary,
-    // shop=pet, shop=pet_grooming
+    // Expanded coverage v3:
+    //   amenity=veterinary, healthcare=veterinary,
+    //   healthcare:speciality=veterinary (standalone + on clinic nodes),
+    //   shop=pet, shop=pet_grooming
     // Uses [out:json] for JSON response, [timeout:90] to prevent hanging
     const query = `
       [out:json][timeout:90];
       (
         node["amenity"="veterinary"](${HK_BBOX});
         way["amenity"="veterinary"](${HK_BBOX});
+        node["healthcare"="veterinary"](${HK_BBOX});
+        way["healthcare"="veterinary"](${HK_BBOX});
         node["healthcare:speciality"="veterinary"](${HK_BBOX});
         way["healthcare:speciality"="veterinary"](${HK_BBOX});
+        node["healthcare"="clinic"]["healthcare:speciality"="veterinary"](${HK_BBOX});
+        way["healthcare"="clinic"]["healthcare:speciality"="veterinary"](${HK_BBOX});
         node["shop"="pet"](${HK_BBOX});
         way["shop"="pet"](${HK_BBOX});
         node["shop"="pet_grooming"](${HK_BBOX});
@@ -78,7 +84,7 @@ Deno.serve(async (req: Request) => {
         if (!lat || !lon) return null;
 
         const tags = el.tags || {};
-        const isVet = tags.amenity === "veterinary" || tags["healthcare:speciality"] === "veterinary";
+        const isVet = tags.amenity === "veterinary" || tags.healthcare === "veterinary" || tags["healthcare:speciality"] === "veterinary";
         const isGrooming = tags.shop === "pet_grooming";
         const name = tags.name || (isVet ? "Veterinary Clinic" : isGrooming ? "Pet Grooming" : "Pet Shop");
         const address =
