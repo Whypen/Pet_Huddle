@@ -101,9 +101,15 @@ async function fetchNearbyPOIs(lat: number, lng: number): Promise<NearbyPOI[]> {
     if (!data.elements) return [];
 
     const centerPt = point([lng, lat]);
-    return data.elements
-      .filter((el: any) => el.lat && el.lon)
-      .map((el: any) => {
+    interface OverpassElement {
+      id: number;
+      lat: number;
+      lon: number;
+      tags?: { amenity?: string; name?: string; [key: string]: string | undefined };
+    }
+    return (data.elements as OverpassElement[])
+      .filter((el) => el.lat && el.lon)
+      .map((el) => {
         const poiPt = point([el.lon, el.lat]);
         const dist = distance(centerPt, poiPt, { units: "meters" });
         const isParking = el.tags?.amenity === "parking";

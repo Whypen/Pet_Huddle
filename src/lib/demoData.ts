@@ -937,6 +937,34 @@ export const demoAlerts: DemoAlert[] = [
   },
 ];
 
+// ===== 10 DEMO FRIEND PINS (Green Initial Icons on Map) =====
+export interface DemoFriendPin {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  dob: string | null;
+  relationship_status: string | null;
+  owns_pets: boolean;
+  pet_species: string[];
+  location_name: string;
+  last_lat: number;
+  last_lng: number;
+  location_pinned_until: string;
+}
+
+export const demoFriendPins: DemoFriendPin[] = [
+  { id: "demo-user-1", display_name: "Sarah Chen", avatar_url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200", dob: "1997-03-15", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Central, HK", last_lat: 22.2855, last_lng: 114.1577, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-2", display_name: "Marcus Wong", avatar_url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", dob: "1993-07-22", relationship_status: "In a relationship", owns_pets: true, pet_species: ["dog"], location_name: "Wan Chai, HK", last_lat: 22.2956, last_lng: 114.1722, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-4", display_name: "James Liu", avatar_url: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200", dob: "1990-01-10", relationship_status: "Married", owns_pets: true, pet_species: ["cat"], location_name: "Kowloon, HK", last_lat: 22.3193, last_lng: 114.1694, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-5", display_name: "Jessica Ng", avatar_url: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200", dob: "1996-05-18", relationship_status: "In a relationship", owns_pets: true, pet_species: ["dog"], location_name: "Causeway Bay, HK", last_lat: 22.2799, last_lng: 114.1829, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-7", display_name: "Amy Tsang", avatar_url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200", dob: "1994-09-08", relationship_status: "Open relationship", owns_pets: true, pet_species: ["cat"], location_name: "Tseung Kwan O, HK", last_lat: 22.3080, last_lng: 114.2554, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-9", display_name: "Michelle Yip", avatar_url: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200", dob: "2001-02-14", relationship_status: "Single", owns_pets: true, pet_species: ["cat"], location_name: "Sheung Wan, HK", last_lat: 22.2868, last_lng: 114.1413, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-11", display_name: "Ava Lau", avatar_url: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200", dob: "1999-11-30", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Tsim Sha Tsui, HK", last_lat: 22.3027, last_lng: 114.1772, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-14", display_name: "Daniel Tse", avatar_url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", dob: "1996-08-20", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Central, HK", last_lat: 22.2810, last_lng: 114.1600, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-17", display_name: "Grace Ip", avatar_url: "https://images.unsplash.com/photo-1525134479668-1bee5c7c6845?w=200", dob: "2003-06-12", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Prince Edward, HK", last_lat: 22.3165, last_lng: 114.1700, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-19", display_name: "Ivy Tam", avatar_url: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200", dob: "1995-04-25", relationship_status: "Single", owns_pets: true, pet_species: ["dog", "cat", "bird"], location_name: "North Point, HK", last_lat: 22.2780, last_lng: 114.1850, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+];
+
 // Helper functions
 export const getVerifiedUsers = () => demoUsers.filter(u => u.isVerified);
 export const getUsersWithCar = () => demoUsers.filter(u => u.hasCar);

@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
-import { demoUsers, demoAlerts, DemoUser } from "@/lib/demoData";
+import { demoUsers, demoAlerts, demoFriendPins, DemoUser } from "@/lib/demoData";
 import { useUpsell } from "@/hooks/useUpsell";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
@@ -199,6 +199,42 @@ const Map = () => {
 
   // Invisible mode — Eye toggle
   const [isInvisible, setIsInvisible] = useState(false);
+
+  // ============================================================
+  // PIN PERSISTENCE: Restore pin from localStorage on mount
+  // Spec: Pin survives tab switches. If < 12h old, render on load.
+  // ============================================================
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("huddle_pin");
+      if (!stored) return;
+      const pin = JSON.parse(stored) as { lat: number; lng: number; expiresAt: string; invisible?: boolean };
+      const expiryTime = new Date(pin.expiresAt).getTime();
+      const systemExpiry = expiryTime + (10 * 60 * 60 * 1000); // 12h system retention = 2h visible + 10h extra
+      if (Date.now() < systemExpiry) {
+        console.log("[PIN] Restored pin from localStorage:", pin);
+        setUserLocation({ lat: pin.lat, lng: pin.lng });
+        setPinExpiresAt(pin.expiresAt);
+        setVisibleEnabled(true);
+        if (pin.invisible) setIsInvisible(true);
+      } else {
+        console.log("[PIN] Stored pin expired, clearing");
+        localStorage.removeItem("huddle_pin");
+      }
+    } catch {
+      // Corrupted data
+      localStorage.removeItem("huddle_pin");
+    }
+  }, []);
+
+  // Persist pin to localStorage whenever it changes
+  useEffect(() => {
+    if (userLocation && pinExpiresAt) {
+      const pinData = { lat: userLocation.lat, lng: userLocation.lng, expiresAt: pinExpiresAt, invisible: isInvisible };
+      localStorage.setItem("huddle_pin", JSON.stringify(pinData));
+      console.log("[PIN] Saved pin to localStorage:", pinData);
+    }
+  }, [userLocation, pinExpiresAt, isInvisible]);
 
   const profileRec = useMemo(() => {
     if (profile && typeof profile === "object") return profile as unknown as Record<string, unknown>;
@@ -378,6 +414,9 @@ const Map = () => {
     if (!user) return;
     setPinExpiresAt(null);
     setUserLocation(null);
+    setIsInvisible(false);
+    localStorage.removeItem("huddle_pin");
+    console.log("[PIN] Unpinned — cleared localStorage");
     const res = await supabase
       .from("profiles")
       .update({
@@ -514,6 +553,17 @@ const Map = () => {
     map.current.on("load", () => {
       setMapLoaded(true);
       setTimeout(() => { map.current?.resize(); }, 200);
+      // Snap to persisted pin location on map load
+      try {
+        const storedPin = localStorage.getItem("huddle_pin");
+        if (storedPin) {
+          const pin = JSON.parse(storedPin);
+          if (pin.lat && pin.lng) {
+            map.current?.flyTo({ center: [pin.lng, pin.lat], zoom: 14 });
+            console.log("[PIN] Map loaded — flyTo persisted pin");
+          }
+        }
+      } catch { /* ignore */ }
     });
 
     map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
@@ -826,7 +876,7 @@ const Map = () => {
     }
   };
 
-  // Fetch friend pins
+  // Fetch friend pins — with demo fallback
   const fetchFriendPins = async () => {
     try {
       if (!user || !visibleEnabled) { setFriendPins([]); return; }
@@ -839,9 +889,42 @@ const Map = () => {
         p_radius_m: viewRadiusMeters,
       });
       if (error) throw error;
-      setFriendPins((Array.isArray(data) ? data : []) as FriendPin[]);
+      const dbPins = (Array.isArray(data) ? data : []) as FriendPin[];
+      if (dbPins.length > 0) {
+        setFriendPins(dbPins);
+      } else {
+        // Fallback: 10 demo friend pins
+        console.log("[Friends] No DB pins — using 10 demo friend pins");
+        setFriendPins(demoFriendPins.map((d) => ({
+          id: d.id,
+          display_name: d.display_name,
+          avatar_url: d.avatar_url,
+          dob: d.dob,
+          relationship_status: d.relationship_status,
+          owns_pets: d.owns_pets,
+          pet_species: d.pet_species,
+          location_name: d.location_name,
+          last_lat: d.last_lat,
+          last_lng: d.last_lng,
+          location_pinned_until: d.location_pinned_until,
+        })));
+      }
     } catch {
-      setFriendPins([]);
+      // Even on error, show demo friend pins
+      console.log("[Friends] Error fetching — using demo friend pins");
+      setFriendPins(demoFriendPins.map((d) => ({
+        id: d.id,
+        display_name: d.display_name,
+        avatar_url: d.avatar_url,
+        dob: d.dob,
+        relationship_status: d.relationship_status,
+        owns_pets: d.owns_pets,
+        pet_species: d.pet_species,
+        location_name: d.location_name,
+        last_lat: d.last_lat,
+        last_lng: d.last_lng,
+        location_pinned_until: d.location_pinned_until,
+      })));
     }
   };
 
@@ -1035,7 +1118,7 @@ const Map = () => {
           {/* Subtext: context-dependent privacy message */}
           {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
             <p className="text-xs text-right text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              You are invisible from Map.
+              You're invisible from map.{pinExpiresAt ? ` Pinned until ${new Date(pinExpiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}` : ""}
             </p>
           )}
           {mapTab === "Event" && !pinningActive && !visibleEnabled && !isPinned && (
