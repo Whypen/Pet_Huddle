@@ -16,7 +16,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import distance from "@turf/distance";
 import { point } from "@turf/helpers";
-import { MapPin } from "lucide-react";
+import { MapPin, Search, Loader2 } from "lucide-react";
 
 interface NearbyPOI {
   id: number;
@@ -37,19 +37,45 @@ interface PinningLayerProps {
   onNearbyPOIs?: (pois: NearbyPOI[]) => void;
 }
 
-// Mapbox Reverse Geocoding
+// Mapbox Reverse Geocoding with 3s timeout
 async function reverseGeocode(lng: number, lat: number, token: string): Promise<string> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
     const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${token}&types=address,place,locality,neighborhood&limit=1`;
-    const res = await fetch(url);
-    if (!res.ok) return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) return "";
     const data = await res.json();
     if (data.features && data.features.length > 0) {
-      return data.features[0].place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      return data.features[0].place_name || "";
     }
-    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    return "";
   } catch {
-    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    return ""; // Empty string signals timeout / failure → show manual input
+  }
+}
+
+// Mapbox Forward Geocoding — search by text, returns { lat, lng, address }
+async function forwardGeocode(
+  query: string,
+  token: string,
+  bbox?: string
+): Promise<{ lat: number; lng: number; address: string } | null> {
+  try {
+    const bboxParam = bbox ? `&bbox=${bbox}` : "";
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&types=address,place,locality,neighborhood,poi&limit=1${bboxParam}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      const feat = data.features[0];
+      const [lng, lat] = feat.center;
+      return { lat, lng, address: feat.place_name || query };
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -110,6 +136,9 @@ const PinningLayer = ({
   const [distKm, setDistKm] = useState<number>(0);
   const [nearbyPois, setNearbyPois] = useState<NearbyPOI[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualQuery, setManualQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const poiMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -147,6 +176,25 @@ const PinningLayer = ({
     [map, clearPOIMarkers]
   );
 
+  // Forward geocode handler for manual address input
+  const handleManualSearch = useCallback(async () => {
+    if (!map || !manualQuery.trim()) return;
+    setIsSearching(true);
+    const token = mapboxgl.accessToken as string;
+    // Bias results to Hong Kong bbox
+    const result = await forwardGeocode(manualQuery.trim(), token, "113.83,22.15,114.44,22.56");
+    if (result) {
+      setAddress(result.address);
+      setShowManualInput(false);
+      setManualQuery("");
+      // Fly map to the geocoded location → triggers moveend → updates center
+      map.flyTo({ center: [result.lng, result.lat], zoom: 14 });
+      onCenterChange?.(result.lat, result.lng);
+      onAddressChange?.(result.address, distKm);
+    }
+    setIsSearching(false);
+  }, [map, manualQuery, distKm, onCenterChange, onAddressChange]);
+
   // Handler for map movement end — runs reverse geocoding + Overpass + distance
   const handleMoveEnd = useCallback(async () => {
     if (!map || !isActive) return;
@@ -158,11 +206,12 @@ const PinningLayer = ({
     onCenterChange?.(lat, lng);
 
     setIsLoading(true);
+    setShowManualInput(false);
 
     // Get mapbox access token from the map instance
     const token = mapboxgl.accessToken as string;
 
-    // Run reverse geocoding + Overpass in parallel
+    // Run reverse geocoding (3s timeout) + Overpass in parallel
     const [addr, pois] = await Promise.all([
       reverseGeocode(lng, lat, token),
       fetchNearbyPOIs(lat, lng),
@@ -176,15 +225,23 @@ const PinningLayer = ({
       dist = distance(from, to, { units: "kilometers" });
     }
 
-    setAddress(addr);
+    // If reverse geocode failed (empty string) → show manual fallback
+    if (!addr) {
+      setShowManualInput(true);
+      setAddress("");
+      onAddressChange?.("", Math.round(dist * 10) / 10);
+    } else {
+      setAddress(addr);
+      setShowManualInput(false);
+      onAddressChange?.(addr, Math.round(dist * 10) / 10);
+    }
+
     setDistKm(Math.round(dist * 10) / 10);
     setNearbyPois(pois);
 
     // Place POI markers
     placePOIMarkers(pois);
 
-    // Notify parent
-    onAddressChange?.(addr, Math.round(dist * 10) / 10);
     onNearbyPOIs?.(pois);
 
     setIsLoading(false);
@@ -228,25 +285,52 @@ const PinningLayer = ({
         <MapPin className="w-10 h-10 text-brandBlue fill-brandBlue" strokeWidth={1.5} />
       </div>
 
-      {/* Header bar: Address | distance */}
+      {/* Header bar: Address | distance | manual fallback */}
       <div className="absolute top-16 left-4 right-4 z-[1100]">
-        <div className="bg-white/95 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-brandText truncate">
-              {isLoading ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-brandBlue/30 animate-pulse" />
-                  Searching address...
-                </span>
-              ) : address || "Move map to select location"}
+        {showManualInput && !isLoading ? (
+          /* Manual address input fallback — shown when reverse geocoding times out */
+          <div className="bg-white/95 backdrop-blur-sm rounded-xl px-3 py-2 shadow-md">
+            <p className="text-[10px] text-muted-foreground mb-1.5">
+              Address lookup timed out. Type an address manually:
             </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={manualQuery}
+                onChange={(e) => setManualQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleManualSearch(); }}
+                placeholder="e.g. Central, Hong Kong"
+                className="flex-1 h-9 rounded-lg border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brandBlue/30"
+                autoFocus
+              />
+              <button
+                onClick={() => void handleManualSearch()}
+                disabled={isSearching || !manualQuery.trim()}
+                className="h-9 px-3 rounded-lg bg-brandBlue text-white text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+              >
+                {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
-          {userLocation && distKm > 0 && (
-            <span className="ml-3 text-xs font-semibold text-brandBlue whitespace-nowrap">
-              {distKm} km
-            </span>
-          )}
-        </div>
+        ) : (
+          <div className="bg-white/95 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-brandText truncate">
+                {isLoading ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full bg-brandBlue/30 animate-pulse" />
+                    Searching address...
+                  </span>
+                ) : address || "Move map to select location"}
+              </p>
+            </div>
+            {userLocation && distKm > 0 && (
+              <span className="ml-3 text-xs font-semibold text-brandBlue whitespace-nowrap">
+                {distKm} km
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Nearby POIs summary */}
         {nearbyPois.length > 0 && (

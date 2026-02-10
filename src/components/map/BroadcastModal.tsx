@@ -220,7 +220,7 @@ const BroadcastModal = ({
               <p className="text-xs text-muted-foreground mb-4">
                 {typeof address === "string" && address.length > 0 && !address.includes("Searching")
                   ? address
-                  : "Select a location on the map"}
+                  : `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`}
               </p>
             )}
 
@@ -342,7 +342,7 @@ const BroadcastModal = ({
             {/* Submit button — disabled while address is still searching */}
             <Button
               onClick={handleSubmit}
-              disabled={creating || !selectedLocation || (typeof address === "string" && address.includes("Searching"))}
+              disabled={creating || !selectedLocation}
               className="w-full h-12 rounded-xl text-white font-semibold"
               style={{ backgroundColor: ALERT_TYPE_COLORS[alertType] }}
             >

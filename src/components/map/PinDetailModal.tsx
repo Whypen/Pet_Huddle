@@ -9,12 +9,12 @@
  * - Creator can Edit/Remove (all alert types)
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   Heart,
-  Share2,
+  Send,
   Flag,
   Ban,
   EyeOff,
@@ -123,6 +123,13 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     }
   };
 
+  const [supportCount, setSupportCount] = useState(0);
+
+  // Sync support count from alert prop
+  useEffect(() => {
+    if (alert) setSupportCount(alert.support_count || 0);
+  }, [alert]);
+
   const handleSupport = async () => {
     if (!user || !alert) {
       toast.error("Please login to support alerts");
@@ -134,8 +141,15 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         user_id: user.id,
         interaction_type: "support",
       });
+
+      // Increment support_count in DB
+      await (supabase as any)
+        .from("map_alerts")
+        .update({ support_count: (alert.support_count || 0) + 1 })
+        .eq("id", alert.id);
+
       setLiked(true);
-      toast.success("Thanks for your support!");
+      setSupportCount((prev) => prev + 1);
       onRefresh();
     } catch (error: unknown) {
       const code =
@@ -314,7 +328,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                 </div>
                 <span className="text-sm font-medium">{alert.creator?.display_name || "Anonymous"}</span>
                 <span className="text-sm text-muted-foreground ml-auto">
-                  {alert.support_count} supports
+                  {supportCount || alert.support_count || 0} supports
                 </span>
               </div>
 
@@ -346,28 +360,25 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
             </div>
 
             {/* ================================================================ */}
-            {/* Threads-style Footer — 3-dots | Share | Heart | "See on Threads" */}
+            {/* Threads-style Footer — "See on Threads" | Heart | Share | 3-dots */}
             {/* ================================================================ */}
             <div className="border-t border-border px-6 py-3 flex items-center justify-between">
-              {/* Left: "See on Threads" pill button */}
-              {alert.has_thread ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    navigate("/threads");
-                    toast.info("Opening Threads");
-                  }}
-                  className="rounded-full px-4 h-9 flex items-center gap-1.5 text-sm font-medium"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  See on Threads
-                </Button>
-              ) : (
-                <div />
-              )}
+              {/* Left: "See on Threads" pill button — ALL alerts show this */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Deep-link: if alert has a thread, navigate with alert ID filter
+                  const threadParam = alert.id ? `?alert=${alert.id}` : "";
+                  navigate(`/threads${threadParam}`);
+                }}
+                className="rounded-full px-4 h-9 flex items-center gap-1.5 text-sm font-medium"
+              >
+                <MessageCircle className="w-4 h-4" />
+                See on Threads
+              </Button>
 
-              {/* Right: Heart | Share | 3-dots */}
+              {/* Right: Heart | Share (paper plane) | 3-dots */}
               <div className="flex items-center gap-1">
                 {/* Heart / Support */}
                 <button
@@ -386,13 +397,13 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                   />
                 </button>
 
-                {/* Share */}
+                {/* Share — Paper Plane (Send icon, Instagram-style) */}
                 <button
                   onClick={handleShare}
                   className="p-2 rounded-full hover:bg-muted transition-colors"
                   title="Share"
                 >
-                  <Share2 className="w-5 h-5 text-muted-foreground" />
+                  <Send className="w-5 h-5 text-muted-foreground" />
                 </button>
 
                 {/* 3-dots menu (Report / Hide / Block) */}
