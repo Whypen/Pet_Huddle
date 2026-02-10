@@ -233,7 +233,12 @@ const PinningLayer = ({
         <div className="bg-white/95 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-brandText truncate">
-              {isLoading ? "Locating..." : address || "Move map to select location"}
+              {isLoading ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-brandBlue/30 animate-pulse" />
+                  Searching address...
+                </span>
+              ) : address || "Move map to select location"}
             </p>
           </div>
           {userLocation && distKm > 0 && (

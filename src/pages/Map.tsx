@@ -477,25 +477,30 @@ const Map = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // User location marker
+  // User location marker — Green Name-Initial icon when pinned (matches Friends pin style)
   useEffect(() => {
     if (!map.current || !mapLoaded || !userLocation) return;
     const el = document.createElement("div");
     el.className = "user-location-marker";
+    const displayName = profile?.display_name || user?.email?.charAt(0) || "Me";
+    const initial = typeof displayName === "string" ? displayName.charAt(0).toUpperCase() : "M";
     el.innerHTML = `
       <div style="
-        width: 20px; height: 20px;
-        background-color: #2145CF; border-radius: 50%;
+        width: 40px; height: 40px;
+        background-color: #A6D539; border-radius: 50%;
         border: 3px solid white;
-        box-shadow: 0 0 0 4px rgba(37,99,235,0.3), 0 4px 12px rgba(0,0,0,0.3);
-        cursor: pointer;
-      "></div>
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center;
+        cursor: pointer; font-size: 14px; font-weight: bold; color: white;
+      ">
+        ${initial}
+      </div>
     `;
     const marker = new mapboxgl.Marker(el)
       .setLngLat([userLocation.lng, userLocation.lat])
       .addTo(map.current);
     return () => { marker.remove(); };
-  }, [userLocation, mapLoaded]);
+  }, [userLocation, mapLoaded, profile?.display_name, user?.email]);
 
   // ==========================================================================
   // Update Markers — Vet layer BOTH tabs, alerts Event only, friends Friends only
@@ -513,7 +518,7 @@ const Map = () => {
       if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) return;
 
       const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
-      const emoji = vet.type === "pet_shop" ? "🏪" : "🏥";
+      const emoji = vet.type === "pet_shop" ? "🛍️" : "🏥";
       const el = document.createElement("div");
       el.className = "vet-marker";
       el.innerHTML = `
@@ -586,19 +591,19 @@ const Map = () => {
       });
     }
 
-    // Demo alerts (Event tab)
+    // Demo alerts (Event tab) — ALL clickable, open PinDetailModal
     if (showEvent) {
-      demoAlerts.slice(0, 10).forEach((alert: any) => {
-        if (!alert.location?.lng && !alert.longitude) return;
-        const lng = alert.location?.lng ?? alert.longitude;
-        const lat = alert.location?.lat ?? alert.latitude;
+      demoAlerts.forEach((demoAlert: any) => {
+        if (!demoAlert.location?.lng && !demoAlert.longitude) return;
+        const lng = demoAlert.location?.lng ?? demoAlert.longitude;
+        const lat = demoAlert.location?.lat ?? demoAlert.latitude;
         if (!lng || !lat || isNaN(lng) || isNaN(lat)) return;
 
-        const color = alertTypeColors[alert.type] || "#a1a4a9";
+        const color = alertTypeColors[demoAlert.type] || "#a1a4a9";
         const el = document.createElement("div");
         el.className = "demo-alert-marker";
-        const isLost = String(alert.type).toLowerCase() === "lost";
-        const isStray = String(alert.type).toLowerCase() === "stray";
+        const isLost = String(demoAlert.type).toLowerCase() === "lost";
+        const isStray = String(demoAlert.type).toLowerCase() === "stray";
         el.innerHTML = `
           <div style="
             width: 36px; height: 36px;
@@ -612,6 +617,24 @@ const Map = () => {
             <span style="font-size: 16px;">${isLost ? "🚨" : isStray ? "🐾" : "ℹ️"}</span>
           </div>
         `;
+        // CLICK → open PinDetailModal with demo data converted to MapAlert shape
+        el.addEventListener("click", () => {
+          const demoCreator = demoUsers.find((u) => u.id === demoAlert.creatorId);
+          setSelectedAlert({
+            id: demoAlert.id,
+            latitude: lat,
+            longitude: lng,
+            alert_type: demoAlert.type,
+            title: demoAlert.type === "Others" ? "Community Notice" : `${demoAlert.type} Alert`,
+            description: demoAlert.description,
+            photo_url: demoAlert.photoUrl || null,
+            support_count: demoAlert.supportCount || 0,
+            report_count: demoAlert.reportCount || 0,
+            created_at: demoAlert.createdAt,
+            creator_id: demoAlert.creatorId || null,
+            creator: demoCreator ? { display_name: demoCreator.name, avatar_url: demoCreator.avatarUrl || null } : null,
+          });
+        });
         const marker = new mapboxgl.Marker(el)
           .setLngLat([lng, lat])
           .addTo(map.current!);
@@ -887,8 +910,8 @@ const Map = () => {
         {/* BOTTOM: Subtext + Broadcast CTA                                  */}
         {/* ================================================================ */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
-          {/* Spec: Subtext "Stay visible or pin your location..." — Event tab ONLY */}
-          {mapTab === "Event" && !pinningActive && (
+          {/* Subtext: only when Event tab AND Visible is OFF AND not pinning */}
+          {mapTab === "Event" && !pinningActive && !visibleEnabled && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
               Stay visible or pin your location to see the nearby events
             </p>
@@ -1083,7 +1106,7 @@ const Map = () => {
             >
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-2xl">
-                  {selectedVet.type === "pet_shop" ? "🏪" : "🏥"}
+                  {selectedVet.type === "pet_shop" ? "🛍️" : "🏥"}
                 </div>
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
@@ -1137,7 +1160,7 @@ const Map = () => {
       </AnimatePresence>
 
       {/* ================================================================ */}
-      {/* Friend Profile Modal (demo)                                      */}
+      {/* Friend Profile Modal (demo) — Profile image with overlay          */}
       {/* ================================================================ */}
       <AnimatePresence>
         {selectedFriend && (
@@ -1153,23 +1176,53 @@ const Map = () => {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-card rounded-t-3xl p-6 max-h-[70vh] overflow-auto"
+              className="w-full bg-card rounded-t-3xl overflow-hidden max-h-[75vh]"
             >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold">{selectedFriend.name}</h3>
-                  <p className="text-xs text-muted-foreground">{selectedFriend.locationName}</p>
-                </div>
-                <button onClick={() => setSelectedFriend(null)}>
-                  <X className="w-6 h-6" />
+              {/* Profile image with overlay — square shrink-to-fit */}
+              <div className="relative w-full aspect-square max-h-[50vh] bg-muted overflow-hidden">
+                {selectedFriend.avatarUrl ? (
+                  <img
+                    src={selectedFriend.avatarUrl}
+                    alt={selectedFriend.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-[#A6D539] to-[#7DA828]">
+                    <span className="text-6xl font-bold text-white">{selectedFriend.name.charAt(0)}</span>
+                  </div>
+                )}
+                {/* Close button */}
+                <button
+                  onClick={() => setSelectedFriend(null)}
+                  className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 flex items-center justify-center"
+                >
+                  <X className="w-5 h-5 text-white" />
                 </button>
+                {/* Name, Age, Gender, Owned Pet Species overlay on image */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent p-4">
+                  <h3 className="text-xl font-bold text-white">
+                    {selectedFriend.name}, {selectedFriend.age}
+                  </h3>
+                  <p className="text-sm text-white/80">{selectedFriend.gender}</p>
+                  {selectedFriend.pets.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {selectedFriend.pets.map((pet) => (
+                        <span
+                          key={pet.id}
+                          className="text-xs bg-white/20 backdrop-blur-sm text-white px-2 py-0.5 rounded-full"
+                        >
+                          {pet.species === "dog" ? "🐕" : pet.species === "cat" ? "🐱" : "🐾"} {pet.species}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="text-sm text-muted-foreground mb-3">{selectedFriend.bio}</div>
-              <div className="text-sm font-medium mb-1">{t("Pets")}</div>
-              <div className="text-xs text-muted-foreground">
-                {(selectedFriend.pets || []).length > 0
-                  ? selectedFriend.pets.map((pet) => `${pet.name} (${pet.species})`).join(", ")
-                  : t("No pets listed")}
+
+              {/* Details below image */}
+              <div className="p-5">
+                <p className="text-xs text-muted-foreground mb-2">{selectedFriend.locationName}</p>
+                <p className="text-sm text-foreground">{selectedFriend.bio}</p>
               </div>
             </motion.div>
           </motion.div>

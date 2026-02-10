@@ -23,7 +23,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 
@@ -109,22 +108,8 @@ const BroadcastModal = ({
     try {
       let photoUrl: string | null = null;
 
-      // Image upload with QMS media check
+      // Image upload — no media quota (removed per mandate)
       if (imageFile) {
-        const q = await (supabase as any).rpc("check_and_increment_quota", { action_type: "media" });
-        if (q.data !== true) {
-          showUpsellBanner({
-            message: "Limited. Upgrade or add +10 Media to continue uploading images today.",
-            ctaLabel: "Go to Premium",
-            onCta: () => {
-              sessionStorage.setItem("pending_addon", "media");
-              navigate("/premium");
-            },
-          });
-          setCreating(false);
-          return;
-        }
-
         const compressed = await imageCompression(imageFile, { maxSizeMB: 0.5, useWebWorker: true });
         const uploadFile = compressed instanceof File ? compressed : imageFile;
         const fileExt = imageFile.name.split(".").pop();
@@ -264,7 +249,7 @@ const BroadcastModal = ({
             <div className="space-y-1 mb-3">
               <label className="text-xs font-medium text-muted-foreground">Title</label>
               <Input
-                placeholder="Alert title (max 100 chars)"
+                placeholder=""
                 value={alertTitle}
                 onChange={(e) => {
                   if (e.target.value.length <= MAX_TITLE_CHARS) setAlertTitle(e.target.value);
@@ -281,7 +266,7 @@ const BroadcastModal = ({
             <div className="space-y-1 mb-3">
               <label className="text-xs font-medium text-muted-foreground">Description</label>
               <Textarea
-                placeholder="Description (max 500 chars)..."
+                placeholder=""
                 value={description}
                 onChange={(e) => {
                   if (e.target.value.length <= MAX_DESC_CHARS) setDescription(e.target.value);

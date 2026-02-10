@@ -308,7 +308,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                 </Button>
               )}
 
-              {/* Creator controls — Edit + Remove (Lost only) */}
+              {/* Creator controls — Edit + Remove */}
               {isCreator && (
                 <div className="flex gap-2 mb-3">
                   <Button
@@ -323,16 +323,14 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                     <Pencil className="w-4 h-4 mr-2" />
                     Edit
                   </Button>
-                  {alert.alert_type === "Lost" && (
-                    <Button
-                      variant="outline"
-                      onClick={() => setShowConfirmRemove(true)}
-                      className="flex-1 h-10 rounded-xl text-red-500 border-red-200 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Remove
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowConfirmRemove(true)}
+                    className="flex-1 h-10 rounded-xl text-red-500 border-red-200 hover:bg-red-50"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Remove
+                  </Button>
                 </div>
               )}
 
