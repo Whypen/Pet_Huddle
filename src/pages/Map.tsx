@@ -464,7 +464,7 @@ const Map = () => {
       if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) return;
 
       const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
-      const emoji = vet.type === "pet_shop" ? "🛍️" : "🏥";
+      const emoji = vet.type === "pet_shop" ? "🛍️" : vet.type === "pet_grooming" ? "✂️" : "🏥";
       const el = document.createElement("div");
       el.className = "vet-marker";
       el.innerHTML = `
@@ -488,7 +488,10 @@ const Map = () => {
           "></span>
         </div>
       `;
-      el.addEventListener("click", () => setSelectedVet(vet));
+      el.addEventListener("click", () => {
+        map.current?.flyTo({ center: [vet.lng, vet.lat], zoom: 14 });
+        setSelectedVet(vet);
+      });
 
       const marker = new mapboxgl.Marker(el)
         .setLngLat([vet.lng, vet.lat])
@@ -563,8 +566,10 @@ const Map = () => {
             <span style="font-size: 16px;">${isLost ? "🚨" : isStray ? "🐾" : "ℹ️"}</span>
           </div>
         `;
-        // CLICK → open PinDetailModal with demo data converted to MapAlert shape
+        // CLICK → flyTo 2km zoom (14) + open PinDetailModal
         el.addEventListener("click", () => {
+          // 2km proximity snap
+          map.current?.flyTo({ center: [lng, lat], zoom: 14 });
           const demoCreator = demoUsers.find((u) => u.id === demoAlert.creatorId);
           setSelectedAlert({
             id: demoAlert.id,
@@ -613,7 +618,11 @@ const Map = () => {
               <span style="font-size: 16px;">${isLost ? "🚨" : isStray ? "🐾" : "ℹ️"}</span>
             </div>
           `;
-          el.addEventListener("click", () => setSelectedAlert(alert));
+          el.addEventListener("click", () => {
+            // 2km proximity snap on alert click
+            map.current?.flyTo({ center: [alert.longitude, alert.latitude], zoom: 14 });
+            setSelectedAlert(alert);
+          });
           const marker = new mapboxgl.Marker(el)
             .setLngLat([alert.longitude, alert.latitude])
             .addTo(map.current!);
@@ -817,6 +826,10 @@ const Map = () => {
             onClick={() => {
               fetchAlerts();
               fetchVetClinics();
+              // Re-center on user pin if active (pin persistence)
+              if (userLocation && map.current) {
+                map.current.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
+              }
               toast.success("Map refreshed");
             }}
             className="flex items-center gap-2 px-4 py-2 bg-gray-500/80 backdrop-blur-sm text-white text-xs font-medium rounded-full shadow-md hover:bg-gray-600/80 transition-colors"
@@ -1052,14 +1065,14 @@ const Map = () => {
             >
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-2xl">
-                  {selectedVet.type === "pet_shop" ? "🛍️" : "🏥"}
+                  {selectedVet.type === "pet_shop" ? "🛍️" : selectedVet.type === "pet_grooming" ? "✂️" : "🏥"}
                 </div>
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
                   <div className="flex items-center gap-2">
                     {selectedVet.type && (
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full capitalize">
-                        {selectedVet.type === "pet_shop" ? "Pet Shop" : "Veterinary"}
+                        {selectedVet.type === "pet_shop" ? "Pet Shop" : selectedVet.type === "pet_grooming" ? "Pet Grooming" : "Veterinary"}
                       </span>
                     )}
                     {selectedVet.isOpen !== undefined && (

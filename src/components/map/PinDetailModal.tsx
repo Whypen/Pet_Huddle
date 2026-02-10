@@ -3,24 +3,25 @@
  *
  * Spec:
  * - Full view modal for alert details
- * - "Reply on Threads" button (only if has_thread)
- * - Red "Report Abuse" footer
+ * - Threads-style footer: 3-dots (Report/Hide/Block) | Share | Heart | "See on Threads"
+ * - Native Web Share API with clipboard fallback
  * - abuse_count > 10 → DB active=false → immediate hide
- * - Creator can Edit/Remove (Lost only)
+ * - Creator can Edit/Remove (all alert types)
  */
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
-  ThumbsUp,
+  Heart,
+  Share2,
   Flag,
   Ban,
   EyeOff,
   Pencil,
   Trash2,
   MessageCircle,
-  AlertTriangle,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,8 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
   const [editTitle, setEditTitle] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [showConfirmRemove, setShowConfirmRemove] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   const formatTimeAgo = (date: string) => {
     const now = new Date();
@@ -88,6 +91,36 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+  };
+
+  // Native Share API with clipboard fallback
+  const handleShare = async () => {
+    if (!alert) return;
+    const alertTitle = typeof alert.title === "string" ? alert.title : "Huddle Alert";
+    const alertDesc = typeof alert.description === "string" ? alert.description : "";
+    const shareText = `Check out this ${alert.alert_type} alert on Huddle! ${alertDesc}`.trim();
+    const shareUrl = window.location.href;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Huddle Alert: ${alertTitle}`,
+          text: shareText,
+          url: shareUrl,
+        });
+      } catch (err) {
+        // User cancelled or share failed — silent
+        console.log("Share cancelled:", err);
+      }
+    } else {
+      // Fallback: Copy link to clipboard
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success("Link copied to clipboard!");
+      } catch {
+        toast.error("Failed to copy link");
+      }
+    }
   };
 
   const handleSupport = async () => {
@@ -101,6 +134,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         user_id: user.id,
         interaction_type: "support",
       });
+      setLiked(true);
       toast.success("Thanks for your support!");
       onRefresh();
     } catch (error: unknown) {
@@ -110,6 +144,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
           : "";
       if (code === "23505") {
         toast.info("You've already supported this alert");
+        setLiked(true);
       } else {
         toast.error("Failed to support alert");
       }
@@ -122,6 +157,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
       toast.error("Please login to report alerts");
       return;
     }
+    setShowMenu(false);
     try {
       await supabase.from("alert_interactions").insert({
         alert_id: alert.id,
@@ -162,8 +198,16 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
   };
 
   const handleBlockUser = () => {
+    setShowMenu(false);
     onClose();
     toast.success("You won't see posts from this user");
+  };
+
+  const handleHideAlert = () => {
+    if (!alert) return;
+    setShowMenu(false);
+    onHide(alert.id);
+    onClose();
   };
 
   // Creator: Remove alert
@@ -274,40 +318,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                 </span>
               </div>
 
-              {/* Action buttons */}
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <Button onClick={handleSupport} className="h-12 rounded-xl bg-primary hover:bg-primary/90">
-                  <ThumbsUp className="w-5 h-5 mr-2" />
-                  Support
-                </Button>
-                <Button
-                  onClick={() => {
-                    onHide(alert.id);
-                    onClose();
-                  }}
-                  variant="outline"
-                  className="h-12 rounded-xl"
-                >
-                  <EyeOff className="w-5 h-5 mr-2" />
-                  Hide
-                </Button>
-              </div>
-
-              {/* Spec: "Reply on Threads" — only if has_thread */}
-              {alert.has_thread && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    navigate("/threads");
-                    toast.info("See on Threads");
-                  }}
-                  className="w-full h-10 rounded-xl mb-3 flex items-center justify-center gap-2"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  Reply on Threads
-                </Button>
-              )}
-
               {/* Creator controls — Edit + Remove */}
               {isCreator && (
                 <div className="flex gap-2 mb-3">
@@ -333,26 +343,102 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                   </Button>
                 </div>
               )}
-
-              {/* Block user */}
-              <button
-                onClick={handleBlockUser}
-                className="w-full flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground hover:text-destructive"
-              >
-                <Ban className="w-4 h-4" />
-                Block User
-              </button>
             </div>
 
-            {/* Spec: Red "Report Abuse" footer — always visible at bottom */}
-            <div className="border-t border-border px-6 py-3">
-              <button
-                onClick={handleReport}
-                className="w-full flex items-center justify-center gap-2 py-2.5 text-sm font-medium text-red-500 hover:text-red-600 transition-colors"
-              >
-                <Flag className="w-4 h-4" />
-                Report Abuse
-              </button>
+            {/* ================================================================ */}
+            {/* Threads-style Footer — 3-dots | Share | Heart | "See on Threads" */}
+            {/* ================================================================ */}
+            <div className="border-t border-border px-6 py-3 flex items-center justify-between">
+              {/* Left: "See on Threads" pill button */}
+              {alert.has_thread ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigate("/threads");
+                    toast.info("Opening Threads");
+                  }}
+                  className="rounded-full px-4 h-9 flex items-center gap-1.5 text-sm font-medium"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  See on Threads
+                </Button>
+              ) : (
+                <div />
+              )}
+
+              {/* Right: Heart | Share | 3-dots */}
+              <div className="flex items-center gap-1">
+                {/* Heart / Support */}
+                <button
+                  onClick={handleSupport}
+                  className={cn(
+                    "p-2 rounded-full transition-all",
+                    liked ? "bg-red-50" : "hover:bg-muted"
+                  )}
+                  title="Support"
+                >
+                  <Heart
+                    className={cn(
+                      "w-5 h-5 transition-colors",
+                      liked ? "text-red-500 fill-red-500" : "text-muted-foreground"
+                    )}
+                  />
+                </button>
+
+                {/* Share */}
+                <button
+                  onClick={handleShare}
+                  className="p-2 rounded-full hover:bg-muted transition-colors"
+                  title="Share"
+                >
+                  <Share2 className="w-5 h-5 text-muted-foreground" />
+                </button>
+
+                {/* 3-dots menu (Report / Hide / Block) */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowMenu(!showMenu)}
+                    className="p-2 rounded-full hover:bg-muted transition-colors"
+                    title="More"
+                  >
+                    <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+                  </button>
+
+                  <AnimatePresence>
+                    {showMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="absolute right-0 bottom-12 bg-card border border-border rounded-xl shadow-elevated py-1 w-44 z-50"
+                      >
+                        <button
+                          onClick={handleReport}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
+                        >
+                          <Flag className="w-4 h-4 text-red-500" />
+                          <span className="text-red-500">Report Abuse</span>
+                        </button>
+                        <button
+                          onClick={handleHideAlert}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
+                        >
+                          <EyeOff className="w-4 h-4 text-muted-foreground" />
+                          <span>Hide Alert</span>
+                        </button>
+                        <button
+                          onClick={handleBlockUser}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
+                        >
+                          <Ban className="w-4 h-4 text-muted-foreground" />
+                          <span>Block User</span>
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
             </div>
           </motion.div>
         </motion.div>
