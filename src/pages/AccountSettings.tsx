@@ -205,6 +205,11 @@ export default function AccountSettingsPage() {
         {/* Notifications */}
         <div className="text-xs font-bold text-brandText/70 pt-2">Notifications</div>
         <ToggleRow
+          label="Push Notifications"
+          checked={prefs.push_notifications_enabled !== false}
+          onChange={(v) => savePrefs({ ...prefs, push_notifications_enabled: v })}
+        />
+        <ToggleRow
           label="Pause All Notifications"
           checked={!!prefs.pause_all_notifications}
           onChange={(v) => savePrefs({ ...prefs, pause_all_notifications: v })}

@@ -171,6 +171,8 @@ const AIVet = () => {
             weight: selectedPet.weight,
             weight_unit: selectedPet.weight_unit,
             history: selectedPet.bio || selectedPet.routine || "",
+            medications: selectedPet.medications || [],
+            vaccinations: selectedPet.vaccinations || [],
           }
         : undefined;
       let imageBase64: string | undefined;

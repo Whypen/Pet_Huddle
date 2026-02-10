@@ -1,4 +1,4 @@
-# MASTER_SPEC.md — huddle v1.9 (Definitive, Single Source of Truth)
+# MASTER_SPEC.md — huddle v2.0 (Definitive, Single Source of Truth)
 
 **Audience:** New full‑stack developer rebuilding from scratch.
 
@@ -7,6 +7,7 @@
 ---
 
 ## Changelog
+- **v2.0**: Full sweep audit — 15-filter tier gating fix (Verified Only → Gold), AI Vet pet data enrichment (medications/vaccinations), push notifications toggle, broadcast add-on spec alignment, Discover 40-card daily limit + blur overlay, Premium features text updated.
 - **v1.9**: Final perks override, full algo consolidation, notifications + map UI for quota/upsell enforcement.
 
 ## 0. Product DNA
@@ -252,6 +253,179 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - QMS enforced for ai_vision/chat_image/thread_post
 - Safe Harbor checkbox enforced in KYC + booking
 - Maintenance banner active when /health-check fails
+
+---
+
+## 10. Full Sweep Audit (v2.0) — PASS/FAIL Checklist
+
+### 10a. Discovery Filter — 15 Filters with 3-Tier Gating
+
+**Status: PASS (Fixed)**
+
+Exact 15 filter rows in `Chats.tsx` FILTER_ROWS:
+| # | Filter | Tier | Type |
+|---|--------|------|------|
+| 1 | Age Range | Free | range |
+| 2 | Gender | Free | multi |
+| 3 | Distance | Free | slider |
+| 4 | Species | Free | multi |
+| 5 | Social Role | Free | multi |
+| 6 | Height Range | Premium | range |
+| 7 | Sexual Orientation | Premium | multi |
+| 8 | Highest Degree | Premium | multi |
+| 9 | Relationship Status | Premium | multi |
+| 10 | Car Badge | Premium | toggle |
+| 11 | Pet Experience | Premium | toggle |
+| 12 | Language | Premium | multi |
+| 13 | Verified Users Only | **Gold** | toggle |
+| 14 | Who waved at you | Gold | toggle |
+| 15 | Active Users only | Gold | toggle |
+
+**Tier gating: Free = 5 (rows 1-5), Premium = 12 (rows 1-12), Gold = 15 (all)**
+
+Fix applied: Moved "Verified Users Only" from premium to gold tier gating. Filter payload in discovery now sends `verified_only` only when `effectiveTier === "gold"`.
+
+### 10b. Pet Profile → Home Dashboard Reminder
+
+**Status: PASS**
+
+- `EditPetProfile.tsx`: vaccination reminder synced to `reminders` table via `syncVaccinationReminder()`
+- `Index.tsx`: `computeNextEvent` from `@/utils/petLogic` calculates next event from reminders table
+- Dashboard shows `nextEventLabel` on pet card
+- Grey subtext "Input last vaccination dates for better tracking" present
+- Red error validations for DOB, weight, vaccination dates, microchip ID all present via ErrorLabel
+
+### 10c. Personal Profile → Discovery Display
+
+**Status: PASS**
+
+- `EditProfile.tsx`: All per-field show/hide toggles present (show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, show_relationship_status)
+- Social album: max 5 images, <500KB compression via browser-image-compression
+- Identity lock for verified users
+- `Chats.tsx` discovery cards respect show_* toggles when rendering profile sheets (handleProfileTap fetches all show_* fields)
+- Profile fields: display_name, legal_name, phone, dob, bio, gender, orientation, height, weight, degree, school, major, occupation, relationship_status, has_car, languages, location, pet_experience, social_album
+
+### 10d. Discovery Algorithm & Card Display
+
+**Status: PASS (Fixed)**
+
+- Discovery embedded in Chats page (horizontal card scroll, snap paging)
+- Cards show: Name, Age, Pet Species, Verified badge, Car badge, Role badge
+- Overlay icons: Wave, Star (quota-gated), X (skip)
+- Full-screen modal with album carousel on tap
+- Ranking: `social-discovery` Edge Function uses `ORDER BY (score + priority * 1000) DESC`
+- Free=1 priority, Premium=2, Gold=3
+- **40-card daily limit for free users**: localStorage counter + `check_and_increment_quota("discovery_profile")` RPC
+- **Blur overlay on blocked cards**: white/70 backdrop-blur with Lock icon + Upgrade CTA (both in Chats.tsx and Discover.tsx)
+
+### 10e. Threads Scoring & Posting Quota
+
+**Status: PASS**
+
+- `NoticeBoard.tsx`: Thread creation calls `check_and_increment_quota("thread_post")` before insert
+- Quota exceeded → tier-specific upsell banner via `showUpsellBanner()`
+- Sorting: "Trending" (score DESC) and "Latest" (created_at DESC) toggle
+- Keyword search via `ILIKE` on title/content
+- Topic filter via `contains("tags", [topic])`
+- Thread score stored in `threads.score` column, updated by `update_threads_scores()` pg_cron
+- Score formula: time*10 + care_circle*20 + verified*50 + gold*30 + replies*5 + likes*3 + clicks*1 - ln(days+1)*5
+- Thread content: max 1000 chars, replies max 200 chars
+- Hashtags: up to 3, auto-generated on space press
+- Report/Hide/Block actions available via dropdown menu
+- Abuse auto-hide at >10 reports (backend trigger)
+
+### 10f. Map & Broadcast Alert
+
+**Status: PASS**
+
+- Floating tabs overlay (80% transparent, top-left) for Event/Friends toggle
+- Visible toggle: blue MapPin icon (green tint ON, grey tint OFF)
+- Refresh CTA: grey pill overlay
+- No header block or filter chips
+- Pin/Unpin: styled modal popups (not window.confirm)
+- Broadcast creation: full-screen bottom sheet with Title (100 chars) + Description (500 chars)
+- Post on Threads checkbox: only for Stray/Lost types
+- Vet data: from `poi_locations` table (Overpass API harvested)
+- Vet layer visible in BOTH tabs
+- Alert detail modal: Title display, Reply on Threads button
+- Creator controls: Edit + Remove (Lost alerts only)
+- Offline warning banner with WifiOff icon
+- Tier-based broadcast: Free (10km/12h), Premium (25km/24h), Gold (50km/48h), Add-on (150km/72h)
+
+### 10g. Notification Live/Mute & Account Settings
+
+**Status: PASS (Fixed)**
+
+- `AccountSettings.tsx` toggles: Non-Social mode, Hide from Map, **Push Notifications** (added), Pause All Notifications, Social (Waves/Matches), Nanny/Booking, Thread Activity, Map Alert, Email Notifications
+- Notification preferences saved to `notification_preferences` table
+- Language selector (English, 繁體中文, 简体中文, 日本語, 한국어)
+- Mute-all pauses all notification delivery
+- Per-channel granularity (social, nanny, threads, map_alert, email)
+
+### 10h. AI Vet Fetch Pet Data & Image Analysis
+
+**Status: PASS (Fixed)**
+
+- Pet selector dropdown shows all user's pets
+- Pet profile sent to backend includes: name, species, breed, age, weight, weight_unit, history, **medications** (added), **vaccinations** (added)
+- Gemini 1.5 Flash for text-only, Gemini 1.5 Pro for image input
+- Image compression <500KB before upload
+- QMS gate: `check_and_increment_quota("ai_vision")` for image analysis
+- Disclaimer footer: "huddle AI provides informational content, not veterinary diagnosis"
+- Emergency keyword detection triggers map link
+
+### 10i. Payment Gateway (Stripe)
+
+**Status: PASS**
+
+- `Chats.tsx`: Nanny booking via `create-marketplace-booking` Edge Function
+- Client-side idempotency key: `booking_{userId}_{timestamp}`
+- Safe Harbor checkbox required before checkout
+- Escrow: hold 100% upfront, release after 48h
+- Split: 90% sitter / 10% platform fee
+- Stripe Checkout Session with metadata (client_id, sitter_id, dates, pet_id, location)
+- Booking form: multi-day dates, pet dropdown, district input, currency select
+- `stripe-webhook` Edge Function updates booking status on `payment_intent.succeeded`
+
+### 10j. QMS (Quota Management System)
+
+**Status: PASS**
+
+- `check_and_increment_quota(action_type)` RPC used across: thread_post, discovery_profile, ai_vision, map_broadcast
+- Upsell on deny: tier-specific banner/modal with CTA to /premium
+- Gold exhaustion: no CTA, wait message only
+- Quotas per spec: Thread (Free 3/day, Premium 15/day, Gold 30/day), Discovery (Free 40/day, Premium/Gold unlimited), AI Vet (Free 0, Premium 10/day, Gold 20/day)
+
+### 10k. Family Sharing (Gold)
+
+**Status: PASS**
+
+- Family invite in AccountSettings: Gold-only gate
+- 10-digit user_id input for invite
+- Receiver notification popup with accept/decline
+- `family_members` table with status (pending/accepted)
+- Pooled quotas: `effective_tier` column propagates Gold benefits to family member
+- 1 slot max per Gold subscriber
+
+### 10l. Nanny Bookings
+
+**Status: PASS**
+
+- Booking form in Chats.tsx: service start/end dates, pet dropdown, district input, currency + amount
+- Validation: end date must be after start date, amount > 0
+- Safe Harbor disclaimer checkbox
+- Stripe escrow via `create-marketplace-booking` Edge Function
+- Dispute resolution: admin-only via `process-dispute-resolution`
+
+### 10m. Premium Page Spec Alignment
+
+**Status: PASS (Fixed)**
+
+- Premium features text updated: Broadcast "25km radius • 24h duration" (was "20/week • 10km • 24h")
+- Gold features text updated: Broadcast "50km radius • 48h duration" (was "20/week • 20km • 48h")
+- Filters text: Premium "12 advanced filters", Gold "All 15 filters (Gold exclusive)"
+- AI Vet line added to both tiers
+- Emergency Broadcast add-on: "+1 Broadcast (72h / 150km radius)" with "ADD-ON" pill
 
 ---
 

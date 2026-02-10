@@ -34,7 +34,7 @@ const DEFAULT_PRICING: Pricing = {
 
 const ADD_ONS: AddOn[] = [
   { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "emergency_alert", title: "Broadcast (72H/20km)", subtitle: "+1 Broadcast (72h / 20km)", pill: "72H" },
+  { id: "emergency_alert", title: "Emergency Broadcast", subtitle: "+1 Broadcast (72h / 150km radius)", pill: "ADD-ON" },
   { id: "vet_media", title: "Media (+10)", subtitle: "+10 Media", pill: "Extra" },
 ];
 
@@ -44,17 +44,19 @@ const FEATURES = (tier: "premium" | "gold") =>
         { title: "Unlimited", tip: "Unlimited discovery + standard ranking", icon: Sparkles },
         { title: "Threads", tip: "5 posts/day", icon: CheckCircle2 },
         { title: "Media", tip: "10/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "20/week • 10km • 24h", icon: CheckCircle2 },
-        { title: "Filters", tip: "Advanced filters (Premium+)", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "25km radius • 24h duration", icon: CheckCircle2 },
+        { title: "Filters", tip: "12 advanced filters (Premium)", icon: CheckCircle2 },
+        { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
       ]
     : [
         { title: "Unlimited", tip: "Unlimited discovery + priority ranking", icon: Sparkles },
         { title: "Threads", tip: "20 posts/day", icon: CheckCircle2 },
         { title: "Stars", tip: "3/cycle (direct chat)", icon: CheckCircle2 },
         { title: "Media", tip: "50/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "20/week • 20km • 48h", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "50km radius • 48h duration", icon: CheckCircle2 },
         { title: "Family", tip: "1 member (quota inheritance)", icon: CheckCircle2 },
-        { title: "Filters", tip: "Advanced filters (Premium+)", icon: CheckCircle2 },
+        { title: "Filters", tip: "All 15 filters (Gold exclusive)", icon: CheckCircle2 },
+        { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
       ];
 
 function money(n: number) {

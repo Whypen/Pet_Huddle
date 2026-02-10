@@ -85,7 +85,7 @@ const FILTER_ROWS: FilterRowDef[] = [
   { key: "hasCar", label: "Car Badge", tier: "premium", type: "toggle" },
   { key: "hasPetExperience", label: "Pet Experience", tier: "premium", type: "toggle" },
   { key: "languages", label: "Language", tier: "premium", type: "multi" },
-  { key: "verifiedOnly", label: "Verified Users Only", tier: "premium", type: "toggle" },
+  { key: "verifiedOnly", label: "Verified Users Only", tier: "gold", type: "toggle" },
   { key: "whoWavedAtMe", label: "Who waved at you", tier: "gold", type: "toggle" },
   { key: "activeOnly", label: "Active Users only", tier: "gold", type: "toggle" },
 ];
@@ -578,7 +578,7 @@ const Chats = () => {
           has_car: isPremium ? filters.hasCar : undefined,
           has_pet_experience: isPremium ? filters.hasPetExperience : undefined,
           languages: isPremium ? filters.languages : undefined,
-          verified_only: isPremium ? filters.verifiedOnly : undefined,
+          verified_only: effectiveTier === "gold" ? filters.verifiedOnly : undefined,
           who_waved_at_me: effectiveTier === "gold" ? filters.whoWavedAtMe : undefined,
           active_only: effectiveTier === "gold" ? filters.activeOnly : undefined,
           advanced: isPremium,
