@@ -399,19 +399,8 @@ const Chats = () => {
     }
   }, [discoveryKey]);
 
+  // Quota removed — all tiers unlimited
   const bumpDiscoverySeen = async (): Promise<boolean> => {
-    if (isPremium) return true;
-    try {
-      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-        action_type: "discovery_profile",
-      });
-      if (allowed === false) {
-        setIsPremiumOpen(true);
-        return false;
-      }
-    } catch {
-      // Fail-open for UX, but keep local counter.
-    }
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
       try {
@@ -1039,13 +1028,7 @@ const Chats = () => {
                             if (blocked) return;
                             const okSeen = await bumpDiscoverySeen();
                             if (!okSeen) return;
-                            const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-                              action_type: "star",
-                            });
-                            if (allowed === false) {
-                              toast.error(t("No stars remaining"));
-                              return;
-                            }
+                            // Quota removed — stars unlimited for all tiers
                             navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
                           }}
                           className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
