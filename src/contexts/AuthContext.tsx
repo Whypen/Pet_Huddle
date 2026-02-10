@@ -8,6 +8,7 @@ export interface Profile {
   display_name: string | null;
   legal_name: string | null;
   phone: string | null;
+  prefs?: Record<string, unknown> | null;
   verification_status?: string | null;
   verification_comment?: string | null;
   avatar_url: string | null;
@@ -58,6 +59,7 @@ export interface Profile {
   show_relationship_status?: boolean;
   last_lat?: number | null;
   last_lng?: number | null;
+  map_visible?: boolean | null;
   care_circle?: string[] | null;
 }
 
@@ -115,7 +117,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         show_gender, show_orientation, show_age, show_height, show_weight,
         show_academic, show_affiliation, show_occupation, show_bio,
         last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status,
-        social_album
+        social_album, prefs, map_visible
       `)
       .eq("id", userId)
       .maybeSingle();
