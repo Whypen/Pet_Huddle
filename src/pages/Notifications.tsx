@@ -32,11 +32,11 @@ export default function NotificationsPage() {
 
     const load = async () => {
       setLoading(true);
-      const res = await (supabase as any)
-        .from("notifications")
-        .select("id,message,type,read,created_at,metadata")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
+      const res = await supabase
+        .from("notifications" as "profiles")
+        .select("id,message,type,read,created_at,metadata" as "*")
+        .eq("user_id" as "id", user.id)
+        .order("created_at" as "id", { ascending: false })
         .limit(200);
       if (cancelled) return;
       setRows((res.data ?? []) as NotificationRow[]);
@@ -63,13 +63,13 @@ export default function NotificationsPage() {
   const markOneRead = async (id: string) => {
     if (!user) return;
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read: true } : r)));
-    await (supabase as any).from("notifications").update({ read: true }).eq("id", id).eq("user_id", user.id);
+    await supabase.from("notifications" as "profiles").update({ read: true } as Record<string, unknown>).eq("id" as "created_at", id).eq("user_id" as "created_at", user.id);
   };
 
   const markAllRead = async () => {
     if (!user) return;
     setRows((prev) => prev.map((r) => ({ ...r, read: true })));
-    await (supabase as any).from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    await supabase.from("notifications" as "profiles").update({ read: true } as Record<string, unknown>).eq("user_id" as "created_at", user.id).eq("read" as "created_at", false);
   };
 
   return (

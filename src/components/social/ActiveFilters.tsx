@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FilterState, defaultFilters } from "./FilterSheet";
+import { FilterState, defaultFilters } from "./filterTypes";
 
 interface ActiveFiltersProps {
   filters: FilterState;

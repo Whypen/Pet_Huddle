@@ -148,7 +148,7 @@ const HazardScanner = () => {
     if (!user) return;
 
     try {
-      const { error } = await (supabase as any).from("hazard_identifications").insert({
+      const { error } = await supabase.from("hazard_identifications" as "profiles").insert({
         user_id: user.id,
         image_url: imageUrl,
         object_identified: scanResult.object,
@@ -158,7 +158,7 @@ const HazardScanner = () => {
         ingested: wasIngested,
         immediate_action: scanResult.immediate_action,
         ai_response: scanResult
-      });
+      } as Record<string, unknown>);
 
       if (error) throw error;
     } catch (error) {

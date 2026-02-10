@@ -21,12 +21,3 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
     </div>
   );
 };
-
-// Hook to use settings drawer from any page
-export const useAppLayout = () => {
-  return {
-    openSettings: () => {
-      // Will be provided by context
-    }
-  };
-};

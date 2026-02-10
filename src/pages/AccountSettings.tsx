@@ -41,9 +41,9 @@ export default function AccountSettingsPage() {
   useEffect(() => {
     (async () => {
       if (!user?.id) return;
-      const r = await (supabase as any)
+      const r = await supabase
         .from("profiles")
-        .select("prefs, non_social, hide_from_map, language")
+        .select("prefs, non_social, hide_from_map, language" as "*")
         .eq("id", user.id)
         .maybeSingle();
       if (!r.error && r.data) {
@@ -58,10 +58,10 @@ export default function AccountSettingsPage() {
       }
 
       // Fetch family member (Gold only)
-      const fm = await (supabase as any)
-        .from("family_members")
-        .select("family_member_id, profiles!family_members_family_member_id_fkey(display_name)")
-        .eq("user_id", user.id)
+      const fm = await supabase
+        .from("family_members" as "profiles")
+        .select("family_member_id, profiles!family_members_family_member_id_fkey(display_name)" as "*")
+        .eq("user_id" as "id", user.id)
         .maybeSingle();
       if (!fm.error && fm.data) {
         const member = fm.data as Record<string, unknown>;

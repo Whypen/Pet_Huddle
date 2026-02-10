@@ -67,6 +67,7 @@ const AIVet = () => {
       fetchPets();
       checkUsage();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Contract override: AI Vet media is gated by QMS on upload. UI allows attach for Premium/Gold
@@ -89,6 +90,7 @@ const AIVet = () => {
       };
       setMessages([greeting]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPet]);
 
   const fetchPets = async () => {
@@ -100,8 +102,8 @@ const AIVet = () => {
         .eq("is_active", true);
 
       if (!error && data && data.length > 0) {
-        setPets(data as any as Pet[]);
-        setSelectedPet(data[0] as any as Pet);
+        setPets(data as unknown as Pet[]);
+        setSelectedPet(data[0] as unknown as Pet);
       }
     } catch (error) {
       console.error("Error fetching pets:", error);
@@ -110,7 +112,7 @@ const AIVet = () => {
 
   const checkUsage = async () => {
     if (!isPremium) {
-      const result = await getAiVetUsage() as any;
+      const result = await getAiVetUsage() as { success?: boolean; data?: { remaining?: number } };
       if (result.success && result.data) {
         setRemaining(result.data.remaining);
       }
@@ -150,7 +152,7 @@ const AIVet = () => {
       // Create conversation if needed
       let currentConversationId = conversationId;
       if (!currentConversationId) {
-        const createResult = await createAiVetConversation(selectedPet?.id) as any;
+        const createResult = await createAiVetConversation(selectedPet?.id) as { success?: boolean; data?: { id?: string } };
         if (createResult.success && createResult.data?.id) {
           currentConversationId = createResult.data.id;
           setConversationId(currentConversationId);
@@ -185,7 +187,7 @@ const AIVet = () => {
         });
         imageBase64 = imageBase64.split(",")[1] || imageBase64;
       }
-      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64) as any;
+      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64) as { success?: boolean; data?: { message: string; remaining?: number; triage?: boolean }; error?: string };
 
       if (result.success && result.data) {
         const aiMessage: Message = {

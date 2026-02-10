@@ -297,9 +297,9 @@ export default function PremiumPage() {
                       {p.label} {money(p.price)}
                     </span>
                   </div>
-                  {(p as any).pill ? (
+                  {"pill" in p && p.pill ? (
                     <span className={cn("text-xs px-2 py-1 rounded-full font-semibold", tab === "Gold" ? "bg-brandGold/15 text-brandGold" : "bg-brandBlue/10 text-brandBlue")}>
-                      {(p as any).pill}
+                      {p.pill}
                     </span>
                   ) : null}
                 </button>

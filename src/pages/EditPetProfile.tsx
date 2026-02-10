@@ -134,34 +134,35 @@ const EditPetProfile = () => {
       if (error) throw error;
 
       if (data) {
-        const d = data as any;
-        const isKnownSpecies = speciesOptions.some(s => s.id === d.species);
+        const d = data as Record<string, unknown>;
+        const species = typeof d.species === "string" ? d.species : "";
+        const isKnownSpecies = speciesOptions.some(s => s.id === species);
         setFormData({
-          name: d.name || "",
-          species: isKnownSpecies ? d.species : "others",
-          custom_species: isKnownSpecies ? "" : d.species || "",
-          breed: d.breed || "",
-          gender: d.gender || "",
-          neutered_spayed: d.neutered_spayed || false,
-          dob: d.dob || "",
-          weight: d.weight?.toString() || "",
-          weight_unit: d.weight_unit || "kg",
-          bio: d.bio || "",
-          routine: d.routine || "",
-          clinic_name: d.clinic_name || "",
-          preferred_vet: d.preferred_vet || "",
-          phone_no: d.phone_no || "",
-          microchip_id: d.microchip_id || "",
-          temperament: d.temperament || [],
-          vaccinations: Array.isArray(d.vaccinations) ? d.vaccinations : [],
-          vaccination_dates: d.vaccination_dates || [],
-          next_vaccination_reminder: d.next_vaccination_reminder || "",
-          medications: Array.isArray(d.medications) ? d.medications : [],
-          is_active: d.is_active ?? true,
-          is_public: d.is_public ?? true,
+          name: (d.name as string) || "",
+          species: isKnownSpecies ? species : "others",
+          custom_species: isKnownSpecies ? "" : species || "",
+          breed: (d.breed as string) || "",
+          gender: (d.gender as string) || "",
+          neutered_spayed: (d.neutered_spayed as boolean) || false,
+          dob: (d.dob as string) || "",
+          weight: d.weight != null ? String(d.weight) : "",
+          weight_unit: (d.weight_unit as string) || "kg",
+          bio: (d.bio as string) || "",
+          routine: (d.routine as string) || "",
+          clinic_name: (d.clinic_name as string) || "",
+          preferred_vet: (d.preferred_vet as string) || "",
+          phone_no: (d.phone_no as string) || "",
+          microchip_id: (d.microchip_id as string) || "",
+          temperament: (Array.isArray(d.temperament) ? d.temperament : []) as string[],
+          vaccinations: Array.isArray(d.vaccinations) ? (d.vaccinations as { name: string; date: string }[]) : [],
+          vaccination_dates: (Array.isArray(d.vaccination_dates) ? d.vaccination_dates : []) as string[],
+          next_vaccination_reminder: (d.next_vaccination_reminder as string) || "",
+          medications: Array.isArray(d.medications) ? (d.medications as { name: string; dosage: string; frequency: string }[]) : [],
+          is_active: d.is_active !== false,
+          is_public: d.is_public !== false,
         });
         if (d.photo_url) {
-          setPhotoPreview(d.photo_url);
+          setPhotoPreview(d.photo_url as string);
         }
       }
     } catch (error) {
@@ -379,16 +380,16 @@ const EditPetProfile = () => {
         try {
           const kind = "Vaccination";
           // Delete the previous canonical record so we don't accumulate duplicates.
-          await (supabase as any).from("reminders").delete().eq("pet_id", targetPetId).eq("kind", kind);
+          await supabase.from("reminders" as "profiles").delete().eq("pet_id" as "id", targetPetId).eq("kind" as "id", kind);
 
           if (formData.next_vaccination_reminder) {
-            await (supabase as any).from("reminders").insert({
+            await supabase.from("reminders" as "profiles").insert({
               owner_id: user.id,
               pet_id: targetPetId,
               kind,
               reason: "Vaccination/ Check-up Reminder",
               due_date: formData.next_vaccination_reminder,
-            });
+            } as Record<string, unknown>);
           }
         } catch (e) {
           // If the table isn't deployed yet, don't block pet save.

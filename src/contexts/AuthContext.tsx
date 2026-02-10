@@ -102,43 +102,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
       .from("profiles")
-      .select(`
-        id, user_id, display_name, legal_name, phone, avatar_url, bio,
-        gender_genre, orientation, dob, height, weight, weight_unit,
-        degree, school, major, affiliation, occupation,
-        pet_experience, experience_years, relationship_status,
-        has_car, languages, location_name, location_country, location_district,
-        is_verified, user_role, tier, subscription_status,
-        stars_count, mesh_alert_count, media_credits, family_slots,
-        onboarding_completed, owns_pets,
-        social_availability, availability_status,
-        show_gender, show_orientation, show_age, show_height, show_weight,
-        show_academic, show_affiliation, show_occupation, show_bio,
-        last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status,
-        social_album, prefs, map_visible
-      `)
+      .select(
+        "id, user_id, display_name, legal_name, phone, avatar_url, bio, gender_genre, orientation, dob, height, weight, weight_unit, degree, school, major, affiliation, occupation, pet_experience, experience_years, relationship_status, has_car, languages, location_name, location_country, location_district, is_verified, user_role, tier, subscription_status, stars_count, mesh_alert_count, media_credits, family_slots, onboarding_completed, owns_pets, social_availability, availability_status, show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status, social_album, prefs, map_visible" as "*"
+      )
       .eq("id", userId)
       .maybeSingle();
 
     if (!error && data) {
       let effectiveTier = data.tier || "free";
       let familyOwnerId: string | null = null;
-      const { data: family } = await (supabase as any)
-        .from("family_members")
-        .select("inviter_user_id")
-        .eq("invitee_user_id", userId)
-        .eq("status", "accepted")
-        .maybeSingle();
+      const { data: family } = await supabase
+        .from("family_members" as "profiles")
+        .select("inviter_user_id" as "*")
+        .eq("invitee_user_id" as "id", userId)
+        .eq("status" as "id", "accepted")
+        .maybeSingle() as unknown as { data: { inviter_user_id?: string } | null };
 
       if (family?.inviter_user_id) {
         familyOwnerId = family.inviter_user_id;
-        const { data: inviter } = await (supabase as any)
+        const { data: inviter } = await supabase
           .from("profiles")
           .select("tier")
           .eq("id", family.inviter_user_id)
-          .maybeSingle();
+          .maybeSingle() as unknown as { data: { tier?: string } | null };
         if (inviter?.tier) {
           effectiveTier = inviter.tier;
         }
@@ -232,15 +220,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Best-effort consent audit log. This will succeed when a session exists.
       if (consent?.acceptedAtIso) {
-        await (supabase as any)
-          .from("consent_logs")
+        await supabase
+          .from("consent_logs" as "profiles")
           .insert({
             user_id: data.user.id,
             consent_type: "terms_privacy",
             consent_version: consent.version,
             accepted_at: consent.acceptedAtIso,
             metadata: { source: "web_signup" },
-          })
+          } as Record<string, unknown>)
           .throwOnError()
           .catch(() => {
             // If email confirmation is required, the user may not have an active session yet.
@@ -265,7 +253,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const { data } = await supabase.auth.getUser();
           const uid = data?.user?.id;
           if (uid) {
-            await (supabase as any).from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+            await supabase.from("profiles").update({ last_login: new Date().toISOString() } as Record<string, unknown>).eq("id", uid);
           }
         }
         return { error: error as Error | null };
@@ -280,7 +268,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const { data } = await supabase.auth.getUser();
         const uid = data?.user?.id;
         if (uid) {
-          await (supabase as any).from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+          await supabase.from("profiles").update({ last_login: new Date().toISOString() } as Record<string, unknown>).eq("id", uid);
         }
       }
 

@@ -29,8 +29,8 @@ const Admin = () => {
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("verification_uploads")
+    const { data, error } = await supabase
+      .from("verification_uploads" as "profiles")
       .select(`
         id,
         user_id,
@@ -47,9 +47,9 @@ const Admin = () => {
           verification_comment,
           avatar_url
         )
-      `)
-      .eq("status", "pending")
-      .order("uploaded_at", { ascending: false });
+      ` as "*")
+      .eq("status" as "id", "pending")
+      .order("uploaded_at" as "id", { ascending: false });
 
     if (error) {
       console.warn("[Admin] Failed to load verification uploads:", error.message);
@@ -58,18 +58,18 @@ const Admin = () => {
       return;
     }
 
-    const mapped = ((data || []) as any[]).map((row: any) => ({
-      upload_id: row.id,
-      id: row.profiles?.id ?? row.user_id,
-      display_name: row.profiles?.display_name ?? null,
-      legal_name: row.profiles?.legal_name ?? null,
-      verification_status: row.profiles?.verification_status ?? null,
-      verification_comment: row.profiles?.verification_comment ?? null,
-      avatar_url: row.profiles?.avatar_url ?? null,
-      document_url: row.document_url,
-      selfie_url: row.selfie_url,
-      country: row.country,
-      document_type: row.document_type,
+    const mapped = ((data || []) as Record<string, unknown>[]).map((row: Record<string, unknown>) => ({
+      upload_id: row.id as string,
+      id: (row.profiles as Record<string, unknown> | null)?.id as string ?? row.user_id as string,
+      display_name: (row.profiles as Record<string, unknown> | null)?.display_name as string | null ?? null,
+      legal_name: (row.profiles as Record<string, unknown> | null)?.legal_name as string | null ?? null,
+      verification_status: (row.profiles as Record<string, unknown> | null)?.verification_status as string | null ?? null,
+      verification_comment: (row.profiles as Record<string, unknown> | null)?.verification_comment as string | null ?? null,
+      avatar_url: (row.profiles as Record<string, unknown> | null)?.avatar_url as string | null ?? null,
+      document_url: row.document_url as string | null,
+      selfie_url: row.selfie_url as string | null,
+      country: row.country as string | null,
+      document_type: row.document_type as string | null,
     }));
 
     setRows(mapped as VerificationRow[]);
@@ -112,15 +112,15 @@ const Admin = () => {
       })
       .eq("id", id);
     if (uploadId) {
-      await (supabase as any)
-        .from("verification_uploads")
+      await supabase
+        .from("verification_uploads" as "profiles")
         .update({
           status,
           reviewed_at: new Date().toISOString(),
           reviewed_by: profile?.id || null,
           rejection_reason: status === "rejected" ? comment[id] || null : null,
-        })
-        .eq("id", uploadId);
+        } as Record<string, unknown>)
+        .eq("id" as "created_at", uploadId);
     }
     if (target?.selfie_url || target?.document_url) {
       const paths = [target.selfie_url, target.document_url].filter(Boolean) as string[];

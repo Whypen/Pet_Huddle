@@ -258,7 +258,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     try {
       await supabase
         .from("map_alerts")
-        .update({ is_active: false } as any)
+        .update({ is_active: false } as Record<string, unknown>)
         .eq("id", alert.id)
         .eq("creator_id", user.id);
       toast.success("Alert removed");

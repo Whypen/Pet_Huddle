@@ -431,13 +431,13 @@ const Chats = () => {
           (profile.last_lat && profile.last_lng ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}` : "")
       );
       if (selectedNanny?.id) {
-        (supabase as any)
-          .from("sitter_profiles")
-          .select("hourly_rate")
-          .eq("user_id", selectedNanny.id)
+        supabase
+          .from("sitter_profiles" as "profiles")
+          .select("hourly_rate" as "*")
+          .eq("user_id" as "id", selectedNanny.id)
           .maybeSingle()
-          .then(({ data }: any) => {
-            setSitterHourlyRate(data?.hourly_rate || null);
+          .then(({ data }: { data: Record<string, unknown> | null }) => {
+            setSitterHourlyRate((data?.hourly_rate as number) || null);
           });
       }
       setServiceDate("");
@@ -530,7 +530,7 @@ const Chats = () => {
   useEffect(() => {
     const loadConversations = async () => {
       try {
-        const data = await getConversations() as any;
+        const data = await getConversations() as Record<string, unknown>;
         if (data && data.chats) {
           // Map backend data to our format
           // For now, we'll use mock data
@@ -785,9 +785,9 @@ const Chats = () => {
     setProfileSheetData(null);
     setProfileSheetLoading(true);
     try {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("profiles")
-        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role")
+        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role" as "*")
         .eq("id", userId)
         .maybeSingle();
       if (error) throw error;
@@ -1003,9 +1003,9 @@ const Chats = () => {
                             if (!ok) return;
                             try {
                               if (profile?.id) {
-                                await (supabase as any)
-                                  .from("waves")
-                                  .insert({ from_user_id: profile.id, to_user_id: p.id })
+                                await supabase
+                                  .from("waves" as "profiles")
+                                  .insert({ from_user_id: profile.id, to_user_id: p.id } as Record<string, unknown>)
                                   .throwOnError();
                               }
                               toast.success(t("Wave sent"));

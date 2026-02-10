@@ -43,7 +43,7 @@ const FounderMessage = ({ onClose }: FounderMessageProps) => {
     };
 
     fetchMessage();
-  }, [getFounderMessage]);
+  }, [getFounderMessage, t]);
 
   const handleClose = () => {
     localStorage.setItem("founder_message_shown", "true");

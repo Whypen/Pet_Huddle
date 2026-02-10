@@ -44,7 +44,7 @@ export const useUpsell = () => {
 
   const fetchQuotaSnapshot = useCallback(async (): Promise<QuotaSnapshot | null> => {
     if (!user) return null;
-    const r = await (supabase as any).rpc("get_quota_snapshot");
+    const r = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: unknown }>)("get_quota_snapshot");
     if (r.error) {
       console.warn("[useUpsell] get_quota_snapshot failed", r.error);
       return null;
@@ -157,11 +157,11 @@ export const useUpsell = () => {
     const tier = effectiveTier(snap);
     const totalSlots = tier === "gold" ? 1 : 0;
 
-    const { count } = await (supabase as any)
-      .from("family_members")
+    const { count } = await supabase
+      .from("family_members" as "profiles")
       .select("id", { count: "exact", head: true })
-      .eq("inviter_user_id", ownerId)
-      .eq("status", "accepted");
+      .eq("inviter_user_id" as "id", ownerId)
+      .eq("status" as "id", "accepted") as unknown as { count: number | null };
 
     const currentFamilyCount = count || 0;
 

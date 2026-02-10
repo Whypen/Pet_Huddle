@@ -114,7 +114,7 @@ const Discover = () => {
   const bumpDiscoverySeen = async (): Promise<boolean> => {
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
-      try { localStorage.setItem(discoveryKey, String(next)); } catch {}
+      try { localStorage.setItem(discoveryKey, String(next)); } catch { /* intentionally empty */ }
       return next;
     });
     return true;

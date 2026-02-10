@@ -24,4 +24,18 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // shadcn/ui generated components: allow mixed exports (variants, hooks, re-exports)
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  // Context files: export hooks + providers together (standard React pattern)
+  {
+    files: ["src/contexts/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

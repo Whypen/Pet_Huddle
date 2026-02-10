@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
-import { demoUsers, demoAlerts, demoFriendPins, DemoUser } from "@/lib/demoData";
+import { demoUsers, demoAlerts, demoFriendPins, DemoUser, DemoAlert } from "@/lib/demoData";
 import { useUpsell } from "@/hooks/useUpsell";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
@@ -276,7 +276,7 @@ const Map = () => {
   // Quota snapshot
   const loadQuotaSnapshot = useCallback(async () => {
     if (!user) return;
-    const res = await (supabase as any).rpc("get_quota_snapshot");
+    const res = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_quota_snapshot");
     if (res.error) return;
     const row = Array.isArray(res.data) ? (res.data[0] as Record<string, unknown> | undefined) : (res.data as Record<string, unknown> | null);
     const d = row && typeof row === "object" ? row : null;
@@ -343,8 +343,8 @@ const Map = () => {
 
     if (user) {
       console.log("[PIN] Saving to DB — set_user_location RPC...");
-      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
-      await (supabase as any).rpc("set_user_location", {
+      await supabase.from("profiles").update({ map_visible: true } as Record<string, unknown>).eq("id", user.id);
+      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("set_user_location", {
         p_lat: lat,
         p_lng: lng,
         p_pin_hours: 2,
@@ -452,7 +452,7 @@ const Map = () => {
     const newInvisible = !isInvisible;
     setIsInvisible(newInvisible);
     console.log(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
-    await (supabase as any).from("profiles").update({ is_visible: !newInvisible }).eq("id", user.id);
+    await supabase.from("profiles").update({ is_visible: !newInvisible } as Record<string, unknown>).eq("id", user.id);
     if (newInvisible) {
       toast.info("You are now invisible on the map");
     } else {
@@ -499,8 +499,9 @@ const Map = () => {
         .eq("is_active", true)
         .in("poi_type", ["veterinary", "pet_shop", "pet_grooming"]);
       if (error) throw error;
-      const clinics: VetClinic[] = (data || []).map((row: any) => {
-        const hours = typeof row.opening_hours === "string" ? row.opening_hours : "";
+      const clinics: VetClinic[] = (data || []).map((row) => {
+        const r = row as Record<string, unknown>;
+        const hours = typeof r.opening_hours === "string" ? r.opening_hours : "";
         const is24h = hours.toLowerCase().includes("24/7") || hours.toLowerCase().includes("24 hours");
         let isOpen: boolean | undefined;
         if (is24h) {
@@ -510,17 +511,17 @@ const Map = () => {
           isOpen = currentHour >= 8 && currentHour < 20;
         }
         return {
-          id: row.id,
-          name: row.name || "Vet / Pet Shop",
-          lat: row.latitude,
-          lng: row.longitude,
-          phone: row.phone || undefined,
+          id: r.id as string,
+          name: (r.name as string) || "Vet / Pet Shop",
+          lat: r.latitude as number,
+          lng: r.longitude as number,
+          phone: (r.phone as string) || undefined,
           openingHours: hours || undefined,
-          address: row.address || undefined,
+          address: (r.address as string) || undefined,
           rating: undefined,
           isOpen,
           is24h,
-          type: row.poi_type,
+          type: r.poi_type as string,
         };
       });
       setVetClinics(clinics);
@@ -733,7 +734,7 @@ const Map = () => {
 
     // Demo alerts (Event tab) — ALL clickable, open PinDetailModal
     if (showEvent) {
-      demoAlerts.forEach((demoAlert: any) => {
+      demoAlerts.forEach((demoAlert: DemoAlert) => {
         if (!demoAlert.location?.lng && !demoAlert.longitude) return;
         const lng = demoAlert.location?.lng ?? demoAlert.longitude;
         const lat = demoAlert.location?.lat ?? demoAlert.latitude;
@@ -830,7 +831,7 @@ const Map = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat != null && lng != null) {
-        const { data, error } = await (supabase as any).rpc("get_map_alerts_nearby", {
+        const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_map_alerts_nearby", {
           p_lat: lat,
           p_lng: lng,
           p_radius_m: viewRadiusMeters,
@@ -883,7 +884,7 @@ const Map = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat == null || lng == null) return;
-      const { data, error } = await (supabase as any).rpc("get_friend_pins_nearby", {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby", {
         p_lat: lat,
         p_lng: lng,
         p_radius_m: viewRadiusMeters,

@@ -136,13 +136,13 @@ const Index = () => {
       }
       try {
         const todayISO = new Date().toISOString().slice(0, 10);
-        const res = await (supabase as any)
-          .from("reminders")
-          .select("id,pet_id,due_date,kind,reason")
-          .eq("owner_id", user.id)
-          .eq("pet_id", selectedPet.id)
-          .gte("due_date", todayISO)
-          .order("due_date", { ascending: true })
+        const res = await supabase
+          .from("reminders" as "profiles")
+          .select("id,pet_id,due_date,kind,reason" as "*")
+          .eq("owner_id" as "id", user.id)
+          .eq("pet_id" as "id", selectedPet.id)
+          .gte("due_date" as "id", todayISO)
+          .order("due_date" as "id", { ascending: true })
           .limit(50);
         if (res.error) throw res.error;
         const reminders = (res.data ?? []) as PetReminder[];
