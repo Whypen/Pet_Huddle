@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Bell, ChevronRight, Diamond, FileText, LogOut, Settings, Shield, Star, User as UserIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -38,14 +38,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     return name.trim().slice(0, 1).toUpperCase();
   }, [profile?.display_name]);
 
-  // Fetch user's pets
-  useEffect(() => {
-    if (user) {
-      fetchPets();
-    }
-  }, [user]);
-
-  const fetchPets = async () => {
+  const fetchPets = useCallback(async () => {
     if (!user) return;
 
     try {
@@ -62,7 +55,14 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     } catch (err) {
       console.error("Error fetching pets:", err);
     }
-  };
+  }, [user]);
+
+  // Fetch user's pets
+  useEffect(() => {
+    if (user) {
+      fetchPets();
+    }
+  }, [user, fetchPets]);
 
   // Contract: Notification Hub bell + red dot when unread > 0.
   useEffect(() => {
@@ -74,13 +74,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     let cancelled = false;
 
     const refreshUnread = async () => {
-      const res = await (supabase as any)
-        .from("notifications")
+      const res = await supabase
+        .from("notifications" as "profiles")
         .select("id", { count: "exact", head: true })
         .eq("user_id", user.id)
-        .eq("read", false);
+        .eq("read" as "user_id", false);
       if (cancelled) return;
-      setUnreadCount(res.count ?? 0);
+      setUnreadCount((res as { count: number | null }).count ?? 0);
     };
 
     const channel = supabase

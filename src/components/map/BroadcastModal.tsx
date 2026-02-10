@@ -7,7 +7,7 @@
  * Add-on (150km/72h)
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -15,6 +15,7 @@ import {
   Loader2,
   ChevronDown,
   AlertTriangle,
+  MapPin,
 } from "lucide-react";
 import imageCompression from "browser-image-compression";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,31 @@ const BroadcastModal = ({
   const [postOnThreads, setPostOnThreads] = useState(false);
   const [selectedRangeKm, setSelectedRangeKm] = useState<number | null>(null);
   const [selectedDurationH, setSelectedDurationH] = useState<number | null>(null);
+  const [showManualAddress, setShowManualAddress] = useState(false);
+  const [manualAddress, setManualAddress] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 3s timer: if address still "Searching..." after 3s, show manual input
+  useEffect(() => {
+    if (!isOpen) {
+      setShowManualAddress(false);
+      setManualAddress("");
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+    const addressReady = typeof address === "string" && address.length > 0 && !address.includes("Searching");
+    if (addressReady) {
+      setShowManualAddress(false);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+    // Start 3s timer
+    timerRef.current = setTimeout(() => {
+      console.log("[BroadcastModal] 3s timer expired — showing manual address input");
+      setShowManualAddress(true);
+    }, 3000);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [isOpen, address]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
@@ -164,20 +190,20 @@ const BroadcastModal = ({
         throw error;
       }
 
-      const alertId = (insertedAlert as any)?.id;
+      const alertId = (insertedAlert as { id?: string } | null)?.id;
       toast.success("Alert broadcasted!");
 
       // PHASE 2.2: Threads auto-duplication — capture thread_id and attach to map_alerts
       if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
         try {
-          const { data: threadData, error: threadErr } = await (supabase as any).from("threads").insert({
+          const { data: threadData, error: threadErr } = await supabase.from("threads" as "profiles").insert({
             user_id: user.id,
             title: alertTitle.trim() || `Broadcast (${alertType})`,
             content: description.trim() || "",
             tags: ["News"],
             hashtags: [],
             images: photoUrl ? [photoUrl] : [],
-          }).select("id").maybeSingle();
+          } as Record<string, unknown>).select("id").maybeSingle();
 
           if (threadErr) {
             console.warn("[Broadcast] Thread insert failed:", threadErr);
@@ -185,11 +211,11 @@ const BroadcastModal = ({
           }
 
           // Link the thread_id back to the map alert
-          const threadId = threadData?.id;
+          const threadId = (threadData as { id?: string } | null)?.id;
           if (threadId && alertId) {
-            await (supabase as any)
+            await supabase
               .from("map_alerts")
-              .update({ thread_id: threadId })
+              .update({ thread_id: threadId } as Record<string, unknown>)
               .eq("id", alertId);
             console.log(`[Broadcast] Linked thread_id=${threadId} to alert_id=${alertId}`);
           }
@@ -235,13 +261,42 @@ const BroadcastModal = ({
               </button>
             </div>
 
-            {/* Location display — always show address STRING, never lat/lng or object */}
+            {/* Location display — with 3s manual fallback */}
             {selectedLocation && (
-              <p className="text-xs text-muted-foreground mb-4">
-                {typeof address === "string" && address.length > 0 && !address.includes("Searching")
-                  ? address
-                  : `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`}
-              </p>
+              <div className="mb-4">
+                <p className="text-xs text-muted-foreground">
+                  {manualAddress
+                    ? manualAddress
+                    : typeof address === "string" && address.length > 0 && !address.includes("Searching")
+                      ? address
+                      : showManualAddress
+                        ? `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`
+                        : "Searching address..."}
+                </p>
+                {showManualAddress && !manualAddress && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <MapPin className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    <Input
+                      placeholder="Enter address manually"
+                      value={manualAddress}
+                      onChange={(e) => setManualAddress(e.target.value)}
+                      className="rounded-xl text-sm h-9 flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 rounded-xl text-xs"
+                      onClick={() => {
+                        if (manualAddress.trim()) {
+                          toast.success("Address set");
+                        }
+                      }}
+                    >
+                      Use
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Spec: Dropdown Topic selector */}

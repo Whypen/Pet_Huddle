@@ -99,7 +99,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     if (!alert) return;
     const alertTitle = typeof alert.title === "string" ? alert.title : "Huddle Alert";
     const alertDesc = typeof alert.description === "string" ? alert.description : "";
-    const shareUrl = `https://huddle-app-preview-link.com/pins/${alert.id}`;
+    const shareUrl = `https://huddle-preview.vercel.app/pin/${alert.id}`;
     const shareTitle = "Check this out on Huddle!";
     const shareText = `${alertTitle} - ${alertDesc} | View more on Huddle!`.trim();
 
@@ -132,11 +132,38 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     if (alert) setSupportCount(alert.support_count || 0);
   }, [alert]);
 
+  // Support toggle: Single tap = +1. Tap again (when liked) = -1.
   const handleSupport = async () => {
     if (!user || !alert) {
       toast.error("Please login to support alerts");
       return;
     }
+
+    if (liked) {
+      // Already liked → remove support
+      try {
+        await supabase
+          .from("alert_interactions")
+          .delete()
+          .eq("alert_id", alert.id)
+          .eq("user_id", user.id)
+          .eq("interaction_type", "support");
+
+        await supabase
+          .from("map_alerts")
+          .update({ support_count: Math.max(0, (supportCount || 1) - 1) } as Record<string, unknown>)
+          .eq("id", alert.id);
+
+        setLiked(false);
+        setSupportCount((prev) => Math.max(0, prev - 1));
+        onRefresh();
+      } catch {
+        toast.error("Failed to remove support");
+      }
+      return;
+    }
+
+    // Not yet liked → add support
     try {
       await supabase.from("alert_interactions").insert({
         alert_id: alert.id,
@@ -144,10 +171,9 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         interaction_type: "support",
       });
 
-      // Increment support_count in DB
-      await (supabase as any)
+      await supabase
         .from("map_alerts")
-        .update({ support_count: (alert.support_count || 0) + 1 })
+        .update({ support_count: (supportCount || 0) + 1 } as Record<string, unknown>)
         .eq("id", alert.id);
 
       setLiked(true);
@@ -188,10 +214,10 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         .eq("id", alert.id)
         .maybeSingle();
 
-      if (updatedAlert && (updatedAlert as any).report_count > 10) {
+      if (updatedAlert && (updatedAlert as { report_count?: number }).report_count && (updatedAlert as { report_count: number }).report_count > 10) {
         await supabase
           .from("map_alerts")
-          .update({ is_active: false } as any)
+          .update({ is_active: false } as Record<string, unknown>)
           .eq("id", alert.id);
         toast.success("Alert has been auto-hidden due to multiple reports");
         onClose();

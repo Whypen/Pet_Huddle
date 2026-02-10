@@ -10,7 +10,7 @@ interface FounderMessageProps {
   onClose: () => void;
 }
 
-export const FounderMessage = ({ onClose }: FounderMessageProps) => {
+const FounderMessage = ({ onClose }: FounderMessageProps) => {
   const { t } = useLanguage();
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -19,8 +19,8 @@ export const FounderMessage = ({ onClose }: FounderMessageProps) => {
   useEffect(() => {
     const fetchMessage = async () => {
       try {
-        const result = await getFounderMessage() as any;
-        if (result.success && result.data?.message) {
+        const result = (await getFounderMessage()) as { success?: boolean; data?: { message?: string } };
+        if (result?.success && result.data?.message) {
           setMessage(result.data.message);
         } else {
           // Default message if API fails

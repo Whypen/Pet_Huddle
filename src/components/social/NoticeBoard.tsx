@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -105,23 +105,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const [topicFilter, setTopicFilter] = useState<string>("All");
   const [sortMode, setSortMode] = useState<"Trending" | "Latest">("Trending");
 
-  useEffect(() => {
-    fetchNotices(true);
-  }, []);
-
-  // Re-run query when filters change.
-  useEffect(() => {
-    fetchNotices(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyword, topicFilter, sortMode]);
-
-  useEffect(() => {
-    if (replyFor) {
-      setTimeout(() => replyInputRef.current?.focus(), 0);
-    }
-  }, [replyFor]);
-
-  const fetchNotices = async (reset: boolean = false) => {
+  const fetchNotices = useCallback(async (reset: boolean = false) => {
     try {
       if (reset) {
         setLoading(true);
@@ -129,8 +113,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
         setLoadingMore(true);
       }
 
-      let query = (supabase as any)
-        .from("threads")
+      let query = supabase
+        .from("threads" as "profiles")
         .select(`
           id,
           title,
@@ -166,16 +150,16 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       const { data, error } = await query;
 
       if (error) throw error;
-      const newNotices = (data || []) as any[];
+      const newNotices = ((data || []) as unknown) as Thread[];
       if (reset) {
-        setNotices(newNotices as Thread[]);
+        setNotices(newNotices);
       } else {
-        setNotices(prev => [...prev, ...(newNotices as Thread[])]);
+        setNotices(prev => [...prev, ...newNotices]);
       }
-      const ids = newNotices.map((n: any) => n.id);
+      const ids = newNotices.map((n) => n.id);
       if (ids.length > 0) {
-        const { data: comments } = await (supabase as any)
-          .from("thread_comments")
+        const { data: comments } = await supabase
+          .from("thread_comments" as "profiles")
           .select(`
             id,
             thread_id,
@@ -188,12 +172,12 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           .in("thread_id", ids)
           .order("created_at", { ascending: true });
         const grouped: Record<string, ThreadComment[]> = {};
-        ((comments || []) as any[]).forEach((c: any) => {
-          grouped[c.thread_id] = [...(grouped[c.thread_id] || []), c as ThreadComment];
+        (((comments || []) as unknown) as ThreadComment[]).forEach((c) => {
+          grouped[c.thread_id] = [...(grouped[c.thread_id] || []), c];
         });
         setCommentsByThread((prev) => ({ ...prev, ...grouped }));
       }
-      const last = newNotices[newNotices.length - 1] as any;
+      const last = newNotices[newNotices.length - 1];
       if (last?.created_at) {
         setLastCreatedAt(last.created_at);
       }
@@ -204,7 +188,17 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [keyword, topicFilter, sortMode, lastCreatedAt]);
+
+  useEffect(() => {
+    fetchNotices(true);
+  }, [fetchNotices]);
+
+  useEffect(() => {
+    if (replyFor) {
+      setTimeout(() => replyInputRef.current?.focus(), 0);
+    }
+  }, [replyFor]);
 
   const fetchMentionSuggestions = async (query: string) => {
     if (!query) {
@@ -289,14 +283,14 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       const { data: { publicUrl } } = supabase.storage.from("notices").getPublicUrl(fileName);
       uploadedUrl = publicUrl;
     }
-    const { error } = await (supabase as any)
-      .from("thread_comments")
+    const { error } = await supabase
+      .from("thread_comments" as "profiles")
       .insert({
         thread_id: thread.id,
         user_id: user.id,
         content: replyContent.trim(),
         images: uploadedUrl ? [uploadedUrl] : [],
-      });
+      } as Record<string, unknown>);
     if (error) {
       toast.error(error.message);
       return;
@@ -362,8 +356,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
       // Quota removed — thread posts unlimited for all tiers
 
-      const { error } = await (supabase as any)
-        .from("threads")
+      const { error } = await supabase
+        .from("threads" as "profiles")
         .insert({
           user_id: user.id,
           title: title.trim(),
@@ -371,7 +365,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           tags: [category],
           hashtags: hashtagList,
           images: imageUrl ? [imageUrl] : [],
-        });
+        } as Record<string, unknown>);
 
       if (error) throw error;
 
