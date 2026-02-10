@@ -360,13 +360,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
       const hashtagList = hashtags.slice(0, 3);
 
-      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-        action_type: "thread_post",
-      });
-      if (allowed === false) {
-        openThreadQuotaDialog();
-        return;
-      }
+      // Quota removed — thread posts unlimited for all tiers
 
       const { error } = await (supabase as any)
         .from("threads")

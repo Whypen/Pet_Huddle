@@ -110,19 +110,8 @@ const Discover = () => {
     }
   }, [discoveryKey]);
 
+  // Quota removed — all tiers unlimited
   const bumpDiscoverySeen = async (): Promise<boolean> => {
-    if (isPremium) return true;
-    try {
-      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-        action_type: "discovery_profile",
-      });
-      if (allowed === false) {
-        setIsPremiumOpen(true);
-        return false;
-      }
-    } catch {
-      // Fail-open for UX
-    }
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
       try { localStorage.setItem(discoveryKey, String(next)); } catch {}
@@ -450,18 +439,7 @@ const Discover = () => {
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        const ok = await checkStarsAvailable();
-                        if (!ok) {
-                          toast.error(t("Buy a star pack to immediately chat with the user"));
-                          return;
-                        }
-                        const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
-                          action_type: "star",
-                        });
-                        if (allowed === false) {
-                          toast.error(t("No stars remaining"));
-                          return;
-                        }
+                        // Quota removed — stars unlimited for all tiers
                         navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
                       }}
                       className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"

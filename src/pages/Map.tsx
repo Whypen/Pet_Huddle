@@ -116,64 +116,9 @@ type MapAlertsNearbyRow = {
 };
 
 // ==========================================================================
-// Overpass API: Fetch vets + pet shops with opening_hours
+// POI Cache: Read vets + pet shops from poi_locations table (NO live Overpass)
+// Harvested monthly via Edge Function + pg_cron
 // ==========================================================================
-async function fetchOverpassVets(lat: number, lng: number): Promise<VetClinic[]> {
-  try {
-    const radius = 50000; // 50km
-    const query = `
-      [out:json][timeout:15];
-      (
-        node["amenity"="veterinary"](around:${radius},${lat},${lng});
-        node["shop"="pet"](around:${radius},${lat},${lng});
-      );
-      out body;
-    `;
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: `data=${encodeURIComponent(query)}`,
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data.elements) return [];
-
-    return data.elements
-      .filter((el: any) => el.lat && el.lon)
-      .map((el: any) => {
-        const tags = el.tags || {};
-        const hours = tags.opening_hours || "";
-        const isVet = tags.amenity === "veterinary";
-        const is24h = hours.toLowerCase().includes("24/7") || hours.toLowerCase().includes("24 hours");
-        // Simple open/closed heuristic based on opening_hours string
-        let isOpen: boolean | undefined;
-        if (is24h) {
-          isOpen = true;
-        } else if (hours) {
-          // Try basic check — if hours exist, mark as open during typical hours
-          const currentHour = new Date().getHours();
-          isOpen = currentHour >= 8 && currentHour < 20;
-        }
-
-        return {
-          id: `osm-${el.id}`,
-          name: tags.name || (isVet ? "Veterinary Clinic" : "Pet Shop"),
-          lat: el.lat,
-          lng: el.lon,
-          phone: tags.phone || tags["contact:phone"] || undefined,
-          openingHours: hours || undefined,
-          address: [tags["addr:street"], tags["addr:housenumber"], tags["addr:city"]].filter(Boolean).join(", ") || undefined,
-          rating: undefined,
-          isOpen,
-          is24h,
-          type: isVet ? "veterinary" : "pet_shop",
-        } as VetClinic;
-      });
-  } catch (e) {
-    console.warn("[Map] Overpass vet fetch failed:", e);
-    return [];
-  }
-}
 
 // ==========================================================================
 // Main Map Component
@@ -376,43 +321,44 @@ const Map = () => {
   };
 
   // ==========================================================================
-  // Fetch: Overpass vet/pet shops
+  // Fetch: Vet/pet shops from poi_locations cache (NO live Overpass calls)
+  // Data is harvested monthly by Edge Function + pg_cron
   // ==========================================================================
   const fetchVetClinics = useCallback(async () => {
     try {
-      // Try Overpass API first
-      const lat = userLocation?.lat ?? 22.2828;
-      const lng = userLocation?.lng ?? 114.1583;
-      const overpassClinics = await fetchOverpassVets(lat, lng);
-
-      if (overpassClinics.length > 0) {
-        setVetClinics(overpassClinics);
-        return;
-      }
-
-      // Fallback: poi_locations table
       const { data, error } = await supabase
         .from("poi_locations")
         .select("id, name, latitude, longitude, phone, opening_hours, address, poi_type, is_active")
         .eq("is_active", true)
-        .in("poi_type", ["veterinary", "pet_shop"]);
+        .in("poi_type", ["veterinary", "pet_shop", "pet_grooming"]);
       if (error) throw error;
-      const clinics: VetClinic[] = (data || []).map((row: any) => ({
-        id: row.id,
-        name: row.name || "Vet / Pet Shop",
-        lat: row.latitude,
-        lng: row.longitude,
-        phone: row.phone || undefined,
-        openingHours: row.opening_hours || undefined,
-        address: row.address || undefined,
-        rating: undefined,
-        isOpen: undefined,
-        is24h: typeof row.opening_hours === "string" && row.opening_hours.toLowerCase().includes("24"),
-        type: row.poi_type,
-      }));
+      const clinics: VetClinic[] = (data || []).map((row: any) => {
+        const hours = typeof row.opening_hours === "string" ? row.opening_hours : "";
+        const is24h = hours.toLowerCase().includes("24/7") || hours.toLowerCase().includes("24 hours");
+        let isOpen: boolean | undefined;
+        if (is24h) {
+          isOpen = true;
+        } else if (hours) {
+          const currentHour = new Date().getHours();
+          isOpen = currentHour >= 8 && currentHour < 20;
+        }
+        return {
+          id: row.id,
+          name: row.name || "Vet / Pet Shop",
+          lat: row.latitude,
+          lng: row.longitude,
+          phone: row.phone || undefined,
+          openingHours: hours || undefined,
+          address: row.address || undefined,
+          rating: undefined,
+          isOpen,
+          is24h,
+          type: row.poi_type,
+        };
+      });
       setVetClinics(clinics);
     } catch (error) {
-      console.error("Error fetching vet/pet-shop:", error);
+      console.error("Error fetching vet/pet-shop from cache:", error);
       // Last resort: demo data
       setVetClinics([
         { id: "vet-1", name: t("map.vet.hk_clinic"), lat: 22.2855, lng: 114.1577, is24h: true, isOpen: true, rating: 4.8, type: "veterinary" },
@@ -421,7 +367,7 @@ const Map = () => {
         { id: "vet-4", name: t("map.vet.kowloon"), lat: 22.3018, lng: 114.1695, is24h: false, isOpen: true, rating: 4.5, type: "pet_shop" },
       ]);
     }
-  }, [t, userLocation?.lat, userLocation?.lng]);
+  }, [t]);
 
   // ==========================================================================
   // Map Initialization
@@ -1140,20 +1086,18 @@ const Map = () => {
                 <p>{t("Timely reflection of any changes of operations of the Vet Clinic is not guaranteed")}</p>
               </div>
 
-              {/* Spec: Blue "Call" button */}
-              <Button
-                onClick={() => {
-                  if (selectedVet.phone) {
+              {/* Spec: Blue "Call" button — HIDDEN when phone is NULL */}
+              {selectedVet.phone && (
+                <Button
+                  onClick={() => {
                     window.open(`tel:${selectedVet.phone}`);
-                  } else {
-                    toast.info(t("Phone number not available"));
-                  }
-                }}
-                className="w-full h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90 text-white"
-              >
-                <Phone className="w-5 h-5 mr-2" />
-                {t("map.call_now")}
-              </Button>
+                  }}
+                  className="w-full h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90 text-white"
+                >
+                  <Phone className="w-5 h-5 mr-2" />
+                  {t("map.call_now")}
+                </Button>
+              )}
             </motion.div>
           </motion.div>
         )}

@@ -34,15 +34,21 @@ Deno.serve(async (req: Request) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Overpass QL query: fetch veterinary clinics and pet shops within Hong Kong bbox
-    // Uses [out:json] for JSON response, [timeout:60] to prevent hanging
+    // Overpass QL query: fetch veterinary clinics, pet shops, pet grooming within Hong Kong bbox
+    // Expanded coverage: amenity=veterinary, healthcare:speciality=veterinary,
+    // shop=pet, shop=pet_grooming
+    // Uses [out:json] for JSON response, [timeout:90] to prevent hanging
     const query = `
-      [out:json][timeout:60];
+      [out:json][timeout:90];
       (
         node["amenity"="veterinary"](${HK_BBOX});
         way["amenity"="veterinary"](${HK_BBOX});
+        node["healthcare:speciality"="veterinary"](${HK_BBOX});
+        way["healthcare:speciality"="veterinary"](${HK_BBOX});
         node["shop"="pet"](${HK_BBOX});
         way["shop"="pet"](${HK_BBOX});
+        node["shop"="pet_grooming"](${HK_BBOX});
+        way["shop"="pet_grooming"](${HK_BBOX});
       );
       out center;
     `;
@@ -72,8 +78,9 @@ Deno.serve(async (req: Request) => {
         if (!lat || !lon) return null;
 
         const tags = el.tags || {};
-        const isVet = tags.amenity === "veterinary";
-        const name = tags.name || (isVet ? "Veterinary Clinic" : "Pet Shop");
+        const isVet = tags.amenity === "veterinary" || tags["healthcare:speciality"] === "veterinary";
+        const isGrooming = tags.shop === "pet_grooming";
+        const name = tags.name || (isVet ? "Veterinary Clinic" : isGrooming ? "Pet Grooming" : "Pet Shop");
         const address =
           tags["addr:full"] ||
           [tags["addr:street"], tags["addr:housenumber"]].filter(Boolean).join(" ") ||
@@ -83,14 +90,14 @@ Deno.serve(async (req: Request) => {
 
         return {
           osm_id: `${el.type}_${el.id}`,
-          poi_type: isVet ? "veterinary" : "pet_shop",
+          poi_type: isVet ? "veterinary" : isGrooming ? "pet_grooming" : "pet_shop",
           name,
           latitude: lat,
           longitude: lon,
           address,
           phone,
           opening_hours: openingHours,
-          active: true,
+          is_active: true,
           last_harvested_at: new Date().toISOString(),
         };
       })
@@ -109,7 +116,7 @@ Deno.serve(async (req: Request) => {
     const { data: existing } = await supabase
       .from("poi_locations")
       .select("osm_id")
-      .eq("active", true);
+      .eq("is_active", true);
 
     const existingIds = new Set((existing || []).map((r: { osm_id: string }) => r.osm_id));
     const newIds = new Set(records.map((r: { osm_id: string }) => r.osm_id));
@@ -119,7 +126,7 @@ Deno.serve(async (req: Request) => {
     if (toDeactivate.length > 0) {
       await supabase
         .from("poi_locations")
-        .update({ active: false })
+        .update({ is_active: false })
         .in("osm_id", toDeactivate);
       console.log(`[overpass-harvest] Deactivated ${toDeactivate.length} stale records`);
     }

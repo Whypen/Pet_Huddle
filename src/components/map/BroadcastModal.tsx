@@ -166,21 +166,16 @@ const BroadcastModal = ({
 
       toast.success("Alert broadcasted!");
 
-      // Post on Threads (Stray/Lost only)
+      // Post on Threads (Stray/Lost only) — quota removed, unlimited for all tiers
       if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
-        const quota = await (supabase as any).rpc("check_and_increment_quota", { action_type: "thread_post" });
-        if (quota.data === true) {
-          await (supabase as any).from("threads").insert({
-            user_id: user.id,
-            title: alertTitle.trim() || `Broadcast (${alertType})`,
-            content: description.trim() || "",
-            tags: ["News"],
-            hashtags: [],
-            images: photoUrl ? [photoUrl] : [],
-          });
-        } else {
-          toast.info("Thread post limit reached. Your broadcast is still live.");
-        }
+        await (supabase as any).from("threads").insert({
+          user_id: user.id,
+          title: alertTitle.trim() || `Broadcast (${alertType})`,
+          content: description.trim() || "",
+          tags: ["News"],
+          hashtags: [],
+          images: photoUrl ? [photoUrl] : [],
+        });
       }
 
       handleClose();
