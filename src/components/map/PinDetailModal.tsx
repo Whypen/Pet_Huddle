@@ -57,6 +57,7 @@ interface MapAlert {
   range_meters?: number | null;
   creator_id?: string | null;
   has_thread?: boolean;
+  thread_id?: string | null;
   creator: {
     display_name: string | null;
     avatar_url: string | null;
@@ -93,18 +94,19 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     return `${days}d ago`;
   };
 
-  // Native Share API with clipboard fallback
+  // Native Share API (WhatsApp, IG, FB etc.) with clipboard fallback
   const handleShare = async () => {
     if (!alert) return;
     const alertTitle = typeof alert.title === "string" ? alert.title : "Huddle Alert";
     const alertDesc = typeof alert.description === "string" ? alert.description : "";
-    const shareText = `Check out this ${alert.alert_type} alert on Huddle! ${alertDesc}`.trim();
-    const shareUrl = window.location.href;
+    const shareUrl = `https://huddle-app-preview-link.com/pins/${alert.id}`;
+    const shareTitle = "Check this out on Huddle!";
+    const shareText = `${alertTitle} - ${alertDesc} | View more on Huddle!`.trim();
 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `Huddle Alert: ${alertTitle}`,
+          title: shareTitle,
           text: shareText,
           url: shareUrl,
         });
@@ -115,7 +117,7 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
     } else {
       // Fallback: Copy link to clipboard
       try {
-        await navigator.clipboard.writeText(shareUrl);
+        await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
         toast.success("Link copied to clipboard!");
       } catch {
         toast.error("Failed to copy link");
@@ -368,9 +370,14 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  // Deep-link: if alert has a thread, navigate with alert ID filter
-                  const threadParam = alert.id ? `?alert=${alert.id}` : "";
-                  navigate(`/threads${threadParam}`);
+                  // Deep-link: if alert has a thread_id, go directly to that thread
+                  if (alert.thread_id) {
+                    navigate(`/threads?thread=${alert.thread_id}`);
+                  } else {
+                    // Fallback: navigate with alert ID filter
+                    const threadParam = alert.id ? `?alert=${alert.id}` : "";
+                    navigate(`/threads${threadParam}`);
+                  }
                 }}
                 className="rounded-full px-4 h-9 flex items-center gap-1.5 text-sm font-medium"
               >

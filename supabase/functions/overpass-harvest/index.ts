@@ -35,10 +35,13 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Overpass QL query: fetch veterinary clinics, pet shops, pet grooming within Hong Kong bbox
-    // Expanded coverage v3:
+    // Expanded coverage v4:
     //   amenity=veterinary, healthcare=veterinary,
     //   healthcare:speciality=veterinary (standalone + on clinic nodes),
-    //   shop=pet, shop=pet_grooming
+    //   shop=pet, shop=pet_grooming,
+    //   office=government + government=veterinary (AFCD/Gov clinics),
+    //   shop=veterinary (common HK mis-tagging),
+    //   animal_shelter=yes (SPCA/rescue vets)
     // Uses [out:json] for JSON response, [timeout:90] to prevent hanging
     const query = `
       [out:json][timeout:90];
@@ -51,6 +54,12 @@ Deno.serve(async (req: Request) => {
         way["healthcare:speciality"="veterinary"](${HK_BBOX});
         node["healthcare"="clinic"]["healthcare:speciality"="veterinary"](${HK_BBOX});
         way["healthcare"="clinic"]["healthcare:speciality"="veterinary"](${HK_BBOX});
+        node["office"="government"]["government"="veterinary"](${HK_BBOX});
+        way["office"="government"]["government"="veterinary"](${HK_BBOX});
+        node["shop"="veterinary"](${HK_BBOX});
+        way["shop"="veterinary"](${HK_BBOX});
+        node["animal_shelter"="yes"](${HK_BBOX});
+        way["animal_shelter"="yes"](${HK_BBOX});
         node["shop"="pet"](${HK_BBOX});
         way["shop"="pet"](${HK_BBOX});
         node["shop"="pet_grooming"](${HK_BBOX});
@@ -84,9 +93,10 @@ Deno.serve(async (req: Request) => {
         if (!lat || !lon) return null;
 
         const tags = el.tags || {};
-        const isVet = tags.amenity === "veterinary" || tags.healthcare === "veterinary" || tags["healthcare:speciality"] === "veterinary";
+        const isVet = tags.amenity === "veterinary" || tags.healthcare === "veterinary" || tags["healthcare:speciality"] === "veterinary" || (tags.office === "government" && tags.government === "veterinary") || tags.shop === "veterinary";
+        const isShelter = tags.animal_shelter === "yes";
         const isGrooming = tags.shop === "pet_grooming";
-        const name = tags.name || (isVet ? "Veterinary Clinic" : isGrooming ? "Pet Grooming" : "Pet Shop");
+        const name = tags.name || (isVet ? "Veterinary Clinic" : isShelter ? "Animal Shelter" : isGrooming ? "Pet Grooming" : "Pet Shop");
         const address =
           tags["addr:full"] ||
           [tags["addr:street"], tags["addr:housenumber"]].filter(Boolean).join(" ") ||
@@ -96,7 +106,7 @@ Deno.serve(async (req: Request) => {
 
         return {
           osm_id: `${el.type}_${el.id}`,
-          poi_type: isVet ? "veterinary" : isGrooming ? "pet_grooming" : "pet_shop",
+          poi_type: isVet ? "veterinary" : isShelter ? "veterinary" : isGrooming ? "pet_grooming" : "pet_shop",
           name,
           latitude: lat,
           longitude: lon,
