@@ -148,7 +148,7 @@ const HazardScanner = () => {
     if (!user) return;
 
     try {
-      const { error } = await supabase.from("hazard_identifications").insert({
+      const { error } = await (supabase as any).from("hazard_identifications").insert({
         user_id: user.id,
         image_url: imageUrl,
         object_identified: scanResult.object,

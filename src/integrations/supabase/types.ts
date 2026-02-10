@@ -60,64 +60,6 @@ export type Database = {
           },
         ]
       }
-      chat_messages: {
-        Row: {
-          id: string
-          room_id: string
-          sender_id: string
-          content: string
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          room_id: string
-          sender_id: string
-          content: string
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          room_id?: string
-          sender_id?: string
-          content?: string
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "chat_messages_sender_id_fkey"
-            columns: ["sender_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      chat_room_members: {
-        Row: {
-          room_id: string
-          user_id: string
-          created_at: string | null
-        }
-        Insert: {
-          room_id: string
-          user_id: string
-          created_at?: string | null
-        }
-        Update: {
-          room_id?: string
-          user_id?: string
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "chat_room_members_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       map_alerts: {
         Row: {
           alert_type: string
@@ -217,141 +159,10 @@ export type Database = {
           },
         ]
       }
-      scan_rate_limits: {
-        Row: {
-          id: string
-          user_id: string
-          scan_timestamp: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          scan_timestamp?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          scan_timestamp?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "scan_rate_limits_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sitter_profiles: {
-        Row: {
-          id: string
-          user_id: string
-          stripe_connect_account_id: string
-          onboarding_complete: boolean | null
-          payouts_enabled: boolean | null
-          charges_enabled: boolean | null
-          hourly_rate: number | null
-          bio: string | null
-          services: Json | null
-          availability: Json | null
-          rating: number | null
-          total_bookings: number | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          stripe_connect_account_id: string
-          onboarding_complete?: boolean | null
-          payouts_enabled?: boolean | null
-          charges_enabled?: boolean | null
-          hourly_rate?: number | null
-          bio?: string | null
-          services?: Json | null
-          availability?: Json | null
-          rating?: number | null
-          total_bookings?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          stripe_connect_account_id?: string
-          onboarding_complete?: boolean | null
-          payouts_enabled?: boolean | null
-          charges_enabled?: boolean | null
-          hourly_rate?: number | null
-          bio?: string | null
-          services?: Json | null
-          availability?: Json | null
-          rating?: number | null
-          total_bookings?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sitter_profiles_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      triage_cache: {
-        Row: {
-          id: string
-          image_hash: string
-          object_identified: string | null
-          is_hazard: boolean | null
-          hazard_type: string | null
-          toxicity_level: string | null
-          immediate_action: string | null
-          ai_response: Json | null
-          hit_count: number | null
-          last_accessed_at: string | null
-          expires_at: string | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          image_hash: string
-          object_identified?: string | null
-          is_hazard?: boolean | null
-          hazard_type?: string | null
-          toxicity_level?: string | null
-          immediate_action?: string | null
-          ai_response?: Json | null
-          hit_count?: number | null
-          last_accessed_at?: string | null
-          expires_at?: string | null
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          image_hash?: string
-          object_identified?: string | null
-          is_hazard?: boolean | null
-          hazard_type?: string | null
-          toxicity_level?: string | null
-          immediate_action?: string | null
-          ai_response?: Json | null
-          hit_count?: number | null
-          last_accessed_at?: string | null
-          expires_at?: string | null
-          created_at?: string | null
-        }
-        Relationships: []
-      }
       pets: {
         Row: {
           bio: string | null
           breed: string | null
-          clinic_name: string | null
           created_at: string | null
           dob: string | null
           gender: string | null
@@ -361,8 +172,6 @@ export type Database = {
           medications: Json | null
           microchip_id: string | null
           name: string
-          neutered_spayed: boolean | null
-          next_vaccination_reminder: string | null
           owner_id: string
           photo_url: string | null
           routine: string | null
@@ -370,8 +179,6 @@ export type Database = {
           temperament: string[] | null
           updated_at: string | null
           vaccinations: Json | null
-          preferred_vet: string | null
-          phone_no: string | null
           vet_contact: string | null
           weight: number | null
           weight_unit: string | null
@@ -379,7 +186,6 @@ export type Database = {
         Insert: {
           bio?: string | null
           breed?: string | null
-          clinic_name?: string | null
           created_at?: string | null
           dob?: string | null
           gender?: string | null
@@ -389,8 +195,6 @@ export type Database = {
           medications?: Json | null
           microchip_id?: string | null
           name: string
-          neutered_spayed?: boolean | null
-          next_vaccination_reminder?: string | null
           owner_id: string
           photo_url?: string | null
           routine?: string | null
@@ -398,8 +202,6 @@ export type Database = {
           temperament?: string[] | null
           updated_at?: string | null
           vaccinations?: Json | null
-          preferred_vet?: string | null
-          phone_no?: string | null
           vet_contact?: string | null
           weight?: number | null
           weight_unit?: string | null
@@ -407,7 +209,6 @@ export type Database = {
         Update: {
           bio?: string | null
           breed?: string | null
-          clinic_name?: string | null
           created_at?: string | null
           dob?: string | null
           gender?: string | null
@@ -417,8 +218,6 @@ export type Database = {
           medications?: Json | null
           microchip_id?: string | null
           name?: string
-          neutered_spayed?: boolean | null
-          next_vaccination_reminder?: string | null
           owner_id?: string
           photo_url?: string | null
           routine?: string | null
@@ -426,8 +225,6 @@ export type Database = {
           temperament?: string[] | null
           updated_at?: string | null
           vaccinations?: Json | null
-          preferred_vet?: string | null
-          phone_no?: string | null
           vet_contact?: string | null
           weight?: number | null
           weight_unit?: string | null
@@ -465,18 +262,10 @@ export type Database = {
           height: number | null
           id: string
           is_verified: boolean | null
-          verified: boolean | null
-          verification_status: string | null
-          verification_comment: string | null
-          verification_document_url: string | null
           languages: string[] | null
           legal_name: string | null
           location_name: string | null
-          last_lat: number | null
-          last_lng: number | null
           major: string | null
-          occupation: string | null
-          orientation: string | null
           onboarding_completed: boolean | null
           owns_pets: boolean | null
           pet_experience: string[] | null
@@ -489,16 +278,8 @@ export type Database = {
           show_bio: boolean | null
           show_gender: boolean | null
           show_height: boolean | null
-          show_orientation: boolean | null
-          show_occupation: boolean | null
           show_weight: boolean | null
           social_availability: boolean | null
-          stars_count: number | null
-          mesh_alert_count: number | null
-          media_credits: number | null
-          family_slots: number | null
-          tier: string | null
-          subscription_status: string | null
           updated_at: string | null
           user_role: string | null
           weight: number | null
@@ -519,18 +300,10 @@ export type Database = {
           height?: number | null
           id: string
           is_verified?: boolean | null
-          verified?: boolean | null
-          verification_status?: string | null
-          verification_comment?: string | null
-          verification_document_url?: string | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
-          last_lat?: number | null
-          last_lng?: number | null
           major?: string | null
-          occupation?: string | null
-          orientation?: string | null
           onboarding_completed?: boolean | null
           owns_pets?: boolean | null
           pet_experience?: string[] | null
@@ -543,16 +316,8 @@ export type Database = {
           show_bio?: boolean | null
           show_gender?: boolean | null
           show_height?: boolean | null
-          show_orientation?: boolean | null
-          show_occupation?: boolean | null
           show_weight?: boolean | null
           social_availability?: boolean | null
-          stars_count?: number | null
-          mesh_alert_count?: number | null
-          media_credits?: number | null
-          family_slots?: number | null
-          tier?: string | null
-          subscription_status?: string | null
           updated_at?: string | null
           user_role?: string | null
           weight?: number | null
@@ -573,18 +338,10 @@ export type Database = {
           height?: number | null
           id?: string
           is_verified?: boolean | null
-          verified?: boolean | null
-          verification_status?: string | null
-          verification_comment?: string | null
-          verification_document_url?: string | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
-          last_lat?: number | null
-          last_lng?: number | null
           major?: string | null
-          occupation?: string | null
-          orientation?: string | null
           onboarding_completed?: boolean | null
           owns_pets?: boolean | null
           pet_experience?: string[] | null
@@ -597,16 +354,8 @@ export type Database = {
           show_bio?: boolean | null
           show_gender?: boolean | null
           show_height?: boolean | null
-          show_orientation?: boolean | null
-          show_occupation?: boolean | null
           show_weight?: boolean | null
           social_availability?: boolean | null
-          stars_count?: number | null
-          mesh_alert_count?: number | null
-          media_credits?: number | null
-          family_slots?: number | null
-          tier?: string | null
-          subscription_status?: string | null
           updated_at?: string | null
           user_role?: string | null
           weight?: number | null

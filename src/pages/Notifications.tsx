@@ -32,7 +32,7 @@ export default function NotificationsPage() {
 
     const load = async () => {
       setLoading(true);
-      const res = await supabase
+      const res = await (supabase as any)
         .from("notifications")
         .select("id,message,type,read,created_at,metadata")
         .eq("user_id", user.id)
@@ -63,13 +63,13 @@ export default function NotificationsPage() {
   const markOneRead = async (id: string) => {
     if (!user) return;
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, read: true } : r)));
-    await supabase.from("notifications").update({ read: true }).eq("id", id).eq("user_id", user.id);
+    await (supabase as any).from("notifications").update({ read: true }).eq("id", id).eq("user_id", user.id);
   };
 
   const markAllRead = async () => {
     if (!user) return;
     setRows((prev) => prev.map((r) => ({ ...r, read: true })));
-    await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
+    await (supabase as any).from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
   };
 
   return (

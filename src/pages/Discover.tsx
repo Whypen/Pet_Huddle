@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { HandMetal, Star, X, Loader2 } from "lucide-react";
+import { HandMetal, Star, X, Loader2, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -92,6 +92,44 @@ const Discover = () => {
   const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+
+  // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
+  const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
+  const discoveryKey = useMemo(() => {
+    const d = new Date();
+    return `discovery_seen_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(discoveryKey);
+      const n = raw ? Number(raw) : 0;
+      setDiscoverySeenToday(Number.isFinite(n) ? n : 0);
+    } catch {
+      setDiscoverySeenToday(0);
+    }
+  }, [discoveryKey]);
+
+  const bumpDiscoverySeen = async (): Promise<boolean> => {
+    if (isPremium) return true;
+    try {
+      const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
+        action_type: "discovery_profile",
+      });
+      if (allowed === false) {
+        setIsPremiumOpen(true);
+        return false;
+      }
+    } catch {
+      // Fail-open for UX
+    }
+    setDiscoverySeenToday((prev) => {
+      const next = prev + 1;
+      try { localStorage.setItem(discoveryKey, String(next)); } catch {}
+      return next;
+    });
+    return true;
+  };
 
   useEffect(() => {
     if (!profile?.dob) return;
@@ -343,7 +381,8 @@ const Discover = () => {
                 {t("Loading discovery...")}
               </div>
             )}
-            {discoverySource.map((p) => {
+            {discoverySource.map((p, idx) => {
+              const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
               const age = p?.dob
                 ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
                 : "";
@@ -365,13 +404,32 @@ const Discover = () => {
               return (
                 <div
                   key={p.id}
-                  className="min-w-[260px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer"
-                  onClick={() => {
+                  className={cn(
+                    "min-w-[260px] rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer",
+                    blocked && "cursor-not-allowed"
+                  )}
+                  onClick={async () => {
+                    if (blocked) return;
+                    const ok = await bumpDiscoverySeen();
+                    if (!ok) return;
                     setSelectedDiscovery(p);
                     setActiveAlbumIndex(0);
                     setShowDiscoveryModal(true);
                   }}
                 >
+                  {/* UAT: Blur overlay for free users after 40 cards/day */}
+                  {blocked && (
+                    <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center gap-2 p-4">
+                      <Lock className="w-8 h-8 text-brandBlue" />
+                      <p className="text-xs text-center font-semibold text-brandText">Upgrade for unlimited discovery</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setIsPremiumOpen(true); }}
+                        className="px-4 py-1.5 rounded-full bg-brandBlue text-white text-xs font-bold"
+                      >
+                        Upgrade
+                      </button>
+                    </div>
+                  )}
                   {cover ? (
                     <img src={cover} alt={p.display_name || ""} className="h-44 w-full object-cover" loading="lazy" />
                   ) : (
@@ -397,7 +455,7 @@ const Discover = () => {
                           toast.error(t("Buy a star pack to immediately chat with the user"));
                           return;
                         }
-                        const { data: allowed } = await supabase.rpc("check_and_increment_quota", {
+                        const { data: allowed } = await (supabase as any).rpc("check_and_increment_quota", {
                           action_type: "star",
                         });
                         if (allowed === false) {

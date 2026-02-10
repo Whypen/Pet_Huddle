@@ -5,15 +5,19 @@ import {
   X,
   ThumbsUp,
   Flag,
-  Eye,
-  EyeOff,
   Ban,
   Loader2,
   Camera,
   Phone,
   Hospital,
   MapPin,
-  Star
+  Star,
+  RefreshCw,
+  EyeOff,
+  Pencil,
+  Trash2,
+  WifiOff,
+  MessageCircle,
 } from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -27,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -39,26 +44,29 @@ import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 
+// Spec: Stray = yellow paw, Lost = red alert, Others = grey paw, Friends = green
 const alertTypeColors: Record<string, string> = {
-  Stray: "#2145CF",
+  Stray: "#EAB308",
   Lost: "#EF4444",
   Found: "#A1A4A9",
   Friends: "#A6D539",
   Others: "#A1A4A9",
-  stray: "#2145CF",
+  stray: "#EAB308",
   lost: "#EF4444",
   found: "#A1A4A9",
   friends: "#A6D539",
   others: "#A1A4A9",
 };
 
-const MAX_ALERT_CHARS = 1000;
+const MAX_TITLE_CHARS = 100;
+const MAX_DESC_CHARS = 500;
 
 interface MapAlert {
   id: string;
   latitude: number;
   longitude: number;
   alert_type: string;
+  title: string | null;
   description: string | null;
   photo_url: string | null;
   support_count: number;
@@ -66,6 +74,8 @@ interface MapAlert {
   created_at: string;
   expires_at?: string | null;
   range_meters?: number | null;
+  creator_id?: string | null;
+  has_thread?: boolean;
   creator: {
     display_name: string | null;
     avatar_url: string | null;
@@ -97,6 +107,7 @@ interface VetClinic {
   rating?: number;
   isOpen?: boolean;
   is24h: boolean;
+  type?: string;
 }
 
 type MapAlertsNearbyRow = {
@@ -104,6 +115,7 @@ type MapAlertsNearbyRow = {
   latitude: number;
   longitude: number;
   alert_type: string;
+  title?: string | null;
   description: string | null;
   photo_url: string | null;
   support_count: number | null;
@@ -111,6 +123,7 @@ type MapAlertsNearbyRow = {
   created_at: string;
   expires_at: string | null;
   range_meters: number | null;
+  creator_id?: string | null;
   creator_display_name: string | null;
   creator_avatar_url: string | null;
 };
@@ -124,12 +137,11 @@ const Map = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
-  
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [mapTab, setMapTab] = useState<"Event" | "Friends">("Event");
   const [visibleEnabled, setVisibleEnabled] = useState(false);
-  const [activeFilter, setActiveFilter] = useState("all");
   const [alerts, setAlerts] = useState<MapAlert[]>([]);
   const [friendPins, setFriendPins] = useState<FriendPin[]>([]);
   const [vetClinics, setVetClinics] = useState<VetClinic[]>([]);
@@ -139,6 +151,7 @@ const Map = () => {
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [creating, setCreating] = useState(false);
   const [alertType, setAlertType] = useState("Stray");
+  const [alertTitle, setAlertTitle] = useState("");
   const [description, setDescription] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -159,8 +172,18 @@ const Map = () => {
   const [premiumFooterReason, setPremiumFooterReason] = useState<string>("broadcast_alert");
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
+  // Spec: styled modal confirmations (not window.confirm)
+  const [showPinConfirm, setShowPinConfirm] = useState(false);
+  const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
+  // Spec: offline warning
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  // Spec: editing alert (creator can edit)
+  const [editingAlert, setEditingAlert] = useState<MapAlert | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+
   const profileRec = useMemo(() => {
-    if (profile && typeof profile === "object") return profile as Record<string, unknown>;
+    if (profile && typeof profile === "object") return profile as unknown as Record<string, unknown>;
     return null;
   }, [profile]);
 
@@ -176,6 +199,18 @@ const Map = () => {
   const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
   const viewRadiusMeters = 50000; // Contract: Map view limited to 50km
 
+  // Spec: Offline warning banner
+  useEffect(() => {
+    const goOnline = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
   useEffect(() => {
     const mv = profileRec ? profileRec["map_visible"] : null;
     setVisibleEnabled(typeof mv === "boolean" ? mv : false);
@@ -189,7 +224,7 @@ const Map = () => {
 
   const loadQuotaSnapshot = useCallback(async () => {
     if (!user) return;
-    const res = await supabase.rpc("get_quota_snapshot");
+    const res = await (supabase as any).rpc("get_quota_snapshot");
     if (res.error) return;
     const row =
       Array.isArray(res.data) ? (res.data[0] as Record<string, unknown> | undefined) : (res.data as Record<string, unknown> | null);
@@ -211,24 +246,17 @@ const Map = () => {
   // Default center (Hong Kong)
   const defaultCenter: [number, number] = [114.1583, 22.2828];
 
-  const filterChips = [
-    { id: "all", label: t("map.filter_all") },
-    { id: "Stray", label: t("map.filter_stray") },
-    { id: "Lost", label: t("map.filter_lost") },
-    { id: "Friends", label: t("map.filter_friends") },
-    { id: "Others", label: t("map.filter_others") },
-  ];
-
+  // Spec: Pin confirmation → styled modal, not window.confirm
   const handlePinMyLocation = () => {
     if (!navigator.geolocation) {
       toast.error(t("Geolocation is not supported on this device"));
       return;
     }
-    // Legal: explicit consent for location use on maps/alerts only (data minimization).
-    const ok = window.confirm(
-      "We use your location for maps and broadcast alerts only. Your pin is visible for 2 hours and retained for 12 hours to deliver alerts. Continue?"
-    );
-    if (!ok) return;
+    setShowPinConfirm(true);
+  };
+
+  const confirmPinLocation = () => {
+    setShowPinConfirm(false);
     setPinning(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -246,9 +274,8 @@ const Map = () => {
         setPinExpiresAt(pinExpires);
         setRetentionExpiresAt(retentionExpires);
         if (user) {
-          // Contract: visible toggle implies consent for friend visibility while pinned.
-          await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
-          await supabase.rpc("set_user_location", {
+          await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+          await (supabase as any).rpc("set_user_location", {
             p_lat: lat,
             p_lng: lng,
             p_pin_hours: 2,
@@ -265,13 +292,18 @@ const Map = () => {
     );
   };
 
-  const handleUnpinMyLocation = async () => {
+  // Spec: Unpin confirmation → styled modal
+  const handleUnpinMyLocation = () => {
     if (!user) {
       toast.error(t("Please login to pin location"));
       return;
     }
-    const ok = window.confirm("Unpin my location? This will immediately stop showing you on the Friends map tab.");
-    if (!ok) return;
+    setShowUnpinConfirm(true);
+  };
+
+  const confirmUnpinLocation = async () => {
+    setShowUnpinConfirm(false);
+    if (!user) return;
     setPinExpiresAt(null);
     setRetentionExpiresAt(null);
     setUserLocation(null);
@@ -301,11 +333,10 @@ const Map = () => {
       return;
     }
     if (!visibleEnabled) {
-      // Turning on visibility: we pin now to match the contract behavior on web.
       handlePinMyLocation();
       return;
     }
-    await handleUnpinMyLocation();
+    handleUnpinMyLocation();
   };
 
   const handleManualPin = async () => {
@@ -321,8 +352,8 @@ const Map = () => {
     setPinExpiresAt(pinExpires);
     setRetentionExpiresAt(retentionExpires);
     if (user) {
-      await supabase.from("profiles").update({ map_visible: true }).eq("id", user.id);
-      await supabase.rpc("set_user_location", {
+      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+      await (supabase as any).rpc("set_user_location", {
         p_lat: lat,
         p_lng: lng,
         p_pin_hours: 2,
@@ -332,36 +363,31 @@ const Map = () => {
     setVisibleEnabled(true);
   };
 
-  // Fetch HK Vet Clinics from Google Places (via Edge Function)
+  // Spec: Fetch vet/pet-shop data from poi_locations table (Overpass API source)
   const fetchVetClinics = useCallback(async () => {
     try {
-      const { data, error } = await supabase.functions.invoke("vet-clinics");
+      const { data, error } = await supabase
+        .from("poi_locations")
+        .select("id, name, latitude, longitude, phone, opening_hours, address, poi_type, is_active")
+        .eq("is_active", true)
+        .in("poi_type", ["veterinary", "pet_shop"]);
       if (error) throw error;
-      const clinics: VetClinic[] = (data?.clinics || []).map((clinic: {
-        id: string;
-        name: string;
-        lat: number;
-        lng: number;
-        phone?: string;
-        openingHours?: string;
-        address?: string;
-        rating?: number;
-        isOpen?: boolean;
-      }) => ({
-        id: clinic.id,
-        name: clinic.name,
-        lat: clinic.lat,
-        lng: clinic.lng,
-        phone: clinic.phone,
-        openingHours: clinic.openingHours,
-        address: clinic.address,
-        rating: clinic.rating,
-        isOpen: clinic.isOpen,
-        is24h: clinic.openingHours?.toLowerCase?.().includes("24") || false,
+      const clinics: VetClinic[] = (data || []).map((row: any) => ({
+        id: row.id,
+        name: row.name || "Vet / Pet Shop",
+        lat: row.latitude,
+        lng: row.longitude,
+        phone: row.phone || undefined,
+        openingHours: row.opening_hours || undefined,
+        address: row.address || undefined,
+        rating: undefined,
+        isOpen: undefined,
+        is24h: typeof row.opening_hours === "string" && row.opening_hours.toLowerCase().includes("24"),
+        type: row.poi_type,
       }));
       setVetClinics(clinics);
     } catch (error) {
-      console.error("Error fetching vet clinics:", error);
+      console.error("Error fetching vet/pet-shop from poi_locations:", error);
       // Fallback demo data
       setVetClinics([
         { id: "vet-1", name: t("map.vet.hk_clinic"), lat: 22.2855, lng: 114.1577, is24h: true, isOpen: true, rating: 4.8 },
@@ -380,7 +406,7 @@ const Map = () => {
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v12",
-      center: initialCenter,
+      center: initialCenter as [number, number],
       zoom: userLocation ? 14 : 11,
     });
 
@@ -431,7 +457,7 @@ const Map = () => {
   // Fetch alerts
   useEffect(() => {
     fetchAlerts();
-    
+
     const channel = supabase
       .channel("map_alerts")
       .on("postgres_changes", { event: "*", schema: "public", table: "map_alerts" }, () => {
@@ -444,7 +470,7 @@ const Map = () => {
     };
   }, []);
 
-  // Place a blue "You are here" pin for the user's own location + persist coords
+  // Place a blue "You are here" pin for the user's own location
   useEffect(() => {
     if (!map.current || !mapLoaded || !userLocation) return;
 
@@ -466,10 +492,10 @@ const Map = () => {
       .setLngLat([userLocation.lng, userLocation.lat])
       .addTo(map.current);
 
-    return () => marker.remove();
+    return () => { marker.remove(); };
   }, [userLocation, mapLoaded, user]);
 
-  // Update markers
+  // Update markers — Spec: Vet layer visible in BOTH tabs
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -477,61 +503,57 @@ const Map = () => {
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
 
-    // Contract: Tabs. Event shows vets + alerts. Friends shows user pins only.
     const showEvent = mapTab === "Event";
     const showFriends = mapTab === "Friends";
 
-    // Add vet clinic markers (Event tab only)
-    if (showEvent && activeFilter === "all") {
-      vetClinics.forEach((vet) => {
-        // SPRINT 1: Null-check for lng/lat to prevent crash
-        if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) {
-          console.warn("Invalid vet coordinates:", vet);
-          return;
-        }
+    // Spec: Vet/Pet-Shop markers visible in BOTH tabs (not just Event)
+    vetClinics.forEach((vet) => {
+      if (!vet.lng || !vet.lat || isNaN(vet.lng) || isNaN(vet.lat)) {
+        console.warn("Invalid vet coordinates:", vet);
+        return;
+      }
 
-        const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
-        const el = document.createElement("div");
-        el.className = "vet-marker";
-        el.innerHTML = `
-          <div style="
-            width: 34px;
-            height: 34px;
-            background-color: #ffffff;
+      const dotColor = vet.isOpen === true ? "#22c55e" : vet.isOpen === false ? "#ef4444" : "#A1A4A9";
+      const el = document.createElement("div");
+      el.className = "vet-marker";
+      el.innerHTML = `
+        <div style="
+          width: 34px;
+          height: 34px;
+          background-color: #ffffff;
+          border-radius: 50%;
+          border: 2px solid #E5E7EB;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          position: relative;
+          font-weight: bold;
+          color: #111827;
+        ">
+          +
+          <span style="
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            border: 2px solid #E5E7EB;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            position: relative;
-            font-weight: bold;
-            color: #111827;
-          ">
-            +
-            <span style="
-              position: absolute;
-              top: -2px;
-              right: -2px;
-              width: 8px;
-              height: 8px;
-              border-radius: 50%;
-              background: ${dotColor};
-              border: 1px solid #ffffff;
-            "></span>
-          </div>
-        `;
-        el.addEventListener("click", () => setSelectedVet(vet));
+            background: ${dotColor};
+            border: 1px solid #ffffff;
+          "></span>
+        </div>
+      `;
+      el.addEventListener("click", () => setSelectedVet(vet));
 
-        const marker = new mapboxgl.Marker(el)
-          .setLngLat([vet.lng, vet.lat])
-          .addTo(map.current!);
-        markersRef.current.push(marker);
-      });
-    }
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([vet.lng, vet.lat])
+        .addTo(map.current!);
+      markersRef.current.push(marker);
+    });
 
-    // Add friend pins (Friends tab only). Fallback to demo users if none (contract: demo pins).
+    // Add friend pins (Friends tab only). Fallback to demo users if none.
     if (showFriends) {
       const pins: Array<{ id: string; name: string; lat: number; lng: number }> = [];
       friendPins.forEach((p) => {
@@ -588,15 +610,11 @@ const Map = () => {
       });
     }
 
-    // Add demo alert markers (Event tab only, contract: demo pins).
+    // Add demo alert markers (Event tab only)
     if (showEvent) {
-      const filteredDemoAlerts = demoAlerts.filter((alert) => {
-        if (activeFilter === "all") return true;
-        return alert.type.toLowerCase() === activeFilter.toLowerCase();
-      });
+      const filteredDemoAlerts = demoAlerts.filter((alert) => true);
 
-      filteredDemoAlerts.slice(0, 10).forEach((alert) => {
-        // SPRINT 1: Null-check for alert location coordinates
+      filteredDemoAlerts.slice(0, 10).forEach((alert: any) => {
         if (!alert.location?.lng || !alert.location?.lat ||
             isNaN(alert.location.lng) || isNaN(alert.location.lat)) {
           return;
@@ -617,9 +635,9 @@ const Map = () => {
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            ${alert.type === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
+            ${String(alert.type).toLowerCase() === "lost" ? "animation: pulse 1.5s ease-in-out infinite;" : ""}
           ">
-            <span style="font-size: 16px;">${alert.type === "lost" ? "🚨" : alert.type === "stray" ? "🐾" : "ℹ️"}</span>
+            <span style="font-size: 16px;">${String(alert.type).toLowerCase() === "lost" ? "🚨" : String(alert.type).toLowerCase() === "stray" ? "🐾" : "ℹ️"}</span>
           </div>
         `;
 
@@ -630,17 +648,15 @@ const Map = () => {
       });
     }
 
-    // Add real alerts from database
+    // Add real alerts from database (Event tab)
     const filteredAlerts = showEvent
       ? alerts.filter((alert) => {
           if (hiddenAlerts.has(alert.id)) return false;
-          if (activeFilter === "all") return true;
-          return alert.alert_type === activeFilter;
+          return true;
         })
       : [];
 
     filteredAlerts.forEach((alert) => {
-      // SPRINT 1: Critical null-check for database alert coordinates
       if (!alert.longitude || !alert.latitude ||
           isNaN(alert.longitude) || isNaN(alert.latitude)) {
         console.warn("Invalid database alert coordinates:", alert);
@@ -681,14 +697,14 @@ const Map = () => {
 
       markersRef.current.push(marker);
     });
-  }, [alerts, activeFilter, friendPins, hiddenAlerts, mapLoaded, mapTab, vetClinics]);
+  }, [alerts, friendPins, hiddenAlerts, mapLoaded, mapTab, vetClinics]);
 
   const fetchAlerts = async () => {
     try {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat != null && lng != null) {
-        const { data, error } = await supabase.rpc("get_map_alerts_nearby", {
+        const { data, error } = await (supabase as any).rpc("get_map_alerts_nearby", {
           p_lat: lat,
           p_lng: lng,
           p_radius_m: viewRadiusMeters,
@@ -699,23 +715,24 @@ const Map = () => {
           latitude: row.latitude,
           longitude: row.longitude,
           alert_type: row.alert_type,
+          title: row.title || null,
           description: row.description,
           photo_url: row.photo_url,
           support_count: row.support_count ?? 0,
           report_count: row.report_count ?? 0,
           created_at: row.created_at,
+          creator_id: row.creator_id || null,
           creator: { display_name: row.creator_display_name, avatar_url: row.creator_avatar_url },
           expires_at: row.expires_at,
           range_meters: row.range_meters,
         }));
         setAlerts(mapped);
       } else {
-        // Fallback: no user location yet
         const { data, error } = await supabase
           .from("map_alerts")
           .select(`
-            id, latitude, longitude, alert_type, description, photo_url,
-            support_count, report_count, created_at,
+            id, latitude, longitude, alert_type, title, description, photo_url,
+            support_count, report_count, created_at, creator_id,
             creator:profiles!map_alerts_creator_id_fkey(display_name, avatar_url)
           `)
           .eq("is_active", true)
@@ -745,7 +762,7 @@ const Map = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
       if (lat == null || lng == null) return;
-      const { data, error } = await supabase.rpc("get_friend_pins_nearby", {
+      const { data, error } = await (supabase as any).rpc("get_friend_pins_nearby", {
         p_lat: lat,
         p_lng: lng,
         p_radius_m: viewRadiusMeters,
@@ -787,8 +804,7 @@ const Map = () => {
       let photoUrl = null;
 
       if (imageFile) {
-        // v1.9 override: broadcast media deducts from Media quota (Free=0, Premium=10/day, Gold=50/day).
-        const q = await supabase.rpc("check_and_increment_quota", { action_type: "media" });
+        const q = await (supabase as any).rpc("check_and_increment_quota", { action_type: "media" });
         if (q.data !== true) {
           showUpsellBanner({
             message: "Limited. Upgrade or add +10 Media to continue uploading images today.",
@@ -801,7 +817,6 @@ const Map = () => {
           return;
         }
 
-        // Client-side compression (<500KB target) to reduce storage + bandwidth.
         const compressed = await imageCompression(imageFile, { maxSizeMB: 0.5, useWebWorker: true });
         const uploadFile = compressed instanceof File ? compressed : imageFile;
         const fileExt = imageFile.name.split(".").pop();
@@ -824,6 +839,7 @@ const Map = () => {
       const durH = selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
       const expiresAt = new Date(Date.now() + durH * 60 * 60 * 1000).toISOString();
 
+      // Spec: Insert with title field
       const { data: inserted, error } = await supabase
         .from("map_alerts")
         .insert({
@@ -831,6 +847,7 @@ const Map = () => {
         latitude: selectedLocation.lat,
         longitude: selectedLocation.lng,
         alert_type: alertType,
+        title: alertTitle.trim() || null,
         description: description.trim() || null,
         photo_url: photoUrl,
         range_meters: Math.round(rangeKm * 1000),
@@ -840,7 +857,7 @@ const Map = () => {
         .maybeSingle();
 
       if (error) {
-        const errObj = (typeof error === "object" && error !== null) ? (error as Record<string, unknown>) : null;
+        const errObj = (typeof error === "object" && error !== null) ? (error as unknown as Record<string, unknown>) : null;
         const msg = typeof (errObj?.message) === "string" ? (errObj.message as string) : "";
         if (msg.includes("quota_exceeded")) {
           showUpsellBanner({
@@ -858,13 +875,13 @@ const Map = () => {
 
       toast.success(t("Alert broadcasted!"));
 
-      // Contract: optional "Post on Threads" (best-effort).
-      if (postOnThreads) {
-        const quota = await supabase.rpc("check_and_increment_quota", { action_type: "thread_post" });
+      // Contract: optional "Post on Threads" — only for Stray/Lost (spec: checkbox only for Stray/Lost)
+      if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
+        const quota = await (supabase as any).rpc("check_and_increment_quota", { action_type: "thread_post" });
         if (quota.data === true) {
-          await supabase.from("threads").insert({
+          await (supabase as any).from("threads").insert({
             user_id: user.id,
-            title: `Broadcast (${alertType})`,
+            title: alertTitle.trim() || `Broadcast (${alertType})`,
             content: description.trim() || "",
             tags: ["News"],
             hashtags: [],
@@ -890,6 +907,7 @@ const Map = () => {
     setIsCreateOpen(false);
     setSelectedLocation(null);
     setAlertType("Stray");
+    setAlertTitle("");
     setDescription("");
     setImageFile(null);
     setImagePreview(null);
@@ -961,6 +979,38 @@ const Map = () => {
     toast.success(t("You won't see posts from this user"));
   };
 
+  // Spec: Creator can remove Lost alerts
+  const handleRemoveAlert = async (alertId: string) => {
+    if (!user) return;
+    try {
+      await supabase.from("map_alerts").update({ is_active: false }).eq("id", alertId).eq("creator_id", user.id);
+      toast.success("Alert removed");
+      setSelectedAlert(null);
+      setShowConfirmRemove(null);
+      fetchAlerts();
+    } catch {
+      toast.error("Failed to remove alert");
+    }
+  };
+
+  // Spec: Creator can edit their alerts
+  const handleSaveEditAlert = async () => {
+    if (!editingAlert || !user) return;
+    try {
+      await supabase
+        .from("map_alerts")
+        .update({ title: editTitle.trim() || null, description: editDesc.trim() || null })
+        .eq("id", editingAlert.id)
+        .eq("creator_id", user.id);
+      toast.success("Alert updated");
+      setEditingAlert(null);
+      setSelectedAlert(null);
+      fetchAlerts();
+    } catch {
+      toast.error("Failed to update alert");
+    }
+  };
+
   const formatTimeAgo = (date: string) => {
     const now = new Date();
     const then = new Date(date);
@@ -988,21 +1038,28 @@ const Map = () => {
         onUpgradeClick={() => setIsPremiumOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
-      
-      {/* Header */}
-      <header className="px-4 pt-4 pb-3 bg-card z-10 flex-shrink-0">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1">
-            <h1 className="text-xl font-bold text-brandText">{t("Map")}</h1>
-            <p className="text-xs text-muted-foreground mt-1">
-              Available on map for 2 hours and stay in system for 12 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings.
-            </p>
-          </div>
-        </div>
 
-        {/* Contract: Tabs + Visible toggle + Pin button */}
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 bg-black/5 rounded-full p-1">
+      {/* Spec: Map takes full remaining height. No header block, no filter chips. */}
+      <div className="flex-1 relative min-h-0">
+        {loading && !mapLoaded ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : null}
+
+        <div ref={mapContainer} className="h-full w-full" />
+
+        {/* Spec: Offline warning banner */}
+        {isOffline && (
+          <div className="absolute top-0 left-0 right-0 z-[1100] bg-red-500 text-white text-center text-xs py-2 flex items-center justify-center gap-2">
+            <WifiOff className="w-4 h-4" />
+            You are offline. Map data may be outdated.
+          </div>
+        )}
+
+        {/* Spec: Tabs overlay on map — 80% transparent, top-left */}
+        <div className="absolute top-4 left-4 z-[1000] flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full p-1 shadow-md">
             {(["Event", "Friends"] as const).map((tab) => {
               const active = mapTab === tab;
               return (
@@ -1017,7 +1074,7 @@ const Map = () => {
                   }}
                   className={cn(
                     "px-4 py-2 rounded-full text-sm font-bold transition-colors",
-                    active ? "bg-white text-brandText shadow-sm" : "text-brandText/70 hover:text-brandText"
+                    active ? "bg-brandBlue text-white shadow-sm" : "text-brandText/70 hover:text-brandText"
                   )}
                 >
                   {tab}
@@ -1025,97 +1082,78 @@ const Map = () => {
               );
             })}
           </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => void toggleVisible()}
-              className={cn(
-                "w-10 h-10 rounded-full border flex items-center justify-center transition-colors",
-                visibleEnabled ? "border-brandGold text-brandGold bg-brandGold/10" : "border-gray-300 text-brandText/70 bg-white"
-              )}
-              aria-label={visibleEnabled ? "Visible: On" : "Visible: Off"}
-            >
-              {visibleEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-            </button>
-
-            <Button
-              onClick={() => {
-                if (isPinned) {
-                  void handleUnpinMyLocation();
-                } else {
-                  handlePinMyLocation();
-                }
-              }}
-              disabled={pinning}
-              className="h-10 rounded-full bg-primary text-primary-foreground"
-            >
-              <MapPin className="w-4 h-4 mr-2" />
-              {pinning ? t("Pinning...") : isPinned ? "Unpin" : t("Pin my Location")}
-            </Button>
-          </div>
         </div>
 
-        {/* Manual lat/lng input removed — use Mapbox geocode for location name only */}
+        {/* Spec: Visible toggle as blue MapPin icon — top-right, green tint ON / grey tint OFF */}
+        <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
+          <button
+            onClick={() => void toggleVisible()}
+            className={cn(
+              "w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-colors",
+              visibleEnabled
+                ? "bg-brandBlue text-white"
+                : "bg-white/80 backdrop-blur-sm text-gray-400"
+            )}
+            aria-label={visibleEnabled ? "Visible: On" : "Visible: Off"}
+          >
+            <MapPin className={cn("w-5 h-5", visibleEnabled ? "text-[#A6D539]" : "text-gray-400")} />
+          </button>
+
+          {/* Pin/Unpin button */}
+          <button
+            onClick={() => {
+              if (isPinned) {
+                handleUnpinMyLocation();
+              } else {
+                handlePinMyLocation();
+              }
+            }}
+            disabled={pinning}
+            className={cn(
+              "h-10 px-4 rounded-full flex items-center gap-2 text-sm font-semibold shadow-md transition-colors",
+              isPinned
+                ? "bg-red-500 text-white"
+                : "bg-brandBlue text-white"
+            )}
+          >
+            <MapPin className="w-4 h-4" />
+            {pinning ? "Pinning..." : isPinned ? "Unpin" : "Pin"}
+          </button>
+        </div>
+
+        {/* Spec: Refresh CTA grey pill overlay on map */}
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[1000]">
+          <button
+            onClick={() => {
+              fetchAlerts();
+              fetchVetClinics();
+              toast.success("Map refreshed");
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-500/80 backdrop-blur-sm text-white text-xs font-medium rounded-full shadow-md hover:bg-gray-600/80 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+        </div>
+
+        {/* Pinned until info */}
         {pinExpiresAt && (
-          <p className="text-xs text-muted-foreground mt-2">
-            {t("Pinned until")}: {new Date(pinExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </p>
+          <div className="absolute top-16 right-4 z-[1000]">
+            <span className="text-xs bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-muted-foreground">
+              Pinned until {new Date(pinExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
         )}
-      </header>
 
-      {/* Filter Chips */}
-      {mapTab === "Event" ? (
-        <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
-          <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-            {filterChips.map((chip) => (
-              <button
-                key={chip.id}
-                onClick={() => setActiveFilter(chip.id)}
-                className={cn(
-                  "px-4 py-2 rounded-full text-sm font-medium transition-colors whitespace-nowrap",
-                  activeFilter === chip.id
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
-                )}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className="px-4 py-3 bg-card border-b border-border z-10 flex-shrink-0">
-          <p className="text-xs text-muted-foreground">
-            Friends pins show only when users have Visible on and are within 50km.
-          </p>
-        </div>
-      )}
-
-      {/* Map Container */}
-      <div className="flex-1 relative min-h-0">
-        {loading && !mapLoaded ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          </div>
-        ) : null}
-
-        <div ref={mapContainer} className="h-full w-full" />
-
-        {/* Create Alert Mode Overlay */}
-        {isCreateOpen && (
-          <div className="absolute top-4 left-4 right-4 bg-card rounded-xl p-4 shadow-elevated z-[1000]">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold">{t("Tap map to select location")}</h3>
+        {/* Create Alert Mode Overlay (tap-to-select) */}
+        {isCreateOpen && !selectedLocation && (
+          <div className="absolute top-24 left-4 right-4 bg-card/95 backdrop-blur-sm rounded-xl p-4 shadow-elevated z-[1000]">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-sm">{t("Tap map to select location")}</h3>
               <button onClick={resetCreateForm}>
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            {selectedLocation && (
-              <p className="text-sm text-muted-foreground">
-                📍 {selectedLocation.lat.toFixed(4)}, {selectedLocation.lng.toFixed(4)}
-              </p>
-            )}
           </div>
         )}
 
@@ -1132,6 +1170,7 @@ const Map = () => {
                   setSelectedRangeKm(broadcastRange);
                   setSelectedDurationH(effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
                   setPostOnThreads(false);
+                  setAlertTitle("");
                   setIsCreateOpen(true);
                 }}
                 className="w-full bg-primary text-primary-foreground rounded-xl px-4 py-3 shadow-elevated flex items-center justify-center gap-2 font-semibold"
@@ -1140,16 +1179,46 @@ const Map = () => {
                 {t("map.broadcast")}
               </motion.button>
             </div>
-          ) : selectedLocation ? (
-            <div className="bg-card rounded-xl p-4 shadow-elevated space-y-4">
+          ) : null}
+        </div>
+      </div>
+
+      {/* Spec: Broadcast Creation — Full-screen modal with Title + Description */}
+      <AnimatePresence>
+        {isCreateOpen && selectedLocation && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[2000] bg-black/50 flex items-end"
+            onClick={resetCreateForm}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-card rounded-t-3xl p-6 max-h-[85vh] overflow-auto"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
+                <button onClick={resetCreateForm}>
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <p className="text-xs text-muted-foreground mb-4">
+                📍 {selectedLocation.lat.toFixed(4)}, {selectedLocation.lng.toFixed(4)}
+              </p>
+
               {/* Alert Type */}
-              <div className="flex gap-2">
+              <div className="flex gap-2 mb-4">
                 {["Stray", "Lost", "Others"].map((type) => (
                   <button
                     key={type}
                     onClick={() => setAlertType(type)}
                     className={cn(
-                      "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
+                      "flex-1 py-2.5 rounded-lg text-sm font-medium transition-all",
                       alertType === type
                         ? "text-white"
                         : "bg-muted text-muted-foreground"
@@ -1162,27 +1231,47 @@ const Map = () => {
                   </button>
                 ))}
               </div>
-              
-              {/* Description — max 1000 chars per spec */}
-              <div className="space-y-1">
+
+              {/* Spec: Title field — max 100 chars */}
+              <div className="space-y-1 mb-3">
+                <label className="text-xs font-medium text-muted-foreground">Title</label>
+                <Input
+                  placeholder="Alert title (max 100 chars)"
+                  value={alertTitle}
+                  onChange={(e) => {
+                    if (e.target.value.length <= MAX_TITLE_CHARS) {
+                      setAlertTitle(e.target.value);
+                    }
+                  }}
+                  className="rounded-xl"
+                  maxLength={MAX_TITLE_CHARS}
+                />
+                <div className="flex justify-end text-xs text-muted-foreground">
+                  <span>{alertTitle.length}/{MAX_TITLE_CHARS}</span>
+                </div>
+              </div>
+
+              {/* Spec: Description — max 500 chars */}
+              <div className="space-y-1 mb-3">
+                <label className="text-xs font-medium text-muted-foreground">Description</label>
                 <Textarea
-                  placeholder={t("Description (max 1000 chars)...")}
+                  placeholder="Description (max 500 chars)..."
                   value={description}
                   onChange={(e) => {
-                    if (e.target.value.length <= MAX_ALERT_CHARS) {
+                    if (e.target.value.length <= MAX_DESC_CHARS) {
                       setDescription(e.target.value);
                     }
                   }}
-                  className="rounded-xl min-h-[60px]"
+                  className="rounded-xl min-h-[80px]"
                 />
-                <div className="flex items-center justify-end text-xs text-muted-foreground">
-                  <span>{description.length}/{MAX_ALERT_CHARS}</span>
+                <div className="flex justify-end text-xs text-muted-foreground">
+                  <span>{description.length}/{MAX_DESC_CHARS}</span>
                 </div>
               </div>
-              
+
               {/* Image */}
               {imagePreview ? (
-                <div className="relative">
+                <div className="relative mb-3">
                   <img src={imagePreview} alt="" className="rounded-xl max-h-32 object-cover w-full" />
                   <button
                     onClick={() => { setImageFile(null); setImagePreview(null); }}
@@ -1192,16 +1281,15 @@ const Map = () => {
                   </button>
                 </div>
               ) : (
-                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer mb-3">
                   <Camera className="w-5 h-5" />
                   {t("map.add_photo")}
                   <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                 </label>
               )}
 
-              {/* Contract: Range/Duration gated dropdowns + "Post on Threads" */}
-              {/* Spec: Range — Free max 10km, Premium max 25km, Gold max 50km. Duration — Free 12h, Premium 24h, Gold 48h, Add-on 72h. */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Range/Duration gated dropdowns */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">Range</div>
                   <select
@@ -1222,7 +1310,7 @@ const Map = () => {
                   <select
                     value={String(selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12))}
                     onChange={(e) => setSelectedDurationH(Number(e.target.value))}
-                    className="w-full h-9 rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
+                    className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
                   >
                     <option value="12">12h</option>
                     <option value="24" disabled={!isPremium}>24h{!isPremium ? " (Premium)" : ""}</option>
@@ -1232,16 +1320,19 @@ const Map = () => {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={postOnThreads}
-                  onChange={(e) => setPostOnThreads(e.target.checked)}
-                  className="w-4 h-4"
-                />
-                Post on Threads
-              </label>
-              
+              {/* Spec: "Post on Threads" checkbox only for Stray/Lost */}
+              {(alertType === "Stray" || alertType === "Lost") && (
+                <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                  <input
+                    type="checkbox"
+                    checked={postOnThreads}
+                    onChange={(e) => setPostOnThreads(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Post on Threads
+                </label>
+              )}
+
               {/* Submit */}
               <Button
                 onClick={handleCreateAlert}
@@ -1255,10 +1346,102 @@ const Map = () => {
                   t("map.broadcast_alert").replace("{type}", t(alertType))
                 )}
               </Button>
-            </div>
-          ) : null}
-        </div>
-      </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Spec: Pin confirmation modal */}
+      <AnimatePresence>
+        {showPinConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center px-6"
+            onClick={() => setShowPinConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-brandBlue/10 flex items-center justify-center">
+                  <MapPin className="w-5 h-5 text-brandBlue" />
+                </div>
+                <h3 className="text-lg font-bold text-brandText">Pin My Location</h3>
+              </div>
+              <p className="text-sm text-muted-foreground mb-6">
+                We use your location for maps and broadcast alerts only. Your pin is visible for 2 hours and retained for 12 hours to deliver alerts. Continue?
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowPinConfirm(false)}
+                  className="flex-1 h-11 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={confirmPinLocation}
+                  className="flex-1 h-11 rounded-xl bg-brandBlue hover:bg-brandBlue/90"
+                >
+                  Continue
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Spec: Unpin confirmation modal */}
+      <AnimatePresence>
+        {showUnpinConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center px-6"
+            onClick={() => setShowUnpinConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                  <MapPin className="w-5 h-5 text-red-500" />
+                </div>
+                <h3 className="text-lg font-bold text-brandText">Unpin Location</h3>
+              </div>
+              <p className="text-sm text-muted-foreground mb-6">
+                Unpin my location? This will immediately stop showing you on the Friends map tab.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowUnpinConfirm(false)}
+                  className="flex-1 h-11 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => void confirmUnpinLocation()}
+                  className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white"
+                >
+                  Unpin
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Vet Clinic Modal */}
       <AnimatePresence>
@@ -1284,6 +1467,11 @@ const Map = () => {
                 <div>
                   <h3 className="font-semibold">{selectedVet.name}</h3>
                   <div className="flex items-center gap-2">
+                    {selectedVet.type && (
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full capitalize">
+                        {selectedVet.type === "pet_shop" ? "Pet Shop" : "Veterinary"}
+                      </span>
+                    )}
                     {selectedVet.isOpen !== undefined && (
                       <span className={cn(
                         "text-xs px-2 py-0.5 rounded-full",
@@ -1325,7 +1513,6 @@ const Map = () => {
                 </button>
               </div>
 
-              {/* Contract: no navigation button (timely ops changes not guaranteed). */}
               <div className="grid grid-cols-1 gap-3">
                 <Button
                   onClick={() => {
@@ -1346,9 +1533,9 @@ const Map = () => {
         )}
       </AnimatePresence>
 
-      {/* Alert Detail Modal */}
+      {/* Spec: Alert Detail Modal — with Title, Reply on Threads, Creator edit/remove */}
       <AnimatePresence>
-        {selectedAlert && (
+        {selectedAlert && !editingAlert && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1365,7 +1552,7 @@ const Map = () => {
             >
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <span 
+                  <span
                     className="px-3 py-1 rounded-full text-white text-sm font-medium"
                     style={{ backgroundColor: alertTypeColors[selectedAlert.alert_type] }}
                   >
@@ -1379,6 +1566,11 @@ const Map = () => {
                   <X className="w-6 h-6" />
                 </button>
               </div>
+
+              {/* Spec: Title field in detail modal */}
+              {selectedAlert.title && (
+                <h3 className="text-lg font-bold text-brandText mb-2">{selectedAlert.title}</h3>
+              )}
 
               {selectedAlert.photo_url && (
                 <img src={selectedAlert.photo_url} alt="" className="w-full rounded-xl mb-4 max-h-48 object-cover" />
@@ -1405,7 +1597,7 @@ const Map = () => {
               </div>
 
               {/* Actions */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 <Button onClick={() => handleSupport(selectedAlert.id)} className="h-12 rounded-xl bg-primary hover:bg-primary/90">
                   <ThumbsUp className="w-5 h-5 mr-2" />
                   {t("social.support")}
@@ -1415,6 +1607,47 @@ const Map = () => {
                   {t("social.report")}
                 </Button>
               </div>
+
+              {/* Spec: "Reply on Threads" button */}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  navigate("/threads");
+                  toast.info("Navigate to Threads to reply");
+                }}
+                className="w-full h-10 rounded-xl mb-3 flex items-center justify-center gap-2"
+              >
+                <MessageCircle className="w-4 h-4" />
+                Reply on Threads
+              </Button>
+
+              {/* Spec: Creator controls — Edit + Remove (Lost only) */}
+              {user && selectedAlert.creator_id === user.id && (
+                <div className="flex gap-2 mb-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingAlert(selectedAlert);
+                      setEditTitle(selectedAlert.title || "");
+                      setEditDesc(selectedAlert.description || "");
+                    }}
+                    className="flex-1 h-10 rounded-xl"
+                  >
+                    <Pencil className="w-4 h-4 mr-2" />
+                    Edit
+                  </Button>
+                  {selectedAlert.alert_type === "Lost" && (
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowConfirmRemove(selectedAlert.id)}
+                      className="flex-1 h-10 rounded-xl text-red-500 border-red-200 hover:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              )}
 
               <div className="flex gap-2">
                 <button
@@ -1431,6 +1664,106 @@ const Map = () => {
                   <Ban className="w-4 h-4" />
                   {t("Block User")}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Spec: Remove confirmation dialog */}
+      <AnimatePresence>
+        {showConfirmRemove && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center px-6"
+            onClick={() => setShowConfirmRemove(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
+            >
+              <h3 className="text-lg font-bold text-brandText mb-2">Remove Alert?</h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                This will permanently remove this alert from the map.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowConfirmRemove(null)}
+                  className="flex-1 h-11 rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => showConfirmRemove && handleRemoveAlert(showConfirmRemove)}
+                  className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white"
+                >
+                  Remove
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Spec: Edit Alert Modal */}
+      <AnimatePresence>
+        {editingAlert && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[3000] bg-black/50 flex items-end"
+            onClick={() => setEditingAlert(null)}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full bg-card rounded-t-3xl p-6"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-brandText">Edit Alert</h3>
+                <button onClick={() => setEditingAlert(null)}>
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Title</label>
+                  <Input
+                    value={editTitle}
+                    onChange={(e) => {
+                      if (e.target.value.length <= MAX_TITLE_CHARS) setEditTitle(e.target.value);
+                    }}
+                    className="rounded-xl mt-1"
+                    maxLength={MAX_TITLE_CHARS}
+                  />
+                  <div className="flex justify-end text-xs text-muted-foreground mt-1">{editTitle.length}/{MAX_TITLE_CHARS}</div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Description</label>
+                  <Textarea
+                    value={editDesc}
+                    onChange={(e) => {
+                      if (e.target.value.length <= MAX_DESC_CHARS) setEditDesc(e.target.value);
+                    }}
+                    className="rounded-xl mt-1 min-h-[80px]"
+                  />
+                  <div className="flex justify-end text-xs text-muted-foreground mt-1">{editDesc.length}/{MAX_DESC_CHARS}</div>
+                </div>
+                <Button
+                  onClick={handleSaveEditAlert}
+                  className="w-full h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90"
+                >
+                  Save Changes
+                </Button>
               </div>
             </motion.div>
           </motion.div>

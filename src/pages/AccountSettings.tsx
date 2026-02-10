@@ -41,7 +41,7 @@ export default function AccountSettingsPage() {
   useEffect(() => {
     (async () => {
       if (!user?.id) return;
-      const r = await supabase
+      const r = await (supabase as any)
         .from("profiles")
         .select("prefs, non_social, hide_from_map, language")
         .eq("id", user.id)
@@ -58,7 +58,7 @@ export default function AccountSettingsPage() {
       }
 
       // Fetch family member (Gold only)
-      const fm = await supabase
+      const fm = await (supabase as any)
         .from("family_members")
         .select("family_member_id, profiles!family_members_family_member_id_fkey(display_name)")
         .eq("user_id", user.id)
@@ -204,6 +204,11 @@ export default function AccountSettingsPage() {
 
         {/* Notifications */}
         <div className="text-xs font-bold text-brandText/70 pt-2">Notifications</div>
+        <ToggleRow
+          label="Push Notifications"
+          checked={prefs.push_notifications_enabled !== false}
+          onChange={(v) => savePrefs({ ...prefs, push_notifications_enabled: v })}
+        />
         <ToggleRow
           label="Pause All Notifications"
           checked={!!prefs.pause_all_notifications}

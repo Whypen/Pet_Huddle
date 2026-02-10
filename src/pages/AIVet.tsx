@@ -100,8 +100,8 @@ const AIVet = () => {
         .eq("is_active", true);
 
       if (!error && data && data.length > 0) {
-        setPets(data);
-        setSelectedPet(data[0]);
+        setPets(data as any as Pet[]);
+        setSelectedPet(data[0] as any as Pet);
       }
     } catch (error) {
       console.error("Error fetching pets:", error);
@@ -110,7 +110,7 @@ const AIVet = () => {
 
   const checkUsage = async () => {
     if (!isPremium) {
-      const result = await getAiVetUsage();
+      const result = await getAiVetUsage() as any;
       if (result.success && result.data) {
         setRemaining(result.data.remaining);
       }
@@ -150,7 +150,7 @@ const AIVet = () => {
       // Create conversation if needed
       let currentConversationId = conversationId;
       if (!currentConversationId) {
-        const createResult = await createAiVetConversation(selectedPet?.id);
+        const createResult = await createAiVetConversation(selectedPet?.id) as any;
         if (createResult.success && createResult.data?.id) {
           currentConversationId = createResult.data.id;
           setConversationId(currentConversationId);
@@ -171,6 +171,8 @@ const AIVet = () => {
             weight: selectedPet.weight,
             weight_unit: selectedPet.weight_unit,
             history: selectedPet.bio || selectedPet.routine || "",
+            medications: selectedPet.medications || [],
+            vaccinations: selectedPet.vaccinations || [],
           }
         : undefined;
       let imageBase64: string | undefined;
@@ -183,7 +185,7 @@ const AIVet = () => {
         });
         imageBase64 = imageBase64.split(",")[1] || imageBase64;
       }
-      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64);
+      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64) as any;
 
       if (result.success && result.data) {
         const aiMessage: Message = {

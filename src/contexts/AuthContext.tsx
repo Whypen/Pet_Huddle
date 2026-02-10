@@ -102,7 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("profiles")
       .select(`
         id, user_id, display_name, legal_name, phone, avatar_url, bio,
@@ -125,7 +125,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!error && data) {
       let effectiveTier = data.tier || "free";
       let familyOwnerId: string | null = null;
-      const { data: family } = await supabase
+      const { data: family } = await (supabase as any)
         .from("family_members")
         .select("inviter_user_id")
         .eq("invitee_user_id", userId)
@@ -134,7 +134,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (family?.inviter_user_id) {
         familyOwnerId = family.inviter_user_id;
-        const { data: inviter } = await supabase
+        const { data: inviter } = await (supabase as any)
           .from("profiles")
           .select("tier")
           .eq("id", family.inviter_user_id)
@@ -232,7 +232,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Best-effort consent audit log. This will succeed when a session exists.
       if (consent?.acceptedAtIso) {
-        await supabase
+        await (supabase as any)
           .from("consent_logs")
           .insert({
             user_id: data.user.id,
@@ -265,7 +265,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const { data } = await supabase.auth.getUser();
           const uid = data?.user?.id;
           if (uid) {
-            await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+            await (supabase as any).from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
           }
         }
         return { error: error as Error | null };
@@ -280,7 +280,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const { data } = await supabase.auth.getUser();
         const uid = data?.user?.id;
         if (uid) {
-          await supabase.from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
+          await (supabase as any).from("profiles").update({ last_login: new Date().toISOString() }).eq("id", uid);
         }
       }
 

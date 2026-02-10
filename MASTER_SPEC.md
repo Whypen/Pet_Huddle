@@ -1,4 +1,4 @@
-# MASTER_SPEC.md — huddle v1.9 (Definitive, Single Source of Truth)
+# MASTER_SPEC.md — huddle v2.0 (Definitive, Single Source of Truth)
 
 **Audience:** New full‑stack developer rebuilding from scratch.
 
@@ -7,6 +7,7 @@
 ---
 
 ## Changelog
+- **v2.0**: Full sweep audit — 15-filter tier gating fix (Verified Only → Gold), AI Vet pet data enrichment (medications/vaccinations), push notifications toggle, broadcast add-on spec alignment, Discover 40-card daily limit + blur overlay, Premium features text updated.
 - **v1.9**: Final perks override, full algo consolidation, notifications + map UI for quota/upsell enforcement.
 
 ## 0. Product DNA
@@ -255,6 +256,179 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ---
 
+## 10. Full Sweep Audit (v2.0) — PASS/FAIL Checklist
+
+### 10a. Discovery Filter — 15 Filters with 3-Tier Gating
+
+**Status: PASS (Fixed)**
+
+Exact 15 filter rows in `Chats.tsx` FILTER_ROWS:
+| # | Filter | Tier | Type |
+|---|--------|------|------|
+| 1 | Age Range | Free | range |
+| 2 | Gender | Free | multi |
+| 3 | Distance | Free | slider |
+| 4 | Species | Free | multi |
+| 5 | Social Role | Free | multi |
+| 6 | Height Range | Premium | range |
+| 7 | Sexual Orientation | Premium | multi |
+| 8 | Highest Degree | Premium | multi |
+| 9 | Relationship Status | Premium | multi |
+| 10 | Car Badge | Premium | toggle |
+| 11 | Pet Experience | Premium | toggle |
+| 12 | Language | Premium | multi |
+| 13 | Verified Users Only | **Gold** | toggle |
+| 14 | Who waved at you | Gold | toggle |
+| 15 | Active Users only | Gold | toggle |
+
+**Tier gating: Free = 5 (rows 1-5), Premium = 12 (rows 1-12), Gold = 15 (all)**
+
+Fix applied: Moved "Verified Users Only" from premium to gold tier gating. Filter payload in discovery now sends `verified_only` only when `effectiveTier === "gold"`.
+
+### 10b. Pet Profile → Home Dashboard Reminder
+
+**Status: PASS**
+
+- `EditPetProfile.tsx`: vaccination reminder synced to `reminders` table via `syncVaccinationReminder()`
+- `Index.tsx`: `computeNextEvent` from `@/utils/petLogic` calculates next event from reminders table
+- Dashboard shows `nextEventLabel` on pet card
+- Grey subtext "Input last vaccination dates for better tracking" present
+- Red error validations for DOB, weight, vaccination dates, microchip ID all present via ErrorLabel
+
+### 10c. Personal Profile → Discovery Display
+
+**Status: PASS**
+
+- `EditProfile.tsx`: All per-field show/hide toggles present (show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, show_relationship_status)
+- Social album: max 5 images, <500KB compression via browser-image-compression
+- Identity lock for verified users
+- `Chats.tsx` discovery cards respect show_* toggles when rendering profile sheets (handleProfileTap fetches all show_* fields)
+- Profile fields: display_name, legal_name, phone, dob, bio, gender, orientation, height, weight, degree, school, major, occupation, relationship_status, has_car, languages, location, pet_experience, social_album
+
+### 10d. Discovery Algorithm & Card Display
+
+**Status: PASS (Fixed)**
+
+- Discovery embedded in Chats page (horizontal card scroll, snap paging)
+- Cards show: Name, Age, Pet Species, Verified badge, Car badge, Role badge
+- Overlay icons: Wave, Star (quota-gated), X (skip)
+- Full-screen modal with album carousel on tap
+- Ranking: `social-discovery` Edge Function uses `ORDER BY (score + priority * 1000) DESC`
+- Free=1 priority, Premium=2, Gold=3
+- **40-card daily limit for free users**: localStorage counter + `check_and_increment_quota("discovery_profile")` RPC
+- **Blur overlay on blocked cards**: white/70 backdrop-blur with Lock icon + Upgrade CTA (both in Chats.tsx and Discover.tsx)
+
+### 10e. Threads Scoring & Posting Quota
+
+**Status: PASS**
+
+- `NoticeBoard.tsx`: Thread creation calls `check_and_increment_quota("thread_post")` before insert
+- Quota exceeded → tier-specific upsell banner via `showUpsellBanner()`
+- Sorting: "Trending" (score DESC) and "Latest" (created_at DESC) toggle
+- Keyword search via `ILIKE` on title/content
+- Topic filter via `contains("tags", [topic])`
+- Thread score stored in `threads.score` column, updated by `update_threads_scores()` pg_cron
+- Score formula: time*10 + care_circle*20 + verified*50 + gold*30 + replies*5 + likes*3 + clicks*1 - ln(days+1)*5
+- Thread content: max 1000 chars, replies max 200 chars
+- Hashtags: up to 3, auto-generated on space press
+- Report/Hide/Block actions available via dropdown menu
+- Abuse auto-hide at >10 reports (backend trigger)
+
+### 10f. Map & Broadcast Alert
+
+**Status: PASS**
+
+- Floating tabs overlay (80% transparent, top-left) for Event/Friends toggle
+- Visible toggle: blue MapPin icon (green tint ON, grey tint OFF)
+- Refresh CTA: grey pill overlay
+- No header block or filter chips
+- Pin/Unpin: styled modal popups (not window.confirm)
+- Broadcast creation: full-screen bottom sheet with Title (100 chars) + Description (500 chars)
+- Post on Threads checkbox: only for Stray/Lost types
+- Vet data: from `poi_locations` table (Overpass API harvested)
+- Vet layer visible in BOTH tabs
+- Alert detail modal: Title display, Reply on Threads button
+- Creator controls: Edit + Remove (Lost alerts only)
+- Offline warning banner with WifiOff icon
+- Tier-based broadcast: Free (10km/12h), Premium (25km/24h), Gold (50km/48h), Add-on (150km/72h)
+
+### 10g. Notification Live/Mute & Account Settings
+
+**Status: PASS (Fixed)**
+
+- `AccountSettings.tsx` toggles: Non-Social mode, Hide from Map, **Push Notifications** (added), Pause All Notifications, Social (Waves/Matches), Nanny/Booking, Thread Activity, Map Alert, Email Notifications
+- Notification preferences saved to `notification_preferences` table
+- Language selector (English, 繁體中文, 简体中文, 日本語, 한국어)
+- Mute-all pauses all notification delivery
+- Per-channel granularity (social, nanny, threads, map_alert, email)
+
+### 10h. AI Vet Fetch Pet Data & Image Analysis
+
+**Status: PASS (Fixed)**
+
+- Pet selector dropdown shows all user's pets
+- Pet profile sent to backend includes: name, species, breed, age, weight, weight_unit, history, **medications** (added), **vaccinations** (added)
+- Gemini 1.5 Flash for text-only, Gemini 1.5 Pro for image input
+- Image compression <500KB before upload
+- QMS gate: `check_and_increment_quota("ai_vision")` for image analysis
+- Disclaimer footer: "huddle AI provides informational content, not veterinary diagnosis"
+- Emergency keyword detection triggers map link
+
+### 10i. Payment Gateway (Stripe)
+
+**Status: PASS**
+
+- `Chats.tsx`: Nanny booking via `create-marketplace-booking` Edge Function
+- Client-side idempotency key: `booking_{userId}_{timestamp}`
+- Safe Harbor checkbox required before checkout
+- Escrow: hold 100% upfront, release after 48h
+- Split: 90% sitter / 10% platform fee
+- Stripe Checkout Session with metadata (client_id, sitter_id, dates, pet_id, location)
+- Booking form: multi-day dates, pet dropdown, district input, currency select
+- `stripe-webhook` Edge Function updates booking status on `payment_intent.succeeded`
+
+### 10j. QMS (Quota Management System)
+
+**Status: PASS**
+
+- `check_and_increment_quota(action_type)` RPC used across: thread_post, discovery_profile, ai_vision, map_broadcast
+- Upsell on deny: tier-specific banner/modal with CTA to /premium
+- Gold exhaustion: no CTA, wait message only
+- Quotas per spec: Thread (Free 3/day, Premium 15/day, Gold 30/day), Discovery (Free 40/day, Premium/Gold unlimited), AI Vet (Free 0, Premium 10/day, Gold 20/day)
+
+### 10k. Family Sharing (Gold)
+
+**Status: PASS**
+
+- Family invite in AccountSettings: Gold-only gate
+- 10-digit user_id input for invite
+- Receiver notification popup with accept/decline
+- `family_members` table with status (pending/accepted)
+- Pooled quotas: `effective_tier` column propagates Gold benefits to family member
+- 1 slot max per Gold subscriber
+
+### 10l. Nanny Bookings
+
+**Status: PASS**
+
+- Booking form in Chats.tsx: service start/end dates, pet dropdown, district input, currency + amount
+- Validation: end date must be after start date, amount > 0
+- Safe Harbor disclaimer checkbox
+- Stripe escrow via `create-marketplace-booking` Edge Function
+- Dispute resolution: admin-only via `process-dispute-resolution`
+
+### 10m. Premium Page Spec Alignment
+
+**Status: PASS (Fixed)**
+
+- Premium features text updated: Broadcast "25km radius • 24h duration" (was "20/week • 10km • 24h")
+- Gold features text updated: Broadcast "50km radius • 48h duration" (was "20/week • 20km • 48h")
+- Filters text: Premium "12 advanced filters", Gold "All 15 filters (Gold exclusive)"
+- AI Vet line added to both tiers
+- Emergency Broadcast add-on: "+1 Broadcast (72h / 150km radius)" with "ADD-ON" pill
+
+---
+
 # FULL FEATURE INVENTORY — EVERY PAGE IN /src/pages
 
 > This section lists **every page** and documents UI elements (buttons/inputs/labels), local state, global context usage, and user flows. Use this as a rebuild blueprint.
@@ -304,22 +478,24 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 4) `Chats.tsx`
 **UI Elements:**
-- **Collapsible Discovery section** (default expanded): toggle header "Discovery" with ChevronUp/Down, AnimatePresence expand/collapse animation. Contains single-card paging discovery row with badge overlays (Verified/Car) on card image (see 13f)
-- **Collapsible Chats section** (default collapsed): toggle header "Chats" with ChevronUp/Down, AnimatePresence expand/collapse. Contains unified tabs + chat/group list
+- **Collapsible Discovery section** (default expanded): toggle header "Discovery" with ChevronUp/Down, `borderBottom: 1px solid #E0E0E0` + `boxShadow: 0 1px 3px rgba(0,0,0,0.1)` on header. AnimatePresence expand/collapse animation. Contains single-card paging discovery row with 3:4 vertical images (aspectRatio: 3/4, object-contain, centered) and badge overlays (see 13f)
+- **Collapsible Chats section** (default collapsed): toggle header "Chats" with same underline border + shadow. AnimatePresence expand/collapse. Contains unified tabs + chat/group list
 - Search, discovery filter button (SlidersHorizontal icon), Create Group (premium+verified)
-- Unified tabs inside Chats section: Nannies | Play Dates | Animal Lovers | Groups (see 13e)
-- Booking modal with Safe Harbor modal
+- Unified tabs inside Chats section: **Play Dates | Nannies | Animal Lovers | Groups** (Play Dates default). Active tab: underlined blue (brandBlue 2px bottom bar), no rounded pill. (see 13e)
+- Booking modal (Safe Harbor removed — disclaimer now inside ChatDialogue)
 - Discovery Filter Modal: chevron rows with per-filter selection UIs, summary text, defaults, reset (see 13c)
-- **Profile Sheet**: right-side drawer with 3:4 hero image, gradient overlay, Verified/Tier badge overlays, PawPrint pet icon overlay (bottom-right), name+age at bottom-left, public fields list layout. Non-social block for non_social users. (see 13d)
-- Swipe-to-delete on chat items with red bin icon and confirmation
-- **Group Manage modal**: group image + name + member count header, scrollable members list with "Remove" per member, "Invite from Mutual Waves" section with invite button per user, "Change Image" button
-- **Chat preview**: green "Book Now" pill for nanny chats (replaces $ icon), grey unread badge, bold social availability subtext
+- **Profile Sheet**: **full-screen scrollable modal** (fixed inset-0) with 3:4 hero image at top, horizontal images fit to container. Overlays at bottom of image: Name, Age, Social Role, Pet Species, Verified + Car Badge. Pet icon section below image if user owns pet. Vertical field list: Bio, Pet Species, Pet Experience, Location, Gender, Orientation, Relationship Status, Academic, Language, Social Album (3-column grid thumbnails). Non-social users show blocked card. (see 13d)
+- Swipe-to-delete on chat items: outlined red bin icon appears **only during swipe** (not static background), popup confirmation dialog
+- **Group Manage modal**: working group image upload (Supabase storage), scrollable members list with **working Remove** (deletes from chat_room_members), **Invite from Mutual Waves** with real notification insertion (receiver gets "Do you want to join?" notification), Change Image with file input
+- **Chat preview**: grey bold subtext closer to bottom border (text-[#6B7280] mt-1.5). No "Book Now" pill in preview (moved to ChatDialogue). Unread badge: **grey in chats**, **blue (brandBlue) in groups**
 
 **State:**
 - `hiddenDiscoveryIds`, `filters` (DiscoveryFilters object), `booking*` states
 - `isFilterModalOpen`, `activeFilterRow`, `profileSheetUser`, `profileSheetData`
-- `groupManageId`, `swipeDeleteId`
+- `groupManageId`, `swipeDeleteId`, `deleteConfirmId`
+- `groupImageUploading`, `groupMembers`, `mutualWaves`
 - `discoveryExpanded` (default `true`), `chatsExpanded` (default `false`)
+- `mainTab` default: `"playdates"`
 - Uses `AuthContext`, `useUpsell`
 
 **Flow:**
@@ -327,25 +503,31 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - Star → direct chat + quota
 - X → skip + add to hiddenDiscoveryIds
 - Expand Search → +15km (via filters.maxDistanceKm), clears hiddenDiscoveryIds
-- Booking → Safe Harbor modal → booking modal → Stripe checkout
-- Tap avatar → fetch profile → right-side sheet with 3:4 hero image (non_social blocked)
+- Booking → booking modal → Stripe checkout (no Safe Harbor popup)
+- Tap avatar → fetch profile → full-screen scrollable modal with 3:4 hero image (non_social excluded from discovery query)
 - Filter icon → tier-gated filter modal with per-filter selection UIs
-- Swipe left on chat → red bin → confirm delete (blocked if active transaction)
+- Swipe left on chat → outlined bin appears during swipe → popup confirm delete (blocked if active transaction)
 - Tap "Discovery" header → toggle discovery section expand/collapse
 - Tap "Chats" header → toggle chats section expand/collapse
+- Group manage → load members from chat_room_members + mutual waves → Remove works (DB delete), Invite sends notification
 
 ## 5) `ChatDialogue.tsx`
 **UI Elements:**
-- Messages list
+- Messages list with realtime subscription
 - Input text, send button
-- Media upload button
+- Media upload button (**no quota check** — media unlimited for all tiers in chats)
+- **Nanny chats**: green "Book Now" pill in header (top-right), pinned disclaimer banner below header (different text if current user is a nanny vs client)
+- **Group chats**: group avatar icon in header, "Manage" pill in header
+- URL params: `id`, `name`, `type` (playdates | nannies | animal-lovers | group)
 
 **State:**
-- Messages array
+- Messages array, chatType from URL params
 
 **Flow:**
 - Send message → insert into chat_messages
-- Media upload → QMS check `chat_image` → upload → insert message
+- Media upload → compress → upload to storage → insert message (no QMS gate — unlimited)
+- Book Now → navigate back to /chats with booking params
+- Nanny disclaimer: "Book verified Pet Nannies for safety..." for clients; "You are offering nanny services..." for nannies
 
 ## 6) `Social.tsx` (Threads)
 **UI Elements:**
@@ -405,28 +587,96 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 - Text → Gemini Flash
 - Image → QMS check `ai_vision` → Gemini Pro
 
-## 12) `Map.tsx`
-**UI Elements:**
-- Mapbox GL map with user pins, vet clinic pins, stray/lost pins
-- Broadcast Alert form: title, description (max 1000 chars), range dropdown, duration dropdown, visibility toggle (Eye/EyeOff icon)
-- "Pin my Location" with subtext: "Available on map for 2 hours and stay in system for 24 hours to receive broadcast alert. If you want to mute alerts, please go to Account Settings."
+## 12) `Map.tsx` — Map & Broadcast Alert (Final Specification, Overpass API Edition)
 
-**Broadcast Range by Tier:**
-- Free: 10km max, 12h visible, 3/week
-- Premium: 25km max, 24h visible, 30/month
-- Gold: 50km max, 48h visible, 50/month (pooled)
-- Add-on: 72h/150km
+### 12a) Overall Purpose & Controls
+The map is the central real-time location-based hub:
+- Showing visible users (friend pins — green name-initial icons)
+- Displaying nearby vet clinics & pet shops (static layer from `poi_locations` table, always visible in BOTH tabs)
+- Creating and receiving broadcast alerts (lost pets, stray sightings, general notices)
 
-**Range Dropdown Options:** 2km, 10km, 20km, 25km (Premium+), 50km (Gold+), 150km (Add-on)
-**Duration Dropdown Options:** 12h, 24h (Premium+), 48h (Gold+), 72h (Add-on)
+**Hard view restriction:** Only pins and alerts within **50 km** of user are ever shown.
+**Location source priority:** 1) Currently pinned location, 2) Live phone location (Visible ON), 3) Profile district fallback (geocoded).
 
-**Visibility Toggle:** Eye/EyeOff icon button replaces the text "Visible: On/Off"
+### 12b) Tabs Overlay (on map)
+- **80% transparent floating box**, positioned top-left overlay ON the map (not in header)
+- **"Event" tab**: displays Vet & Pet Shop pins + Lost/Stray/Others broadcast alerts
+- **"Friends" tab**: displays other visible users' green name-initial pins
+- Vet & Pet Shop static layer is **always visible in both tabs** (no toggle to hide)
+- **Subtext** (only when "Event" tab active, below tabs): "Stay visible or pin your location to see the nearby events"
 
-**HK Vet Clinics:** Auto-loaded, white icon with green/red dot (open/closed). Subtext: "Timely reflection of any changes of operations of the Vet Clinic is not guaranteed". 5-star rating (verified users only).
+### 12c) Always-Visible Controls
+- **Visible toggle**: icon-only, styled as **blue pin icon** (MapPin). Open eye / green tint = ON, Closed eye / grey tint = OFF.
+  - ON: enables location service → auto-pin at current live position + user can manually drag pin
+  - OFF: removes active pin + user becomes invisible (no pins visible, still receives alerts within system retention)
+- **Refresh CTA**: grey pill button labeled "Refresh" (overlay on map). Tap → forces immediate update. Also auto-refreshes on screen enter. Lazy-loading of map tiles.
+- **Broadcast FAB**: floating button on map (always visible, no extra text box above it)
 
-**Pin Colors:** Stray = blue, Lost = red, Friends = default
+### 12d) Pin Location Flow
+1. Visible toggle must be ON for pinning
+2. System auto-pins at current live location
+3. User can manually drag/tap to move pin
+4. On drop → **confirmation popup**: "Available on map for 2 hours and stay in system for 12 hours to receive broadcast alert." + "Confirm" CTA + "<" return arrow
+5. On Confirm → pin saved, green name-initial icon visible for **exactly 2 hours**
+6. After 2h: pin disappears, location stays in system for additional 10h (total 12h) for alert delivery
+7. Unpin (toggle OFF): popup "Unpin location? You will not be able to see Friends & it will affect the pet care location result" → Yes = pin removed immediately
 
-**Performance:** PostGIS ST_DWithin for radius queries, GIST index on profiles.location
+**Dual timers per pin:** `Visible_Duration = 2h` (map display), `System_Duration = 12h` (alert reception)
+**Hide from Map toggle** (Account Settings): ON = pin mode disabled + any pin removed; OFF = re-enabled
+
+### 12e) Broadcast Alert Creation
+Full-screen modal on tap of broadcast FAB:
+- **Topic**: "Stray" / "Lost" / "Others" (segmented buttons)
+- **Title**: short text (required, max 100 chars)
+- **Short Description**: longer text (max 500 chars)
+- **Image**: optional upload (gallery or camera), shrink to fit preview
+- **Checkbox** (only for Stray/Lost): "Post on Threads to allow updates from other users"
+- **Range**: slider (0 km to tier max)
+- **Duration**: slider (1h to tier max)
+- **"Broadcast" button** at bottom
+
+**Tier Gating (strict):**
+- Free: max 10 km range, max 12h duration
+- Premium: max 25 km, max 24h
+- Gold: max 50 km, max 48h
+- Add-on (purchased separately): 150 km range, 72h duration
+
+**Pin colors:** Stray = **yellow paw** 🐾, Lost = **red alert** 🚨, Others = **grey paw** 🐾, Friends = **green name-initial**
+
+### 12f) Full View Modal (tapping any pin)
+Shows: Topic (bold), Title, full description (500 chars), image (if uploaded), "Reply on Threads" button (if creator checked Post on Threads), "Report abuse" button.
+Abuse counter > 10 → pin auto-hidden for all users.
+
+**Creator controls:** Can always edit title/description/image. Range + duration locked after creation. Lost topic → extra "Remove" button with confirmation.
+
+### 12g) Vet & Pet Shop Layer (Overpass API + Monthly Harvest)
+- Data from `poi_locations` table (harvested by Supabase Edge Function `overpass-harvest`)
+- Edge Function queries `https://overpass-api.de/api/interpreter` for `amenity=veterinary` OR `shop=pet` within 50km
+- Mapping: `name` → tags.name, `address` → tags["addr:full"], `phone` → tags.phone, `opening_hours` → tags.opening_hours
+- Reconciliation: missing → `active=false`, changed → UPDATE, new → INSERT
+- `pg_cron` runs every 30 days
+- Client queries `poi_locations` with PostGIS `ST_DWithin` (<100ms)
+- Pin appearance: hospital/store emoji with green dot (open) / red dot (closed)
+- Full view: address, phone, hours, "Call" button only (no navigation)
+- Legal subtext: "Data provided by third-party sources. Information may not be current; please verify directly with the clinic."
+
+### 12h) Notifications
+- Lost/stray alerts → push notifications: "💡: Furry friend sighting reported in [District]!" / "🚨: A furry friend is missing in [District]!"
+- In-app: bell icon shows red dot for unread
+- Admin can send manual notifications
+
+### 12i) Automatic Cleanup
+- Daily midnight (00:00 UTC): delete all expired alerts
+- Pins disappear immediately when expired
+
+### 12j) Edge Cases
+- Hide from Map ON → no alerts, no pins, pin mode disabled
+- No location permission → toast "Enable location to use map features", still shows vets/pet shops
+- Quota exceeded → creation blocked + tier-specific upsell
+- Abuse reports > 10 → auto-hidden
+- Offline → cached alerts + "You're offline: Results may be out of date. Please refresh when back online."
+
+**Performance:** PostGIS ST_DWithin for radius queries, GIST index on profiles.location, poi_locations.geog
 
 ## 13) `Settings.tsx`
 **UI Elements (Gear Logo CTA, UAT):**
@@ -576,52 +826,59 @@ Vaccination inputs must show: **"Input last vaccination dates for better trackin
 
 ## 13d) Profile Tap in Chats / Discovery
 
-**Behavior:** Tapping a user's avatar in the chat list or discovery card opens a scrollable right-side sheet (w-80, max-w-[85vw]).
+**Behavior:** Tapping a user's avatar in the chat list or discovery card opens a **full-screen scrollable modal** (fixed inset-0, z-[81]).
 
-**Layout (3:4 hero image design):**
-1. **Hero image** (aspect-ratio 3:4, object-cover) — user's avatar fills the top. Gradient overlay at bottom (black/70 → transparent).
-2. **Badge overlays** (top-left): Verified (gold pill), Premium/Gold tier badge
-3. **PawPrint pet icon** (bottom-right of image): white circle with blue PawPrint icon, shown if user has pets
-4. **Name + age** (bottom-left of image, over gradient): bold white text
-5. **Public fields list** (below image, p-4): label-value rows (Status, Location, Bio, Gender, Orientation, Job, Education, Pets). Each row: grey label (w-20) + text value. Bio is full-width block.
-6. Close button: absolute top-right, black/40 circle with white X
+**Layout (3:4 hero image, full-screen scrollable):**
+1. **Hero image** (aspect-ratio 3:4, object-cover) — user's avatar fills top. Horizontal images fit to 4:3 container. Gradient overlay at bottom (h-32, black/80 → transparent).
+2. **Overlays at bottom of image:**
+   - Verified badge (gold pill) + Car badge (blue pill) — row above name
+   - Name + Age (bold white text)
+   - Social Role + Pet Species line below (xs text, white/80)
+3. **Pet icon section** (below image): PawPrint icon + "Pet Owner" text in a border-b row, shown only if user has pets
+4. **Vertical field list** (divide-y divider): Bio (full-width block), Pet Species, Pet Experience (years), Location, Gender, Orientation, Relationship Status, Academic, Language. Each row: grey label (w-28) + text value. Respects `show_*` toggles.
+5. **Social Album** (below fields): 3-column grid of square thumbnails (max 9), shown if social_album has entries
+6. Close button: absolute top-right, black/50 circle with white X
 
-**Respects `show_*` toggles:** Only render fields where the corresponding `show_*` flag is not false.
+**Non-Social users:** `profiles.non_social = true` users are **completely excluded from the discovery query** (filtered server-side). If profile is opened directly and non_social is true, show a centered blocked card.
 
-**Non-Social block:** If `profiles.non_social = true`, show a blocked card with User icon, name, and message: "This user has enabled Non-Social mode and is not available for discovery or chat."
-
-**Backend:** `SELECT ... FROM profiles WHERE id = target_id AND visible_from_discovery = true`
-RLS: `visible_from_discovery = true OR auth.uid() = owner`
+**Backend:** `SELECT ... FROM profiles WHERE id = target_id`; discovery query: `WHERE non_social IS NOT TRUE`
+Profile query includes: `display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, social_album, show_*, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role`
 
 ## 13e) Chats Preview List & Group Changes
 
 **Collapsible sections:**
-- **Discovery section** (default expanded): "Discovery" header with ChevronUp/Down toggle. AnimatePresence height animation (0.25s easeInOut). Contains discovery cards.
-- **Chats section** (default collapsed): "Chats" header with ChevronUp/Down toggle. Same animation. Contains unified tabs + chat/group list.
+- **Discovery section** (default expanded): "Discovery" header with ChevronUp/Down toggle + `borderBottom: 1px solid #E0E0E0` + `boxShadow: 0 1px 3px rgba(0,0,0,0.1)`. AnimatePresence height animation (0.25s easeInOut). Contains discovery cards.
+- **Chats section** (default collapsed): "Chats" header with same underline border + shadow styling. Same animation. Contains unified tabs + chat/group list.
 
 **Unified tab system (inside Chats section):**
-- Tabs: Nannies | Play Dates | Animal Lovers | Groups
-- All chats and groups rendered inside the collapsible Chats section
+- Tab order: **Play Dates | Nannies | Animal Lovers | Groups** (Play Dates is default)
+- Active tab: **underlined blue** (2px brandBlue bottom bar), text-brandBlue. Inactive: text-muted-foreground. No rounded pill backgrounds. Tabs sit on a border-b border-border line.
 
 **Chat preview layout:**
 1. Name (bold) + timestamp (right-aligned)
 2. One-line message preview (truncate with "..." if long)
-3. Social availability in bold blue subtext below (e.g., "Pet Nanny", "Playdate", "Animal Lover")
+3. **Grey bold subtext** closer to bottom border (text-[#6B7280] font-bold mt-1.5): "Pet Nanny", "Playdate", "Animal Lover"
 
 **Right-side actions:**
-- **Nannies:** Green "Book Now" pill button (bg #A6D539, white text, rounded-full, text-[10px] font-bold) — opens Safe Harbor → booking modal
-- **Unread badge:** Grey circle (bg-muted-foreground/70) with white count text
+- **No "Book Now" pill** in chat preview (moved to ChatDialogue header)
+- **Unread badge (chats):** Grey circle (bg-muted-foreground/70) with white count text
+- **Unread badge (groups):** Blue circle (bg-brandBlue) with white count text
 
-**Swipe left on chat:** Show red rubbish bin icon (WhatsApp style) → confirm "Conversation will be deleted". Conversations with active transactions cannot be deleted.
+**Swipe-to-delete:** Outlined red bin icon appears **only during active swipe** (not as a static background). On release past threshold → **popup confirmation dialog** (Dialog component): "This conversation will be permanently deleted. Are you sure?" with Cancel + Delete buttons. Conversations with active transactions cannot be deleted.
 
 **Groups:**
 - No badge on avatar
 - Under group name show "X members" (static)
 - Group creator only: blue pill "Manage" (right-aligned next to group name)
-- Tap Manage → modal with: group image header (w-14 circle), group name + member count, scrollable member list with "Remove" per member, "Invite from Mutual Waves" section listing chat contacts with "Invite" button each, "Change Image" button
+- Tap Manage → modal with:
+  - **Group Image**: displayed avatar (from avatarUrl) or gradient placeholder. **Working "Change Image"** button with file input → compress → upload to Supabase storage → update local state + DB
+  - Group name + member count
+  - **Members list**: fetched from `chat_room_members` joined with `profiles`. **Working "Remove"** button: deletes from `chat_room_members`, updates local state + member count
+  - **Invite from Mutual Waves**: fetched from `waves` table (mutual = both directions). Each user shown with avatar + name + "Invite" button. Invite inserts a `notifications` row (`type: "group_invite"`) for the receiver with group details. Receiver sees "Do you want to join [Group]?" notification.
 
 ## 13f) Discovery Profile Card UI
 
+**Card image:** 3:4 vertical aspect ratio (`aspectRatio: 3/4`, `object-contain`, centered on muted background)
 **Shows:** Name, Age, Social Role/Availability, Pet Species, Verified Badge + Car Badge overlay on card image
 **Single card visible at a time:** Horizontal scroll with `scrollSnapType: "x mandatory"`, card width = calc(100vw - 40px)
 **Action icons overlay:** Wave (match), Star (direct chat + quota), X (skip)
