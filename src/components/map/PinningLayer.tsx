@@ -207,15 +207,18 @@ const PinningLayer = ({
 
     setIsLoading(true);
     setShowManualInput(false);
+    console.log(`[PinningLayer] moveEnd — center: lat=${lat.toFixed(5)}, lng=${lng.toFixed(5)}`);
 
     // Get mapbox access token from the map instance
     const token = mapboxgl.accessToken as string;
 
     // Run reverse geocoding (3s timeout) + Overpass in parallel
+    console.log("[PinningLayer] Geocoding Payload: reverseGeocode + fetchNearbyPOIs...");
     const [addr, pois] = await Promise.all([
       reverseGeocode(lng, lat, token),
       fetchNearbyPOIs(lat, lng),
     ]);
+    console.log(`[PinningLayer] Geocode result: addr="${addr}", POIs=${pois.length}`);
 
     // Turf.js distance from device GPS to center pin
     let dist = 0;

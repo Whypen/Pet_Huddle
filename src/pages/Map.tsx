@@ -8,9 +8,14 @@ import {
   MapPin,
   RefreshCw,
   WifiOff,
+  Eye,
+  EyeOff,
+  ExternalLink,
 } from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import distance from "@turf/distance";
+import { point } from "@turf/helpers";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -30,6 +35,9 @@ import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 import PinningLayer from "@/components/map/PinningLayer";
 import BroadcastModal from "@/components/map/BroadcastModal";
 import PinDetailModal from "@/components/map/PinDetailModal";
+
+// Mock coordinates for dev fallback (Hong Kong — Tai Wai)
+const MOCK_COORDS = { lat: 22.3964, lng: 114.1095 };
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -63,6 +71,7 @@ interface MapAlert {
   range_meters?: number | null;
   creator_id?: string | null;
   has_thread?: boolean;
+  thread_id?: string | null;
   creator: {
     display_name: string | null;
     avatar_url: string | null;
@@ -111,6 +120,7 @@ type MapAlertsNearbyRow = {
   expires_at: string | null;
   range_meters: number | null;
   creator_id?: string | null;
+  thread_id?: string | null;
   creator_display_name: string | null;
   creator_avatar_url: string | null;
 };
@@ -187,6 +197,9 @@ const Map = () => {
   // Add-on broadcast quota
   const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
 
+  // Invisible mode — Eye toggle
+  const [isInvisible, setIsInvisible] = useState(false);
+
   const profileRec = useMemo(() => {
     if (profile && typeof profile === "object") return profile as unknown as Record<string, unknown>;
     return null;
@@ -247,6 +260,28 @@ const Map = () => {
   // Default center (Hong Kong)
   const defaultCenter: [number, number] = [114.1583, 22.2828];
 
+  // Pin button re-centers on live GPS when already pinned
+  const reCenterOnGPS = useCallback(() => {
+    if (!navigator.geolocation || !map.current) return;
+    console.log("[PIN] Re-centering on live GPS...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        console.log(`[PIN] Re-center GPS Success: lat=${lat}, lng=${lng}`);
+        map.current?.flyTo({ center: [lng, lat], zoom: 14 });
+        setUserLocation({ lat, lng });
+      },
+      () => {
+        // Fall back to existing user location
+        if (userLocation && map.current) {
+          map.current.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
+        }
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  }, [userLocation]);
+
   // ==========================================================================
   // Pin / Unpin Location
   // ==========================================================================
@@ -258,36 +293,74 @@ const Map = () => {
     setShowPinConfirm(true);
   };
 
+  // ============================================================
+  // PHASE 1: Solution-Loop Protocol — GPS High-Accuracy Pin Fix
+  // Steps: 1) GPS high-accuracy → 2) Mock fallback → 3) Manual
+  // Debug logging at EVERY state transition
+  // ============================================================
+  const applyPinLocation = useCallback(async (lat: number, lng: number, source: string) => {
+    console.log(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
+    setUserLocation({ lat, lng });
+    const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    setPinExpiresAt(pinExpires);
+    console.log("[PIN] Pin State Updated: pinExpiresAt=", pinExpires);
+
+    if (user) {
+      console.log("[PIN] Saving to DB — set_user_location RPC...");
+      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+      await (supabase as any).rpc("set_user_location", {
+        p_lat: lat,
+        p_lng: lng,
+        p_pin_hours: 2,
+        p_retention_hours: 12,
+      });
+      console.log("[PIN] DB save complete.");
+    }
+
+    // Fly to location
+    if (map.current) {
+      console.log("[PIN] flyTo user location...");
+      map.current.flyTo({ center: [lng, lat], zoom: 14 });
+    }
+
+    setVisibleEnabled(true);
+    setIsInvisible(false);
+    setPinning(false);
+    console.log(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
+    toast.success(`Location pinned (${source})`);
+  }, [user]);
+
   const confirmPinLocation = () => {
     setShowPinConfirm(false);
     setPinning(true);
+    console.log("[PIN] GPS Request Sent — enableHighAccuracy=true, timeout=5000ms");
+
+    // STEP 1: GPS with High Accuracy
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        console.log(`[PIN] GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}, accuracy=${pos.coords.accuracy}m`);
         if (pos.coords.accuracy && pos.coords.accuracy > 500) {
-          toast.warning(t("Location accuracy too low. Please retry with better GPS signal."));
-          setPinning(false);
+          console.log("[PIN] GPS accuracy too low (>500m). Falling back to mock...");
+          toast.warning(t("Location accuracy too low. Using approximate location."));
+          // STEP 2: Fall back to mock
+          await applyPinLocation(MOCK_COORDS.lat, MOCK_COORDS.lng, "mock-fallback");
           return;
         }
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        setUserLocation({ lat, lng });
-        const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-        setPinExpiresAt(pinExpires);
-        if (user) {
-          await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
-          await (supabase as any).rpc("set_user_location", {
-            p_lat: lat,
-            p_lng: lng,
-            p_pin_hours: 2,
-            p_retention_hours: 12,
-          });
-        }
-        setVisibleEnabled(true);
-        setPinning(false);
+        await applyPinLocation(lat, lng, "GPS");
       },
-      () => {
-        toast.error(t("Unable to detect current location"));
-        setPinning(false);
+      async (err) => {
+        console.log(`[PIN] GPS Error: code=${err.code}, message=${err.message}`);
+        // STEP 2: Mock coordinates fallback
+        console.log("[PIN] Applying mock coordinates fallback [22.3964, 114.1095]...");
+        toast.info("GPS unavailable — using approximate location. You can refine via Broadcast pin.");
+        await applyPinLocation(MOCK_COORDS.lat, MOCK_COORDS.lng, "mock-fallback");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0,
       }
     );
   };
@@ -333,6 +406,47 @@ const Map = () => {
       handlePinMyLocation();
     }
   };
+
+  // Invisible mode toggle — Brand Blue eye icon
+  const toggleInvisible = async () => {
+    if (!user) return;
+    const newInvisible = !isInvisible;
+    setIsInvisible(newInvisible);
+    console.log(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
+    await (supabase as any).from("profiles").update({ is_visible: !newInvisible }).eq("id", user.id);
+    if (newInvisible) {
+      toast.info("You are now invisible on the map");
+    } else {
+      toast.success("You are now visible on the map");
+    }
+  };
+
+  // Auto-pin on mount: request geolocation on page load for returning users
+  useEffect(() => {
+    if (!user || isPinned || visibleEnabled) return;
+    // Only prompt once per session
+    const prompted = sessionStorage.getItem("geoPrompted");
+    if (prompted) return;
+    sessionStorage.setItem("geoPrompted", "true");
+
+    if (!navigator.geolocation) return;
+    console.log("[PIN] Auto-pin: Requesting geolocation on mount...");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        console.log(`[PIN] Auto-pin GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}`);
+        if (pos.coords.accuracy && pos.coords.accuracy > 500) {
+          console.log("[PIN] Auto-pin: accuracy too low, skipping auto-pin");
+          return;
+        }
+        await applyPinLocation(pos.coords.latitude, pos.coords.longitude, "auto-pin");
+      },
+      (err) => {
+        console.log(`[PIN] Auto-pin GPS declined/failed: ${err.message}`);
+        // Silent — don't annoy user
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
+    );
+  }, [user, isPinned, visibleEnabled, applyPinLocation]);
 
   // ==========================================================================
   // Fetch: Vet/pet shops from poi_locations cache (NO live Overpass calls)
@@ -438,12 +552,14 @@ const Map = () => {
   }, []);
 
   // User location marker — Green Name-Initial icon when pinned (matches Friends pin style)
+  // Invisible mode: 50% opacity
   useEffect(() => {
     if (!map.current || !mapLoaded || !userLocation) return;
     const el = document.createElement("div");
     el.className = "user-location-marker";
     const displayName = profile?.display_name || user?.email?.charAt(0) || "Me";
     const initial = typeof displayName === "string" ? displayName.charAt(0).toUpperCase() : "M";
+    const opacity = isInvisible ? "0.5" : "1";
     el.innerHTML = `
       <div style="
         width: 48px; height: 48px;
@@ -451,6 +567,8 @@ const Map = () => {
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 4px 12px rgba(33,69,207,0.4);
         cursor: pointer;
+        opacity: ${opacity};
+        transition: opacity 0.3s ease;
       ">
         <div style="
           width: 38px; height: 38px;
@@ -467,7 +585,7 @@ const Map = () => {
       .setLngLat([userLocation.lng, userLocation.lat])
       .addTo(map.current);
     return () => { marker.remove(); };
-  }, [userLocation, mapLoaded, profile?.display_name, user?.email]);
+  }, [userLocation, mapLoaded, profile?.display_name, user?.email, isInvisible]);
 
   // ==========================================================================
   // Update Markers — Vet layer BOTH tabs, alerts Event only, friends Friends only
@@ -680,6 +798,7 @@ const Map = () => {
           report_count: row.report_count ?? 0,
           created_at: row.created_at,
           creator_id: row.creator_id || null,
+          thread_id: row.thread_id || null,
           creator: { display_name: row.creator_display_name, avatar_url: row.creator_avatar_url },
           expires_at: row.expires_at,
           range_meters: row.range_meters,
@@ -690,7 +809,7 @@ const Map = () => {
           .from("map_alerts")
           .select(`
             id, latitude, longitude, alert_type, title, description, photo_url,
-            support_count, report_count, created_at, creator_id,
+            support_count, report_count, created_at, creator_id, thread_id,
             creator:profiles!map_alerts_creator_id_fkey(display_name, avatar_url)
           `)
           .eq("is_active", true)
@@ -812,29 +931,52 @@ const Map = () => {
             })}
           </div>
 
-          {/* Spec: Single green pin button — white pin icon ON / grey OFF */}
-          <button
-            onClick={handlePinToggle}
-            disabled={pinning}
-            className={cn(
-              "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors",
-              isPinned || visibleEnabled
-                ? "bg-[#A6D539]"
-                : "bg-white/80 backdrop-blur-sm"
-            )}
-            aria-label={isPinned ? "Pinned (tap to unpin)" : "Pin my location"}
-          >
-            {pinning ? (
-              <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-            ) : (
-              <MapPin
+          {/* Right cluster: Invisible Eye toggle + Pin button */}
+          <div className="flex items-center gap-2">
+            {/* Invisible Eye toggle — only show when pinned */}
+            {(isPinned || visibleEnabled) && (
+              <button
+                onClick={toggleInvisible}
                 className={cn(
-                  "w-5 h-5",
-                  isPinned || visibleEnabled ? "text-white" : "text-gray-400"
+                  "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors",
+                  isInvisible
+                    ? "bg-gray-400"
+                    : "bg-[#2145CF]"
                 )}
-              />
+                aria-label={isInvisible ? "Invisible (tap to become visible)" : "Visible (tap to go invisible)"}
+              >
+                {isInvisible ? (
+                  <EyeOff className="w-5 h-5 text-white" />
+                ) : (
+                  <Eye className="w-5 h-5 text-white" />
+                )}
+              </button>
             )}
-          </button>
+
+            {/* Spec: Single green pin button — white pin icon ON / grey OFF */}
+            <button
+              onClick={handlePinToggle}
+              disabled={pinning}
+              className={cn(
+                "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors",
+                isPinned || visibleEnabled
+                  ? "bg-[#A6D539]"
+                  : "bg-white/80 backdrop-blur-sm"
+              )}
+              aria-label={isPinned ? "Pinned (tap to unpin)" : "Pin my location"}
+            >
+              {pinning ? (
+                <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+              ) : (
+                <MapPin
+                  className={cn(
+                    "w-5 h-5",
+                    isPinned || visibleEnabled ? "text-white" : "text-gray-400"
+                  )}
+                />
+              )}
+            </button>
+          </div>
         </div>
 
         {/* ================================================================ */}
@@ -845,8 +987,10 @@ const Map = () => {
             onClick={() => {
               fetchAlerts();
               fetchVetClinics();
-              // Re-center on user pin if active (pin persistence)
-              if (userLocation && map.current) {
+              // Re-center on live GPS or stored user pin
+              if (isPinned || visibleEnabled) {
+                reCenterOnGPS();
+              } else if (userLocation && map.current) {
                 map.current.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
               }
               toast.success("Map refreshed");
@@ -889,14 +1033,24 @@ const Map = () => {
         {/* ================================================================ */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
           {/* Subtext: context-dependent privacy message */}
+          {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
+            <p className="text-xs text-right text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
+              You are invisible from Map.
+            </p>
+          )}
           {mapTab === "Event" && !pinningActive && !visibleEnabled && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              Stay visible or pin your location to see accurate events &amp; friends nearby.
+              Pin location to see accurate events and friends nearby.
             </p>
           )}
           {mapTab === "Friends" && !pinningActive && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              Pin your location to see friends nearby. Your location is only visible while pinned.
+              Pin your location to see friends nearby.
+            </p>
+          )}
+          {mapTab === "Friends" && !pinningActive && isPinned && isInvisible && (
+            <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
+              Stay visible to see friends nearby.
             </p>
           )}
 
@@ -1121,22 +1275,39 @@ const Map = () => {
                 {selectedVet.openingHours && <p>{t("Hours")}: {formatOpeningHours(selectedVet.openingHours)}</p>}
                 {selectedVet.phone && <p>{t("Phone")}: {selectedVet.phone}</p>}
                 <p className="text-[10px] text-muted-foreground/60 mt-2">
-                  Data sourced from OpenStreetMap contributors. Timely reflection of any changes of operations is not guaranteed.
+                  Data sourced from OpenStreetMap. Verification recommended.
                 </p>
               </div>
 
               {/* Spec: Blue "Call" button — HIDDEN when phone is NULL */}
-              {selectedVet.phone && (
+              <div className="flex gap-2">
+                {selectedVet.phone && (
+                  <Button
+                    onClick={() => {
+                      window.open(`tel:${selectedVet.phone}`);
+                    }}
+                    className="flex-1 h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90 text-white"
+                  >
+                    <Phone className="w-5 h-5 mr-2" />
+                    {t("map.call_now")}
+                  </Button>
+                )}
+                {/* Search Google for more Vets */}
                 <Button
+                  variant="outline"
                   onClick={() => {
-                    window.open(`tel:${selectedVet.phone}`);
+                    const query = encodeURIComponent(`${selectedVet.name} veterinary Hong Kong`);
+                    window.open(`https://www.google.com/maps/search/${query}`, "_blank");
                   }}
-                  className="w-full h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90 text-white"
+                  className={cn(
+                    "h-12 rounded-xl",
+                    selectedVet.phone ? "" : "flex-1"
+                  )}
                 >
-                  <Phone className="w-5 h-5 mr-2" />
-                  {t("map.call_now")}
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Search Google
                 </Button>
-              )}
+              </div>
             </motion.div>
           </motion.div>
         )}

@@ -130,7 +130,7 @@ const BroadcastModal = ({
       const durH = selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
       const expiresAt = new Date(Date.now() + durH * 60 * 60 * 1000).toISOString();
 
-      const { error } = await supabase
+      const { data: insertedAlert, error } = await supabase
         .from("map_alerts")
         .insert({
           creator_id: user.id,
@@ -164,18 +164,38 @@ const BroadcastModal = ({
         throw error;
       }
 
+      const alertId = (insertedAlert as any)?.id;
       toast.success("Alert broadcasted!");
 
-      // Post on Threads (Stray/Lost only) — quota removed, unlimited for all tiers
+      // PHASE 2.2: Threads auto-duplication — capture thread_id and attach to map_alerts
       if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
-        await (supabase as any).from("threads").insert({
-          user_id: user.id,
-          title: alertTitle.trim() || `Broadcast (${alertType})`,
-          content: description.trim() || "",
-          tags: ["News"],
-          hashtags: [],
-          images: photoUrl ? [photoUrl] : [],
-        });
+        try {
+          const { data: threadData, error: threadErr } = await (supabase as any).from("threads").insert({
+            user_id: user.id,
+            title: alertTitle.trim() || `Broadcast (${alertType})`,
+            content: description.trim() || "",
+            tags: ["News"],
+            hashtags: [],
+            images: photoUrl ? [photoUrl] : [],
+          }).select("id").maybeSingle();
+
+          if (threadErr) {
+            console.warn("[Broadcast] Thread insert failed:", threadErr);
+            toast.info("Alert posted but thread sync failed");
+          }
+
+          // Link the thread_id back to the map alert
+          const threadId = threadData?.id;
+          if (threadId && alertId) {
+            await (supabase as any)
+              .from("map_alerts")
+              .update({ thread_id: threadId })
+              .eq("id", alertId);
+            console.log(`[Broadcast] Linked thread_id=${threadId} to alert_id=${alertId}`);
+          }
+        } catch (threadCatchErr) {
+          console.warn("[Broadcast] Thread sync catch:", threadCatchErr);
+        }
       }
 
       handleClose();
