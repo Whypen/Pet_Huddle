@@ -262,21 +262,25 @@ const BroadcastModal = ({
 
       // Step A: insert thread first (for Stray/Lost + Post on Threads)
       if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
-        const { data: threadData, error: threadErr } = await supabase.from("threads" as "profiles").insert({
-          user_id: user.id,
-          title: alertTitle.trim() || `Broadcast (${alertType})`,
-          content: description.trim() || "",
-          tags: ["News"],
-          hashtags: [],
-          images: photoUrl ? [photoUrl] : [],
-          is_map_alert: true,
-          is_public: true,
-        } as Record<string, unknown>).select("id").maybeSingle();
+        const { data: threadData, error: threadErr } = await supabase
+          .from("threads" as "profiles")
+          .insert({
+            user_id: user.id,
+            title: alertTitle.trim() || `Broadcast (${alertType})`,
+            content: description.trim() || "",
+            tags: ["News"],
+            hashtags: [],
+            images: photoUrl ? [photoUrl] : [],
+            is_map_alert: true,
+            is_public: true,
+          })
+          .select("id")
+          .single();
 
-        if (threadErr || !(threadData as { id?: string } | null)?.id) {
-          throw threadErr || new Error("Thread insert failed");
+        if (threadErr || !threadData?.id) {
+          throw new Error("Thread creation failed. Alert aborted to prevent ghosting.");
         }
-        threadId = (threadData as { id?: string } | null)?.id || null;
+        threadId = threadData.id;
       }
 
       const rangeKm = selectedRangeKm ?? broadcastRange;

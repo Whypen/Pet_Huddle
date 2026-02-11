@@ -155,6 +155,7 @@ const Map = () => {
   const { showUpsellBanner } = useUpsellBanner();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const hasInitialized = useRef(false);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -569,21 +570,36 @@ const Map = () => {
   }, [t]);
 
   // ==========================================================================
-  // Map Initialization (one-time)
+  // Map Initialization (singleton + one-time auto-snap)
   // ==========================================================================
   useEffect(() => {
+    // Ensure Mapbox CSS is present in DOM (defensive fallback)
+    if (!document.getElementById("mapbox-css")) {
+      const link = document.createElement("link");
+      link.id = "mapbox-css";
+      link.rel = "stylesheet";
+      link.href = "https://api.mapbox.com/mapbox-gl-js/v2.9.1/mapbox-gl.css";
+      document.head.appendChild(link);
+    }
+
     if (map.current || !mapContainer.current) return;
 
-    const initialCenter = defaultCenter;
+    const initialCenter: [number, number] = userLocation
+      ? [userLocation.lng, userLocation.lat]
+      : defaultCenter;
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: "mapbox://styles/mapbox/streets-v12",
-      center: initialCenter as [number, number],
-      zoom: 11,
+      style: "mapbox://styles/mapbox/streets-v11",
+      center: initialCenter,
+      zoom: 13,
     });
 
     map.current.on("load", () => {
       setMapLoaded(true);
+      if (!hasInitialized.current && userLocation) {
+        map.current?.flyTo({ center: [userLocation.lng, userLocation.lat], essential: true });
+        hasInitialized.current = true;
+      }
       setTimeout(() => { map.current?.resize(); }, 200);
     });
 
@@ -593,7 +609,7 @@ const Map = () => {
       map.current?.remove();
       map.current = null;
     };
-  }, []);
+  }, [userLocation?.lat, userLocation?.lng]);
 
   // Handle window resize
   useEffect(() => {
