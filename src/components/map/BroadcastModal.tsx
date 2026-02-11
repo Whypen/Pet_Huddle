@@ -270,6 +270,7 @@ const BroadcastModal = ({
           hashtags: [],
           images: photoUrl ? [photoUrl] : [],
           is_map_alert: true,
+          is_public: true,
         } as Record<string, unknown>).select("id").maybeSingle();
 
         if (threadErr || !(threadData as { id?: string } | null)?.id) {

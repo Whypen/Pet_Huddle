@@ -585,17 +585,6 @@ const Map = () => {
     map.current.on("load", () => {
       setMapLoaded(true);
       setTimeout(() => { map.current?.resize(); }, 200);
-      // Snap to persisted pin location on map load
-      try {
-        const storedPin = localStorage.getItem("huddle_pin");
-        if (storedPin) {
-          const pin = JSON.parse(storedPin);
-          if (pin.lat && pin.lng) {
-            map.current?.flyTo({ center: [pin.lng, pin.lat], zoom: 14 });
-            console.log("[PIN] Map loaded — flyTo persisted pin");
-          }
-        }
-      } catch { /* ignore */ }
     });
 
     map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");

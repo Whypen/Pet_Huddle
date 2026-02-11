@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const envPath = path.resolve(process.cwd(), ".env");
 if (fs.existsSync(envPath)) {
@@ -116,6 +117,7 @@ const buildThread = (alert, userId) => ({
   hashtags: [],
   images: alert.photoUrl ? [alert.photoUrl] : [],
   is_map_alert: true,
+  is_public: true,
   created_at: alert.createdAt,
 });
 
@@ -136,17 +138,52 @@ const run = async () => {
       legal_name: name,
       phone: "+85200000000",
       onboarding_completed: true,
+      posted_to_threads: true,
     });
     if (profileErr) {
       console.error("Failed to seed demo profile:", profileErr);
       process.exit(1);
     }
   }
+  await supabase.from("profiles").update({ posted_to_threads: true }).eq("id", userId);
+
   const rows = demoAlerts.map((alert) => buildThread(alert, userId));
   const { error } = await supabase.from("threads").upsert(rows, { onConflict: "id" });
   if (error) {
     console.error("Failed to seed demo threads:", error);
     process.exit(1);
+  }
+  const { data: alerts, error: alertErr } = await supabase
+    .from("map_alerts")
+    .select("id, thread_id, created_at")
+    .limit(200);
+  if (alertErr) {
+    console.error("Failed to fetch map_alerts:", alertErr);
+    process.exit(1);
+  }
+  for (const alert of alerts || []) {
+    const threadId = alert.thread_id || demoThreadIdByAlert[alert.id] || crypto.randomUUID();
+    if (!alert.thread_id) {
+      await supabase.from("map_alerts").update({ thread_id: threadId }).eq("id", alert.id);
+    }
+    const { data: existing } = await supabase.from("threads").select("id").eq("id", threadId).maybeSingle();
+    if (!existing) {
+      await supabase.from("threads").insert({
+        id: threadId,
+        user_id: userId,
+        title: "Alert",
+        content: "",
+        tags: ["News"],
+        hashtags: [],
+        images: [],
+        is_map_alert: true,
+        is_public: true,
+        map_id: alert.id,
+        created_at: alert.created_at,
+      });
+    } else {
+      await supabase.from("threads").update({ map_id: alert.id, is_map_alert: true, is_public: true }).eq("id", threadId);
+    }
   }
   console.log(`Seeded ${rows.length} demo threads.`);
 };

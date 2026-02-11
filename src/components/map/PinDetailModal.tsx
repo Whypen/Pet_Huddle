@@ -31,7 +31,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
-import { buildSocialShareLinks } from "@/lib/socialShare";
+import { ShareSheet } from "@/components/social/ShareSheet";
 
 const MAX_TITLE_CHARS = 100;
 const MAX_DESC_CHARS = 500;
@@ -98,11 +98,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
   const [showShareModal, setShowShareModal] = useState(false);
   const [sharePayload, setSharePayload] = useState<{ url: string; text: string }>({ url: "", text: "" });
 
-  const openShareModal = (url: string, text: string) => {
-    setSharePayload({ url, text });
-    setShowShareModal(true);
-  };
-
   // Native Share API (WhatsApp, IG, FB etc.) with clipboard fallback
   const handleShare = async () => {
     if (!alert) return;
@@ -124,7 +119,8 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         console.log("Share cancelled:", err);
       }
     } else {
-      openShareModal(shareUrl, shareText);
+      setSharePayload({ url: shareUrl, text: shareText });
+      setShowShareModal(true);
     }
   };
 
@@ -486,91 +482,12 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
               </div>
             </div>
 
-            <AnimatePresence>
-              {showShareModal && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-[4000] bg-black/50 flex items-center justify-center px-6"
-                  onClick={() => setShowShareModal(false)}
-                >
-                  <motion.div
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.95, opacity: 0 }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-base font-semibold text-brandText">Share Alert</h3>
-                      <button onClick={() => setShowShareModal(false)}>
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3 mb-4">
-                      {(() => {
-                        const links = buildSocialShareLinks(sharePayload.url, sharePayload.text);
-                        return (
-                          <>
-                            <a
-                              className="flex flex-col items-center gap-1 text-xs text-muted-foreground"
-                              href={links.whatsapp}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <span className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center">WA</span>
-                              WhatsApp
-                            </a>
-                            <a
-                              className="flex flex-col items-center gap-1 text-xs text-muted-foreground"
-                              href={links.facebook}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <span className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center">FB</span>
-                              Facebook
-                            </a>
-                            <a
-                              className="flex flex-col items-center gap-1 text-xs text-muted-foreground"
-                              href={links.messenger}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <span className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center">MS</span>
-                              Messenger
-                            </a>
-                            <a
-                              className="flex flex-col items-center gap-1 text-xs text-muted-foreground"
-                              href={links.twitter}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              <span className="w-10 h-10 rounded-full bg-sky-500 text-white flex items-center justify-center">TW</span>
-                              Twitter
-                            </a>
-                          </>
-                        );
-                      })()}
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(`${sharePayload.text} ${sharePayload.url}`.trim());
-                          toast.success("Link copied to clipboard!");
-                        } catch {
-                          toast.error("Failed to copy link");
-                        }
-                      }}
-                    >
-                      Copy Link
-                    </Button>
-                  </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <ShareSheet
+              open={showShareModal}
+              onClose={() => setShowShareModal(false)}
+              url={sharePayload.url}
+              text={sharePayload.text}
+            />
           </motion.div>
         </motion.div>
       )}
