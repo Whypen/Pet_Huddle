@@ -38,6 +38,8 @@ import PinDetailModal from "@/components/map/PinDetailModal";
 
 // Mock coordinates for dev fallback (Hong Kong — Tai Wai)
 const MOCK_COORDS = { lat: 22.3964, lng: 114.1095 };
+// Zoom Level 16.5 ≈ ~500m proximity
+const PROXIMITY_ZOOM = 16.5;
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -591,13 +593,18 @@ const Map = () => {
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v11",
       center: initialCenter,
-      zoom: 13,
+      zoom: PROXIMITY_ZOOM,
     });
 
     map.current.on("load", () => {
       setMapLoaded(true);
       if (!hasInitialized.current && userLocation) {
-        map.current?.flyTo({ center: [userLocation.lng, userLocation.lat], essential: true });
+        map.current?.flyTo({
+          center: [userLocation.lng, userLocation.lat],
+          zoom: PROXIMITY_ZOOM,
+          essential: true,
+          duration: 2000,
+        });
         hasInitialized.current = true;
       }
       setTimeout(() => { map.current?.resize(); }, 200);

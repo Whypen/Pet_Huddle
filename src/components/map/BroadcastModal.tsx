@@ -301,6 +301,7 @@ const BroadcastModal = ({
           expires_at: expiresAt,
           address: resolvedAddress || null,
           thread_id: threadId,
+          posted_to_threads: Boolean(threadId),
         })
         .select("id")
         .maybeSingle();
@@ -319,6 +320,9 @@ const BroadcastModal = ({
           });
           setCreating(false);
           return;
+        }
+        if (threadId) {
+          await supabase.from("threads").delete().eq("id", threadId);
         }
         throw error;
       }
