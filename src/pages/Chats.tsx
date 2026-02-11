@@ -455,7 +455,19 @@ const Chats = () => {
         if (expected > 0) setBookingAmount(expected.toString());
       }
     }
-  }, [nannyBookingOpen, profile?.id, selectedNanny?.id]);
+  }, [
+    nannyBookingOpen,
+    profile?.id,
+    profile?.last_lat,
+    profile?.last_lng,
+    profile?.location_name,
+    selectedNanny?.id,
+    serviceDate,
+    serviceEndDate,
+    startTime,
+    endTime,
+    sitterHourlyRate,
+  ]);
 
   useEffect(() => {
     if (!sitterHourlyRate || !serviceDate || !serviceEndDate) return;
@@ -471,7 +483,7 @@ const Chats = () => {
     if (serviceDate && !serviceEndDate) {
       setServiceEndDate(serviceDate);
     }
-  }, [serviceDate]);
+  }, [serviceDate, serviceEndDate]);
 
   // Load group members + mutual waves when group manage modal opens
   useEffect(() => {
@@ -524,23 +536,24 @@ const Chats = () => {
       }
     };
     load();
-  }, [groupManageId, profile?.id]);
+  }, [groupManageId, profile?.id, profile?.display_name, profile?.avatar_url]);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const data = await getConversations() as Record<string, unknown>;
+      if (data && data.chats) {
+        // Map backend data to our format
+        // For now, we'll use mock data
+      }
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+    }
+  }, [getConversations]);
 
   // Load conversations from backend
   useEffect(() => {
-    const loadConversations = async () => {
-      try {
-        const data = await getConversations() as Record<string, unknown>;
-        if (data && data.chats) {
-          // Map backend data to our format
-          // For now, we'll use mock data
-        }
-      } catch (error) {
-        console.error("Failed to load conversations:", error);
-      }
-    };
-    loadConversations();
-  }, []);
+    void loadConversations();
+  }, [loadConversations]);
 
   // Discovery cards (embedded in Chats) — send full filter payload
   useEffect(() => {

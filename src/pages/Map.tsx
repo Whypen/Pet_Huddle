@@ -249,7 +249,7 @@ const Map = () => {
         if (typeof data.address === "string") setPinAddressSnapshot(data.address);
       }
     })();
-  }, [user]);
+  }, [isInvisible, pinAddressSnapshot, user]);
 
   // Persist pin to localStorage whenever it changes
   useEffect(() => {
@@ -320,7 +320,7 @@ const Map = () => {
   }, [searchParams]);
 
   // Default center (Hong Kong)
-  const defaultCenter: [number, number] = [114.1583, 22.2828];
+  const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
 
   // Pin button re-centers on live GPS when already pinned
   const reCenterOnGPS = useCallback(() => {
@@ -369,9 +369,16 @@ const Map = () => {
 
     if (user) {
       console.log("[PIN] Saving to DB — set_user_location RPC...");
-      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+      await supabase
+        .from("profiles")
+        .update({ map_visible: true } as Record<string, unknown>)
+        .eq("id", user.id);
       const permanentHours = 24 * 365 * 10; // 10 years
-      await (supabase as any).rpc("set_user_location", {
+      const rpcSetUserLocation = supabase.rpc as (
+        fn: string,
+        args?: Record<string, unknown>
+      ) => Promise<{ error: unknown }>;
+      await rpcSetUserLocation("set_user_location", {
         p_lat: lat,
         p_lng: lng,
         p_pin_hours: permanentHours,
@@ -395,7 +402,7 @@ const Map = () => {
     setPinning(false);
     console.log(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [user]);
+  }, [isInvisible, pinAddressSnapshot, user]);
 
   const confirmPinLocation = () => {
     setShowPinConfirm(false);
@@ -485,7 +492,10 @@ const Map = () => {
     const newInvisible = !isInvisible;
     setIsInvisible(newInvisible);
     console.log(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
-    await (supabase as any).from("profiles").update({ is_visible: !newInvisible }).eq("id", user.id);
+    await supabase
+      .from("profiles")
+      .update({ is_visible: !newInvisible } as Record<string, unknown>)
+      .eq("id", user.id);
     await supabase.from("pins").update({ is_invisible: newInvisible } as Record<string, unknown>).eq("user_id", user.id).is("thread_id", null);
     if (newInvisible) {
       toast.info("You are now invisible on the map");
@@ -616,7 +626,7 @@ const Map = () => {
       map.current?.remove();
       map.current = null;
     };
-  }, [userLocation?.lat, userLocation?.lng]);
+  }, [defaultCenter, userLocation, userLocation?.lat, userLocation?.lng]);
 
   // Handle window resize
   useEffect(() => {
@@ -632,10 +642,10 @@ const Map = () => {
 
   // Fetch alerts + realtime subscription
   useEffect(() => {
-    fetchAlerts();
+    void fetchAlerts();
     const channel = supabase
       .channel("map_alerts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "map_alerts" }, () => { fetchAlerts(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "map_alerts" }, () => { void fetchAlerts(); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -860,12 +870,12 @@ const Map = () => {
           markersRef.current.push(marker);
         });
     }
-  }, [alerts, friendPins, hiddenAlerts, mapLoaded, mapTab, vetClinics]);
+  }, [alerts, friendPins, hiddenAlerts, isPinned, mapLoaded, mapTab, vetClinics]);
 
   // ==========================================================================
   // Fetch alerts
   // ==========================================================================
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     try {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? null);
@@ -914,10 +924,10 @@ const Map = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [profile?.last_lat, profile?.last_lng, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
 
   // Fetch friend pins — with demo fallback
-  const fetchFriendPins = async () => {
+  const fetchFriendPins = useCallback(async () => {
     try {
       if (!user || !visibleEnabled) { setFriendPins([]); return; }
       const lat = userLocation?.lat ?? (profile?.last_lat ?? null);
@@ -966,12 +976,12 @@ const Map = () => {
         location_pinned_until: d.location_pinned_until,
       })));
     }
-  };
+  }, [profile?.last_lat, profile?.last_lng, user, userLocation?.lat, userLocation?.lng, viewRadiusMeters, visibleEnabled]);
 
   useEffect(() => {
     if (mapTab !== "Friends") return;
     void fetchFriendPins();
-  }, [mapTab, visibleEnabled, userLocation?.lat, userLocation?.lng]);
+  }, [fetchFriendPins, mapTab, visibleEnabled, userLocation?.lat, userLocation?.lng]);
 
   // Reset on mount
   useEffect(() => {

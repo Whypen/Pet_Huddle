@@ -981,6 +981,11 @@ const demoThreadIdByAlert: Record<string, string> = {
   "lost-8": "f2ac2b03-24ef-4c04-b645-938622f5edce",
   "lost-9": "c33ecb2c-c2b9-487d-8910-ffe71d3f30ba",
   "lost-10": "97f1a18a-e748-41d5-8ebf-f5e3768792b4",
+  "others-1": "b6f5bb06-1f74-4b4c-9bdb-aefe7f5e1131",
+  "others-2": "5b1df1e8-e80f-4f85-90d7-cd67c5a3f1f4",
+  "others-3": "2f8d1629-31dd-4db2-a882-8f0cbfa7a4d6",
+  "others-4": "ed305f81-a25e-4ecf-9ab8-03fb70a4c017",
+  "others-5": "d74818f9-b3af-443d-9d7d-5634000414c6",
 };
 
 demoAlerts.forEach((alert) => {

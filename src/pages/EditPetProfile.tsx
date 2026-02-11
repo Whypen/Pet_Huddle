@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Camera, Loader2, Save, X, Plus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -115,15 +115,7 @@ const EditPetProfile = () => {
     (formData.species !== "others" || formData.custom_species.trim().length > 0);
   const isFormValid = hasRequiredFields && !hasErrors;
 
-  useEffect(() => {
-    if (petId) {
-      fetchPet();
-    } else {
-      setLoading(false);
-    }
-  }, [petId]);
-
-  const fetchPet = async () => {
+  const fetchPet = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("pets")
@@ -171,7 +163,15 @@ const EditPetProfile = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [petId, t]);
+
+  useEffect(() => {
+    if (petId) {
+      void fetchPet();
+    } else {
+      setLoading(false);
+    }
+  }, [petId, fetchPet]);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

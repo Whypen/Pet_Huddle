@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -81,30 +81,7 @@ const Index = () => {
   const [loading, setLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
 
-  useEffect(() => {
-    if (user?.id) {
-      fetchPets();
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("pets-home-refresh")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pets" },
-        () => {
-          fetchPets();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  const fetchPets = async () => {
+  const fetchPets = useCallback(async () => {
     try {
       if (!user?.id) return;
       const { data, error } = await supabase
@@ -125,7 +102,30 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user?.id) {
+      void fetchPets();
+    }
+  }, [user?.id, fetchPets]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("pets-home-refresh")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pets" },
+        () => {
+          void fetchPets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPets]);
 
   // UAT: Next Event must pull from Supabase reminders table.
   useEffect(() => {
