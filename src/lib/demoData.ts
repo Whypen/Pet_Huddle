@@ -23,6 +23,7 @@ export interface DemoUser {
   location: { lat: number; lng: number };
   locationName: string;
   isOnline: boolean;
+  postedToThreads?: boolean;
   pets: Array<{
     id: string;
     name: string;
@@ -46,6 +47,24 @@ export interface DemoAlert {
   createdAt: string;
   creatorId: string;
   isActive: boolean;
+  threadId?: string;
+  postedToThreads?: boolean;
+}
+
+export interface DemoThread {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  hashtags: string[];
+  images: string[];
+  created_at: string;
+  user_id: string;
+  author: {
+    display_name: string | null;
+    avatar_url: string | null;
+    is_verified: boolean;
+  } | null;
 }
 
 // 20 Demo Users with comprehensive data - mix of roles and attributes
@@ -592,6 +611,10 @@ export const demoUsers: DemoUser[] = [
   },
 ];
 
+demoUsers.forEach((u) => {
+  u.postedToThreads = true;
+});
+
 // Demo alerts for map — Spec: 10 Stray (blue paw 🐾) + 10 Lost (red alert 🚨)
 export const demoAlerts: DemoAlert[] = [
   // ===== 10 STRAY ALERTS =====
@@ -937,7 +960,52 @@ export const demoAlerts: DemoAlert[] = [
   },
 ];
 
-// ===== 10 DEMO FRIEND PINS (Green Initial Icons on Map) =====
+const demoThreadIdByAlert: Record<string, string> = {
+  "stray-1": "9888a51c-eb39-418d-b779-b5171b1d399d",
+  "stray-2": "2bd23e9b-9758-46fd-a807-4803a4ee12e7",
+  "stray-3": "8dfe8ca2-7141-4465-b8a3-0f535e8fbd6b",
+  "stray-4": "6ead51ff-33f7-450d-8122-38226b368924",
+  "stray-5": "2bf80aea-6dec-4728-a21d-ee61b04536b7",
+  "stray-6": "e8bc3c1d-c6cd-453d-89f2-1250662ab997",
+  "stray-7": "5693eb81-1036-4902-826c-644e713b65e4",
+  "stray-8": "f1d667ca-c495-457f-ad19-74aaca9c41bb",
+  "stray-9": "f68abbe9-1ca8-4845-b43c-9d5cd19f7165",
+  "stray-10": "18cf7406-d38f-47bf-aa86-0bdd5fc02924",
+  "lost-1": "43a06dd1-0ce0-4854-8448-42dd905a4d18",
+  "lost-2": "f6fe5d47-48f8-4c29-a065-5e1068ff0a09",
+  "lost-3": "c4856dc0-2ff1-42b9-916a-560de967a8e1",
+  "lost-4": "605143ad-6131-46f4-8aa5-8cb717ef14d0",
+  "lost-5": "d06bc79a-c105-4bc3-baba-c0020baee022",
+  "lost-6": "9eff8465-7454-40b8-a8d3-bb0deda1c024",
+  "lost-7": "66f64fe6-1bc7-4f5a-ba59-b3c303fe59ae",
+  "lost-8": "f2ac2b03-24ef-4c04-b645-938622f5edce",
+  "lost-9": "c33ecb2c-c2b9-487d-8910-ffe71d3f30ba",
+  "lost-10": "97f1a18a-e748-41d5-8ebf-f5e3768792b4",
+};
+
+demoAlerts.forEach((alert) => {
+  alert.threadId = demoThreadIdByAlert[alert.id];
+  alert.postedToThreads = true;
+});
+
+export const demoThreads: DemoThread[] = demoAlerts.map((alert) => {
+  const creator = demoUsers.find((u) => u.id === alert.creatorId);
+  return {
+    id: alert.threadId || demoThreadIdByAlert[alert.id],
+    title: alert.type === "Others" ? "Community Notice" : `${alert.type} Alert`,
+    content: alert.description,
+    tags: [alert.type === "Others" ? "News" : "News"],
+    hashtags: [],
+    images: alert.photoUrl ? [alert.photoUrl] : [],
+    created_at: alert.createdAt,
+    user_id: alert.creatorId,
+    author: creator
+      ? { display_name: creator.name, avatar_url: creator.avatarUrl || null, is_verified: creator.isVerified }
+      : null,
+  };
+});
+
+// ===== 15 DEMO FRIEND PINS (Green Initial Icons on Map) =====
 export interface DemoFriendPin {
   id: string;
   display_name: string;
@@ -955,11 +1023,16 @@ export interface DemoFriendPin {
 export const demoFriendPins: DemoFriendPin[] = [
   { id: "demo-user-1", display_name: "Sarah Chen", avatar_url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200", dob: "1997-03-15", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Central, HK", last_lat: 22.2855, last_lng: 114.1577, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-2", display_name: "Marcus Wong", avatar_url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", dob: "1993-07-22", relationship_status: "In a relationship", owns_pets: true, pet_species: ["dog"], location_name: "Wan Chai, HK", last_lat: 22.2956, last_lng: 114.1722, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-3", display_name: "Emily Lam", avatar_url: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=200", dob: "1999-01-20", relationship_status: "Single", owns_pets: false, pet_species: [], location_name: "Admiralty, HK", last_lat: 22.2783, last_lng: 114.1747, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-4", display_name: "James Liu", avatar_url: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200", dob: "1990-01-10", relationship_status: "Married", owns_pets: true, pet_species: ["cat"], location_name: "Kowloon, HK", last_lat: 22.3193, last_lng: 114.1694, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-5", display_name: "Jessica Ng", avatar_url: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200", dob: "1996-05-18", relationship_status: "In a relationship", owns_pets: true, pet_species: ["dog"], location_name: "Causeway Bay, HK", last_lat: 22.2799, last_lng: 114.1829, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-6", display_name: "David Chan", avatar_url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", dob: "1979-10-02", relationship_status: "Married", owns_pets: true, pet_species: ["bird"], location_name: "Mong Kok, HK", last_lat: 22.3364, last_lng: 114.1747, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-7", display_name: "Amy Tsang", avatar_url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200", dob: "1994-09-08", relationship_status: "Open relationship", owns_pets: true, pet_species: ["cat"], location_name: "Tseung Kwan O, HK", last_lat: 22.3080, last_lng: 114.2554, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-8", display_name: "Kevin Ho", avatar_url: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200", dob: "1998-03-12", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Aberdeen, HK", last_lat: 22.2397, last_lng: 114.1715, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-9", display_name: "Michelle Yip", avatar_url: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200", dob: "2001-02-14", relationship_status: "Single", owns_pets: true, pet_species: ["cat"], location_name: "Sheung Wan, HK", last_lat: 22.2868, last_lng: 114.1413, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-10", display_name: "Tom Lee", avatar_url: "https://images.unsplash.com/photo-1463453091185-61582044d556?w=200", dob: "1969-11-05", relationship_status: "Divorced", owns_pets: true, pet_species: ["dog", "cat"], location_name: "Sham Shui Po, HK", last_lat: 22.3526, last_lng: 114.1392, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-11", display_name: "Ava Lau", avatar_url: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=200", dob: "1999-11-30", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Tsim Sha Tsui, HK", last_lat: 22.3027, last_lng: 114.1772, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  { id: "demo-user-12", display_name: "Brian Kwok", avatar_url: "https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=200", dob: "1987-04-04", relationship_status: "Married", owns_pets: true, pet_species: ["dog"], location_name: "Mong Kok, HK", last_lat: 22.3219, last_lng: 114.1690, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-14", display_name: "Daniel Tse", avatar_url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", dob: "1996-08-20", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Central, HK", last_lat: 22.2810, last_lng: 114.1600, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-17", display_name: "Grace Ip", avatar_url: "https://images.unsplash.com/photo-1525134479668-1bee5c7c6845?w=200", dob: "2003-06-12", relationship_status: "Single", owns_pets: true, pet_species: ["dog"], location_name: "Prince Edward, HK", last_lat: 22.3165, last_lng: 114.1700, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
   { id: "demo-user-19", display_name: "Ivy Tam", avatar_url: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200", dob: "1995-04-25", relationship_status: "Single", owns_pets: true, pet_species: ["dog", "cat", "bird"], location_name: "North Point, HK", last_lat: 22.2780, last_lng: 114.1850, location_pinned_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },

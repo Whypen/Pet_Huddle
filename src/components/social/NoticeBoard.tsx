@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 import imageCompression from "browser-image-compression";
+import { useSearchParams, useParams } from "react-router-dom";
+import { demoThreads } from "@/lib/demoData";
 
 const tags = [
   { id: "Dog", labelKey: "threads.tag.dog", icon: MessageSquare, color: "bg-primary" },
@@ -70,6 +72,8 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user, profile } = useAuth();
   const { showUpsellBanner } = useUpsellBanner();
+  const [searchParams] = useSearchParams();
+  const params = useParams();
   const [notices, setNotices] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -151,8 +155,13 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
       if (error) throw error;
       const newNotices = ((data || []) as unknown) as Thread[];
+      const threadParam = params.threadId || searchParams.get("thread");
+      const alertParam = searchParams.get("alert");
+      const demoThreadId = threadParam || (alertParam ? `thread-${alertParam}` : null);
+      const demoThread = demoThreadId ? demoThreads.find((t) => t.id === demoThreadId) : null;
       if (reset) {
-        setNotices(newNotices);
+        const merged = demoThread ? [demoThread as Thread, ...newNotices] : newNotices;
+        setNotices(merged);
       } else {
         setNotices(prev => [...prev, ...newNotices]);
       }
@@ -188,7 +197,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [keyword, topicFilter, sortMode, lastCreatedAt]);
+  }, [keyword, topicFilter, sortMode, lastCreatedAt, searchParams, params.threadId]);
 
   useEffect(() => {
     fetchNotices(true);

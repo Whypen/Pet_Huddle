@@ -173,7 +173,8 @@ const Map = () => {
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
   const [pinning, setPinning] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [pinExpiresAt, setPinExpiresAt] = useState<string | null>(null);
+  const [pinPersistedAt, setPinPersistedAt] = useState<string | null>(null);
+  const [pinAddressSnapshot, setPinAddressSnapshot] = useState<string | null>(null);
   const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
   const [premiumFooterReason, setPremiumFooterReason] = useState<string>("broadcast_alert");
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
@@ -202,24 +203,20 @@ const Map = () => {
 
   // ============================================================
   // PIN PERSISTENCE: Restore pin from localStorage on mount
-  // Spec: Pin survives tab switches. If < 12h old, render on load.
+  // Spec: Pin survives tab switches and is permanent until unpinned.
   // ============================================================
   useEffect(() => {
     try {
       const stored = localStorage.getItem("huddle_pin");
       if (!stored) return;
-      const pin = JSON.parse(stored) as { lat: number; lng: number; expiresAt: string; invisible?: boolean };
-      const expiryTime = new Date(pin.expiresAt).getTime();
-      const systemExpiry = expiryTime + (10 * 60 * 60 * 1000); // 12h system retention = 2h visible + 10h extra
-      if (Date.now() < systemExpiry) {
+      const pin = JSON.parse(stored) as { lat: number; lng: number; invisible?: boolean; pinnedAt?: string; address?: string };
+      if (typeof pin.lat === "number" && typeof pin.lng === "number") {
         console.log("[PIN] Restored pin from localStorage:", pin);
         setUserLocation({ lat: pin.lat, lng: pin.lng });
-        setPinExpiresAt(pin.expiresAt);
         setVisibleEnabled(true);
         if (pin.invisible) setIsInvisible(true);
-      } else {
-        console.log("[PIN] Stored pin expired, clearing");
-        localStorage.removeItem("huddle_pin");
+        if (typeof pin.pinnedAt === "string") setPinPersistedAt(pin.pinnedAt);
+        if (typeof pin.address === "string") setPinAddressSnapshot(pin.address);
       }
     } catch {
       // Corrupted data
@@ -227,14 +224,44 @@ const Map = () => {
     }
   }, []);
 
+  // Fallback: restore pin from DB if localStorage missing
+  useEffect(() => {
+    if (!user) return;
+    const stored = localStorage.getItem("huddle_pin");
+    if (stored) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from("pins")
+        .select("lat,lng,address,is_invisible,created_at")
+        .eq("user_id", user.id)
+        .is("thread_id", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return;
+      if (typeof data.lat === "number" && typeof data.lng === "number") {
+        setUserLocation({ lat: data.lat, lng: data.lng });
+        setVisibleEnabled(true);
+        setIsInvisible(Boolean(data.is_invisible));
+        if (typeof data.address === "string") setPinAddressSnapshot(data.address);
+      }
+    })();
+  }, [user]);
+
   // Persist pin to localStorage whenever it changes
   useEffect(() => {
-    if (userLocation && pinExpiresAt) {
-      const pinData = { lat: userLocation.lat, lng: userLocation.lng, expiresAt: pinExpiresAt, invisible: isInvisible };
+    if (userLocation) {
+      const pinData = {
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+        invisible: isInvisible,
+        pinnedAt: pinPersistedAt || new Date().toISOString(),
+        address: pinAddressSnapshot || undefined,
+      };
       localStorage.setItem("huddle_pin", JSON.stringify(pinData));
       console.log("[PIN] Saved pin to localStorage:", pinData);
     }
-  }, [userLocation, pinExpiresAt, isInvisible]);
+  }, [userLocation, isInvisible, pinPersistedAt, pinAddressSnapshot]);
 
   const profileRec = useMemo(() => {
     if (profile && typeof profile === "object") return profile as unknown as Record<string, unknown>;
@@ -245,11 +272,7 @@ const Map = () => {
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
   const viewRadiusMeters = 50000;
 
-  const isPinned = useMemo(() => {
-    const until = profileRec ? profileRec["location_pinned_until"] : null;
-    if (typeof until !== "string") return false;
-    return new Date(until).getTime() > Date.now();
-  }, [profileRec]);
+  const isPinned = useMemo(() => Boolean(userLocation), [userLocation]);
 
   // ==========================================================================
   // Effects
@@ -337,27 +360,32 @@ const Map = () => {
   const applyPinLocation = useCallback(async (lat: number, lng: number, source: string) => {
     console.log(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
     setUserLocation({ lat, lng });
-    const pinExpires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-    setPinExpiresAt(pinExpires);
-    console.log("[PIN] Pin State Updated: pinExpiresAt=", pinExpires);
+    const pinnedAt = new Date().toISOString();
+    setPinPersistedAt(pinnedAt);
+    console.log("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
 
     if (user) {
       console.log("[PIN] Saving to DB — set_user_location RPC...");
-      await supabase.from("profiles").update({ map_visible: true } as Record<string, unknown>).eq("id", user.id);
-      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("set_user_location", {
+      await (supabase as any).from("profiles").update({ map_visible: true }).eq("id", user.id);
+      const permanentHours = 24 * 365 * 10; // 10 years
+      await (supabase as any).rpc("set_user_location", {
         p_lat: lat,
         p_lng: lng,
-        p_pin_hours: 2,
-        p_retention_hours: 12,
+        p_pin_hours: permanentHours,
+        p_retention_hours: permanentHours,
       });
+      await supabase.from("pins").delete().eq("user_id", user.id).is("thread_id", null);
+      await supabase.from("pins").insert({
+        user_id: user.id,
+        lat,
+        lng,
+        address: pinAddressSnapshot,
+        is_invisible: isInvisible,
+      } as Record<string, unknown>);
       console.log("[PIN] DB save complete.");
     }
 
-    // Fly to location
-    if (map.current) {
-      console.log("[PIN] flyTo user location...");
-      map.current.flyTo({ center: [lng, lat], zoom: 14 });
-    }
+    // Do not auto-fly to prevent map blinking; initial fly handled on map load.
 
     setVisibleEnabled(true);
     setIsInvisible(false);
@@ -412,11 +440,13 @@ const Map = () => {
   const confirmUnpinLocation = async () => {
     setShowUnpinConfirm(false);
     if (!user) return;
-    setPinExpiresAt(null);
+    setPinPersistedAt(null);
     setUserLocation(null);
     setIsInvisible(false);
+    setPinAddressSnapshot(null);
     localStorage.removeItem("huddle_pin");
     console.log("[PIN] Unpinned — cleared localStorage");
+    await supabase.from("pins").delete().eq("user_id", user.id).is("thread_id", null);
     const res = await supabase
       .from("profiles")
       .update({
@@ -452,7 +482,8 @@ const Map = () => {
     const newInvisible = !isInvisible;
     setIsInvisible(newInvisible);
     console.log(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
-    await supabase.from("profiles").update({ is_visible: !newInvisible } as Record<string, unknown>).eq("id", user.id);
+    await (supabase as any).from("profiles").update({ is_visible: !newInvisible }).eq("id", user.id);
+    await supabase.from("pins").update({ is_invisible: newInvisible } as Record<string, unknown>).eq("user_id", user.id).is("thread_id", null);
     if (newInvisible) {
       toast.info("You are now invisible on the map");
     } else {
@@ -538,17 +569,17 @@ const Map = () => {
   }, [t]);
 
   // ==========================================================================
-  // Map Initialization
+  // Map Initialization (one-time)
   // ==========================================================================
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
-    const initialCenter = userLocation ? [userLocation.lng, userLocation.lat] : defaultCenter;
+    const initialCenter = defaultCenter;
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: "mapbox://styles/mapbox/streets-v12",
       center: initialCenter as [number, number],
-      zoom: userLocation ? 14 : 11,
+      zoom: 11,
     });
 
     map.current.on("load", () => {
@@ -582,12 +613,7 @@ const Map = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Fly to user location on change
-  useEffect(() => {
-    if (map.current && userLocation) {
-      map.current.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
-    }
-  }, [userLocation]);
+  // NOTE: Do not auto-fly on userLocation changes to prevent map blinking.
 
   // Fetch vet clinics on mount
   useEffect(() => { fetchVetClinics(); }, [fetchVetClinics]);
@@ -697,7 +723,7 @@ const Map = () => {
         pins.push({ id: p.id, name: p.display_name || "Friend", lat: p.last_lat, lng: p.last_lng });
       });
       if (pins.length === 0) {
-        demoUsers.slice(0, 10).forEach((friend) => {
+        demoUsers.slice(0, 15).forEach((friend) => {
           if (!friend.location?.lng || !friend.location?.lat) return;
           pins.push({ id: friend.id, name: friend.name, lat: friend.location.lat, lng: friend.location.lng });
         });
@@ -775,6 +801,7 @@ const Map = () => {
             report_count: demoAlert.reportCount || 0,
             created_at: demoAlert.createdAt,
             creator_id: demoAlert.creatorId || null,
+            thread_id: demoAlert.threadId || null,
             creator: demoCreator ? { display_name: demoCreator.name, avatar_url: demoCreator.avatarUrl || null } : null,
           });
         });
@@ -894,8 +921,8 @@ const Map = () => {
       if (dbPins.length > 0) {
         setFriendPins(dbPins);
       } else {
-        // Fallback: 10 demo friend pins
-        console.log("[Friends] No DB pins — using 10 demo friend pins");
+        // Fallback: 15 demo friend pins
+        console.log("[Friends] No DB pins — using 15 demo friend pins");
         setFriendPins(demoFriendPins.map((d) => ({
           id: d.id,
           display_name: d.display_name,
@@ -912,7 +939,7 @@ const Map = () => {
       }
     } catch {
       // Even on error, show demo friend pins
-      console.log("[Friends] Error fetching — using demo friend pins");
+      console.log("[Friends] Error fetching — using 15 demo friend pins");
       setFriendPins(demoFriendPins.map((d) => ({
         id: d.id,
         display_name: d.display_name,
@@ -1064,7 +1091,7 @@ const Map = () => {
         </div>
 
         {/* ================================================================ */}
-        {/* SECOND ROW: Refresh pill (LEFT)                                  */}
+        {/* SECOND ROW: Refresh pill (LEFT) + Invisible Subtext (RIGHT)      */}
         {/* ================================================================ */}
         <div className="absolute top-16 left-4 z-[1000]">
           <button
@@ -1085,12 +1112,10 @@ const Map = () => {
             Refresh
           </button>
         </div>
-
-        {/* Pinned until info — right side */}
-        {pinExpiresAt && (
+        {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
           <div className="absolute top-16 right-4 z-[1000]">
             <span className="text-xs bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-muted-foreground">
-              Pinned until {new Date(pinExpiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              You are invisible.
             </span>
           </div>
         )}
@@ -1116,13 +1141,7 @@ const Map = () => {
         {/* BOTTOM: Subtext + Broadcast CTA                                  */}
         {/* ================================================================ */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
-          {/* Subtext: context-dependent privacy message */}
-          {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
-            <p className="text-xs text-right text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              You're invisible from map.{pinExpiresAt ? ` Pinned until ${new Date(pinExpiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}` : ""}
-            </p>
-          )}
-          {mapTab === "Event" && !pinningActive && !visibleEnabled && !isPinned && (
+          {mapTab === "Event" && !pinningActive && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
               Pin location to see accurate events and friends nearby.
             </p>
@@ -1130,11 +1149,6 @@ const Map = () => {
           {mapTab === "Friends" && !pinningActive && !isPinned && (
             <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
               Pin your location to see friends nearby.
-            </p>
-          )}
-          {mapTab === "Friends" && !pinningActive && isPinned && isInvisible && (
-            <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
-              Stay visible to see friends nearby.
             </p>
           )}
 
@@ -1190,6 +1204,11 @@ const Map = () => {
         }}
         selectedLocation={pinCenter}
         address={pinAddress}
+        map={map.current}
+        onLocationUpdate={(lat, lng, addr) => {
+          setPinCenter({ lat, lng });
+          if (addr) setPinAddress(addr);
+        }}
         onSuccess={() => {
           fetchAlerts();
           setPinningActive(false);
@@ -1238,7 +1257,7 @@ const Map = () => {
                 <h3 className="text-lg font-bold text-brandText">Pin My Location</h3>
               </div>
               <p className="text-sm text-muted-foreground mb-6">
-                We use your location for maps and broadcast alerts only. Your pin is visible for 2 hours and retained for 12 hours to deliver alerts. Continue?
+                We use your location for maps and broadcast alerts only. Your pin stays active until you unpin it. Continue?
               </p>
               <div className="flex gap-3">
                 <Button

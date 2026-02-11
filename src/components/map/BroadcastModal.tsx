@@ -7,7 +7,7 @@
  * Add-on (150km/72h)
  */
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -26,6 +26,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
+import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
+import mapboxgl from "mapbox-gl";
 
 const MAX_TITLE_CHARS = 100;
 const MAX_DESC_CHARS = 500;
@@ -41,6 +43,8 @@ interface BroadcastModalProps {
   onClose: () => void;
   selectedLocation: { lat: number; lng: number } | null;
   address?: string;
+  map?: mapboxgl.Map | null;
+  onLocationUpdate?: (lat: number, lng: number, address?: string) => void;
   onSuccess: () => void;
   extraBroadcast72h: number;
   onQuotaRefresh: () => void;
@@ -51,6 +55,8 @@ const BroadcastModal = ({
   onClose,
   selectedLocation,
   address,
+  map,
+  onLocationUpdate,
   onSuccess,
   extraBroadcast72h,
   onQuotaRefresh,
@@ -70,17 +76,48 @@ const BroadcastModal = ({
   const [selectedDurationH, setSelectedDurationH] = useState<number | null>(null);
   const [showManualAddress, setShowManualAddress] = useState(false);
   const [manualAddress, setManualAddress] = useState("");
+  const [lockedAddress, setLockedAddress] = useState<string | null>(null);
+  const [isAutoGeocoding, setIsAutoGeocoding] = useState(false);
+  const [isManualGeocoding, setIsManualGeocoding] = useState(false);
+  const [isManualOverride, setIsManualOverride] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reverseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const manualInputRef = useRef<HTMLInputElement | null>(null);
+  const gpsCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const geoWatchRef = useRef<number | null>(null);
+
+  const addressReady = useMemo(() => {
+    const resolved = manualAddress.trim() || lockedAddress || "";
+    if (resolved) return true;
+    if (typeof address === "string" && address.length > 0 && !address.includes("Searching")) return true;
+    return false;
+  }, [manualAddress, lockedAddress, address]);
+
+  const resolvedAddress = useMemo(() => {
+    if (manualAddress.trim()) return manualAddress.trim();
+    if (lockedAddress) return lockedAddress;
+    if (typeof address === "string" && address.length > 0 && !address.includes("Searching")) return address;
+    return "";
+  }, [manualAddress, lockedAddress, address]);
 
   // 3s timer: if address still "Searching..." after 3s, show manual input
   useEffect(() => {
     if (!isOpen) {
       setShowManualAddress(false);
       setManualAddress("");
+      setLockedAddress(null);
+      setIsAutoGeocoding(false);
+      setIsManualGeocoding(false);
+      setIsManualOverride(false);
+      gpsCoordsRef.current = null;
+      if (geoWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
       return;
     }
-    const addressReady = typeof address === "string" && address.length > 0 && !address.includes("Searching");
     if (addressReady) {
       setShowManualAddress(false);
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -90,9 +127,79 @@ const BroadcastModal = ({
     timerRef.current = setTimeout(() => {
       console.log("[BroadcastModal] 3s timer expired — showing manual address input");
       setShowManualAddress(true);
+      setIsAutoGeocoding(false);
+      setTimeout(() => manualInputRef.current?.focus(), 0);
     }, 3000);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isOpen, address]);
+  }, [isOpen, addressReady]);
+
+  useEffect(() => {
+    if (showManualAddress) {
+      setTimeout(() => manualInputRef.current?.focus(), 0);
+    }
+  }, [showManualAddress]);
+
+  // Solution 1: Reverse Geocoding Lock (Automatic) on modal open
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!navigator.geolocation) return;
+    if (geoWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+      geoWatchRef.current = null;
+    }
+    setIsAutoGeocoding(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (isManualOverride) {
+          setIsAutoGeocoding(false);
+          return;
+        }
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        console.log("Geocoding Step 1: GPS Lock", coords);
+        gpsCoordsRef.current = coords;
+        if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
+        reverseDebounceRef.current = setTimeout(async () => {
+          try {
+            if (isManualOverride) return;
+            const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${coords.lng},${coords.lat}.json?access_token=${MAPBOX_ACCESS_TOKEN}&types=address,place,locality,neighborhood&limit=1`;
+            console.log("[BroadcastModal] Reverse geocode payload:", [coords.lng, coords.lat]);
+            const res = await fetch(url);
+            if (res.status === 401 || res.status === 403) {
+              toast.error("Map Service Error - Please enter address manually.");
+              setShowManualAddress(true);
+              setIsAutoGeocoding(false);
+              return;
+            }
+            if (!res.ok) {
+              setIsAutoGeocoding(false);
+              return;
+            }
+            const data = await res.json();
+            const feature = Array.isArray(data.features) ? data.features[0] : null;
+            if (feature?.place_name && !isManualOverride) {
+              setLockedAddress(feature.place_name);
+              setShowManualAddress(false);
+            }
+          } catch {
+            // no-op; fallback handled by 3s timer
+          } finally {
+            setIsAutoGeocoding(false);
+          }
+        }, 300);
+      },
+      () => {
+        setIsAutoGeocoding(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+    return () => {
+      if (geoWatchRef.current !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
+      if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
+    };
+  }, [isOpen, isManualOverride]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
@@ -133,6 +240,7 @@ const BroadcastModal = ({
     setCreating(true);
     try {
       let photoUrl: string | null = null;
+      let threadId: string | null = null;
 
       // Image upload — no media quota (removed per mandate)
       if (imageFile) {
@@ -152,6 +260,24 @@ const BroadcastModal = ({
         photoUrl = publicUrl;
       }
 
+      // Step A: insert thread first (for Stray/Lost + Post on Threads)
+      if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
+        const { data: threadData, error: threadErr } = await supabase.from("threads" as "profiles").insert({
+          user_id: user.id,
+          title: alertTitle.trim() || `Broadcast (${alertType})`,
+          content: description.trim() || "",
+          tags: ["News"],
+          hashtags: [],
+          images: photoUrl ? [photoUrl] : [],
+          is_map_alert: true,
+        } as Record<string, unknown>).select("id").maybeSingle();
+
+        if (threadErr || !(threadData as { id?: string } | null)?.id) {
+          throw threadErr || new Error("Thread insert failed");
+        }
+        threadId = (threadData as { id?: string } | null)?.id || null;
+      }
+
       const rangeKm = selectedRangeKm ?? broadcastRange;
       const durH = selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
       const expiresAt = new Date(Date.now() + durH * 60 * 60 * 1000).toISOString();
@@ -168,6 +294,8 @@ const BroadcastModal = ({
           photo_url: photoUrl,
           range_meters: Math.round(rangeKm * 1000),
           expires_at: expiresAt,
+          address: resolvedAddress || null,
+          thread_id: threadId,
         })
         .select("id")
         .maybeSingle();
@@ -193,35 +321,22 @@ const BroadcastModal = ({
       const alertId = (insertedAlert as { id?: string } | null)?.id;
       toast.success("Alert broadcasted!");
 
-      // PHASE 2.2: Threads auto-duplication — capture thread_id and attach to map_alerts
-      if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
-        try {
-          const { data: threadData, error: threadErr } = await supabase.from("threads" as "profiles").insert({
-            user_id: user.id,
-            title: alertTitle.trim() || `Broadcast (${alertType})`,
-            content: description.trim() || "",
-            tags: ["News"],
-            hashtags: [],
-            images: photoUrl ? [photoUrl] : [],
-          } as Record<string, unknown>).select("id").maybeSingle();
+      // Step B: mirror to pins table (thread_id included if present)
+      await supabase.from("pins").insert({
+        user_id: user.id,
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
+        address: resolvedAddress || null,
+        is_invisible: false,
+        thread_id: threadId,
+      } as Record<string, unknown>);
 
-          if (threadErr) {
-            console.warn("[Broadcast] Thread insert failed:", threadErr);
-            toast.info("Alert posted but thread sync failed");
-          }
+      if (threadId && alertId) {
+        await supabase.from("threads" as "profiles").update({ map_id: alertId } as Record<string, unknown>).eq("id", threadId);
+      }
 
-          // Link the thread_id back to the map alert
-          const threadId = (threadData as { id?: string } | null)?.id;
-          if (threadId && alertId) {
-            await supabase
-              .from("map_alerts")
-              .update({ thread_id: threadId } as Record<string, unknown>)
-              .eq("id", alertId);
-            console.log(`[Broadcast] Linked thread_id=${threadId} to alert_id=${alertId}`);
-          }
-        } catch (threadCatchErr) {
-          console.warn("[Broadcast] Thread sync catch:", threadCatchErr);
-        }
+      if (threadId) {
+        navigate(`/threads/${threadId}`);
       }
 
       handleClose();
@@ -265,34 +380,74 @@ const BroadcastModal = ({
             {selectedLocation && (
               <div className="mb-4">
                 <p className="text-xs text-muted-foreground">
-                  {manualAddress
-                    ? manualAddress
-                    : typeof address === "string" && address.length > 0 && !address.includes("Searching")
-                      ? address
-                      : showManualAddress
-                        ? `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`
-                        : "Searching address..."}
+                  {resolvedAddress
+                    ? resolvedAddress
+                    : showManualAddress
+                      ? `Location: ${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}`
+                      : "Searching address..."}
+                  {!resolvedAddress && !showManualAddress && isAutoGeocoding && (
+                    <span className="inline-flex items-center ml-2 text-muted-foreground">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    </span>
+                  )}
                 </p>
                 {showManualAddress && !manualAddress && (
                   <div className="flex items-center gap-2 mt-2">
                     <MapPin className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <Input
+                      ref={manualInputRef}
                       placeholder="Enter address manually"
                       value={manualAddress}
-                      onChange={(e) => setManualAddress(e.target.value)}
+                      onChange={(e) => {
+                        setManualAddress(e.target.value);
+                        setIsManualOverride(true);
+                      }}
                       className="rounded-xl text-sm h-9 flex-1"
                     />
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-9 rounded-xl text-xs"
-                      onClick={() => {
-                        if (manualAddress.trim()) {
-                          toast.success("Address set");
+                      disabled={isManualGeocoding}
+                      onClick={async () => {
+                        const query = manualAddress.trim();
+                        if (!query) return;
+                        setIsManualOverride(true);
+                        const proximity = gpsCoordsRef.current || selectedLocation;
+                        if (!proximity) {
+                          toast.error("Unable to resolve location. Please try again.");
+                          return;
+                        }
+                        setIsManualGeocoding(true);
+                        try {
+                          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_ACCESS_TOKEN}&limit=1&proximity=${proximity.lng},${proximity.lat}`;
+                          console.log("[BroadcastModal] Forward geocode payload:", [proximity.lng, proximity.lat]);
+                          const res = await fetch(url);
+                          if (res.status === 401 || res.status === 403) {
+                            toast.error("Map Service Error - Please enter address manually.");
+                            setShowManualAddress(true);
+                            return;
+                          }
+                          if (!res.ok) return;
+                          const data = await res.json();
+                          const feature = Array.isArray(data.features) ? data.features[0] : null;
+                          if (feature?.center?.length === 2) {
+                            const [lng, lat] = feature.center as [number, number];
+                            const best = feature.place_name || query;
+                            setManualAddress(best);
+                            onLocationUpdate?.(lat, lng, best);
+                            map?.flyTo({ center: [lng, lat], zoom: 14 });
+                            toast.success("Location updated");
+                            setShowManualAddress(false);
+                          }
+                        } catch {
+                          // Ignore; manual fallback remains
+                        } finally {
+                          setIsManualGeocoding(false);
                         }
                       }}
                     >
-                      Use
+                      {isManualGeocoding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Find on Map"}
                     </Button>
                   </div>
                 )}
@@ -417,7 +572,7 @@ const BroadcastModal = ({
             {/* Submit button — disabled while address is still searching */}
             <Button
               onClick={handleSubmit}
-              disabled={creating || !selectedLocation}
+              disabled={creating || !selectedLocation || !addressReady}
               className="w-full h-12 rounded-xl text-white font-semibold"
               style={{ backgroundColor: ALERT_TYPE_COLORS[alertType] }}
             >
