@@ -125,8 +125,8 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col px-6">
-      <div className="flex-1 flex flex-col justify-center">
+    <div className="min-h-screen bg-white flex flex-col justify-center items-center px-6">
+      <div className="w-full flex flex-col items-center">
         <div className="text-center">
           <img src={huddleLogo} alt={t("app.name")} className="mx-auto h-28 w-28 object-contain" />
           <div
@@ -137,7 +137,7 @@ const Auth = () => {
           </div>
         </div>
 
-        <div className="mt-10 w-full max-w-md mx-auto space-y-3">
+        <div className="mt-10 w-full max-w-md space-y-3 flex flex-col items-center">
           <Button
             type="button"
             variant="outline"
@@ -182,7 +182,7 @@ const Auth = () => {
         </div>
       </div>
 
-      <div className="sticky bottom-0 bg-white py-4 text-center text-[10px] text-brandSubtext">
+      <div className="fixed bottom-0 left-0 right-0 bg-white py-4 text-center text-[10px] text-brandSubtext">
         By continuing, you agree to huddle&apos;s{" "}
         <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("terms")}>
           Terms

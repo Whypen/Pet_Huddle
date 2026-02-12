@@ -61,7 +61,7 @@ const SignupCredentials = () => {
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
   const phoneTouched = Boolean(touchedFields.phone);
   const phoneInvalid = phoneTouched && !e164Regex.test(phone);
-  const otpRequirementMet = otpBypass ? true : otpVerified;
+  const otpRequirementMet = otpBypass ? (!otpSent || otpVerified) : otpVerified;
 
   const checks = passwordChecks(password);
   const strength = passwordStrengthLabel(password);
@@ -69,22 +69,14 @@ const SignupCredentials = () => {
     update({ email, phone, password, otp_verified: otpVerified });
   }, [email, phone, password, otpVerified, update]);
 
-  useEffect(() => {
-    if (!otpBypass) return;
-    if (otpVerified) return;
-    if (otpValue.length === 6 && otpValue === "123456") {
-      setOtpVerified(true);
-      setOtpError(null);
-      void trigger();
-    }
-  }, [otpBypass, otpVerified, otpValue, trigger]);
-
   const sendOtp = async () => {
     if (!phone || !e164Regex.test(phone)) {
       toast.error("Enter a valid phone number");
       return;
     }
     setOtpError(null);
+    setOtpVerified(false);
+    setOtpValue("");
     if (!otpBypass) {
       const { error } = await supabase.auth.signInWithOtp({ phone });
       if (error) {
@@ -318,11 +310,13 @@ const SignupCredentials = () => {
           <p className="text-xs text-muted-foreground">
             {!watch("agreedToTerms")
               ? "Agree to Terms to continue"
-              : !otpRequirementMet
-                ? "Verify your phone number to continue"
-                : phoneInvalid
-                  ? "Enter a valid phone number to continue"
-                  : "Complete all required fields to continue"}
+              : phoneInvalid
+                ? "Enter a valid phone number"
+                : otpSent && otpValue.length < 6
+                  ? "Enter the 6-digit code"
+                  : !otpRequirementMet
+                    ? "Verify your phone number"
+                    : "Complete all required fields to continue"}
           </p>
         ) : null}
       </form>
