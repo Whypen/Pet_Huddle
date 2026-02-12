@@ -74,7 +74,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error("Failed to save offline actions:", error);
     }
-  }, [pendingActions]);
+  }, [pendingActions, t]);
 
   // Health check: uses /health-check endpoint when API URL is set.
   const checkServerHealth = useCallback(async (): Promise<boolean> => {
@@ -89,22 +89,6 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       return false;
     }
   }, []);
-
-  // Retry connection
-  const retryConnection = useCallback(async () => {
-    const serverOk = await checkServerHealth();
-    setIsServerReachable(serverOk);
-
-    if (serverOk && isOnline) {
-      setLastOnlineTime(new Date());
-      toast.success(t("Connection restored!"));
-
-      // Process pending offline actions
-      if (pendingActions.length > 0) {
-        processPendingActions();
-      }
-    }
-  }, [checkServerHealth, isOnline, pendingActions]);
 
   // Process pending offline actions
   const processPendingActions = useCallback(async () => {
@@ -139,6 +123,22 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       toast.warning(`${failedActions.length} action(s) still pending`);
     }
   }, [pendingActions]);
+
+  // Retry connection
+  const retryConnection = useCallback(async () => {
+    const serverOk = await checkServerHealth();
+    setIsServerReachable(serverOk);
+
+    if (serverOk && isOnline) {
+      setLastOnlineTime(new Date());
+      toast.success(t("Connection restored!"));
+
+      // Process pending offline actions
+      if (pendingActions.length > 0) {
+        processPendingActions();
+      }
+    }
+  }, [checkServerHealth, isOnline, pendingActions, processPendingActions, t]);
 
   // Replay a single offline action
   const replayAction = async (action: OfflineAction): Promise<boolean> => {
@@ -202,7 +202,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
 
     setPendingActions(prev => [...prev, newAction]);
     toast.info(t("Action saved. Will sync when online."));
-  }, []);
+  }, [t]);
 
   // Handle online/offline events
   useEffect(() => {
@@ -229,7 +229,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [retryConnection, hasShownOfflineToast]);
+  }, [retryConnection, hasShownOfflineToast, t]);
 
   // Periodic server health check
   useEffect(() => {

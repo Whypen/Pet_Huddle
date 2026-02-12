@@ -60,6 +60,75 @@ export type Database = {
           },
         ]
       }
+      broadcast_alerts: {
+        Row: {
+          address: string | null
+          created_at: string
+          creator_id: string
+          description: string | null
+          duration_hours: number
+          geog: unknown | null
+          id: string
+          latitude: number
+          longitude: number
+          photo_url: string | null
+          post_on_threads: boolean
+          range_km: number
+          thread_id: string | null
+          title: string | null
+          type: string
+        }
+        Insert: {
+          address?: string | null
+          created_at?: string
+          creator_id: string
+          description?: string | null
+          duration_hours: number
+          geog?: unknown | null
+          id?: string
+          latitude: number
+          longitude: number
+          photo_url?: string | null
+          post_on_threads?: boolean
+          range_km: number
+          thread_id?: string | null
+          title?: string | null
+          type: string
+        }
+        Update: {
+          address?: string | null
+          created_at?: string
+          creator_id?: string
+          description?: string | null
+          duration_hours?: number
+          geog?: unknown | null
+          id?: string
+          latitude?: number
+          longitude?: number
+          photo_url?: string | null
+          post_on_threads?: boolean
+          range_km?: number
+          thread_id?: string | null
+          title?: string | null
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_alerts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_alerts_creator_id_fkey"
+            columns: ["creator_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       map_alerts: {
         Row: {
           alert_type: string
@@ -451,7 +520,30 @@ export type Database = {
       }
     }
     Functions: {
-      [_ in never]: never
+      get_visible_broadcast_alerts: {
+        Args: {
+          p_lat: number
+          p_lng: number
+        }
+        Returns: {
+          id: string
+          latitude: number
+          longitude: number
+          alert_type: string
+          title: string | null
+          description: string | null
+          photo_url: string | null
+          support_count: number
+          report_count: number
+          created_at: string
+          expires_at: string | null
+          range_meters: number
+          creator_id: string | null
+          thread_id: string | null
+          creator_display_name: string | null
+          creator_avatar_url: string | null
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

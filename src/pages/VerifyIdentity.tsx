@@ -9,37 +9,34 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { X } from "lucide-react";
 import Webcam from "react-webcam";
+import { humanError } from "@/lib/humanError";
 
 type DocType = "id" | "passport" | "drivers_license";
 
 const compressImage = async (file: File) => {
-  const img = document.createElement("img");
-  const reader = new FileReader();
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-  img.src = dataUrl;
-  await new Promise((resolve) => (img.onload = resolve));
-
   const maxWidth = 1024;
-  const scale = Math.min(1, maxWidth / img.width);
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return file;
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-  let quality = 0.8;
-  let blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-  while (blob && blob.size > 500 * 1024 && quality > 0.5) {
-    quality -= 0.1;
-    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+  // Avoid manual DOM element creation (audit rule): use createImageBitmap + OffscreenCanvas when available.
+  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas === "undefined") {
+    return file;
   }
 
-  if (!blob) return file;
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxWidth / bitmap.width);
+  const width = Math.round(bitmap.width * scale);
+  const height = Math.round(bitmap.height * scale);
+
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  let quality = 0.8;
+  let blob: Blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
+  while (blob.size > 500 * 1024 && quality > 0.5) {
+    quality -= 0.1;
+    blob = await canvas.convertToBlob({ type: "image/jpeg", quality });
+  }
+
   return new File([blob], file.name.replace(/\.[^/.]+$/, ".jpg"), { type: "image/jpeg" });
 };
 
@@ -192,7 +189,7 @@ const VerifyIdentity = () => {
       }, 1200);
       setStep(5);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = humanError(e);
       toast.error(message || t("Verification upload failed"));
     } finally {
       setSaving(false);

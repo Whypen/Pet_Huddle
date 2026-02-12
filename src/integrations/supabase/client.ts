@@ -9,6 +9,10 @@ if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
 }
 console.log("Supabase URL initialized as:", SUPABASE_URL);
+console.log("[SUPABASE_ENV]", {
+  url: SUPABASE_URL,
+  keyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 8) : "missing",
+});
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";

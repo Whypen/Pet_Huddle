@@ -20,7 +20,6 @@ import {
   EyeOff,
   Pencil,
   Trash2,
-  MessageCircle,
   MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -32,6 +31,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { ShareSheet } from "@/components/social/ShareSheet";
+
+const DEMO_MODE = String(import.meta.env.VITE_DEMO_MODE ?? "prod_preview");
+const DEMO_SEEDED = DEMO_MODE === "seeded_threads";
 
 const MAX_TITLE_CHARS = 100;
 const MAX_DESC_CHARS = 500;
@@ -55,10 +57,19 @@ interface MapAlert {
   report_count: number;
   created_at: string;
   expires_at?: string | null;
+  duration_hours?: number | null;
   range_meters?: number | null;
+  range_km?: number | null;
   creator_id?: string | null;
   has_thread?: boolean;
   thread_id?: string | null;
+  posted_to_threads?: boolean;
+  post_on_social?: boolean;
+  social_post_id?: string | null;
+  social_status?: string | null;
+  social_url?: string | null;
+  location_street?: string | null;
+  location_district?: string | null;
   creator: {
     display_name: string | null;
     avatar_url: string | null;
@@ -72,8 +83,8 @@ interface PinDetailModalProps {
   onRefresh: () => void;
 }
 
-const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalProps) => {
-  const { user } = useAuth();
+  const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalProps) => {
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
 
   // Editing state
@@ -84,16 +95,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
   const [liked, setLiked] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  const formatTimeAgo = (date: string) => {
-    const now = new Date();
-    const then = new Date(date);
-    const diff = now.getTime() - then.getTime();
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours < 1) return "Just now";
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  };
 
   const [showShareModal, setShowShareModal] = useState(false);
   const [sharePayload, setSharePayload] = useState<{ url: string; text: string }>({ url: "", text: "" });
@@ -148,11 +149,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
           .eq("user_id", user.id)
           .eq("interaction_type", "support");
 
-        await supabase
-          .from("map_alerts")
-          .update({ support_count: Math.max(0, (supportCount || 1) - 1) } as Record<string, unknown>)
-          .eq("id", alert.id);
-
         setLiked(false);
         setSupportCount((prev) => Math.max(0, prev - 1));
         onRefresh();
@@ -169,11 +165,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         user_id: user.id,
         interaction_type: "support",
       });
-
-      await supabase
-        .from("map_alerts")
-        .update({ support_count: (supportCount || 0) + 1 } as Record<string, unknown>)
-        .eq("id", alert.id);
 
       setLiked(true);
       setSupportCount((prev) => prev + 1);
@@ -206,25 +197,8 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
         interaction_type: "report",
       });
 
-      // Check if abuse threshold exceeded → auto-hide
-      const { data: updatedAlert } = await supabase
-        .from("map_alerts")
-        .select("report_count")
-        .eq("id", alert.id)
-        .maybeSingle();
-
-      if (updatedAlert && (updatedAlert as { report_count?: number }).report_count && (updatedAlert as { report_count: number }).report_count > 10) {
-        await supabase
-          .from("map_alerts")
-          .update({ is_active: false } as Record<string, unknown>)
-          .eq("id", alert.id);
-        toast.success("Alert has been auto-hidden due to multiple reports");
-        onClose();
-        onRefresh();
-        return;
-      }
-
       toast.success("Alert reported");
+      onRefresh();
     } catch (error: unknown) {
       const code =
         typeof error === "object" && error !== null && "code" in error
@@ -253,13 +227,13 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
 
   // Creator: Remove alert
   const handleRemoveAlert = async () => {
-    if (!user || !alert) return;
+    if (!alert || !user) return;
     try {
-      await supabase
-        .from("map_alerts")
-        .update({ is_active: false } as Record<string, unknown>)
-        .eq("id", alert.id)
-        .eq("creator_id", user.id);
+      const query = supabase.from("map_alerts").delete().eq("id", alert.id);
+      if (!isAdmin) {
+        query.eq("creator_id", user.id);
+      }
+      await query;
       toast.success("Alert removed");
       setShowConfirmRemove(false);
       onClose();
@@ -288,6 +262,9 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
   };
 
   const isCreator = user && alert?.creator_id === user.id;
+  const isAdmin = String(profile?.role || "").toLowerCase() === "admin";
+  const canRemove = Boolean(isCreator || isAdmin);
+  const isSocial = Boolean(alert?.post_on_social || alert?.social_post_id || alert?.thread_id);
 
   return (
     <AnimatePresence>
@@ -317,9 +294,6 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                     style={{ backgroundColor: ALERT_TYPE_COLORS[alert.alert_type] || "#A1A4A9" }}
                   >
                     {alert.alert_type}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {formatTimeAgo(alert.created_at)}
                   </span>
                 </div>
                 <button onClick={onClose}>
@@ -360,20 +334,22 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
               </div>
 
               {/* Creator controls — Edit + Remove */}
-              {isCreator && (
+              {(isCreator || isAdmin) && (
                 <div className="flex gap-2 mb-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setIsEditing(true);
-                      setEditTitle(alert.title || "");
-                      setEditDesc(alert.description || "");
-                    }}
-                    className="flex-1 h-10 rounded-xl"
-                  >
-                    <Pencil className="w-4 h-4 mr-2" />
-                    Edit
-                  </Button>
+                  {isCreator && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setIsEditing(true);
+                        setEditTitle(alert.title || "");
+                        setEditDesc(alert.description || "");
+                      }}
+                      className="flex-1 h-10 rounded-xl"
+                    >
+                      <Pencil className="w-4 h-4 mr-2" />
+                      Edit
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={() => setShowConfirmRemove(true)}
@@ -384,31 +360,27 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
                   </Button>
                 </div>
               )}
+              {/* Social link moved to lower-left area (per feedback) */}
+              {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = alert.social_url || (alert.thread_id ? `/threads/${alert.thread_id}` : "");
+                      if (!url) return;
+                      if (url.startsWith("http")) window.open(url, "_blank", "noopener,noreferrer");
+                      else navigate(url);
+                    }}
+                    className="text-sm font-medium text-[#2145CF] underline underline-offset-2"
+                  >
+                    See more on Social
+                  </button>
+                </div>
+              ) : null}
             </div>
 
-            {/* ================================================================ */}
-            {/* Threads-style Footer — "See on Threads" | Heart | Share | 3-dots */}
-            {/* ================================================================ */}
-            <div className="border-t border-border px-6 py-3 flex items-center justify-between">
-              {/* Left: "See on Threads" pill button — ALL alerts show this */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // Deep-link: if alert has a thread_id, go directly to that thread
-                  if (alert.thread_id) {
-                    navigate(`/threads/${alert.thread_id}`);
-                  } else {
-                    navigate(`/threads/${alert.id}`);
-                  }
-                }}
-                className="rounded-full px-4 h-9 flex items-center gap-1.5 text-sm font-medium"
-              >
-                <MessageCircle className="w-4 h-4" />
-                See on Threads
-              </Button>
-
-              {/* Right: Heart | Share (paper plane) | 3-dots */}
+            {/* Actions row (Support | Share | More) */}
+            <div className="border-t border-border px-6 py-3 flex items-center justify-end">
               <div className="flex items-center gap-1">
                 {/* Heart / Support */}
                 <button
@@ -438,13 +410,13 @@ const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalPro
 
                 {/* 3-dots menu (Report / Hide / Block) */}
                 <div className="relative">
-                  <button
-                    onClick={() => setShowMenu(!showMenu)}
-                    className="p-2 rounded-full hover:bg-muted transition-colors"
-                    title="More"
-                  >
-                    <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
-                  </button>
+                <button
+                  onClick={() => setShowMenu(!showMenu)}
+                  className="p-2 rounded-full hover:bg-muted transition-colors"
+                  title="More"
+                >
+                  <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+                </button>
 
                   <AnimatePresence>
                     {showMenu && (

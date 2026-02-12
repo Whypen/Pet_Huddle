@@ -28,6 +28,9 @@ import imageCompression from "browser-image-compression";
 import { useSearchParams, useParams } from "react-router-dom";
 import { demoThreads } from "@/lib/demoData";
 
+const DEMO_MODE = String(import.meta.env.VITE_DEMO_MODE ?? "prod_preview");
+const DEMO_SEEDED = DEMO_MODE === "seeded_threads";
+
 const tags = [
   { id: "Dog", labelKey: "threads.tag.dog", icon: MessageSquare, color: "bg-primary" },
   { id: "Cat", labelKey: "threads.tag.cat", icon: Heart, color: "bg-accent" },
@@ -158,7 +161,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
       const threadParam = params.threadId || searchParams.get("thread");
       const alertParam = searchParams.get("alert");
       const demoThreadId = threadParam || (alertParam ? `thread-${alertParam}` : null);
-      const demoThread = demoThreadId ? demoThreads.find((t) => t.id === demoThreadId) : null;
+      const demoThread = (!DEMO_SEEDED && demoThreadId) ? demoThreads.find((t) => t.id === demoThreadId) : null;
       if (reset) {
         const merged = demoThread ? [demoThread as Thread, ...newNotices] : newNotices;
         setNotices(merged);
@@ -272,6 +275,10 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
   const handleReply = async (thread: Thread) => {
     if (!user) return;
+    if (!thread?.id || (!DEMO_SEEDED && thread.id.startsWith("demo-"))) {
+      toast.info("Demo threads do not accept replies.");
+      return;
+    }
     if (!replyContent.trim()) {
       setReplyError(t("Reply cannot be empty"));
       return;

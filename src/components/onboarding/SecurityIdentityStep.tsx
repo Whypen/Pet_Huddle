@@ -5,13 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ErrorLabel } from "@/components/ui/ErrorLabel";
-import { Checkbox } from "@/components/ui/checkbox";
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 interface SecurityIdentityStepProps {
   legalName: string;
@@ -36,7 +35,6 @@ export const SecurityIdentityStep = ({
   const [verificationStatus, setVerificationStatus] = useState<"idle" | "verifying" | "verified" | "pending" | "skipped">("idle");
   const [showSkipWarning, setShowSkipWarning] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({ legalName: "", phone: "" });
-  const [legalConsent, setLegalConsent] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -49,9 +47,6 @@ export const SecurityIdentityStep = ({
 
   const handleStartVerification = async () => {
     const nextErrors = { legalName: "", phone: "" };
-    if (!legalName.trim()) {
-      nextErrors.legalName = t("Legal name is required");
-    }
     if (!phone.trim()) {
       nextErrors.phone = t("Phone number is required");
     }
@@ -75,15 +70,23 @@ export const SecurityIdentityStep = ({
       setShowSkipWarning(true);
       return;
     }
+    const nextErrors = { legalName: "", phone: "" };
+    if (!phone.trim()) {
+      nextErrors.phone = t("Phone number is required");
+    }
+    setFieldErrors(nextErrors);
+    if (nextErrors.phone) {
+      return;
+    }
     setVerificationStatus("skipped");
     onVerificationStatusChange("skipped");
     toast.info(t("Verification skipped - you can complete this later in settings"));
+    onContinue();
   };
 
   const isValid =
-    Boolean(legalName.trim() && phone.trim()) &&
-    (verificationStatus === "pending" || verificationStatus === "skipped") &&
-    legalConsent;
+    Boolean(phone.trim()) &&
+    (verificationStatus === "pending" || verificationStatus === "skipped");
 
   return (
     <div className="space-y-6">
@@ -110,7 +113,7 @@ export const SecurityIdentityStep = ({
               onLegalNameChange(e.target.value);
               setFieldErrors((prev) => ({
                 ...prev,
-                legalName: e.target.value.trim() ? "" : t("Legal name is required"),
+                legalName: "",
               }));
             }}
             className={`h-12 rounded-xl ${fieldErrors.legalName ? "border-red-500" : ""}`}
@@ -147,28 +150,6 @@ export const SecurityIdentityStep = ({
         </div>
       </div>
 
-      {/* Mandatory Consent */}
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-start gap-3">
-          <Checkbox
-            id="legalConsent"
-            checked={legalConsent}
-            onCheckedChange={(v) => setLegalConsent(v === true)}
-          />
-          <label htmlFor="legalConsent" className="text-sm leading-relaxed text-brandText">
-            I have read and agree to the{" "}
-            <Link to="/terms" className="text-brandBlue hover:underline">
-              Terms of Service
-            </Link>{" "}
-            and{" "}
-            <Link to="/privacy" className="text-brandBlue hover:underline">
-              Privacy Policy
-            </Link>
-            .
-          </label>
-        </div>
-      </div>
-
       {/* Stripe Identity Verification Block */}
       <motion.div
         className="rounded-2xl border-2 border-dashed border-border p-6 text-center"
@@ -192,7 +173,7 @@ export const SecurityIdentityStep = ({
             <Button
               onClick={handleStartVerification}
               className="w-full h-11 rounded-xl"
-              disabled={!legalName.trim() || !phone.trim()}
+              disabled={!phone.trim()}
             >
               {t("Start Verification")}
             </Button>

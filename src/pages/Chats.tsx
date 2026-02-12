@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Users, MessageSquare, Search, X, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, ChevronDown, ChevronUp, Trash2, PawPrint, DollarSign } from "lucide-react";
 import { useNavigate } from "react-router-dom";

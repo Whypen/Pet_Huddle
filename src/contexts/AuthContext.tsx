@@ -265,6 +265,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
 
       if (!error) {
+        const sessionRes = await supabase.auth.getSession();
+        const userRes = await supabase.auth.getUser();
+        console.log("[AUTH_AUDIT] session", sessionRes.data.session ?? null);
+        console.log("[AUTH_AUDIT] session.user.id", sessionRes.data.session?.user?.id ?? null);
+        console.log("[AUTH_AUDIT] getUser", userRes.data.user ?? null);
         const { data } = await supabase.auth.getUser();
         const uid = data?.user?.id;
         if (uid) {

@@ -47,6 +47,7 @@ export interface DemoAlert {
   createdAt: string;
   creatorId: string;
   isActive: boolean;
+  is_demo?: boolean;
   threadId?: string;
   postedToThreads?: boolean;
 }
@@ -1009,6 +1010,20 @@ export const demoThreads: DemoThread[] = demoAlerts.map((alert) => {
       : null,
   };
 });
+
+// ===== 10 HK DEMO PINS (Always-visible map pins) =====
+export const demoPins: DemoAlert[] = [
+  { id: "demo-01", type: "Lost", description: "Missing tabby cat near TST promenade.", latitude: 22.2963, longitude: 114.1722, location: { lat: 22.2963, lng: 114.1722 }, supportCount: 21, reportCount: 0, createdAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(), creatorId: "demo-user-11", isActive: true, is_demo: true, threadId: "43a06dd1-0ce0-4854-8448-42dd905a4d18", postedToThreads: true },
+  { id: "demo-02", type: "Stray", description: "Friendly Shiba spotted near Mong Kok East exit.", latitude: 22.3193, longitude: 114.1694, location: { lat: 22.3193, lng: 114.1694 }, supportCount: 15, reportCount: 0, createdAt: new Date(Date.now() - 75 * 60 * 1000).toISOString(), creatorId: "demo-user-6", isActive: true, is_demo: true, threadId: "9888a51c-eb39-418d-b779-b5171b1d399d", postedToThreads: true },
+  { id: "demo-03", type: "Others", description: "Community feed station restocked in Central.", latitude: 22.2819, longitude: 114.1589, location: { lat: 22.2819, lng: 114.1589 }, supportCount: 10, reportCount: 0, createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-1", isActive: true, is_demo: true, threadId: "b6f5bb06-1f74-4b4c-9bdb-aefe7f5e1131", postedToThreads: true },
+  { id: "demo-04", type: "Lost", description: "Small white dog missing near Wan Chai market.", latitude: 22.2776, longitude: 114.1731, location: { lat: 22.2776, lng: 114.1731 }, supportCount: 18, reportCount: 0, createdAt: new Date(Date.now() - 95 * 60 * 1000).toISOString(), creatorId: "demo-user-2", isActive: true, is_demo: true, threadId: "f6fe5d47-48f8-4c29-a065-5e1068ff0a09", postedToThreads: true },
+  { id: "demo-05", type: "Stray", description: "Young orange kitten seen near Apliu Street, Sham Shui Po.", latitude: 22.3305, longitude: 114.1621, location: { lat: 22.3305, lng: 114.1621 }, supportCount: 9, reportCount: 0, createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-10", isActive: true, is_demo: true, threadId: "2bd23e9b-9758-46fd-a807-4803a4ee12e7", postedToThreads: true },
+  { id: "demo-06", type: "Others", description: "Pet adoption booth open at Tsuen Wan plaza today.", latitude: 22.3707, longitude: 114.1113, location: { lat: 22.3707, lng: 114.1113 }, supportCount: 13, reportCount: 0, createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-4", isActive: true, is_demo: true, threadId: "ed305f81-a25e-4ecf-9ab8-03fb70a4c017", postedToThreads: true },
+  { id: "demo-07", type: "Stray", description: "Injured pigeon reported near Tsing Yi station.", latitude: 22.3587, longitude: 114.1077, location: { lat: 22.3587, lng: 114.1077 }, supportCount: 7, reportCount: 0, createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-12", isActive: true, is_demo: true, threadId: "8dfe8ca2-7141-4465-b8a3-0f535e8fbd6b", postedToThreads: true },
+  { id: "demo-08", type: "Lost", description: "Parakeet flew off near Kwun Tong ferry pier.", latitude: 22.3071, longitude: 114.2252, location: { lat: 22.3071, lng: 114.2252 }, supportCount: 11, reportCount: 0, createdAt: new Date(Date.now() - 70 * 60 * 1000).toISOString(), creatorId: "demo-user-7", isActive: true, is_demo: true, threadId: "c4856dc0-2ff1-42b9-916a-560de967a8e1", postedToThreads: true },
+  { id: "demo-09", type: "Others", description: "Volunteers needed for Sai Kung beach cleanup with pets.", latitude: 22.3814, longitude: 114.2705, location: { lat: 22.3814, lng: 114.2705 }, supportCount: 16, reportCount: 0, createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-15", isActive: true, is_demo: true, threadId: "5b1df1e8-e80f-4f85-90d7-cd67c5a3f1f4", postedToThreads: true },
+  { id: "demo-10", type: "Stray", description: "Brown mixed-breed dog seen near Aberdeen promenade.", latitude: 22.2479, longitude: 114.1547, location: { lat: 22.2479, lng: 114.1547 }, supportCount: 12, reportCount: 0, createdAt: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(), creatorId: "demo-user-8", isActive: true, is_demo: true, threadId: "6ead51ff-33f7-450d-8122-38226b368924", postedToThreads: true },
+];
 
 // ===== 15 DEMO FRIEND PINS (Green Initial Icons on Map) =====
 export interface DemoFriendPin {

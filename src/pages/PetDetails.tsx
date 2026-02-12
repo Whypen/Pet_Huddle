@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Edit, Calendar, Weight, Ruler, Syringe, Pill, Stethoscope, Cpu, Loader2 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -43,13 +43,7 @@ const PetDetails = () => {
   const [pet, setPet] = useState<PetDetails | null>(null);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
 
-  useEffect(() => {
-    if (petId) {
-      fetchPetDetails();
-    }
-  }, [petId]);
-
-  const fetchPetDetails = async () => {
+  const fetchPetDetails = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("pets")
@@ -66,7 +60,13 @@ const PetDetails = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate, petId, t]);
+
+  useEffect(() => {
+    if (petId) {
+      fetchPetDetails();
+    }
+  }, [fetchPetDetails, petId]);
 
   const calculateAge = (dob: string | null) => {
     if (!dob) return null;

@@ -1,406 +1,299 @@
-/**
- * BroadcastModal.tsx — Full-screen Broadcast Creation Modal
- *
- * Spec: Dropdown Topic (Stray/Lost/Others), Title (100 char),
- * Desc (500 char), Image upload, "Post on Threads" checkbox,
- * Tier gating: Free (10km/12h), Premium (25km/24h), Gold (50km/48h),
- * Add-on (150km/72h)
- */
-
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  X,
-  Camera,
-  Loader2,
-  ChevronDown,
-  AlertTriangle,
-  MapPin,
-} from "lucide-react";
-import imageCompression from "browser-image-compression";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, Camera, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { getBroadcastPinStyle, normalizeBroadcastAlertType } from "@/lib/broadcastPinStyle";
+import { humanError } from "@/lib/humanError";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
-import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
-import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
-import mapboxgl from "mapbox-gl";
-
-const MAX_TITLE_CHARS = 100;
-const MAX_DESC_CHARS = 500;
-
-const ALERT_TYPE_COLORS: Record<string, string> = {
-  Stray: "#EAB308",
-  Lost: "#EF4444",
-  Others: "#A1A4A9",
-};
 
 interface BroadcastModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedLocation: { lat: number; lng: number } | null;
-  address?: string;
-  map?: mapboxgl.Map | null;
-  onLocationUpdate?: (lat: number, lng: number, address?: string) => void;
-  onSuccess: () => void;
-  extraBroadcast72h: number;
-  onQuotaRefresh: () => void;
-}
-
-interface MapAlertFormData {
-  creator_id: string;
-  latitude: number;
-  longitude: number;
-  alert_type: string;
-  title: string | null;
-  description: string | null;
-  photo_url: string | null;
-  range_meters: number;
-  expires_at: string;
-  address: string | null;
-  thread_id: string | null;
-  posted_to_threads: boolean;
+  alertType: string;
+  onAlertTypeChange: (next: string) => void;
+  onRequestPinLocation: () => void;
+  onClearLocation: () => void;
+  onRequestUpgrade: () => void;
+  onSuccess: (payload?: {
+    alertId: string | null;
+    threadId: string | null;
+    alert: {
+      id: string;
+      latitude: number;
+      longitude: number;
+      alert_type: string;
+      title: string | null;
+      description: string | null;
+      photo_url: string | null;
+      support_count: number;
+      report_count: number;
+      created_at: string;
+      creator_id: string | null;
+      thread_id: string | null;
+      creator: { display_name: string | null; avatar_url: string | null } | null;
+      expires_at?: string | null;
+      range_meters?: number | null;
+    };
+  }) => void;
+  onError: () => void;
 }
 
 const BroadcastModal = ({
   isOpen,
   onClose,
   selectedLocation,
-  address,
-  map,
-  onLocationUpdate,
+  alertType,
+  onAlertTypeChange,
+  onRequestPinLocation,
+  onClearLocation,
+  onRequestUpgrade,
   onSuccess,
-  extraBroadcast72h,
-  onQuotaRefresh,
+  onError,
 }: BroadcastModalProps) => {
   const { user, profile } = useAuth();
-  const navigate = useNavigate();
-  const { showUpsellBanner } = useUpsellBanner();
-
-  const [alertType, setAlertType] = useState("Stray");
   const [alertTitle, setAlertTitle] = useState("");
   const [description, setDescription] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [postOnThreads, setPostOnThreads] = useState(false);
-  const [selectedRangeKm, setSelectedRangeKm] = useState<number | null>(null);
-  const [selectedDurationH, setSelectedDurationH] = useState<number | null>(null);
-  const [showManualAddress, setShowManualAddress] = useState(false);
-  const [manualAddress, setManualAddress] = useState("");
-  const [lockedAddress, setLockedAddress] = useState<string | null>(null);
-  const [isLocating, setIsLocating] = useState(false);
-  const [isManualGeocoding, setIsManualGeocoding] = useState(false);
-  const [isManualOverride, setIsManualOverride] = useState(false);
-  const [capturedCoords, setCapturedCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reverseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reverseAbortRef = useRef<AbortController | null>(null);
-  const manualInputRef = useRef<HTMLInputElement | null>(null);
-  const gpsCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  const capturedCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  const geoWatchRef = useRef<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
+  const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
+  const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
+  const baseRangeKm = tier === "gold" ? 50 : tier === "premium" ? 25 : 10;
+  const baseDurationHours = tier === "gold" ? 48 : tier === "premium" ? 24 : 12;
+  const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
+  const capRangeKm = extraBroadcast72h > 0 ? 150 : baseRangeKm;
+  const capDurationHours = extraBroadcast72h > 0 ? 72 : baseDurationHours;
+  const [rangeKm, setRangeKm] = useState<number>(baseRangeKm);
+  const [durationHours, setDurationHours] = useState<number>(baseDurationHours);
+  const [showUpsell, setShowUpsell] = useState(false);
+  const upsellOnceRef = useRef(false);
+  const upsellResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const addressReady = useMemo(() => {
-    const resolved = manualAddress.trim() || lockedAddress || "";
-    if (resolved) return true;
-    if (typeof address === "string" && address.length > 0 && !address.includes("Searching")) return true;
-    return false;
-  }, [manualAddress, lockedAddress, address]);
-
-  const resolvedAddress = useMemo(() => {
-    if (manualAddress.trim()) return manualAddress.trim();
-    if (lockedAddress) return lockedAddress;
-    if (typeof address === "string" && address.length > 0 && !address.includes("Searching")) return address;
-    return "";
-  }, [manualAddress, lockedAddress, address]);
-
-  // Capture map center/selected coordinates at modal open and keep stable.
-  useEffect(() => {
-    if (!isOpen) {
-      capturedCoordsRef.current = null;
-      setCapturedCoords(null);
-      return;
-    }
-    const center = map?.getCenter();
-    const nextCoords = center
-      ? { lat: center.lat, lng: center.lng }
-      : selectedLocation
-        ? { lat: selectedLocation.lat, lng: selectedLocation.lng }
-        : null;
-    if (nextCoords) {
-      capturedCoordsRef.current = nextCoords;
-      setCapturedCoords(nextCoords);
-    }
-  }, [isOpen, map, selectedLocation, selectedLocation?.lat, selectedLocation?.lng]);
-
-  // 3s timer: if address is unresolved, stop locate flow and force manual input
-  useEffect(() => {
-    if (!isOpen) {
-      setShowManualAddress(false);
-      setManualAddress("");
-      setLockedAddress(null);
-      setIsLocating(false);
-      setIsManualGeocoding(false);
-      setIsManualOverride(false);
-      gpsCoordsRef.current = null;
-      if (geoWatchRef.current !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(geoWatchRef.current);
-        geoWatchRef.current = null;
-      }
-      if (timerRef.current) clearTimeout(timerRef.current);
-      if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
-      if (reverseAbortRef.current) reverseAbortRef.current.abort();
-      return;
-    }
-    if (addressReady) {
-      setShowManualAddress(false);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      return;
-    }
-    // Start 3s timer
-    timerRef.current = setTimeout(() => {
-      console.log("[BroadcastModal] 3s timer expired — showing manual address input");
-      setShowManualAddress(true);
-      setIsLocating(false);
-      if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
-      if (reverseAbortRef.current) reverseAbortRef.current.abort();
-      setTimeout(() => manualInputRef.current?.focus(), 0);
-    }, 3000);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [isOpen, addressReady, address, capturedCoords?.lat, capturedCoords?.lng]);
-
-  useEffect(() => {
-    if (showManualAddress) {
-      setTimeout(() => manualInputRef.current?.focus(), 0);
-    }
-  }, [showManualAddress]);
-
-  // Solution 1: Reverse Geocoding Lock (Automatic) on modal open
   useEffect(() => {
     if (!isOpen) return;
-    if (!navigator.geolocation) return;
-    if (geoWatchRef.current !== null) {
-      navigator.geolocation.clearWatch(geoWatchRef.current);
-      geoWatchRef.current = null;
-    }
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (isManualOverride) {
-          setIsLocating(false);
-          return;
-        }
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        console.log("Geocoding Step 1: GPS Lock", coords);
-        gpsCoordsRef.current = coords;
-        if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
-        reverseDebounceRef.current = setTimeout(async () => {
-          try {
-            if (isManualOverride) return;
-            reverseAbortRef.current = new AbortController();
-            const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${coords.lng},${coords.lat}.json?access_token=${MAPBOX_ACCESS_TOKEN}&types=address,place,locality,neighborhood&limit=1`;
-            console.log("[BroadcastModal] Reverse geocode payload:", [coords.lng, coords.lat]);
-            const res = await fetch(url, { signal: reverseAbortRef.current.signal });
-            if (res.status === 401 || res.status === 403) {
-              toast.error("Map Service Error - Please enter address manually.");
-              setShowManualAddress(true);
-              setIsLocating(false);
-              return;
-            }
-            if (!res.ok) {
-              setIsLocating(false);
-              return;
-            }
-            const data = await res.json();
-            const feature = Array.isArray(data.features) ? data.features[0] : null;
-            if (feature?.place_name && !isManualOverride) {
-              setLockedAddress(feature.place_name);
-              setShowManualAddress(false);
-            }
-          } catch {
-            // no-op; fallback handled by 3s timer
-          } finally {
-            setIsLocating(false);
-          }
-        }, 300);
-      },
-      () => {
-        setIsLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
-    return () => {
-      if (geoWatchRef.current !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(geoWatchRef.current);
-        geoWatchRef.current = null;
-      }
-      if (reverseDebounceRef.current) clearTimeout(reverseDebounceRef.current);
-      if (reverseAbortRef.current) reverseAbortRef.current.abort();
-    };
-  }, [isOpen, isManualOverride, address, capturedCoords?.lat, capturedCoords?.lng]);
+    setShowUpsell(false);
+    upsellOnceRef.current = false;
+    if (upsellResetTimerRef.current) clearTimeout(upsellResetTimerRef.current);
 
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-  const broadcastRange = effectiveTier === "gold" ? 50 : isPremium ? 25 : 10;
+    (async () => {
+      if (!user) return;
+      const r = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: unknown }>)(
+        "get_quota_snapshot"
+      );
+      if (r.error) return;
+      const row = Array.isArray(r.data) ? r.data[0] : r.data;
+      const extra = row && typeof (row as Record<string, unknown>).extra_broadcast_72h === "number"
+        ? ((row as Record<string, unknown>).extra_broadcast_72h as number)
+        : 0;
+      setExtraBroadcast72h(extra);
+    })();
+  }, [isOpen, user]);
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => setImagePreview(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+  useEffect(() => {
+    if (!isOpen) return;
+    setRangeKm((current) => Math.min(current, capRangeKm));
+    setDurationHours((current) => Math.min(current, capDurationHours));
+  }, [capDurationHours, capRangeKm, isOpen]);
+
+  const showUpsellOncePerDrag = () => {
+    if (upsellOnceRef.current) return;
+    upsellOnceRef.current = true;
+    setShowUpsell(true);
+    if (upsellResetTimerRef.current) clearTimeout(upsellResetTimerRef.current);
+    upsellResetTimerRef.current = setTimeout(() => {
+      upsellOnceRef.current = false;
+    }, 1000);
   };
 
-  const resetForm = useCallback(() => {
-    setAlertType("Stray");
-    setAlertTitle("");
-    setDescription("");
-    setImageFile(null);
-    setImagePreview(null);
-    setPostOnThreads(false);
-    setSelectedRangeKm(null);
-    setSelectedDurationH(null);
-  }, []);
+  const handleRangeChange = (nextValue: number) => {
+    if (nextValue > capRangeKm) {
+      setRangeKm(capRangeKm);
+      showUpsellOncePerDrag();
+      return;
+    }
+    setRangeKm(nextValue);
+  };
 
-  const handleClose = () => {
-    resetForm();
-    onClose();
+  const handleDurationChange = (nextValue: number) => {
+    if (nextValue > capDurationHours) {
+      setDurationHours(capDurationHours);
+      showUpsellOncePerDrag();
+      return;
+    }
+    setDurationHours(nextValue);
   };
 
   const handleSubmit = async () => {
-    const finalCoords = capturedCoordsRef.current || selectedLocation;
-    if (!user || !finalCoords || !resolvedAddress.trim()) {
-      toast.error("Please select a location first");
+    if (!user || !selectedLocation) {
+      toast.error("Pin location first");
+      return;
+    }
+    if (rangeKm > capRangeKm || durationHours > capDurationHours) {
+      toast.error(`Tier limit exceeded. Max ${capRangeKm}km and ${capDurationHours}h for your plan.`);
+      onError();
       return;
     }
 
     setCreating(true);
+    let photoUrl: string | null = null;
+    let createdAlertId: string | null = null;
     try {
-      let photoUrl: string | null = null;
-      let threadId: string | null = null;
-
-      // Image upload — no media quota (removed per mandate)
       if (imageFile) {
-        const compressed = await imageCompression(imageFile, { maxSizeMB: 0.5, useWebWorker: true });
-        const uploadFile = compressed instanceof File ? compressed : imageFile;
-        const fileExt = imageFile.name.split(".").pop();
+        const fileExt = imageFile.name.split(".").pop() || "jpg";
         const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("alerts")
-          .upload(fileName, uploadFile);
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from("alerts")
-          .getPublicUrl(fileName);
-        photoUrl = publicUrl;
+        const upload = await supabase.storage.from("alerts").upload(fileName, imageFile);
+        if (upload.error) throw upload.error;
+        photoUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
       }
 
-      // Step A: insert thread first (for Stray/Lost + Post on Threads)
-      if (postOnThreads && (alertType === "Stray" || alertType === "Lost")) {
-        const { data: threadData, error: threadErr } = await supabase
-          .from("threads" as "profiles")
+      console.log("[BROADCAST_PAYLOAD]", {
+        type: normalizedType,
+        title: alertTitle.trim(),
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
+        rangeKm,
+        durationHours,
+        postOnThreads,
+        hasImage: Boolean(photoUrl),
+      });
+
+      const expiresAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
+      const rangeMeters = Math.round(rangeKm * 1000);
+      const locationLabel = "Pinned Location";
+
+      const sessionRes = await supabase.auth.getSession();
+      const session = sessionRes.data.session;
+      console.log("[UAT_AUTH_STATE]", {
+        sessionPresent: Boolean(session),
+        accessTokenPresent: Boolean(session?.access_token),
+        sessionUserId: session?.user?.id ?? null,
+        contextUserId: user?.id ?? null,
+      });
+      const { data: whoami, error: whoErr } = await supabase.rpc("debug_whoami");
+      console.log("[UAT_WHOAMI]", { whoami, error: whoErr?.message ?? null });
+
+      const { data, error } = await supabase
+        .from("map_alerts")
+        .insert({
+          creator_id: user.id,
+          alert_type: normalizedType,
+          title: alertTitle.trim() || null,
+          description: description.trim() || null,
+          photo_url: photoUrl,
+          media_urls: photoUrl ? [photoUrl] : null,
+          address: null,
+          latitude: selectedLocation.lat,
+          longitude: selectedLocation.lng,
+          range_meters: rangeMeters,
+          range_km: rangeKm,
+          duration_hours: durationHours,
+          expires_at: expiresAt,
+          post_on_social: postOnThreads,
+          posted_to_threads: postOnThreads,
+          location_street: null,
+          location_district: null,
+        })
+        .select("id, created_at, expires_at, range_meters")
+        .single();
+
+      if (error) throw error;
+      createdAlertId = data.id;
+
+      let threadId: string | null = null;
+      if (postOnThreads && (normalizedType === "Stray" || normalizedType === "Lost" || normalizedType === "Others")) {
+        const canonicalTitle = alertTitle.trim() || `${normalizedType} Alert`;
+        const canonicalText = [
+          `Type: ${normalizedType}`,
+          canonicalTitle ? `Title: ${canonicalTitle}` : "",
+          description.trim() ? `Description: ${description.trim()}` : "",
+          `Location: ${locationLabel}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const { data: threadRow, error: threadError } = await supabase
+          .from("threads")
           .insert({
             user_id: user.id,
-            title: alertTitle.trim() || `Broadcast (${alertType})`,
-            content: description.trim() || "",
-            tags: ["News"],
-            hashtags: [],
+            title: canonicalTitle,
+            content: canonicalText,
             images: photoUrl ? [photoUrl] : [],
             is_map_alert: true,
+            map_id: data.id,
             is_public: true,
           })
           .select("id")
           .single();
 
-        if (threadErr || !threadData?.id) {
-          console.error("[BroadcastModal] threads insert error:", threadErr);
-          throw new Error("Thread creation failed. Alert aborted to prevent ghosting.");
+        if (threadError) {
+          console.error("[SOCIAL_DUPLICATION_ERROR]", threadError);
+          toast.error(`Pinned, but Social failed: ${humanError(threadError)}`);
+          await supabase
+          .from("map_alerts")
+          .update({ social_status: "failed" } as Record<string, unknown>)
+          .eq("id", data.id);
+        } else {
+          threadId = threadRow.id;
+          await supabase
+            .from("map_alerts")
+            .update({
+              thread_id: threadId,
+              social_post_id: threadId,
+              posted_to_threads: true,
+              social_status: "posted",
+              social_url: `/threads/${threadId}`,
+            } as Record<string, unknown>)
+            .eq("id", data.id);
         }
-        threadId = threadData.id;
       }
 
-      const rangeKm = selectedRangeKm ?? broadcastRange;
-      const durH = selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12);
-      const expiresAt = new Date(Date.now() + durH * 60 * 60 * 1000).toISOString();
+      console.log("[RPC_RESULT]", { alert_id: data.id, thread_id: threadId, mode: "direct_insert_map_alerts" });
 
-      const formData: MapAlertFormData = {
-        creator_id: user.id,
-        latitude: finalCoords.lat,
-        longitude: finalCoords.lng,
-        alert_type: alertType,
-        title: alertTitle.trim() || null,
-        description: description.trim() || null,
-        photo_url: photoUrl,
-        range_meters: Math.round(rangeKm * 1000),
-        expires_at: expiresAt,
-        address: resolvedAddress || null,
-        thread_id: threadId,
-        posted_to_threads: Boolean(threadId),
-      };
-      const { data: insertedAlert, error } = await supabase
-        .from("map_alerts")
-        .insert(formData)
-        .select("id")
-        .maybeSingle();
+      onSuccess({
+        alertId: data.id,
+        threadId,
+        alert: {
+          id: data.id,
+          latitude: selectedLocation.lat,
+          longitude: selectedLocation.lng,
+          alert_type: normalizedType,
+          title: alertTitle.trim() || null,
+          description: description.trim() || null,
+          photo_url: photoUrl,
+          support_count: 0,
+          report_count: 0,
+          created_at: data.created_at || new Date().toISOString(),
+          creator_id: user.id,
+          thread_id: threadId,
+          social_post_id: threadId,
+          post_on_social: postOnThreads,
+          expires_at: data.expires_at ?? expiresAt,
+          range_meters: data.range_meters ?? rangeMeters,
+          range_km: rangeKm,
+          duration_hours: durationHours,
+          creator: {
+            display_name: profile?.display_name || null,
+            avatar_url: profile?.avatar_url || null,
+          },
+        },
+      });
 
-      if (error) {
-        console.error("[BroadcastModal] map_alerts insert error:", error);
-        const errObj = typeof error === "object" && error !== null ? (error as unknown as Record<string, unknown>) : null;
-        const msg = typeof errObj?.message === "string" ? (errObj.message as string) : "";
-        if (msg.includes("quota_exceeded")) {
-          showUpsellBanner({
-            message: "Limited. You have reached your Broadcast limit for this week.",
-            ctaLabel: "Go to Premium",
-            onCta: () => {
-              sessionStorage.setItem("pending_addon", "emergency_alert");
-              navigate("/premium");
-            },
-          });
-          setCreating(false);
-          return;
-        }
-        if (threadId) {
-          await supabase.from("threads").delete().eq("id", threadId);
-        }
-        throw error;
+      toast.success("Your pin is live!");
+      onClose();
+    } catch (err) {
+      if (createdAlertId) {
+        await supabase.from("map_alerts").delete().eq("id", createdAlertId);
       }
-
-      const alertId = (insertedAlert as { id?: string } | null)?.id;
-      toast.success("Alert broadcasted!");
-
-      // Step B: mirror to pins table (thread_id included if present)
-      await supabase.from("pins").insert({
-        user_id: user.id,
-        lat: finalCoords.lat,
-        lng: finalCoords.lng,
-        address: resolvedAddress || null,
-        is_invisible: false,
-        thread_id: threadId,
-      } as Record<string, unknown>);
-
-      if (threadId && alertId) {
-        await supabase.from("threads" as "profiles").update({ map_id: alertId } as Record<string, unknown>).eq("id", threadId);
-      }
-
-      if (threadId) {
-        navigate(`/threads/${threadId}`);
-      }
-
-      handleClose();
-      onSuccess();
-      onQuotaRefresh();
-    } catch (error: unknown) {
-      console.error("[BroadcastModal] handleSubmit error:", error);
-      const message = error instanceof Error ? error.message : String(error);
-      toast.error(message || "Failed to create alert");
+      console.error("[BASELINE_INSERT_ERROR]", err);
+      toast.error(`Broadcast failed: ${humanError(err)}`);
+      onError();
     } finally {
       setCreating(false);
     }
@@ -413,158 +306,127 @@ const BroadcastModal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[2000] bg-black/50 flex items-end"
-          onClick={handleClose}
+          className="fixed inset-0 z-[5000] bg-black/50 flex items-end"
+          onClick={onClose}
         >
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full bg-card rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
-              <button onClick={handleClose}>
+        <motion.div
+          initial={{ y: "100%" }}
+          animate={{ y: 0 }}
+          exit={{ y: "100%" }}
+          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          onClick={(e) => e.stopPropagation()}
+          className="relative w-full bg-card rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  if (selectedLocation) {
+                    onClearLocation();
+                  } else {
+                    onRequestPinLocation();
+                    onClose();
+                  }
+                }}
+                className={[
+                  "h-9 rounded-full px-4 text-xs font-semibold",
+                  selectedLocation ? "bg-muted text-muted-foreground hover:bg-muted" : "bg-[#2145CF] text-white hover:bg-[#1b39ab]",
+                ].join(" ")}
+              >
+                {selectedLocation ? "Remove Location" : "Pin location"}
+              </Button>
+              <button onClick={onClose} aria-label="Close">
                 <X className="w-6 h-6" />
               </button>
             </div>
+          </div>
 
-            {/* Location display — with 3s manual fallback */}
-            {(capturedCoords || selectedLocation) && (
-              <div className="mb-4">
-                <p className="text-xs text-muted-foreground">
-                  {resolvedAddress
-                    ? resolvedAddress
-                    : showManualAddress
-                      ? `Location: ${(capturedCoords || selectedLocation)!.lat.toFixed(4)}, ${(capturedCoords || selectedLocation)!.lng.toFixed(4)}`
-                      : "Searching address..."}
-                  {!resolvedAddress && !showManualAddress && isLocating && (
-                    <span className="inline-flex items-center ml-2 text-muted-foreground">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    </span>
-                  )}
-                </p>
-                {showManualAddress && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <MapPin className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                    <Input
-                      ref={manualInputRef}
-                      placeholder="Enter address manually"
-                      value={manualAddress}
-                      onChange={(e) => {
-                        setManualAddress(e.target.value);
-                        setIsManualOverride(true);
-                      }}
-                      className="rounded-xl text-sm h-9 flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 rounded-xl text-xs"
-                      disabled={isManualGeocoding}
-                      onClick={async () => {
-                        const query = manualAddress.trim();
-                        if (!query) return;
-                        setIsManualOverride(true);
-                        const proximity = gpsCoordsRef.current || capturedCoordsRef.current || selectedLocation;
-                        if (!proximity) {
-                          toast.error("Unable to resolve location. Please try again.");
-                          return;
-                        }
-                        setIsManualGeocoding(true);
-                        try {
-                          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${MAPBOX_ACCESS_TOKEN}&limit=1&proximity=${proximity.lng},${proximity.lat}`;
-                          console.log("[BroadcastModal] Forward geocode payload:", [proximity.lng, proximity.lat]);
-                          const res = await fetch(url);
-                          if (res.status === 401 || res.status === 403) {
-                            toast.error("Map Service Error - Please enter address manually.");
-                            setShowManualAddress(true);
-                            return;
-                          }
-                          if (!res.ok) return;
-                          const data = await res.json();
-                          const feature = Array.isArray(data.features) ? data.features[0] : null;
-                          if (feature?.center?.length === 2) {
-                            const [lng, lat] = feature.center as [number, number];
-                            const best = feature.place_name || query;
-                            setManualAddress(best);
-                            const nextCoords = { lat, lng };
-                            capturedCoordsRef.current = nextCoords;
-                            setCapturedCoords(nextCoords);
-                            onLocationUpdate?.(lat, lng, best);
-                            map?.flyTo({ center: [lng, lat], zoom: 14 });
-                            toast.success("Location updated");
-                            setShowManualAddress(false);
-                          }
-                        } catch {
-                          // Ignore; manual fallback remains
-                        } finally {
-                          setIsManualGeocoding(false);
-                        }
-                      }}
-                    >
-                      {isManualGeocoding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Find on Map"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Spec: Dropdown Topic selector */}
             <div className="mb-4">
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Topic</label>
-              <div className="relative">
-                <select
-                  value={alertType}
-                  onChange={(e) => setAlertType(e.target.value)}
-                  className="w-full h-11 rounded-xl border border-border bg-white px-4 text-sm font-medium appearance-none pr-10"
-                  style={{ color: ALERT_TYPE_COLORS[alertType] }}
-                >
-                  <option value="Stray">Stray</option>
-                  <option value="Lost">Lost</option>
-                  <option value="Others">Others</option>
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-              </div>
+              <select
+                value={normalizedType}
+                onChange={(e) => onAlertTypeChange(e.target.value)}
+                className="w-full h-11 rounded-xl border border-border bg-white px-4 text-sm font-medium"
+                style={{ color: pinStyle.color }}
+              >
+                <option value="Stray">Stray</option>
+                <option value="Lost">Lost</option>
+                <option value="Others">Others</option>
+              </select>
             </div>
 
-            {/* Title — max 100 chars */}
+            <div className="mb-4 rounded-xl border border-border p-3">
+              <div className="text-xs text-muted-foreground mb-2">
+                Tier limit: up to {baseRangeKm}km and {baseDurationHours}h
+              </div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                Range: {rangeKm} km
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={150}
+                step={1}
+                value={rangeKm}
+                onPointerDown={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onPointerUp={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onTouchEnd={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onChange={(e) => handleRangeChange(Number(e.target.value))}
+                className="w-full"
+              />
+              <label className="text-xs font-medium text-muted-foreground mb-1 mt-3 block">
+                Duration: {durationHours} h
+              </label>
+              <input
+                type="range"
+                min={1}
+                max={72}
+                step={1}
+                value={durationHours}
+                onPointerDown={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onPointerUp={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onTouchEnd={() => {
+                  upsellOnceRef.current = false;
+                }}
+                onChange={(e) => handleDurationChange(Number(e.target.value))}
+                className="w-full"
+              />
+              {showUpsell && extraBroadcast72h <= 0 ? (
+                <div className="mt-3 rounded-xl border border-[#EAB308]/30 bg-[#FEF9C3] p-3 text-xs text-[#854D0E] flex items-center justify-between gap-3">
+                  <span>Upgrade your membership to enjoy this perk!</span>
+                  <button
+                    type="button"
+                    onClick={onRequestUpgrade}
+                    className="shrink-0 rounded-full bg-[#A6D539] px-3 py-1 text-[11px] font-semibold text-brandText"
+                  >
+                    Upgrade
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
             <div className="space-y-1 mb-3">
               <label className="text-xs font-medium text-muted-foreground">Title</label>
-              <Input
-                placeholder=""
-                value={alertTitle}
-                onChange={(e) => {
-                  if (e.target.value.length <= MAX_TITLE_CHARS) setAlertTitle(e.target.value);
-                }}
-                className="rounded-xl"
-                maxLength={MAX_TITLE_CHARS}
-              />
-              <div className="flex justify-end text-xs text-muted-foreground">
-                <span>{alertTitle.length}/{MAX_TITLE_CHARS}</span>
-              </div>
+              <Input value={alertTitle} onChange={(e) => setAlertTitle(e.target.value.slice(0, 100))} />
             </div>
 
-            {/* Description — max 500 chars */}
             <div className="space-y-1 mb-3">
               <label className="text-xs font-medium text-muted-foreground">Description</label>
-              <Textarea
-                placeholder=""
-                value={description}
-                onChange={(e) => {
-                  if (e.target.value.length <= MAX_DESC_CHARS) setDescription(e.target.value);
-                }}
-                className="rounded-xl min-h-[80px]"
-              />
-              <div className="flex justify-end text-xs text-muted-foreground">
-                <span>{description.length}/{MAX_DESC_CHARS}</span>
-              </div>
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value.slice(0, 500))} className="min-h-[80px]" />
             </div>
 
-            {/* Image upload */}
             {imagePreview ? (
               <div className="relative mb-3">
                 <img src={imagePreview} alt="" className="rounded-xl max-h-32 object-cover w-full" />
@@ -579,68 +441,42 @@ const BroadcastModal = ({
               <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer mb-3">
                 <Camera className="w-5 h-5" />
                 Add Photo
-                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
-              </label>
-            )}
-
-            {/* Range/Duration tier-gated dropdowns */}
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">Range</div>
-                <select
-                  value={String(selectedRangeKm ?? broadcastRange)}
-                  onChange={(e) => setSelectedRangeKm(Number(e.target.value))}
-                  className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
-                >
-                  <option value="2">2km</option>
-                  <option value="10" disabled={broadcastRange < 10}>10km{broadcastRange < 10 ? " (Premium)" : ""}</option>
-                  <option value="20" disabled={broadcastRange < 20}>20km{broadcastRange < 20 ? " (Premium)" : ""}</option>
-                  <option value="25" disabled={broadcastRange < 25}>25km{broadcastRange < 25 ? " (Gold)" : ""}</option>
-                  <option value="50" disabled={broadcastRange < 50}>50km{broadcastRange < 50 ? " (Gold)" : ""}</option>
-                  <option value="150" disabled={extraBroadcast72h <= 0}>150km (Add-on)</option>
-                </select>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">Duration</div>
-                <select
-                  value={String(selectedDurationH ?? (effectiveTier === "gold" ? 48 : isPremium ? 24 : 12))}
-                  onChange={(e) => setSelectedDurationH(Number(e.target.value))}
-                  className="w-full h-10 rounded-lg border border-border bg-white px-3 text-sm"
-                >
-                  <option value="12">12h</option>
-                  <option value="24" disabled={!isPremium}>24h{!isPremium ? " (Premium)" : ""}</option>
-                  <option value="48" disabled={effectiveTier !== "gold"}>48h{effectiveTier !== "gold" ? " (Gold)" : ""}</option>
-                  <option value="72" disabled={extraBroadcast72h <= 0}>72h (Add-on)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Post on Threads checkbox — Stray/Lost only */}
-            {(alertType === "Stray" || alertType === "Lost") && (
-              <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
                 <input
-                  type="checkbox"
-                  checked={postOnThreads}
-                  onChange={(e) => setPostOnThreads(e.target.checked)}
-                  className="w-4 h-4 rounded"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setImageFile(file);
+                    const reader = new FileReader();
+                    reader.onloadend = () => setImagePreview(reader.result as string);
+                    reader.readAsDataURL(file);
+                  }}
                 />
-                Post on Threads
               </label>
             )}
 
-            {/* Submit button — disabled while address is still searching */}
+            <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+              <input
+                type="checkbox"
+                checked={postOnThreads}
+                onChange={(e) => setPostOnThreads(e.target.checked)}
+                className="w-4 h-4 rounded"
+              />
+              Posted on Social
+            </label>
+
             <Button
               onClick={handleSubmit}
-              disabled={creating || !(capturedCoords || selectedLocation) || !resolvedAddress.trim()}
+              disabled={creating || !selectedLocation}
               className="w-full h-12 rounded-xl text-white font-semibold"
-              style={{ backgroundColor: ALERT_TYPE_COLORS[alertType] }}
+              style={{ backgroundColor: pinStyle.color }}
             >
-              {creating ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
+              {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                 <span className="flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5" />
-                  Broadcast {alertType} Alert
+                  Broadcast {normalizedType} Alert
                 </span>
               )}
             </Button>

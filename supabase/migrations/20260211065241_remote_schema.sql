@@ -100,47 +100,34 @@ revoke truncate on table "public"."notice_board_likes" from "service_role";
 
 revoke update on table "public"."notice_board_likes" from "service_role";
 
-revoke delete on table "public"."pins" from "anon";
+do $$
+begin
+  if to_regclass('public.pins') is not null then
+    execute 'revoke delete on table public.pins from anon';
+    execute 'revoke insert on table public.pins from anon';
+    execute 'revoke references on table public.pins from anon';
+    execute 'revoke select on table public.pins from anon';
+    execute 'revoke trigger on table public.pins from anon';
+    execute 'revoke truncate on table public.pins from anon';
+    execute 'revoke update on table public.pins from anon';
 
-revoke insert on table "public"."pins" from "anon";
+    execute 'revoke delete on table public.pins from authenticated';
+    execute 'revoke insert on table public.pins from authenticated';
+    execute 'revoke references on table public.pins from authenticated';
+    execute 'revoke select on table public.pins from authenticated';
+    execute 'revoke trigger on table public.pins from authenticated';
+    execute 'revoke truncate on table public.pins from authenticated';
+    execute 'revoke update on table public.pins from authenticated';
 
-revoke references on table "public"."pins" from "anon";
-
-revoke select on table "public"."pins" from "anon";
-
-revoke trigger on table "public"."pins" from "anon";
-
-revoke truncate on table "public"."pins" from "anon";
-
-revoke update on table "public"."pins" from "anon";
-
-revoke delete on table "public"."pins" from "authenticated";
-
-revoke insert on table "public"."pins" from "authenticated";
-
-revoke references on table "public"."pins" from "authenticated";
-
-revoke select on table "public"."pins" from "authenticated";
-
-revoke trigger on table "public"."pins" from "authenticated";
-
-revoke truncate on table "public"."pins" from "authenticated";
-
-revoke update on table "public"."pins" from "authenticated";
-
-revoke delete on table "public"."pins" from "service_role";
-
-revoke insert on table "public"."pins" from "service_role";
-
-revoke references on table "public"."pins" from "service_role";
-
-revoke select on table "public"."pins" from "service_role";
-
-revoke trigger on table "public"."pins" from "service_role";
-
-revoke truncate on table "public"."pins" from "service_role";
-
-revoke update on table "public"."pins" from "service_role";
+    execute 'revoke delete on table public.pins from service_role';
+    execute 'revoke insert on table public.pins from service_role';
+    execute 'revoke references on table public.pins from service_role';
+    execute 'revoke select on table public.pins from service_role';
+    execute 'revoke trigger on table public.pins from service_role';
+    execute 'revoke truncate on table public.pins from service_role';
+    execute 'revoke update on table public.pins from service_role';
+  end if;
+end $$;
 
 alter table "public"."notice_board_likes" drop constraint "notice_board_likes_post_id_fkey";
 
@@ -148,9 +135,17 @@ alter table "public"."notice_board_likes" drop constraint "notice_board_likes_po
 
 alter table "public"."notice_board_likes" drop constraint "notice_board_likes_user_id_fkey";
 
-alter table "public"."pins" drop constraint "pins_thread_id_fkey";
-
-alter table "public"."pins" drop constraint "pins_user_id_fkey";
+do $$
+begin
+  if to_regclass('public.pins') is not null then
+    if exists (select 1 from pg_constraint where conname = 'pins_thread_id_fkey') then
+      execute 'alter table public.pins drop constraint pins_thread_id_fkey';
+    end if;
+    if exists (select 1 from pg_constraint where conname = 'pins_user_id_fkey') then
+      execute 'alter table public.pins drop constraint pins_user_id_fkey';
+    end if;
+  end if;
+end $$;
 
 alter table "public"."profiles" drop constraint "profiles_id_fkey";
 
@@ -234,15 +229,86 @@ drop function if exists "public"."admin_review_verification"(p_user_id uuid, p_s
 
 drop function if exists "public"."update_notice_like_count"();
 
-drop type "public"."geometry_dump";
+-- postgis owns geometry_dump; dropping it breaks extension-managed deps in fresh/local setups.
+do $$
+declare
+  v_type_oid oid;
+  v_owned_by_extension boolean;
+begin
+  select t.oid
+  into v_type_oid
+  from pg_type t
+  join pg_namespace n on n.oid = t.typnamespace
+  where n.nspname = 'public'
+    and t.typname = 'geometry_dump';
+
+  if v_type_oid is null then
+    return;
+  end if;
+
+  select exists (
+    select 1
+    from pg_depend d
+    join pg_extension e on e.oid = d.refobjid
+    where d.classid = 'pg_type'::regclass
+      and d.objid = v_type_oid
+      and d.deptype = 'e'
+  )
+  into v_owned_by_extension;
+
+  if v_owned_by_extension then
+    raise notice 'Skipping drop type public.geometry_dump (extension-owned)';
+  else
+    execute 'drop type \"public\".\"geometry_dump\"';
+  end if;
+end $$;
 
 drop view if exists "public"."profiles_public";
 
-drop type "public"."valid_detail";
+-- postgis owns valid_detail; dropping it breaks extension-managed deps in fresh/local setups.
+do $$
+declare
+  v_type_oid oid;
+  v_owned_by_extension boolean;
+begin
+  select t.oid
+  into v_type_oid
+  from pg_type t
+  join pg_namespace n on n.oid = t.typnamespace
+  where n.nspname = 'public'
+    and t.typname = 'valid_detail';
+
+  if v_type_oid is null then
+    return;
+  end if;
+
+  select exists (
+    select 1
+    from pg_depend d
+    join pg_extension e on e.oid = d.refobjid
+    where d.classid = 'pg_type'::regclass
+      and d.objid = v_type_oid
+      and d.deptype = 'e'
+  )
+  into v_owned_by_extension;
+
+  if v_owned_by_extension then
+    raise notice 'Skipping drop type public.valid_detail (extension-owned)';
+  else
+    execute 'drop type \"public\".\"valid_detail\"';
+  end if;
+end $$;
 
 alter table "public"."notice_board_likes" drop constraint "notice_board_likes_pkey";
 
-alter table "public"."pins" drop constraint "pins_pkey";
+do $$
+begin
+  if to_regclass('public.pins') is not null then
+    if exists (select 1 from pg_constraint where conname = 'pins_pkey') then
+      execute 'alter table public.pins drop constraint pins_pkey';
+    end if;
+  end if;
+end $$;
 
 drop index if exists "public"."idx_notice_likes_post_id";
 
@@ -260,7 +326,12 @@ drop index if exists "public"."idx_profiles_location";
 
 drop table "public"."notice_board_likes";
 
-drop table "public"."pins";
+do $$
+begin
+  if to_regclass('public.pins') is not null then
+    execute 'drop table public.pins';
+  end if;
+end $$;
 
 
   create table "public"."ai_vet_messages" (
@@ -563,7 +634,18 @@ alter table "public"."ai_vet_conversations" drop column "messages";
 
 alter table "public"."ai_vet_conversations" add column "title" text;
 
-alter table "public"."map_alerts" drop column "address";
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'map_alerts'
+      and column_name = 'address'
+  ) then
+    execute 'alter table public.map_alerts drop column address';
+  end if;
+end $$;
 
 alter table "public"."map_alerts" alter column "location_geog" set data type public.geography(Point,4326) using "location_geog"::public.geography(Point,4326);
 
@@ -1233,7 +1315,20 @@ END;
 $function$
 ;
 
-create type "public"."geometry_dump" as ("path" integer[], "geom" public.geometry);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname = 'public'
+      and t.typname = 'geometry_dump'
+  ) then
+    execute 'create type \"public\".\"geometry_dump\" as (\"path\" integer[], \"geom\" public.geometry)';
+  else
+    raise notice 'Skipping create type public.geometry_dump (already exists)';
+  end if;
+end $$;
 
 create or replace view "public"."profiles_public" as  SELECT id,
     display_name,
@@ -1290,7 +1385,20 @@ create or replace view "public"."profiles_public" as  SELECT id,
    FROM public.profiles;
 
 
-create type "public"."valid_detail" as ("valid" boolean, "reason" character varying, "location" public.geometry);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_type t
+    join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname = 'public'
+      and t.typname = 'valid_detail'
+  ) then
+    execute 'create type \"public\".\"valid_detail\" as (\"valid\" boolean, \"reason\" character varying, \"location\" public.geometry)';
+  else
+    raise notice 'Skipping create type public.valid_detail (already exists)';
+  end if;
+end $$;
 
 grant delete on table "public"."ai_vet_messages" to "anon";
 
@@ -2386,8 +2494,24 @@ using (((bucket_id = 'identity_verification'::text) AND ((owner = auth.uid()) OR
   WHERE (profiles.id = auth.uid())) = 'admin'::text))));
 
 
-CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'storage'
+      and p.proname = 'protect_delete'
+  ) then
+    raise notice 'Skipping storage protect_delete triggers (storage.protect_delete() missing)';
+    return;
+  end if;
 
-CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete();
+  if not exists (select 1 from pg_trigger where tgname = 'protect_buckets_delete') then
+    execute 'CREATE TRIGGER protect_buckets_delete BEFORE DELETE ON storage.buckets FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()';
+  end if;
 
-
+  if not exists (select 1 from pg_trigger where tgname = 'protect_objects_delete') then
+    execute 'CREATE TRIGGER protect_objects_delete BEFORE DELETE ON storage.objects FOR EACH STATEMENT EXECUTE FUNCTION storage.protect_delete()';
+  end if;
+end $$;

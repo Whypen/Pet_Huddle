@@ -9,6 +9,7 @@ import { SecurityIdentityStep } from "@/components/onboarding/SecurityIdentitySt
 import { ProfileSetupStep } from "@/components/onboarding/ProfileSetupStep";
 import { PetSetupStep } from "@/components/onboarding/PetSetupStep";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { humanError } from "@/lib/humanError";
 
 type OnboardingPhase = "security" | "profile" | "pet";
 
@@ -65,8 +66,16 @@ const Onboarding = () => {
 
   useEffect(() => {
     if (profile?.legal_name && !legalName) setLegalName(profile.legal_name);
-    if (profile?.phone && !phone) setPhone(profile.phone);
-  }, [profile, legalName, phone]);
+    const metaPhone = typeof user?.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
+    const authPhone = typeof user?.phone === "string" ? user.phone : "";
+    const profilePhone = typeof profile?.phone === "string" ? profile.phone : "";
+    const raw = metaPhone || authPhone || profilePhone || "";
+    const next = raw.trim();
+    if ((next === "+0000000000" || next === "+10000000000")) {
+      return;
+    }
+    if (next && !phone) setPhone(next);
+  }, [profile, legalName, phone, user?.phone, user?.user_metadata?.phone]);
 
   const handleSecurityComplete = async () => {
     if (!user) return;
@@ -76,10 +85,15 @@ const Onboarding = () => {
       const { error } = await supabase
         .from("profiles")
         .update({
-          legal_name: legalName,
-          phone: phone,
+          legal_name: legalName.trim() ? legalName.trim() : null,
+          phone: phone.trim() ? phone.trim() : null,
           is_verified: false,
-          verification_status: verificationStatus === "pending" ? "pending" : null,
+          verification_status:
+            verificationStatus === "pending"
+              ? "pending"
+              : verificationStatus === "skipped"
+              ? "skipped"
+              : null,
         })
         .eq("id", user.id);
 
@@ -87,7 +101,7 @@ const Onboarding = () => {
       
       setPhase("profile");
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = humanError(error);
       toast.error(message || t("Failed to save security information"));
     }
   };
@@ -142,7 +156,7 @@ const Onboarding = () => {
         navigate("/", { replace: true });
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = humanError(error);
       toast.error(message || t("Failed to save profile"));
     } finally {
       setLoading(false);
@@ -167,7 +181,7 @@ const Onboarding = () => {
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = humanError(error);
       toast.error(message || t("Failed to complete setup"));
     }
   };
@@ -189,7 +203,7 @@ const Onboarding = () => {
       localStorage.removeItem("pending_addon");
       navigate("/", { replace: true });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = humanError(error);
       toast.error(message || t("Failed to complete setup"));
     }
   };

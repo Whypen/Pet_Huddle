@@ -38,7 +38,7 @@ interface PinningLayerProps {
 }
 
 // Mapbox Reverse Geocoding with 3s timeout
-async function reverseGeocode(lng: number, lat: number, token: string): Promise<string> {
+async function lookupAddressFromCoords(lng: number, lat: number, token: string): Promise<string> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -145,42 +145,7 @@ const PinningLayer = ({
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualQuery, setManualQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-  const poiMarkersRef = useRef<mapboxgl.Marker[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Clear POI markers from map
-  const clearPOIMarkers = useCallback(() => {
-    poiMarkersRef.current.forEach((m) => m.remove());
-    poiMarkersRef.current = [];
-  }, []);
-
-  // Place POI dot markers on map (tiny coloured dots)
-  const placePOIMarkers = useCallback(
-    (pois: NearbyPOI[]) => {
-      if (!map) return;
-      clearPOIMarkers();
-      pois.forEach((poi) => {
-        const el = document.createElement("div");
-        const color = poi.type === "parking" ? "#3B82F6" : "#F59E0B"; // blue parking, amber bus
-        el.innerHTML = `
-          <div style="
-            width: 12px;
-            height: 12px;
-            background: ${color};
-            border-radius: 50%;
-            border: 2px solid white;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-            cursor: pointer;
-          " title="${poi.name} (${poi.distanceM}m)"></div>
-        `;
-        const marker = new mapboxgl.Marker(el)
-          .setLngLat([poi.lng, poi.lat])
-          .addTo(map);
-        poiMarkersRef.current.push(marker);
-      });
-    },
-    [map, clearPOIMarkers]
-  );
 
   // Forward geocode handler for manual address input
   const handleManualSearch = useCallback(async () => {
@@ -218,13 +183,10 @@ const PinningLayer = ({
     // Get mapbox access token from the map instance
     const token = mapboxgl.accessToken as string;
 
-    // Run reverse geocoding (3s timeout) + Overpass in parallel
-    console.log("[PinningLayer] Geocoding Payload: reverseGeocode + fetchNearbyPOIs...");
-    const [addr, pois] = await Promise.all([
-      reverseGeocode(lng, lat, token),
-      fetchNearbyPOIs(lat, lng),
-    ]);
-    console.log(`[PinningLayer] Geocode result: addr="${addr}", POIs=${pois.length}`);
+    // Nuclear baseline: disable geocoding + POI calls.
+    const addr = "TEST LOCATION";
+    const pois: NearbyPOI[] = [];
+    console.log(`[PinningLayer] Baseline address="${addr}", geocoding disabled`);
 
     // Turf.js distance from device GPS to center pin
     let dist = 0;
@@ -234,32 +196,21 @@ const PinningLayer = ({
       dist = distance(from, to, { units: "kilometers" });
     }
 
-    // If reverse geocode failed (empty string) → show manual fallback
-    if (!addr) {
-      setShowManualInput(true);
-      setAddress("");
-      onAddressChange?.("", Math.round(dist * 10) / 10);
-    } else {
-      setAddress(addr);
-      setShowManualInput(false);
-      onAddressChange?.(addr, Math.round(dist * 10) / 10);
-    }
+    setAddress(addr);
+    setShowManualInput(false);
+    onAddressChange?.(addr, Math.round(dist * 10) / 10);
 
     setDistKm(Math.round(dist * 10) / 10);
     setNearbyPois(pois);
 
-    // Place POI markers
-    placePOIMarkers(pois);
-
     onNearbyPOIs?.(pois);
 
     setIsLoading(false);
-  }, [map, isActive, userLocation, onAddressChange, onCenterChange, onNearbyPOIs, placePOIMarkers]);
+  }, [map, isActive, userLocation, onAddressChange, onCenterChange, onNearbyPOIs]);
 
   // Debounced move end listener
   useEffect(() => {
     if (!map || !mapLoaded || !isActive) {
-      clearPOIMarkers();
       return;
     }
 
@@ -278,9 +229,8 @@ const PinningLayer = ({
     return () => {
       map.off("moveend", onMoveEnd);
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      clearPOIMarkers();
     };
-  }, [map, mapLoaded, isActive, handleMoveEnd, clearPOIMarkers]);
+  }, [map, mapLoaded, isActive, handleMoveEnd]);
 
   if (!isActive) return null;
 

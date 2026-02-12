@@ -52,6 +52,47 @@ These requirements are a zero-bullshit release gate. Implement in code (web + mo
 - Global providers: AuthContext, LanguageContext, NetworkContext, ErrorBoundary
 - PWA: manifest + service worker
 
+### 1.1.1 Auth & Signup Flow (v2.1, Required)
+This auth flow replaces any previous auth/onboarding screens. All UI must follow `ui_design_system.md` tokens and input sizing rules.
+
+**Routes:**
+- `/auth` (landing)
+- `/signup/dob` (1 of 4)
+- `/signup/name` (2 of 4)
+- `/signup/credentials` (3 of 4)
+- `/signup/verify` (4 of 4)
+- `/verify-identity` (existing KYC flow)
+- `/onboarding` (existing profile setup)
+- `/reset-password`
+- `/auth/callback`
+
+**PublicRoute:** Redirects to `/` if user is already logged in.
+
+**Landing (/auth):**
+- Header: bear logo `huddle-logo-transparent.png` centered
+- Title: "Welcome to huddle" (brandBlue, text-2xl, font-bold)
+- Subtitle: "Your pet care community" (text-muted-foreground, text-sm)
+- Email/Phone segmented control, password with show/hide, remember me, forgot password link
+- Social buttons: Apple (black), Google (white bordered)
+- Biometrics button if supported
+- CTA to `/signup/dob`
+
+**Signup Steps (SignupContext + localStorage persistence):**
+1. **DOB**: MM/DD/YYYY input, age gate <16 blocks continue and shows return-to-auth button.
+2. **Display Name**: 2–30 chars, letters/spaces/hyphen/apostrophe only, live counter.
+3. **Credentials**: email, phone (OTP verify), password + confirm with strength rules; terms checkbox required.
+4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and sets verification_status='pending'; "Skip" sets verification_status='unverified' and continues to `/onboarding`.
+
+**Validation:** React Hook Form + Zod, red error text below fields, red border on invalid, block submit until valid.
+
+**Backend integration:**
+- `supabase.auth.signUp({ email, password, options: { data: { display_name, phone, dob }}})`
+- `supabase.auth.signInWithPassword()` for login; redirect `/` on success
+- Phone OTP: `signInWithOtp` + `verifyOtp`
+- Profiles insert on signup: `display_name`, `dob`, `legal_name`, `phone`, `verification_status`
+
+**UX:** Framer Motion transitions, progress bar 25/50/75/100, auto-scroll to first error, password strength meter, OTP input with auto-advance and paste.
+
 ### 1.2 Backend
 - Supabase (Postgres + RLS + Storage + Realtime + Edge Functions)
 - pg_cron for scheduled jobs
