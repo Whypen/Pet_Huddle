@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 const SignupVerify = () => {
   const navigate = useNavigate();
@@ -25,7 +26,7 @@ const SignupVerify = () => {
     defaultValues: { legal_name: data.legal_name || "" },
   });
 
-  const doSignup = async (verificationStatus: "pending" | "unverified", legalName?: string) => {
+  const startVerificationSignup = async (legalName?: string) => {
     setLoading(true);
     try {
       const { data: authData, error } = await supabase.auth.signUp({
@@ -50,14 +51,51 @@ const SignupVerify = () => {
           dob: data.dob,
           legal_name: legalName || null,
           phone: data.phone,
-          verification_status: verificationStatus,
         });
       }
 
-      if (verificationStatus === "pending") {
-        update({ legal_name: legalName || "" });
-        navigate("/verify-identity", { state: { legalName: legalName || "" } });
-        return;
+      update({ legal_name: legalName || "" });
+      navigate("/verify-identity");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(message || "Failed to sign up");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onStartVerification = (values: { legal_name: string }) => {
+    startVerificationSignup(values.legal_name || data.legal_name);
+  };
+
+  const skipVerificationSignup = async () => {
+    setLoading(true);
+    try {
+      const { data: authData, error } = await supabase.auth.signUp({
+        email: data.email,
+        password: data.password,
+        options: {
+          data: {
+            display_name: data.display_name,
+            phone: data.phone,
+            dob: data.dob,
+            legal_name: data.legal_name || null,
+          },
+        },
+      });
+      if (error) throw error;
+
+      const sessionUser = authData.user;
+      if (sessionUser) {
+        await supabase.from("profiles").upsert({
+          id: sessionUser.id,
+          display_name: data.display_name,
+          dob: data.dob,
+          legal_name: data.legal_name || null,
+          phone: data.phone,
+          verification_status: "unverified",
+          is_verified: false,
+        });
       }
 
       toast.success("Welcome to huddle 🐾");
@@ -68,11 +106,8 @@ const SignupVerify = () => {
       toast.error(message || "Failed to sign up");
     } finally {
       setLoading(false);
+      setShowSkipConfirm(false);
     }
-  };
-
-  const onStartVerification = (values: { legal_name: string }) => {
-    doSignup("pending", values.legal_name || data.legal_name);
   };
 
   return (
@@ -124,38 +159,28 @@ const SignupVerify = () => {
         </div>
       </form>
 
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full h-10 mt-4"
-        onClick={() => setShowSkipConfirm(true)}
-      >
+      <Button type="button" variant="outline" className="w-full h-10 mt-4" onClick={() => setShowSkipConfirm(true)}>
         Skip Verification
       </Button>
 
-      {showSkipConfirm && (
-        <div className="fixed inset-0 z-[3000] bg-black/50 flex items-end" onClick={() => setShowSkipConfirm(false)}>
-          <div className="w-full bg-card rounded-t-3xl p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-brandText">Skipping verification may affect your user journey</h2>
-            <p className="text-sm text-muted-foreground mt-2">
-              Unverified users have limited access to certain community features and may appear less trustworthy to others.
-            </p>
-            <div className="mt-4 space-y-2">
-              <Button type="button" variant="outline" className="w-full h-10" onClick={() => setShowSkipConfirm(false)}>
-                Go Back
-              </Button>
-              <Button
-                type="button"
-                className="w-full h-10"
-                onClick={() => doSignup("unverified", data.legal_name)}
-                disabled={loading}
-              >
-                Continue to Profile Setup
-              </Button>
-            </div>
+      <Dialog open={showSkipConfirm} onOpenChange={setShowSkipConfirm}>
+        <DialogContent className="max-w-sm">
+          <DialogTitle className="text-brandText text-base font-semibold">
+            Skipping verification may affect your user journey
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground mt-2">
+            Unverified users have limited access to certain community features and may appear less trustworthy to others.
+          </p>
+          <div className="mt-4 space-y-2">
+            <Button type="button" variant="ghost" className="w-full h-10" onClick={() => setShowSkipConfirm(false)}>
+              Cancel
+            </Button>
+            <Button type="button" className="w-full h-10" onClick={skipVerificationSignup} disabled={loading}>
+              Yes. Skip verification.
+            </Button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -11,6 +11,7 @@ export interface Profile {
   prefs?: Record<string, unknown> | null;
   verification_status?: string | null;
   verification_comment?: string | null;
+  is_admin?: boolean | null;
   avatar_url: string | null;
   bio: string | null;
   gender_genre: string | null;
@@ -92,7 +93,7 @@ export const useAuth = () => {
 
 export const useIsAdmin = () => {
   const { profile } = useAuth();
-  return profile?.user_role === "admin";
+  return profile?.is_admin === true;
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -105,7 +106,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "id, user_id, display_name, legal_name, phone, avatar_url, bio, gender_genre, orientation, dob, height, weight, weight_unit, degree, school, major, affiliation, occupation, pet_experience, experience_years, relationship_status, has_car, languages, location_name, location_country, location_district, is_verified, user_role, tier, subscription_status, stars_count, mesh_alert_count, media_credits, family_slots, onboarding_completed, owns_pets, social_availability, availability_status, show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status, social_album, prefs, map_visible" as "*"
+        "id, user_id, display_name, legal_name, phone, avatar_url, bio, gender_genre, orientation, dob, height, weight, weight_unit, degree, school, major, affiliation, occupation, pet_experience, experience_years, relationship_status, has_car, languages, location_name, location_country, location_district, is_verified, is_admin, user_role, tier, subscription_status, stars_count, mesh_alert_count, media_credits, family_slots, onboarding_completed, owns_pets, social_availability, availability_status, show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status, social_album, prefs, map_visible" as "*"
       )
       .eq("id", userId)
       .maybeSingle();

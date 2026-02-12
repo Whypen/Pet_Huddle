@@ -37,8 +37,9 @@ import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Notifications from "./pages/Notifications";
 import Admin from "./pages/Admin";
-import VerifyIdentity from "./pages/VerifyIdentity";
+import VerifyIdentity from "./pages/auth/verify/VerifyIdentity";
 import AdminDisputes from "./screens/AdminDisputes";
+import AdminKYCReview from "./pages/admin/AdminKYCReview";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 
@@ -295,7 +296,7 @@ const App = () => (
                     path="/admin/verifications"
                     element={
                       <ProtectedRoute>
-                        <Admin />
+                        <AdminKYCReview />
                       </ProtectedRoute>
                     }
                   />
