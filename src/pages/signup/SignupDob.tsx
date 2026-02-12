@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft } from "lucide-react";
@@ -33,17 +33,30 @@ const fromStoredDob = (value: string) => {
   return { dob_day: "", dob_month: "", dob_year: "" };
 };
 
+const monthOptions = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 const SignupDob = () => {
   const navigate = useNavigate();
   const { data, update } = useSignup();
-  const errorRef = useRef<HTMLParagraphElement | null>(null);
-  const bannerRef = useRef<HTMLDivElement | null>(null);
 
   const {
     handleSubmit,
     watch,
     control,
-    formState: { errors, submitCount },
+    formState: { errors },
   } = useForm<DobForm>({
     resolver: zodResolver(dobSchema),
     mode: "onChange",
@@ -63,25 +76,14 @@ const SignupDob = () => {
   );
   const isCalendarValid = allSelected ? isValidDate(assembledDob) : false;
   const isFutureValid = allSelected ? isNotFuture(assembledDob) : false;
-  const isUnder16 = useMemo(
-    () => (allSelected && isCalendarValid && isFutureValid ? !isAtLeast16(assembledDob) : false),
-    [allSelected, assembledDob, isCalendarValid, isFutureValid],
-  );
-  const submitAttempted = submitCount > 0;
-  const formError = errors.dob_day?.message;
-  const incompleteError = submitAttempted && !allSelected ? "Please select day, month, and year" : "";
-  const dobError = incompleteError || formError;
-  const canContinue = allSelected && isCalendarValid && isFutureValid && isAtLeast16(assembledDob);
-
-  useEffect(() => {
-    if (isUnder16 && bannerRef.current) {
-      bannerRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (dobError && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [dobError, isUnder16]);
+  const isUnder16 = allSelected && isCalendarValid && isFutureValid ? !isAtLeast16(assembledDob) : false;
+  const isInvalidDate = allSelected ? !isCalendarValid || !isFutureValid : false;
+  const dobError = isUnder16
+    ? "Some functions in this app are only available to users above 16 years old"
+    : isInvalidDate
+      ? "Invalid date"
+      : errors.dob_day?.message;
+  const canContinue = allSelected && isCalendarValid && isFutureValid && !isUnder16;
 
   const onSubmit = () => {
     if (!canContinue) return;
@@ -107,11 +109,6 @@ const SignupDob = () => {
       <h1 className="mt-6 text-xl font-bold text-brandText">What is your date of birth?</h1>
       <p className="text-sm text-muted-foreground">We use this to verify your age</p>
 
-      {isUnder16 && (
-        <div ref={bannerRef} className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
-          Some functions in this app are only available to users above 16 years old
-        </div>
-      )}
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
         <div>
           <label className="text-xs text-muted-foreground">Date of birth</label>
@@ -125,11 +122,11 @@ const SignupDob = () => {
                     <SelectValue placeholder="Month" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 12 }, (_, index) => {
+                    {monthOptions.map((label, index) => {
                       const month = index + 1;
                       return (
                         <SelectItem key={month} value={pad2(String(month))}>
-                          {month}
+                          {label}
                         </SelectItem>
                       );
                     })}
@@ -177,11 +174,7 @@ const SignupDob = () => {
               )}
             />
           </div>
-          {dobError && (
-            <p ref={errorRef} className="text-xs text-red-500 mt-1" aria-live="polite">
-              {dobError}
-            </p>
-          )}
+          {dobError && <p className="text-xs text-red-500 mt-1" aria-live="polite">{dobError}</p>}
         </div>
 
         <Button type="submit" className="w-full h-10" disabled={!canContinue}>

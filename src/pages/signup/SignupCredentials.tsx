@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { LegalModal } from "@/components/modals/LegalModal";
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
@@ -25,13 +26,17 @@ const SignupCredentials = () => {
   const [otpVerified, setOtpVerified] = useState(data.otp_verified);
   const [resendIn, setResendIn] = useState(0);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
+  const otpBypass = import.meta.env.DEV || import.meta.env.VITE_DISABLE_OTP === "true";
+  const e164Regex = /^\+[1-9]\d{1,14}$/;
 
   const {
     register,
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isValid },
+    trigger,
+    formState: { errors, isValid, touchedFields },
   } = useForm({
     resolver: zodResolver(credentialsSchema),
     mode: "onChange",
@@ -52,6 +57,11 @@ const SignupCredentials = () => {
     return (parts[1] || "HK") as string;
   }, []);
   const password = watch("password") || "";
+  const confirmPassword = watch("confirmPassword") || "";
+  const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
+  const phoneTouched = Boolean(touchedFields.phone);
+  const phoneInvalid = phoneTouched && !e164Regex.test(phone);
+  const otpRequirementMet = otpBypass ? true : otpVerified;
 
   const checks = passwordChecks(password);
   const strength = passwordStrengthLabel(password);
@@ -60,15 +70,17 @@ const SignupCredentials = () => {
   }, [email, phone, password, otpVerified, update]);
 
   const sendOtp = async () => {
-    if (!phone) {
+    if (!phone || !e164Regex.test(phone)) {
       toast.error("Enter a valid phone number");
       return;
     }
     setOtpError(null);
-    const { error } = await supabase.auth.signInWithOtp({ phone });
-    if (error) {
-      setOtpError(error.message);
-      return;
+    if (!otpBypass) {
+      const { error } = await supabase.auth.signInWithOtp({ phone });
+      if (error) {
+        setOtpError(error.message);
+        return;
+      }
     }
     setOtpSent(true);
     setResendIn(60);
@@ -79,17 +91,25 @@ const SignupCredentials = () => {
       setOtpError("Invalid code");
       return;
     }
-    const { error } = await supabase.auth.verifyOtp({ phone, token: otpValue, type: "sms" });
-    if (error) {
-      setOtpError(error.message || "Invalid code");
-      return;
+    if (otpBypass) {
+      if (otpValue !== "123456") {
+        setOtpError("Invalid code");
+        return;
+      }
+    } else {
+      const { error } = await supabase.auth.verifyOtp({ phone, token: otpValue, type: "sms" });
+      if (error) {
+        setOtpError(error.message || "Invalid code");
+        return;
+      }
     }
     setOtpVerified(true);
     setOtpError(null);
+    void trigger();
   };
 
   const onSubmit = () => {
-    if (!otpVerified) {
+    if (!otpRequirementMet) {
       toast.error("Please verify your phone number");
       return;
     }
@@ -137,13 +157,13 @@ const SignupCredentials = () => {
 
         <div>
           <label className="text-xs text-muted-foreground">Phone Number</label>
-          <div className={`h-9 rounded-md border ${errors.phone ? "border-red-500" : "border-input"} bg-white px-2 flex items-center gap-2 focus-within:border-brandBlue focus-within:ring-1 focus-within:ring-brandBlue`}>
+          <div className={`h-9 rounded-md border ${errors.phone ? "border-red-500" : "border-brandText/40"} bg-white px-2 flex items-center gap-2 focus-within:border-brandBlue focus-within:ring-1 focus-within:ring-brandBlue`}>
             <Phone className="h-4 w-4 text-muted-foreground" />
             <PhoneInput
               defaultCountry={defaultCountry as never}
               international
               value={phone}
-              onChange={(value) => setValue("phone", value || "", { shouldValidate: true })}
+              onChange={(value) => setValue("phone", value || "", { shouldValidate: true, shouldTouch: true })}
               className="flex-1"
               inputClassName="!border-0 !shadow-none !p-0 !text-sm !bg-transparent"
             />
@@ -158,7 +178,7 @@ const SignupCredentials = () => {
               {resendIn > 0 ? `Resend in ${resendIn}s` : "Send Code"}
             </Button>
           </div>
-          {errors.phone && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.phone.message as string}</p>}
+          {phoneInvalid && <p className="text-xs text-red-500 mt-1" aria-live="polite">Your phone number is invalid</p>}
         </div>
 
         {otpSent && (
@@ -237,7 +257,7 @@ const SignupCredentials = () => {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               type={showConfirm ? "text" : "password"}
-              className={`h-9 pl-9 pr-10 ${errors.confirmPassword ? "border-red-500" : ""}`}
+              className={`h-9 pl-9 pr-10 ${errors.confirmPassword || confirmMismatch ? "border-red-500" : ""}`}
               {...register("confirmPassword")}
             />
             <button
@@ -249,23 +269,54 @@ const SignupCredentials = () => {
               {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-          {errors.confirmPassword && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.confirmPassword.message as string}</p>}
+          {(confirmMismatch || errors.confirmPassword) && (
+            <p className="text-xs text-red-500 mt-1" aria-live="polite">
+              {confirmMismatch ? "Passwords do not match" : (errors.confirmPassword?.message as string)}
+            </p>
+          )}
         </div>
 
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           <Checkbox checked={Boolean(watch("agreedToTerms"))} onCheckedChange={(v) => setValue("agreedToTerms", Boolean(v), { shouldValidate: true })} />
           <span>
             I have read and agree to the{" "}
-            <a href="/terms" target="_blank" rel="noreferrer" className="text-brandBlue underline">Terms of Service</a> and{" "}
-            <a href="/privacy" target="_blank" rel="noreferrer" className="text-brandBlue underline">Privacy Policy</a>.
+            <button
+              type="button"
+              className="text-brandBlue underline"
+              onClick={() => setLegalModal("terms")}
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              className="text-brandBlue underline"
+              onClick={() => setLegalModal("privacy")}
+            >
+              Privacy Policy
+            </button>
+            .
           </span>
         </label>
         {errors.agreedToTerms && <p className="text-xs text-red-500">{errors.agreedToTerms.message as string}</p>}
 
-        <Button type="submit" className="w-full h-10" disabled={!isValid || !otpVerified}>
+        <Button type="submit" className="w-full h-10" disabled={!isValid || !otpRequirementMet}>
           Continue
         </Button>
+        {!isValid || !otpRequirementMet ? (
+          <p className="text-xs text-muted-foreground">
+            {!watch("agreedToTerms")
+              ? "Agree to Terms to continue"
+              : !otpRequirementMet
+                ? "Verify your phone number to continue"
+                : phoneInvalid
+                  ? "Enter a valid phone number to continue"
+                  : "Complete all required fields to continue"}
+          </p>
+        ) : null}
       </form>
+      <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
+      <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
     </div>
   );
 };
