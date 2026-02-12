@@ -69,6 +69,13 @@ const SignupCredentials = () => {
     update({ email, phone, password, otp_verified: otpVerified });
   }, [email, phone, password, otpVerified, update]);
 
+  useEffect(() => {
+    setOtpSent(false);
+    setOtpVerified(false);
+    setOtpValue("");
+    setOtpError(null);
+  }, [phone]);
+
   const sendOtp = async () => {
     if (!phone || !e164Regex.test(phone)) {
       toast.error("Enter a valid phone number");
@@ -111,7 +118,10 @@ const SignupCredentials = () => {
   };
 
   const onSubmit = () => {
-    if (!otpRequirementMet) return;
+    if (!otpRequirementMet) {
+      toast.error("Please complete all required steps before continuing");
+      return;
+    }
     navigate("/signup/verify");
   };
 
@@ -191,6 +201,7 @@ const SignupCredentials = () => {
                   maxLength={1}
                   className="h-9 w-10 text-center"
                   ref={(el) => (otpRefs.current[idx] = el)}
+                  value={otpValue[idx] ?? ""}
                   onChange={(e) => {
                     const next = e.target.value.replace(/\D/g, "");
                     const chars = otpValue.split("");
