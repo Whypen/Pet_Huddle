@@ -25,7 +25,6 @@ const SignupCredentials = () => {
   const [otpVerified, setOtpVerified] = useState(data.otp_verified);
   const [resendIn, setResendIn] = useState(0);
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
-  const errorRef = useRef<HTMLDivElement | null>(null);
 
   const {
     register,
@@ -56,17 +55,9 @@ const SignupCredentials = () => {
 
   const checks = passwordChecks(password);
   const strength = passwordStrengthLabel(password);
-  const errorSummary = Object.values(errors).map((e) => e?.message).filter(Boolean);
-
   useEffect(() => {
     update({ email, phone, password, otp_verified: otpVerified });
   }, [email, phone, password, otpVerified, update]);
-
-  useEffect(() => {
-    if (Object.keys(errors).length > 0 && errorRef.current) {
-      errorRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [errors]);
 
   const sendOtp = async () => {
     if (!phone) {
@@ -128,11 +119,6 @@ const SignupCredentials = () => {
 
       <h1 className="mt-6 text-xl font-bold text-brandText">Please fill in your login credentials</h1>
 
-      {errorSummary.length > 0 && (
-        <div ref={errorRef} className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600" aria-live="polite">
-          {errorSummary[0] as string}
-        </div>
-      )}
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
         <div>
           <label className="text-xs text-muted-foreground">Email</label>
@@ -146,25 +132,33 @@ const SignupCredentials = () => {
               autoFocus
             />
           </div>
-          {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message as string}</p>}
+          {errors.email && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.email.message as string}</p>}
         </div>
 
         <div>
           <label className="text-xs text-muted-foreground">Phone Number</label>
-          <div className={`rounded-md border ${errors.phone ? "border-red-500" : "border-input"} px-3 py-1 flex items-center gap-2`}>
+          <div className={`h-9 rounded-md border ${errors.phone ? "border-red-500" : "border-input"} bg-white px-2 flex items-center gap-2 focus-within:border-brandBlue focus-within:ring-1 focus-within:ring-brandBlue`}>
             <Phone className="h-4 w-4 text-muted-foreground" />
             <PhoneInput
               defaultCountry={defaultCountry as never}
               international
               value={phone}
               onChange={(value) => setValue("phone", value || "", { shouldValidate: true })}
-              inputClassName="!border-0 !shadow-none !p-0 !text-sm"
+              className="flex-1"
+              inputClassName="!border-0 !shadow-none !p-0 !text-sm !bg-transparent"
             />
-            <Button type="button" variant="outline" size="sm" onClick={sendOtp} disabled={resendIn > 0}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-brandBlue hover:bg-transparent"
+              onClick={sendOtp}
+              disabled={resendIn > 0}
+            >
               {resendIn > 0 ? `Resend in ${resendIn}s` : "Send Code"}
             </Button>
           </div>
-          {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone.message as string}</p>}
+          {errors.phone && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.phone.message as string}</p>}
         </div>
 
         {otpSent && (
@@ -203,7 +197,7 @@ const SignupCredentials = () => {
                   <CheckCircle className="h-3 w-3 animate-bounce" /> Verified
                 </span>
               )}
-              {otpError && <span className="text-xs text-red-500">{otpError}</span>}
+              {otpError && <span className="text-xs text-red-500" aria-live="polite">{otpError}</span>}
             </div>
           </div>
         )}
@@ -255,7 +249,7 @@ const SignupCredentials = () => {
               {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-          {errors.confirmPassword && <p className="text-xs text-red-500 mt-1">{errors.confirmPassword.message as string}</p>}
+          {errors.confirmPassword && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.confirmPassword.message as string}</p>}
         </div>
 
         <label className="flex items-center gap-2 text-xs text-muted-foreground">

@@ -14,16 +14,21 @@ const AuthCallback = () => {
     const run = async () => {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
+      const type = url.searchParams.get("type");
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
-          toast.error(error.message || "Invalid reset link");
+          toast.error(type === "recovery" ? "Invalid reset link" : "Sign-in failed. Please try again.");
         }
+      }
+      if (type !== "recovery") {
+        navigate("/onboarding");
+        return;
       }
       setReady(true);
     };
     void run();
-  }, []);
+  }, [navigate]);
 
   const updatePassword = async () => {
     const { error } = await supabase.auth.updateUser({ password });

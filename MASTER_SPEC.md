@@ -78,7 +78,7 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
 - CTA to `/signup/dob`
 
 **Signup Steps (SignupContext + localStorage persistence):**
-1. **DOB**: MM/DD/YYYY input, age gate <16 blocks continue and shows return-to-auth button.
+1. **DOB**: MM/DD/YYYY input, age gate <16 blocks continue and shows return-to-auth button. On web, `input[type="date"]` is acceptable per `ui_design_system.md`; store as `YYYY-MM-DD` and treat as equivalent to MM/DD/YYYY for validation.
 2. **Display Name**: 2–30 chars, letters/spaces/hyphen/apostrophe only, live counter.
 3. **Credentials**: email, phone (OTP verify), password + confirm with strength rules; terms checkbox required.
 4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and sets verification_status='pending'; "Skip" sets verification_status='unverified' and continues to `/onboarding`.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -30,7 +30,6 @@ const Auth = () => {
   const navigate = useNavigate();
   const [loginMethod, setLoginMethod] = useState<"email" | "phone">("email");
   const [showPassword, setShowPassword] = useState(false);
-  const [biometricsAvailable, setBiometricsAvailable] = useState(false);
 
   const schema = useMemo(() => {
     return z.object({
@@ -65,14 +64,24 @@ const Auth = () => {
     }
   }, [setValue]);
 
-  useEffect(() => {
-    const check = async () => {
-      if (!window.PublicKeyCredential?.isUserVerifyingPlatformAuthenticatorAvailable) return;
-      const available = await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      setBiometricsAvailable(Boolean(available));
-    };
-    void check();
-  }, []);
+  const getOAuthErrorMessage = (message?: string) => {
+    const msg = (message || "").toLowerCase();
+    if (msg.includes("network") || msg.includes("fetch")) {
+      return "Connection error. Please try again.";
+    }
+    if (msg.includes("redirect") || msg.includes("not allowed") || msg.includes("provider")) {
+      return "Sign-in is not configured. Please contact support.";
+    }
+    return "Unable to sign in. Please try again.";
+  };
+
+  const handleOAuth = async (provider: "google" | "apple") => {
+    const redirectTo = `${window.location.origin}/auth/callback`;
+    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo } });
+    if (error) {
+      toast.error(getOAuthErrorMessage(error.message));
+    }
+  };
 
   const onSubmit = async (values: LoginForm) => {
     const identifier = loginMethod === "email" ? values.email : values.phone;
@@ -104,8 +113,6 @@ const Auth = () => {
     navigate("/");
   };
 
-  const errorSummary = Object.values(errors).map((e) => e?.message).filter(Boolean);
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft flex flex-col px-6">
       <div className="pt-10 pb-6 text-center">
@@ -117,12 +124,6 @@ const Auth = () => {
       </div>
 
       <div className="bg-card rounded-3xl shadow-elevated p-6 max-w-md mx-auto w-full">
-        {errorSummary.length > 0 && (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600" aria-live="polite">
-            {errorSummary[0]}
-          </div>
-        )}
-
         <div className="flex items-center gap-2 rounded-full bg-muted p-1 mb-4">
           <button
             type="button"
@@ -155,21 +156,22 @@ const Auth = () => {
                   autoFocus
                 />
               </div>
-              {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
+              {errors.email && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.email.message}</p>}
             </div>
           ) : (
             <div>
               <label className="text-xs text-muted-foreground">Phone</label>
-              <div className={`rounded-md border ${errors.phone ? "border-red-500" : "border-input"} px-3 py-1`}> 
+              <div className={`h-9 rounded-md border ${errors.phone ? "border-red-500" : "border-input"} bg-white px-2 flex items-center focus-within:border-brandBlue focus-within:ring-1 focus-within:ring-brandBlue`}>
                 <PhoneInput
                   defaultCountry="HK"
                   international
                   value={watch("phone")}
                   onChange={(value) => setValue("phone", value || "", { shouldValidate: true })}
-                  inputClassName="!border-0 !shadow-none !p-0 !text-sm"
+                  className="flex-1"
+                  inputClassName="!border-0 !shadow-none !p-0 !text-sm !bg-transparent"
                 />
               </div>
-              {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone.message}</p>}
+              {errors.phone && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.phone.message}</p>}
             </div>
           )}
 
@@ -192,7 +194,7 @@ const Auth = () => {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>}
+            {errors.password && <p className="text-xs text-red-500 mt-1" aria-live="polite">{errors.password.message}</p>}
           </div>
 
           <div className="flex items-center justify-between">
@@ -215,7 +217,7 @@ const Auth = () => {
             type="button"
             variant="outline"
             className="w-full h-10 bg-black text-white hover:bg-black/90"
-            onClick={() => supabase.auth.signInWithOAuth({ provider: "apple", options: { redirectTo: `${window.location.origin}/onboarding` } })}
+            onClick={() => handleOAuth("apple")}
           >
             <svg viewBox="0 0 24 24" aria-hidden className="mr-2 h-4 w-4 fill-white">
               <path d="M16.365 1.43c0 1.14-.43 2.22-1.23 3.03-.8.8-2.08 1.48-3.22 1.39-.13-1.1.4-2.24 1.18-3.03.77-.8 2.08-1.47 3.27-1.39zM20.64 17.07c-.48 1.1-.7 1.6-1.32 2.58-.87 1.33-2.1 3-3.61 3.01-1.35.01-1.7-.86-3.52-.86-1.81 0-2.2.85-3.52.87-1.5.02-2.65-1.5-3.52-2.83-2.4-3.67-2.66-7.98-1.17-10.27 1.06-1.65 2.75-2.62 4.34-2.62 1.62 0 2.65.88 3.99.88 1.3 0 2.1-.89 3.99-.89 1.41 0 2.9.77 3.96 2.1-3.48 1.9-2.92 6.91.38 8.03z" />\n            </svg>
@@ -225,7 +227,7 @@ const Auth = () => {
             type="button"
             variant="outline"
             className="w-full h-10"
-            onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: `${window.location.origin}/onboarding` } })}
+            onClick={() => handleOAuth("google")}
           >
             <svg viewBox="0 0 24 24" aria-hidden className="mr-2 h-4 w-4">
               <path fill="#EA4335" d="M12 10.2v3.6h5.1c-.2 1.1-1.3 3.3-5.1 3.3-3.1 0-5.6-2.6-5.6-5.7s2.5-5.7 5.6-5.7c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.2 14.5 2.3 12 2.3 6.9 2.3 2.8 6.4 2.8 11.6S6.9 20.9 12 20.9c6.9 0 8.6-4.9 8.6-7.4 0-.5-.1-1-.2-1.3H12z" />
@@ -235,11 +237,6 @@ const Auth = () => {
             </svg>
             Sign in with Google
           </Button>
-          {biometricsAvailable && (
-            <Button type="button" variant="outline" className="w-full h-10">
-              Use Face ID / Touch ID
-            </Button>
-          )}
         </div>
 
         <div className="mt-4 text-center text-sm text-muted-foreground">

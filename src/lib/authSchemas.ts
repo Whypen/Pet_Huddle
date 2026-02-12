@@ -1,22 +1,37 @@
 import { z } from "zod";
 
-export const isValidDate = (value: string) => {
+const parseDob = (value: string) => {
+  if (!value) return null;
+  if (value.includes("-")) {
+    const [yyyy, mm, dd] = value.split("-").map((v) => Number(v));
+    if (!mm || !dd || !yyyy) return null;
+    const d = new Date(yyyy, mm - 1, dd);
+    if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return null;
+    return d;
+  }
   const [mm, dd, yyyy] = value.split("/").map((v) => Number(v));
-  if (!mm || !dd || !yyyy) return false;
-  if (yyyy < 1900 || yyyy > 3000) return false;
+  if (!mm || !dd || !yyyy) return null;
   const d = new Date(yyyy, mm - 1, dd);
-  return d.getFullYear() === yyyy && d.getMonth() === mm - 1 && d.getDate() === dd;
+  if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return null;
+  return d;
+};
+
+export const isValidDate = (value: string) => {
+  const d = parseDob(value);
+  if (!d) return false;
+  const year = d.getFullYear();
+  return year >= 1900 && year <= 3000;
 };
 
 export const isNotFuture = (value: string) => {
-  const [mm, dd, yyyy] = value.split("/").map((v) => Number(v));
-  const d = new Date(yyyy, mm - 1, dd);
+  const d = parseDob(value);
+  if (!d) return false;
   return d.getTime() <= Date.now();
 };
 
 export const isAtLeast16 = (value: string) => {
-  const [mm, dd, yyyy] = value.split("/").map((v) => Number(v));
-  const d = new Date(yyyy, mm - 1, dd);
+  const d = parseDob(value);
+  if (!d) return false;
   const now = new Date();
   const years = now.getFullYear() - d.getFullYear();
   const m = now.getMonth() - d.getMonth();
