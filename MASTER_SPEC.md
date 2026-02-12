@@ -68,19 +68,38 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
 
 **PublicRoute:** Redirects to `/` if user is already logged in.
 
-**Landing (/auth):**
-- Header: bear logo `huddle-logo-transparent.png` centered
-- Title: "Welcome to huddle" (brandBlue, text-2xl, font-bold)
-- Subtitle: "Your pet care community" (text-muted-foreground, text-sm)
-- Email/Phone segmented control, password with show/hide, remember me, forgot password link
-- Social buttons: Apple (black), Google (white bordered)
-- Biometrics button if supported
-- CTA to `/signup/dob`
+**Landing (/auth) — CapCut-style entry:**
+- Plain white background.
+- Centered `huddle-logo-transparent.png` + text “huddle”.
+- Four full-width buttons with left-aligned icon + label:
+  1) Continue with Email
+  2) Continue with Apple
+  3) Continue with Google
+  4) Continue with Facebook
+- Apple/Google/Facebook are placeholders (no OAuth call). On click: toast “Coming soon”.
+- “Continue with Email” opens an in-app modal:
+  - First view: buttons **Sign in** + **Create account**.
+  - Create account → `/signup/dob`.
+  - Sign in → modal content with Email, Password, Remember me, Forgot password link, Sign in button.
+  - Sign in calls `supabase.auth.signInWithPassword({ email, password })`.
+  - On failure: field-level error subtext only.
+- Sticky bottom subtext: “By continuing, you agree to huddle’s Terms and Privacy Policy.” Terms/Privacy open in-app modal (no navigation).
 
 **Signup Steps (SignupContext + localStorage persistence):**
-1. **DOB**: MM/DD/YYYY input, age gate <16 blocks continue and shows return-to-auth button. On web, `input[type="date"]` is acceptable per `ui_design_system.md`; store as `YYYY-MM-DD` and treat as equivalent to MM/DD/YYYY for validation.
+1. **DOB**: Dropdowns (Month/Day/Year). Month uses full names (January–December), day 1–31, year currentYear-16 down to 1900. Store as `YYYY-MM-DD`.
+   - No error on partial selection.
+   - If invalid date: show red subtext “Invalid date”.
+   - If under 16: show red subtext “Some functions in this app are only available to users above 16 years old”; Continue disabled; Return to Sign In visible.
 2. **Display Name**: 2–30 chars, letters/spaces/hyphen/apostrophe only, live counter.
-3. **Credentials**: email, phone (OTP verify), password + confirm with strength rules; terms checkbox required.
+3. **Credentials**: email, phone, password + confirm, terms checkbox required.
+   - Terms of Service + Privacy Policy open in-app modal (no new tab/navigation).
+   - Persist email/phone/password/otp_verified into SignupContext (localStorage).
+   - DEV OTP bypass when `import.meta.env.DEV === true` or `VITE_DISABLE_OTP === "true"`:
+     - Send code shows OTP inputs + 60s countdown without calling Supabase.
+     - Verify accepts `123456` and shows “✓ Verified”.
+     - Continue is not blocked by OTP in DEV once required fields are valid.
+   - Non-DEV: OTP uses `signInWithOtp` + `verifyOtp` and gates Continue.
+   - Inline error subtexts only (no top banners).
 4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and sets verification_status='pending'; "Skip" sets verification_status='unverified' and continues to `/onboarding`.
 
 **Validation:** React Hook Form + Zod, red error text below fields, red border on invalid, block submit until valid.

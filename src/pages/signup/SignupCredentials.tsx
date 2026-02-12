@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, Phone, CheckCircle } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Lock, Mail, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -209,14 +209,14 @@ const SignupCredentials = () => {
               ))}
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={verifyOtp}>
-                Verify
+              <Button
+                type="button"
+                size="sm"
+                onClick={verifyOtp}
+                className={otpVerified ? "bg-green-600 hover:bg-green-600 text-white" : ""}
+              >
+                {otpVerified ? "✓ Verified" : "Verify"}
               </Button>
-              {otpVerified && (
-                <span className="flex items-center gap-1 text-xs text-green-600">
-                  <CheckCircle className="h-3 w-3 animate-bounce" /> Verified
-                </span>
-              )}
               {otpError && <span className="text-xs text-red-500" aria-live="polite">{otpError}</span>}
             </div>
           </div>
