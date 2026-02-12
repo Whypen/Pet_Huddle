@@ -59,8 +59,7 @@ const SignupCredentials = () => {
   const password = watch("password") || "";
   const confirmPassword = watch("confirmPassword") || "";
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
-  const phoneTouched = Boolean(touchedFields.phone);
-  const phoneInvalid = phoneTouched && !e164Regex.test(phone);
+  const phoneInvalid = Boolean(errors.phone);
   const otpRequirementMet = otpBypass ? (!otpSent || otpVerified) : otpVerified;
 
   const checks = passwordChecks(password);
@@ -68,6 +67,11 @@ const SignupCredentials = () => {
   useEffect(() => {
     update({ email, phone, password, otp_verified: otpVerified });
   }, [email, phone, password, otpVerified, update]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log(errors, isValid);
+  }, [errors, isValid]);
 
   useEffect(() => {
     setOtpSent(false);
@@ -187,7 +191,11 @@ const SignupCredentials = () => {
               {resendIn > 0 ? `Resend in ${resendIn}s` : "Send Code"}
             </Button>
           </div>
-          {phoneInvalid && <p className="text-xs text-red-500 mt-1" aria-live="polite">Your phone number is invalid</p>}
+          {errors.phone && (
+            <p className="text-xs text-red-500 mt-1" aria-live="polite">
+              Your phone number is invalid
+            </p>
+          )}
         </div>
 
         {otpSent && (
