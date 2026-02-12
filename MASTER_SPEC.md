@@ -70,20 +70,25 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
 
 **Landing (/auth) — CapCut-style entry:**
 - Plain white background.
-- Centered `huddle-logo-transparent.png` + text “huddle”.
-- Four full-width buttons with left-aligned icon + label:
+- Centered `huddle-logo-transparent.png` (no circular border) at 2x previous size + text “huddle” in **Arial Rounded MT** (brand blue).
+- Four **80% width** buttons (centered) with left-aligned icon + label:
   1) Continue with Email
   2) Continue with Apple
   3) Continue with Google
   4) Continue with Facebook
+- Buttons default: white background, thin grey border; **pressed state** shows thicker brand-blue border (no fill).
 - Apple/Google/Facebook are placeholders (no OAuth call). On click: toast “Coming soon”.
 - “Continue with Email” opens an in-app modal:
   - First view: buttons **Sign in** + **Create account**.
   - Create account → `/signup/dob`.
-  - Sign in → modal content with Email, Password, Remember me, Forgot password link, Sign in button.
+  - Sign in → modal content with Email, Password, **Stay logged in**, Forgot password link, Sign in button.
   - Sign in calls `supabase.auth.signInWithPassword({ email, password })`.
   - On failure: field-level error subtext only.
-- Sticky bottom subtext: “By continuing, you agree to huddle’s Terms and Privacy Policy.” Terms/Privacy open in-app modal (no navigation).
+- Sticky bottom subtext (10px): “By continuing, you agree to huddle’s Terms and Privacy Policy.” Terms/Privacy open in-app modal (no navigation).
+- **Stay logged in** checkbox in Sign in modal:
+  - Default checked.
+  - Checked: normal Supabase persistence.
+  - Unchecked: session-only (tokens cleared on browser close via unload/pagehide).
 
 **Signup Steps (SignupContext + localStorage persistence):**
 1. **DOB**: Dropdowns (Month/Day/Year). Month uses full names (January–December), day 1–31, year currentYear-16 down to 1900. Store as `YYYY-MM-DD`.
@@ -96,10 +101,11 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
    - Persist email/phone/password/otp_verified into SignupContext (localStorage).
    - DEV OTP bypass when `import.meta.env.DEV === true` or `VITE_DISABLE_OTP === "true"`:
      - Send code shows OTP inputs + 60s countdown without calling Supabase.
-     - Verify accepts `123456` and shows “✓ Verified”.
+     - Verify accepts `123456` and shows “✓ Verified” (green). Verify button default state is blue.
      - Continue is not blocked by OTP in DEV once required fields are valid.
    - Non-DEV: OTP uses `signInWithOtp` + `verifyOtp` and gates Continue.
    - Inline error subtexts only (no top banners).
+   - If Continue is disabled, show one helper subtext explaining why (e.g., agree to terms, valid phone, verify phone).
 4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and sets verification_status='pending'; "Skip" sets verification_status='unverified' and continues to `/onboarding`.
 
 **Validation:** React Hook Form + Zod, red error text below fields, red border on invalid, block submit until valid.

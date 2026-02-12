@@ -69,6 +69,16 @@ const SignupCredentials = () => {
     update({ email, phone, password, otp_verified: otpVerified });
   }, [email, phone, password, otpVerified, update]);
 
+  useEffect(() => {
+    if (!otpBypass) return;
+    if (otpVerified) return;
+    if (otpValue.length === 6 && otpValue === "123456") {
+      setOtpVerified(true);
+      setOtpError(null);
+      void trigger();
+    }
+  }, [otpBypass, otpVerified, otpValue, trigger]);
+
   const sendOtp = async () => {
     if (!phone || !e164Regex.test(phone)) {
       toast.error("Enter a valid phone number");
@@ -109,10 +119,7 @@ const SignupCredentials = () => {
   };
 
   const onSubmit = () => {
-    if (!otpRequirementMet) {
-      toast.error("Please verify your phone number");
-      return;
-    }
+    if (!otpRequirementMet) return;
     navigate("/signup/verify");
   };
 
@@ -213,7 +220,11 @@ const SignupCredentials = () => {
                 type="button"
                 size="sm"
                 onClick={verifyOtp}
-                className={otpVerified ? "bg-green-600 hover:bg-green-600 text-white" : ""}
+                className={
+                  otpVerified
+                    ? "bg-green-600 hover:bg-green-600 text-white"
+                    : "bg-brandBlue hover:bg-brandBlue/90 text-white"
+                }
               >
                 {otpVerified ? "✓ Verified" : "Verify"}
               </Button>

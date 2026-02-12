@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -33,6 +33,7 @@ const Auth = () => {
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>("choice");
+  const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
 
   const schema = useMemo(() => {
     return z.object({
@@ -55,6 +56,35 @@ const Auth = () => {
     defaultValues: { remember: true },
   });
 
+  const clearAuthTokens = () => {
+    Object.keys(localStorage).forEach((key) => {
+      if (key.includes("auth-token") && key.startsWith("sb-")) {
+        localStorage.removeItem(key);
+      }
+      if (key.includes("supabase.auth.token")) {
+        localStorage.removeItem(key);
+      }
+    });
+  };
+
+  const disableSessionOnly = () => {
+    localStorage.setItem("huddle_stay_logged_in", "true");
+    if (sessionOnlyHandlerRef.current) {
+      window.removeEventListener("beforeunload", sessionOnlyHandlerRef.current);
+      window.removeEventListener("pagehide", sessionOnlyHandlerRef.current);
+      sessionOnlyHandlerRef.current = null;
+    }
+  };
+
+  const enableSessionOnly = () => {
+    localStorage.setItem("huddle_stay_logged_in", "false");
+    if (!sessionOnlyHandlerRef.current) {
+      sessionOnlyHandlerRef.current = clearAuthTokens;
+      window.addEventListener("beforeunload", clearAuthTokens);
+      window.addEventListener("pagehide", clearAuthTokens);
+    }
+  };
+
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
     if (!values.email) return;
@@ -67,8 +97,10 @@ const Auth = () => {
 
     if (values.remember) {
       localStorage.setItem("auth_login_identifier", values.email);
+      disableSessionOnly();
     } else {
       localStorage.removeItem("auth_login_identifier");
+      enableSessionOnly();
     }
 
     navigate("/");
@@ -96,21 +128,29 @@ const Auth = () => {
     <div className="min-h-screen bg-white flex flex-col px-6">
       <div className="flex-1 flex flex-col justify-center">
         <div className="text-center">
-          <div className="mx-auto h-20 w-20 rounded-full bg-white shadow-elevated flex items-center justify-center border border-brandText/20">
-            <img src={huddleLogo} alt={t("app.name")} className="h-14 w-14 object-contain" />
+          <img src={huddleLogo} alt={t("app.name")} className="mx-auto h-28 w-28 object-contain" />
+          <div
+            className="mt-3 text-2xl font-semibold text-brandBlue"
+            style={{ fontFamily: "\"Arial Rounded MT Bold\",\"Arial Rounded MT\",\"Arial\",sans-serif" }}
+          >
+            huddle
           </div>
-          <div className="mt-3 text-2xl font-semibold text-brandText">huddle</div>
         </div>
 
         <div className="mt-10 w-full max-w-md mx-auto space-y-3">
-          <Button type="button" variant="outline" className="w-full h-11 justify-start gap-3" onClick={openEmailChoice}>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-[80%] mx-auto h-11 justify-start gap-3 border-brandText/40 bg-white hover:bg-white active:border-2 active:border-brandBlue focus-visible:border-2 focus-visible:border-brandBlue focus-visible:ring-1 focus-visible:ring-brandBlue"
+            onClick={openEmailChoice}
+          >
             <AtSign className="h-5 w-5 text-brandText" />
             <span className="text-sm font-medium text-brandText">Continue with Email</span>
           </Button>
           <Button
             type="button"
             variant="outline"
-            className="w-full h-11 justify-start gap-3"
+            className="w-[80%] mx-auto h-11 justify-start gap-3 border-brandText/40 bg-white hover:bg-white active:border-2 active:border-brandBlue focus-visible:border-2 focus-visible:border-brandBlue focus-visible:ring-1 focus-visible:ring-brandBlue"
             onClick={() => toast.error("Coming soon")}
           >
             <Apple className="h-5 w-5 text-brandText" />
@@ -119,7 +159,7 @@ const Auth = () => {
           <Button
             type="button"
             variant="outline"
-            className="w-full h-11 justify-start gap-3"
+            className="w-[80%] mx-auto h-11 justify-start gap-3 border-brandText/40 bg-white hover:bg-white active:border-2 active:border-brandBlue focus-visible:border-2 focus-visible:border-brandBlue focus-visible:ring-1 focus-visible:ring-brandBlue"
             onClick={() => toast.error("Coming soon")}
           >
             <svg viewBox="0 0 24 24" aria-hidden className="h-5 w-5">
@@ -133,7 +173,7 @@ const Auth = () => {
           <Button
             type="button"
             variant="outline"
-            className="w-full h-11 justify-start gap-3"
+            className="w-[80%] mx-auto h-11 justify-start gap-3 border-brandText/40 bg-white hover:bg-white active:border-2 active:border-brandBlue focus-visible:border-2 focus-visible:border-brandBlue focus-visible:ring-1 focus-visible:ring-brandBlue"
             onClick={() => toast.error("Coming soon")}
           >
             <Facebook className="h-5 w-5 text-brandText" />
@@ -142,7 +182,7 @@ const Auth = () => {
         </div>
       </div>
 
-      <div className="sticky bottom-0 bg-white py-4 text-center text-xs text-muted-foreground">
+      <div className="sticky bottom-0 bg-white py-4 text-center text-[10px] text-brandSubtext">
         By continuing, you agree to huddle&apos;s{" "}
         <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("terms")}>
           Terms
@@ -218,7 +258,7 @@ const Auth = () => {
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox checked={watch("remember")} onCheckedChange={(v) => setValue("remember", Boolean(v))} />
-                  Remember me
+                  Stay logged in
                 </label>
                 <Link to="/reset-password" className="text-xs text-brandBlue">Forgot password?</Link>
               </div>
