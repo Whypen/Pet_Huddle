@@ -9,8 +9,15 @@ const parseDob = (value: string) => {
     if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return null;
     return d;
   }
-  const [mm, dd, yyyy] = value.split("/").map((v) => Number(v));
-  if (!mm || !dd || !yyyy) return null;
+  const [p1, p2, p3] = value.split("/").map((v) => Number(v));
+  if (!p1 || !p2 || !p3) return null;
+  let dd = p2;
+  let mm = p1;
+  const yyyy = p3;
+  if (p1 > 12 && p2 <= 12) {
+    dd = p1;
+    mm = p2;
+  }
   const d = new Date(yyyy, mm - 1, dd);
   if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return null;
   return d;
@@ -39,13 +46,26 @@ export const isAtLeast16 = (value: string) => {
   return age >= 16;
 };
 
-export const dobSchema = z.object({
-  dob: z
-    .string()
-    .refine(isValidDate, "Invalid date")
-    .refine(isNotFuture, "Date cannot be in future")
-    .refine(isAtLeast16, "Must be at least 16 years old"),
-});
+export const dobSchema = z
+  .object({
+    dob_day: z.string().optional(),
+    dob_month: z.string().optional(),
+    dob_year: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const { dob_day, dob_month, dob_year } = data;
+    if (!dob_day || !dob_month || !dob_year) return;
+    const day = dob_day.padStart(2, "0");
+    const month = dob_month.padStart(2, "0");
+    const assembled = `${dob_year}-${month}-${day}`;
+    if (!isValidDate(assembled)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dob_day"], message: "Invalid date" });
+      return;
+    }
+    if (!isNotFuture(assembled)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dob_day"], message: "Date cannot be in future" });
+    }
+  });
 
 export const nameSchema = z.object({
   display_name: z
