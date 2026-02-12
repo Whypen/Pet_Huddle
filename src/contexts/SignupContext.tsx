@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 type SignupData = {
   dob: string;
@@ -46,16 +46,27 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
-  const update = (next: Partial<SignupData>) => {
-    setData((prev) => ({ ...prev, ...next }));
-  };
+  const update = useCallback((next: Partial<SignupData>) => {
+    setData((prev) => {
+      let changed = false;
+      const merged = { ...prev };
+      (Object.keys(next) as Array<keyof SignupData>).forEach((key) => {
+        const nextValue = next[key];
+        if (typeof nextValue !== "undefined" && prev[key] !== nextValue) {
+          merged[key] = nextValue as SignupData[typeof key];
+          changed = true;
+        }
+      });
+      return changed ? merged : prev;
+    });
+  }, []);
 
   const reset = () => {
     setData(defaultData);
     localStorage.removeItem(STORAGE_KEY);
   };
 
-  const value = useMemo(() => ({ data, update, reset }), [data]);
+  const value = useMemo(() => ({ data, update, reset }), [data, update]);
 
   return <SignupContext.Provider value={value}>{children}</SignupContext.Provider>;
 };

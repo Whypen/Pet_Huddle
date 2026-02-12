@@ -65,8 +65,14 @@ const SignupCredentials = () => {
   const checks = passwordChecks(password);
   const strength = passwordStrengthLabel(password);
   useEffect(() => {
+    const hasChanges =
+      data.email !== email ||
+      data.phone !== phone ||
+      data.password !== password ||
+      data.otp_verified !== otpVerified;
+    if (!hasChanges) return;
     update({ email, phone, password, otp_verified: otpVerified });
-  }, [email, phone, password, otpVerified, update]);
+  }, [data.email, data.phone, data.password, data.otp_verified, email, phone, password, otpVerified, update]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
