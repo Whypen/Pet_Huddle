@@ -145,11 +145,11 @@ CREATE POLICY identity_verification_service_role_all
 
 -- RPC: finalize identity submission (atomic)
 CREATE OR REPLACE FUNCTION public.finalize_identity_submission(
-  doc_type TEXT,
-  doc_path TEXT,
-  selfie_path TEXT,
-  country TEXT,
-  legal_name TEXT
+  p_doc_type TEXT,
+  p_doc_path TEXT,
+  p_selfie_path TEXT,
+  p_country TEXT,
+  p_legal_name TEXT
 ) RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -161,32 +161,32 @@ BEGIN
   IF v_user IS NULL THEN
     RAISE EXCEPTION 'Not authenticated';
   END IF;
-  IF doc_type NOT IN ('passport', 'drivers_license', 'id_card') THEN
+  IF p_doc_type NOT IN ('passport', 'drivers_license', 'id_card') THEN
     RAISE EXCEPTION 'Invalid doc type';
   END IF;
 
   INSERT INTO public.verification_uploads
     (user_id, document_type, document_url, selfie_url, country, legal_name, status, uploaded_at)
   VALUES
-    (v_user, doc_type, doc_path, selfie_path, country, legal_name, 'pending', NOW());
+    (v_user, p_doc_type, p_doc_path, p_selfie_path, p_country, p_legal_name, 'pending', NOW());
 
-  UPDATE public.profiles
+  UPDATE public.profiles AS prof
     SET verification_status = 'pending',
         is_verified = false,
-        legal_name = COALESCE(legal_name, public.profiles.legal_name),
-        location_country = COALESCE(country, public.profiles.location_country),
+        legal_name = COALESCE(p_legal_name, prof.legal_name),
+        location_country = COALESCE(p_country, prof.location_country),
         verification_comment = NULL
-  WHERE id = v_user;
+  WHERE prof.id = v_user;
 
   INSERT INTO public.admin_audit_logs
     (actor_id, action, target_user_id, details)
   VALUES
     (v_user, 'kyc_submitted', v_user, jsonb_build_object(
-      'doc_type', doc_type,
-      'doc_path', doc_path,
-      'selfie_path', selfie_path,
-      'country', country,
-      'legal_name', legal_name
+      'doc_type', p_doc_type,
+      'doc_path', p_doc_path,
+      'selfie_path', p_selfie_path,
+      'country', p_country,
+      'legal_name', p_legal_name
     ));
 END;
 $$;

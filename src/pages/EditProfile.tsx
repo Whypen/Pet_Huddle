@@ -55,6 +55,7 @@ const EditProfile = () => {
   const [fieldErrors, setFieldErrors] = useState({
     legalName: "",
     displayName: "",
+    social_id: "",
     phone: "",
     dob: "",
     height: "",
@@ -72,7 +73,7 @@ const EditProfile = () => {
     phone: "",
     dob: "",
     bio: "",
-    user_id: "",
+    social_id: "",
 
     // Demographics
     gender_genre: "",
@@ -142,7 +143,7 @@ const EditProfile = () => {
         phone: profile.phone || "",
         dob: profile.dob || "",
         bio: profile.bio || "",
-        user_id: profile.user_id || "",
+        social_id: profile.social_id || "",
         gender_genre: profile.gender_genre || "",
         orientation: profile.orientation || "",
         height: profile.height?.toString() || "",
@@ -320,7 +321,19 @@ const EditProfile = () => {
       }));
       return;
     }
-    if (!formData.dob) {
+        if (!formData.social_id.trim()) {
+      setFieldErrors((prev) => ({ ...prev, social_id: t("Social ID is required") }));
+      return;
+    }
+    if (formData.social_id.trim().length < 6 || formData.social_id.trim().length > 20) {
+      setFieldErrors((prev) => ({ ...prev, social_id: t("Social ID must be 6-20 characters") }));
+      return;
+    }
+    if (!/^[a-z0-9._]+$/.test(formData.social_id.trim())) {
+      setFieldErrors((prev) => ({ ...prev, social_id: t("Only lowercase letters, numbers, dot, underscore") }));
+      return;
+    }
+if (!formData.dob) {
       setFieldErrors((prev) => ({ ...prev, dob: t("Date of birth is required") }));
       return;
     }
@@ -379,6 +392,7 @@ const EditProfile = () => {
           display_name: isIdentityLocked ? profile?.display_name || formData.display_name : formData.display_name,
           legal_name: isIdentityLocked ? profile?.legal_name || formData.legal_name : formData.legal_name,
           phone: isIdentityLocked ? profile?.phone || formData.phone : (formData.phone || null),
+          social_id: formData.social_id || null,
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
           orientation: formData.orientation || null,
@@ -476,6 +490,11 @@ const EditProfile = () => {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
 
+            {/* Social ID - Display Only */}
+            <div className="text-sm text-muted-foreground">
+              @{formData.social_id || "loading..."}
+            </div>
+
             {/* Legal Name */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Legal Name")}</label>
@@ -518,15 +537,45 @@ const EditProfile = () => {
             {fieldErrors.displayName && <ErrorLabel message={fieldErrors.displayName} />}
           </div>
 
-            {/* User ID */}
+            {/* Social ID */}
             <div>
-              <label className="text-sm font-medium mb-2 block">{t("User ID")}</label>
-              <Input
-                value={formData.user_id || ""}
-                placeholder={t("User ID")}
-                className="rounded-[12px] bg-[#f0f0f0]"
-                readOnly
-              />
+              <label className="text-sm font-medium mb-2 block">{t("Social ID")}</label>
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">@</div>
+                <Input
+                  value={formData.social_id || ""}
+                  onChange={(e) => {
+                    const normalized = e.target.value.toLowerCase().replace(/\s/g, "");
+                    setFormData((prev) => ({ ...prev, social_id: normalized }));
+                  }}
+                  onBlur={async () => {
+                    const normalized = formData.social_id?.toLowerCase().replace(/\s/g, "") || "";
+                    if (!normalized || normalized.length < 6 || normalized.length > 20) {
+                      setFieldErrors((prev) => ({ ...prev, social_id: "" }));
+                      return;
+                    }
+                    if (!/^[a-z0-9._]+$/.test(normalized)) {
+                      setFieldErrors((prev) => ({ ...prev, social_id: "Only lowercase letters, numbers, dot, and underscore allowed" }));
+                      return;
+                    }
+                    try {
+                      const { data: isTaken, error } = await supabase.rpc("is_social_id_taken", { candidate: normalized });
+                      if (error) throw error;
+                      setFieldErrors((prev) => ({ 
+                        ...prev, 
+                        social_id: isTaken ? "This social ID is already taken" : "" 
+                      }));
+                    } catch (err) {
+                      console.error("Social ID availability check failed:", err);
+                    }
+                  }}
+                  placeholder="yourid"
+                  className="rounded-[12px] pl-7"
+                  disabled={isIdentityLocked}
+                  aria-invalid={Boolean(fieldErrors.social_id)}
+                />
+              </div>
+              {fieldErrors.social_id && <ErrorLabel message={fieldErrors.social_id} />}
             </div>
 
             {/* Phone */}

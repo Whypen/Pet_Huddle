@@ -62,6 +62,7 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
 - `/signup/credentials` (3 of 4)
 - `/signup/verify` (4 of 4)
 - `/verify-identity` (existing KYC flow)
+- `/onboarding` deprecated (redirects to `/`); profile setup happens in **Edit Profile** only.
 - `/onboarding` (existing profile setup)
 - `/reset-password`
 - `/auth/callback`
@@ -84,6 +85,7 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
   - Sign in → modal content with Email, Password, **Stay logged in**, Forgot password link, Sign in button.
   - Sign in calls `supabase.auth.signInWithPassword({ email, password })`.
   - On failure: field-level error subtext only.
+  - If signup detects an already-registered email, prompt sign-in and route to `/auth`.
 - Sticky bottom subtext (10px): “By continuing, you agree to huddle’s Terms and Privacy Policy.” Terms/Privacy open in-app modal (no navigation).
 - **Stay logged in** checkbox in Sign in modal:
   - Default checked.
@@ -95,26 +97,27 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
    - No error on partial selection.
    - If invalid date: show red subtext “Invalid date”.
    - If under 16: show red subtext “Some functions in this app are only available to users above 16 years old”; Continue disabled; Return to Sign In visible.
-2. **Display Name**: 2–30 chars, letters/spaces/hyphen/apostrophe only, live counter.
+2. **Display Name + Social ID**: Display name 2–30 chars (letters/spaces/hyphen/apostrophe). Social ID 6–20 chars (lowercase letters, numbers, dot, underscore only), REQUIRED, unique, live availability check with 400ms debounce, show "@" prefix in UI.
 3. **Credentials**: email, phone, password + confirm, terms checkbox required.
    - Terms of Service + Privacy Policy open in-app modal (no new tab/navigation).
    - Persist email/phone/password/otp_verified into SignupContext (localStorage).
-   - DEV OTP bypass when `import.meta.env.DEV === true` or `VITE_DISABLE_OTP === "true"`:
-     - Send code shows OTP inputs + 60s countdown without calling Supabase.
-     - Verify accepts `123456` and shows “✓ Verified” (green). Verify button default state is blue.
-     - Continue is not blocked by OTP in DEV once required fields are valid.
+   - OTP gating required in DEV unless explicitly bypassed with `VITE_DISABLE_OTP === "true"`.
+     - Default (localhost): Send code shows OTP inputs + 60s countdown. Verify requires `123456` and a click; Verify button default state is blue and turns green on success.
+     - Bypass only when `VITE_DISABLE_OTP === "true"`.
    - Non-DEV: OTP uses `signInWithOtp` + `verifyOtp` and gates Continue.
    - Inline error subtexts only (no top banners).
    - If Continue is disabled, show one helper subtext explaining why (e.g., agree to terms, valid phone, verify phone).
-4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and sets verification_status='pending'; "Skip" sets verification_status='unverified' and continues to `/onboarding`.
+4. **Verify**: legal name optional if skipping; "Start Verification" goes to `/verify-identity` and does **not** change verification_status until submit; "Skip" sets verification_status='unverified', is_verified=false and continues to `/` (home dashboard).
+   - `/verify-identity` Close/Return always routes back to `/signup/verify`. Submit success returns to `/signup/verify` (never `/onboarding` or `/`).
+   - **Error handling:** On signup error (duplicate email, etc.), SignupVerify stays on current page and shows inline error via toast. Never redirects to `/auth` on error.
 
 **Validation:** React Hook Form + Zod, red error text below fields, red border on invalid, block submit until valid.
 
 **Backend integration:**
-- `supabase.auth.signUp({ email, password, options: { data: { display_name, phone, dob }}})`
+- `supabase.auth.signUp({ email, password, options: { data: { display_name, social_id, phone, dob, legal_name }}})`
 - `supabase.auth.signInWithPassword()` for login; redirect `/` on success
 - Phone OTP: `signInWithOtp` + `verifyOtp`
-- Profiles insert on signup: `display_name`, `dob`, `legal_name`, `phone`, `verification_status`
+- Profiles insert on signup: `display_name`, `social_id`, `dob`, `legal_name`, `phone`, `verification_status`
 
 **UX:** Framer Motion transitions, progress bar 25/50/75/100, auto-scroll to first error, password strength meter, OTP input with auto-advance and paste.
 
@@ -129,6 +132,17 @@ This auth flow replaces any previous auth/onboarding screens. All UI must follow
 ## 2. Security & Data Pillar (The Brain)
 
 ### 2.1 Identity System
+
+### 2.0 Social ID System
+- **Social ID:** User-chosen identifier displayed as @{social_id} (e.g., @john.doe_23)
+- **Format:** 6–20 characters, lowercase only, allows letters, numbers, dot (.), underscore (_)
+- **Uniqueness:** Enforced at DB level via unique index on lower(social_id)
+- **Required:** Cannot be null, must be provided during signup (page 2)
+- **Availability Check:** RPC function `is_social_id_taken(candidate)` with 400ms debounce
+- **UI Display:** Fixed "@" prefix (not stored in DB), shown in profile and throughout app
+- **Editability:** Can be changed in Edit Profile with same validation + availability check
+- **Backfill:** Existing users get auto-generated ID: u + first 10 chars of UUID (no hyphens)
+
 - **User ID:** 10‑digit random string (immutable)
 - **DB Trigger:** `generate_uid()` + `set_profiles_user_id()` BEFORE INSERT on profiles
 - **Roles:** `user`, `admin`, `sitter`
@@ -158,7 +172,7 @@ When the user taps **Submit** in `/verify-identity`:
 1. **Status → Pending:** `profiles.verification_status = 'pending'`.
 2. **Image → Bucket:** selfie + ID uploaded to `identity_verification` bucket (owner = auth.uid()).
 3. **Badge → Show:** UI updates avatar badge to **Pending (grey)** via local profile refresh.
-4. **Redirect:** Success animation → redirect to `/chats`.
+4. **Redirect:** Success animation → redirect to `/signup/verify`.
 
 ### 2.6 Quota Management System (QMS)
 - **Table:** `user_quotas` (RLS-protected) with counters + add-on extras:
@@ -1075,11 +1089,9 @@ Enhancement: Fix insert mutation in Edge Function (INSERT INTO pets (...) VALUES
 Enhancement: On onboarding/profile load, SELECT FROM pets WHERE owner_id = auth.uid() LIMIT 0 (no pre-load), delete any fake rows via migration TRUNCATE pets, enforce no default/fake inserts.
 
 III. Onboarding & Identity Verification (KYC)
-[ ] 8. On-Boarding: Missing whole KYC slows under the Identity Verification under /onboarding
+[ ] 8. On-Boarding (Deprecated): /onboarding is deprecated and redirects to `/`. Profile setup is in Edit Profile; KYC lives at `/verify-identity` and returns to `/signup/verify`.
 
-Enhancement: Add /onboarding route with KYC flow trigger on image submit, use React Router Maps to /verify-identity.
-
-[ ] 9. Identity Verification + Admin Review (Update Full Flow): New /verify-identity route. Header "Identity Verification", with close button at top right corner to allow exit anytime. Screen 1: Country is pre-selected with the user's location selected during registration & blocked for adjustment, only upload Doc Type (ID, Passport, Driver's License) with subtext “We collect your selfie and ID document image to verify your age and identity and to protect our users from fraud and underage access. We generate biometric templates or age estimates from these images solely for this verification. We do not use your biometric data for general facial recognition or any purpose other than verification. Images are deleted after the check; we keep only the outcome (e.g. ‘age verified 18+’) and minimal metadata.” Screen 2: Legal Disclaimer (Biometric data usage/deletion policy). "Agree & Continue" button. Screen 3 (Selfie): Trigger rear camera. Capture image on "I am ready." Screen 4 (ID Doc): Trigger main camera. Capture image on "I am ready." Screen 5: Success page with "Social access granted pending review" notice: "Thanks for completing verification. You can use the Social features for now while we finish our checks. If we later find that you are below the minimum age required for our Social or Chat features, your account may be blocked from these features or from the app entirely, in line with our Terms and Safety Policy." Storage: Save images to new Supabase bucket identity_verification. Fix "bucket not found" error. Admin: Create an admin flag in Supabase to toggle verification_status (Approved/Rejected) (expand: route with 5 screens, close button z-index 9999, pre-selected country from profiles.location_country blocked, rear camera for selfie, main for ID, delete images post-check, bucket create with private RLS, admin UI with toggle button + comment field, RLS admin only).
+[ ] 9. Identity Verification + Admin Review (Update Full Flow): New /verify-identity route. Header has **Return <** (go back a step) and **Close X** (exit to `/signup/verify`). Step 1: full message “At huddle, trust is our foundation. Verifying your identity helps us eliminate bad actors and ensures that when you connect with a neighbor for a playdate or care, you’re dealing with a real, vetted member of our community. It’s how we keep the 'huddle' safe for everyone.” Step 2: legal name + country + doc type selection (ID Card / Passport / Driver’s Licence). Step 3: document capture; Passport enforced landscape 3:2 with MRZ strip; others portrait. Step 4: selfie capture (no blur mask). Step 5: show both images + 3 required checkboxes; Submit uploads to identity_verification, calls finalize_identity_submission (sets verification_status='pending', is_verified=false), then redirects to `/signup/verify`. Abandoning mid‑flow does not change verification status. Storage: private bucket + RLS; admin review route `/admin/verifications` with approve/reject and comment field.
 
 Enhancement: Use react-webcam for camera, Supabase storage.upload for bucket, admin route /admin/verifications with toggle onClick update verification_status trigger email notification.
 

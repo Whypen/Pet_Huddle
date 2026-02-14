@@ -10,12 +10,15 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { humanizeError } from "@/lib/humanizeError";
 
 const SignupVerify = () => {
   const navigate = useNavigate();
   const { data, update, reset } = useSignup();
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+  const DOB_ISO_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
   const {
     register,
@@ -27,6 +30,22 @@ const SignupVerify = () => {
   });
 
   const startVerificationSignup = async (legalName?: string) => {
+    if (!data.display_name.trim()) {
+      toast.error("Please enter a valid display name");
+      return;
+    }
+    if (!data.social_id.trim()) {
+      toast.error("Please enter a valid social ID");
+      return;
+    }
+    if (!DOB_ISO_REGEX.test(data.dob)) {
+      toast.error("Please enter a valid date of birth");
+      return;
+    }
+    if (!E164_PHONE_REGEX.test(data.phone)) {
+      toast.error("Please enter a valid phone number");
+      return;
+    }
     setLoading(true);
     try {
       const { data: authData, error } = await supabase.auth.signUp({
@@ -35,30 +54,26 @@ const SignupVerify = () => {
         options: {
           data: {
             display_name: data.display_name,
-            phone: data.phone,
+            legal_name: legalName || data.legal_name || "",
             dob: data.dob,
-            legal_name: legalName || null,
+            phone: data.phone,
+            social_id: data.social_id,
           },
         },
       });
       if (error) throw error;
 
-      const sessionUser = authData.user;
-      if (sessionUser) {
-        await supabase.from("profiles").upsert({
-          id: sessionUser.id,
-          display_name: data.display_name,
-          dob: data.dob,
-          legal_name: legalName || null,
-          phone: data.phone,
-        });
-      }
-
       update({ legal_name: legalName || "" });
       navigate("/verify-identity");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(message || "Failed to sign up");
+      const message = humanizeError(err);
+      if (message.toLowerCase().includes("already") && message.toLowerCase().includes("registered")) {
+        toast.error("Email already registered. Please sign in.");
+        // Do not navigate away on error - stay on page
+        setLoading(false);
+        return;
+      }
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -69,6 +84,22 @@ const SignupVerify = () => {
   };
 
   const skipVerificationSignup = async () => {
+    if (!data.display_name.trim()) {
+      toast.error("Please enter a valid display name");
+      return;
+    }
+    if (!data.social_id.trim()) {
+      toast.error("Please enter a valid social ID");
+      return;
+    }
+    if (!DOB_ISO_REGEX.test(data.dob)) {
+      toast.error("Please enter a valid date of birth");
+      return;
+    }
+    if (!E164_PHONE_REGEX.test(data.phone)) {
+      toast.error("Please enter a valid phone number");
+      return;
+    }
     setLoading(true);
     try {
       const { data: authData, error } = await supabase.auth.signUp({
@@ -77,9 +108,10 @@ const SignupVerify = () => {
         options: {
           data: {
             display_name: data.display_name,
-            phone: data.phone,
+            legal_name: data.legal_name || "",
             dob: data.dob,
-            legal_name: data.legal_name || null,
+            phone: data.phone,
+            social_id: data.social_id,
           },
         },
       });
@@ -87,23 +119,26 @@ const SignupVerify = () => {
 
       const sessionUser = authData.user;
       if (sessionUser) {
-        await supabase.from("profiles").upsert({
-          id: sessionUser.id,
-          display_name: data.display_name,
-          dob: data.dob,
-          legal_name: data.legal_name || null,
-          phone: data.phone,
-          verification_status: "unverified",
-          is_verified: false,
-        });
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .update({ verification_status: "unverified", is_verified: false })
+          .eq("id", sessionUser.id);
+        if (profileError) throw profileError;
       }
 
       toast.success("Welcome to huddle 🐾");
       reset();
-      navigate("/onboarding");
+      navigate("/");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(message || "Failed to sign up");
+      const message = humanizeError(err);
+      if (message.toLowerCase().includes("already") && message.toLowerCase().includes("registered")) {
+        toast.error("Email already registered. Please sign in.");
+        // Do not navigate away on error - stay on page
+        setLoading(false);
+        setShowSkipConfirm(false);
+        return;
+      }
+      toast.error(message);
     } finally {
       setLoading(false);
       setShowSkipConfirm(false);
