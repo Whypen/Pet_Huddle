@@ -8,6 +8,8 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "audit:map": "node scripts/self_audit_map.mjs",
+    "audit:phase1": "node scripts/phase1_audit.mjs",
+    "db:reset:local": "bash scripts/reset-local-supabase.sh",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

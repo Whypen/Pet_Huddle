@@ -6,6 +6,9 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { normalizeMembershipTier } from "@/lib/membership";
+import { toast } from "sonner";
+import { PLUS_ROUTE } from "@/lib/routes";
 
 type Prefs = {
   push_notifications_enabled?: boolean;
@@ -35,8 +38,7 @@ export default function AccountSettingsPage() {
   const [language, setLanguage] = useState("en");
   const [familyMember, setFamilyMember] = useState<string | null>(null);
 
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isGold = effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
 
   useEffect(() => {
     (async () => {
@@ -106,7 +108,7 @@ export default function AccountSettingsPage() {
       navigate("/auth");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      window.alert(msg || "Delete failed");
+      toast.error(msg || "Delete failed");
     } finally {
       setDeleting(false);
     }
@@ -162,29 +164,11 @@ export default function AccountSettingsPage() {
           ) : (
             <div className="text-xs text-brandText/50">No members linked</div>
           )}
-          {isGold ? (
-            <button
-              onClick={() => navigate("/family-invite")}
-              className="mt-1 px-4 py-2 rounded-lg bg-brandGold text-white text-sm font-bold"
-            >
-              Invite
-            </button>
-          ) : (
-            <div className="mt-1 space-y-1">
-              <div className="text-xs text-brandText/50">Upgrade to Gold for Family Sharing</div>
-              <button
-                onClick={() => navigate("/premium?tab=Gold")}
-                className="px-4 py-2 rounded-lg bg-brandGold text-white text-sm font-bold"
-              >
-                Upgrade to Gold
-              </button>
-            </div>
-          )}
+          <div className="mt-1 text-xs text-brandText/50">Family invites are available soon.</div>
         </div>
 
         {/* Security */}
         <div className="text-xs font-bold text-brandText/70 pt-2">Security</div>
-        <NavRow label="Password" onClick={() => navigate("/change-password")} />
         <NavRow label="Identity Verification" sub="Upload ID/Passport" onClick={() => navigate("/verify-identity")} />
         <ToggleRow label="Biometric Login" checked={!!prefs.biometric_login} onChange={(v) => savePrefs({ ...prefs, biometric_login: v })} />
         <ToggleRow label="Two-Factor Auth" checked={!!prefs.two_factor_auth} onChange={(v) => savePrefs({ ...prefs, two_factor_auth: v })} />
@@ -256,7 +240,7 @@ export default function AccountSettingsPage() {
 
         {/* Subscription */}
         <div className="pt-2">
-          <NavRow label="Manage Subscription" onClick={() => navigate("/premium")} />
+          <NavRow label="Manage Subscription" onClick={() => navigate(PLUS_ROUTE)} />
         </div>
 
         {/* Danger Zone */}

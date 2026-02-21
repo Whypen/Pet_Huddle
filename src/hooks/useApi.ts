@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
-console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
+console.debug("CURRENT API URL:", import.meta.env.VITE_API_URL);
 
 interface ApiResponse<T = unknown> {
   success: boolean;

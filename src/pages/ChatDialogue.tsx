@@ -3,15 +3,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Send, Image as ImageIcon, Loader2, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { PremiumFooter } from "@/components/monetization/PremiumFooter";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
+import { PlusFooter } from "@/components/monetization/PlusFooter";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
-import imageCompression from "browser-image-compression";
+import { compressImage } from "@/lib/imageCompression";
+import { ChatHeaderMenu } from "@/components/chat/ChatHeaderMenu";
+import { BlockModal } from "@/components/modals/BlockModal";
+import { ReportModal } from "@/components/modals/ReportModal";
+import { useBlock } from "@/hooks/useBlock";
 
 interface Message {
   id: string;
@@ -27,20 +31,58 @@ const ChatDialogue = () => {
   const chatId = searchParams.get("id");
   const chatName = searchParams.get("name") || t("Chat");
   const chatType = searchParams.get("type") || "playdates"; // playdates | nannies | animal-lovers | group
+  // otherUserId can be passed explicitly or resolved from chat_room_members
+  const otherUserIdParam = searchParams.get("otherId");
+
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
+  const [isPlusFooterOpen, setIsPlusFooterOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+
+  // The other user's profile ID (resolved for 1:1 chats)
+  const [otherUserId, setOtherUserId] = useState<string | null>(otherUserIdParam);
+
+  // Block / Report modal state
+  const [blockModalOpen, setBlockModalOpen] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+
+  const { isBlocked, isEitherBlocked, block, unblock, refresh: refreshBlock } = useBlock(otherUserId);
 
   // Nanny booking state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
 
   // Determine if current user is a nanny
   const isNanny = profile?.social_role === "nannies" || profile?.user_role === "sitter";
+
+  // ── Resolve other user ID from chat_room_members for 1:1 chats ──────────────
+  useEffect(() => {
+    if (chatType === "group" || !chatId || !user?.id) return;
+    if (otherUserId) return; // already set from URL param
+
+    const resolve = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("chat_room_members")
+          .select("user_id")
+          .eq("room_id", chatId)
+          .neq("user_id", user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data?.user_id) {
+          setOtherUserId(data.user_id);
+        }
+      } catch (err) {
+        console.warn("[ChatDialogue] Could not resolve other user:", err);
+      }
+    };
+
+    resolve();
+  }, [chatId, chatType, user?.id, otherUserId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -122,6 +164,12 @@ const ChatDialogue = () => {
   const handleSend = async () => {
     if (!input.trim() || !chatId) return;
 
+    // ── Block enforcement ────────────────────────────────────────────────────
+    if (isEitherBlocked) {
+      toast.error(t("You cannot send messages in this conversation"));
+      return;
+    }
+
     const optimisticMessage: Message = {
       id: Date.now().toString(),
       content: input,
@@ -162,9 +210,16 @@ const ChatDialogue = () => {
     const file = e.target.files?.[0];
     if (!file || !chatId || !user?.id) return;
 
+    // ── Block enforcement ────────────────────────────────────────────────────
+    if (isEitherBlocked) {
+      toast.error(t("You cannot send messages in this conversation"));
+      e.target.value = "";
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const compressed = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
+      const compressed = await compressImage(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
       if (compressed.size > 500 * 1024) {
         toast.error(t("Image must be under 500KB"));
         setIsLoading(false);
@@ -203,9 +258,12 @@ const ChatDialogue = () => {
     }
   };
 
+  const isGroupChat = chatType === "group";
+  const showMenu = !isGroupChat && !!otherUserId;
+
   return (
     <div className="min-h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader onUpgradeClick={() => setIsPlusOpen(true)} />
 
       {/* Chat Header */}
       <div className="bg-card border-b border-border px-4 py-3 flex items-center gap-3">
@@ -215,7 +273,7 @@ const ChatDialogue = () => {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        {chatType === "group" ? (
+        {isGroupChat ? (
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
             <Users className="w-5 h-5 text-primary" />
           </div>
@@ -225,14 +283,14 @@ const ChatDialogue = () => {
         <div className="flex-1">
           <h2 className="font-semibold">{chatName}</h2>
           <p className="text-xs text-muted-foreground">
-            {chatType === "group" ? t("Group") : t("Online")}
+            {isGroupChat ? t("Group") : isBlocked ? t("Blocked") : t("Online")}
           </p>
         </div>
+
         {/* Green "Book Now" pill — top-right for nanny chats only */}
-        {chatType === "nannies" && (
+        {chatType === "nannies" && !isBlocked && (
           <button
             onClick={() => {
-              // Navigate back to chats and trigger booking for this nanny
               navigate(`/chats?book=${chatId}&name=${encodeURIComponent(chatName)}`);
             }}
             className="px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
@@ -241,14 +299,24 @@ const ChatDialogue = () => {
             Book Now
           </button>
         )}
+
         {/* Group: Manage pill */}
-        {chatType === "group" && (
+        {isGroupChat && (
           <button
             onClick={() => navigate(`/chats?manage=${chatId}`)}
             className="px-2.5 py-1 rounded-full bg-brandBlue text-white text-[10px] font-bold"
           >
             Manage
           </button>
+        )}
+
+        {/* ⋯ Menu — report / block for 1:1 chats */}
+        {showMenu && (
+          <ChatHeaderMenu
+            isBlocked={isBlocked}
+            onReport={() => setReportModalOpen(true)}
+            onBlock={() => setBlockModalOpen(true)}
+          />
         )}
       </div>
 
@@ -258,6 +326,25 @@ const ChatDialogue = () => {
           {isNanny
             ? "You are offering nanny services. All bookings are processed through secure escrow. Maintain professional conduct at all times."
             : "Book verified Pet Nannies for safety. We offer secure payments but are not liable for service disputes or losses."}
+        </div>
+      )}
+
+      {/* Block banner — shown when either party has blocked the other */}
+      {isEitherBlocked && (
+        <div className="bg-orange-50 border-b border-orange-200 px-4 py-2.5 flex items-center gap-2">
+          <span className="text-xs text-orange-700 font-medium">
+            {isBlocked
+              ? `You have blocked ${chatName}. Messaging is disabled.`
+              : "You can't reply to this conversation."}
+          </span>
+          {isBlocked && (
+            <button
+              onClick={() => setBlockModalOpen(true)}
+              className="ml-auto text-xs text-brandBlue underline underline-offset-2"
+            >
+              Unblock
+            </button>
+          )}
         </div>
       )}
 
@@ -325,15 +412,22 @@ const ChatDialogue = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
+      {/* Input Area — disabled when blocked */}
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
           <button
             onClick={() => {
-              // Media unlimited for all tiers in chats — no upsell gate
+              if (isEitherBlocked) {
+                toast.error(t("You cannot send messages in this conversation"));
+                return;
+              }
               mediaInputRef.current?.click();
             }}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
+            disabled={isEitherBlocked}
+            className={cn(
+              "p-2 rounded-full transition-colors",
+              isEitherBlocked ? "opacity-40 cursor-not-allowed" : "hover:bg-muted"
+            )}
           >
             <ImageIcon className="w-5 h-5 text-primary" />
           </button>
@@ -349,17 +443,22 @@ const ChatDialogue = () => {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder={t("Type a message...")}
-            className="flex-1 bg-muted rounded-full px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+            onKeyDown={(e) => e.key === "Enter" && !isEitherBlocked && handleSend()}
+            disabled={isEitherBlocked}
+            className={cn(
+              "flex-1 bg-muted rounded-full px-4 py-2.5 outline-none transition-all",
+              isEitherBlocked
+                ? "opacity-50 cursor-not-allowed"
+                : "focus:ring-2 focus:ring-primary/50"
+            )}
           />
 
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isLoading || isEitherBlocked}
             className={cn(
               "p-2 rounded-full transition-all",
-              input.trim() && !isLoading
+              input.trim() && !isLoading && !isEitherBlocked
                 ? "bg-primary text-primary-foreground hover:bg-primary/90"
                 : "bg-muted text-muted-foreground cursor-not-allowed"
             )}
@@ -369,12 +468,46 @@ const ChatDialogue = () => {
         </div>
       </div>
 
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
-      <PremiumFooter
-        isOpen={isPremiumFooterOpen}
-        onClose={() => setIsPremiumFooterOpen(false)}
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
+      <PlusFooter
+        isOpen={isPlusFooterOpen}
+        onClose={() => setIsPlusFooterOpen(false)}
         triggerReason="chat_media"
       />
+
+      {/* Block modal */}
+      {showMenu && (
+        <BlockModal
+          open={blockModalOpen}
+          onClose={() => setBlockModalOpen(false)}
+          targetName={chatName}
+          isBlocked={isBlocked}
+          onBlock={async () => {
+            await block();
+            await refreshBlock();
+          }}
+          onUnblock={async () => {
+            await unblock();
+            await refreshBlock();
+          }}
+        />
+      )}
+
+      {/* Report modal */}
+      {showMenu && otherUserId && (
+        <ReportModal
+          open={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          targetId={otherUserId}
+          targetName={chatName}
+          contextType="chat"
+          contextId={chatId ?? undefined}
+          onAlsoBlock={async () => {
+            await block();
+            await refreshBlock();
+          }}
+        />
+      )}
     </div>
   );
 };

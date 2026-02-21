@@ -221,7 +221,7 @@ export const PetSetupStep = ({ userId, onComplete, onSkip }: PetSetupStepProps) 
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div className="text-center space-y-2 sticky top-0 bg-background/95 backdrop-blur-sm py-4 -mx-6 px-6 z-10">
+      <div className="text-center space-y-2 sticky top-0 bg-background/95  py-4 -mx-6 px-6 z-10">
         <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 mb-2">
           <PawPrint className="w-7 h-7 text-primary" />
         </div>

@@ -227,7 +227,6 @@ export const PetProfileForm = ({
           <Input
             value={formData.name}
             onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder={t("What's your pet's name?")}
             className="h-12 rounded-xl"
           />
         </div>
@@ -239,7 +238,7 @@ export const PetProfileForm = ({
             onValueChange={(value) => setFormData(prev => ({ ...prev, species: value, breed: "" }))}
           >
             <SelectTrigger className="h-12 rounded-xl">
-              <SelectValue placeholder={t("Select species")} />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {SPECIES_LIST.map(option => (
@@ -255,7 +254,6 @@ export const PetProfileForm = ({
             <Input
               value={formData.customSpecies}
               onChange={(e) => setFormData(prev => ({ ...prev, customSpecies: e.target.value }))}
-              placeholder={t("Enter species name")}
               className="h-12 rounded-xl"
             />
           </div>
@@ -269,7 +267,7 @@ export const PetProfileForm = ({
               onValueChange={(value) => setFormData(prev => ({ ...prev, breed: value }))}
             >
               <SelectTrigger className="h-12 rounded-xl">
-                <SelectValue placeholder={t("Select breed")} />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {getBreedOptions().map(breed => (
@@ -289,7 +287,7 @@ export const PetProfileForm = ({
               onValueChange={(value) => setFormData(prev => ({ ...prev, gender: value }))}
             >
               <SelectTrigger className="h-12 rounded-xl">
-                <SelectValue placeholder={t("Select")} />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="Male">{t("Male")}</SelectItem>
@@ -322,7 +320,6 @@ export const PetProfileForm = ({
                 min="0"
                 value={formData.weight || ""}
                 onChange={(e) => setFormData(prev => ({ ...prev, weight: parseFloat(e.target.value) || null }))}
-                placeholder={t("0")}
                 className="h-12 rounded-xl"
               />
               <Select
@@ -395,7 +392,6 @@ export const PetProfileForm = ({
           <Textarea
             value={formData.medications}
             onChange={(e) => setFormData(prev => ({ ...prev, medications: e.target.value }))}
-            placeholder={t("Any current medications or medical conditions...")}
             className="rounded-xl resize-none"
             rows={2}
           />
@@ -410,7 +406,6 @@ export const PetProfileForm = ({
           <Input
             value={formData.microchipId}
             onChange={(e) => validateMicrochip(e.target.value)}
-            placeholder={t("15-digit microchip number")}
             className="h-11 rounded-xl font-mono"
             maxLength={15}
           />
@@ -434,7 +429,6 @@ export const PetProfileForm = ({
           <Textarea
             value={formData.routine}
             onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
-            placeholder={t("Walk times, feeding schedule, etc...")}
             className="rounded-xl resize-none"
             rows={2}
           />
@@ -465,7 +459,6 @@ export const PetProfileForm = ({
           <Input
             value={formData.vetContact}
             onChange={(e) => setFormData(prev => ({ ...prev, vetContact: e.target.value }))}
-            placeholder={t("Vet name and phone number")}
             className="h-11 rounded-xl"
           />
         </div>
@@ -475,7 +468,6 @@ export const PetProfileForm = ({
           <Textarea
             value={formData.bio}
             onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-            placeholder={t("Tell us about your pet's personality...")}
             className="rounded-xl resize-none"
             rows={3}
           />

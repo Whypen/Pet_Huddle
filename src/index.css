@@ -9,111 +9,126 @@
 @tailwind components;
 
 /* ============================================
-   3. Your custom design system variables
+   3. Design system variables (DESIGN_MASTER_SPEC v3.0)
    ============================================ */
 @layer base {
   :root {
-    /* Branded Design System (ui_design_system.md) */
+    /* ── Core brand palette ───────────────────── */
+    --huddle-blue:         #2145CF;   /* canonical — was #2D37C8 */
+    --plus-gold:           #CFAB21;
+    --text-primary:        #424965;
+    --text-subtext:        #4a4a4a;
+    --error-red:           #EF4444;  /* validation/errors ONLY */
+    --success-green:       #10b981;
+    --warning-amber:       #F59E0B;
+    --emergency-warm-red:  #F97316;  /* emergency broadcasts ONLY */
+    --bg-white:            #FFFFFF;
+    --bg-muted:            #F3F4F6;
+    --bg-blue-soft:        #EBF5FF;
+    --bg-yellow-soft:      #FFF9E6;
 
-    /* Core Palette */
-    --background: 0 0% 100%;
-    --foreground: 228 21% 33%; /* #424965 */
+    /* ── Glass depth tokens (DESIGN_MASTER_SPEC §1.2) ─ */
+    --glass-bg-e2:         rgba(255, 255, 255, 0.80);
+    --glass-bg-e3:         rgba(255, 255, 255, 0.88);
+    --glass-border:        rgba(255, 255, 255, 0.30);
+    --glass-border-e3:     rgba(255, 255, 255, 0.40);
+    --glass-blur-e2:       20px;
+    --glass-blur-e3:       24px;
 
-    /* Primary - Huddle Blue #2145CF */
-    --primary: 228 73% 47%;
-    --primary-foreground: 0 0% 100%;
-    --primary-soft: 228 73% 95%;
+    /* ── Neumorphic tokens (DESIGN_MASTER_SPEC §2.2) ─ */
+    --neu-light:           #fafafa;
+    --neu-shadow:          #e8e8e8;
 
-    /* Accent - subtle brand tint */
-    --accent: 228 73% 47%;
-    --accent-foreground: 0 0% 100%;
-    --accent-soft: 228 73% 95%;
+    /* ── Elevation shadows (DESIGN_MASTER_SPEC §1.1) ─ */
+    --shadow-e1:   0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --shadow-e2:   0 8px 32px rgba(0,0,0,0.12);
+    --shadow-e3:   0 16px 48px rgba(0,0,0,0.16), 0 0 1px rgba(0,0,0,0.08);
 
-    /* Warning/Gold Badge - Premium Gold #CFAB21 */
-    --warning: 48 73% 47%;
-    --warning-foreground: 228 21% 33%;
+    /* ── shadcn/Radix compatible tokens ──────── */
+    --background:               0 0% 100%;
+    --foreground:               228 21% 33%;  /* #424965 */
+    --primary:                  228 73% 47%;  /* #2145CF */
+    --primary-foreground:       0 0% 100%;
+    --primary-soft:             228 73% 95%;
+    --accent:                   228 73% 47%;
+    --accent-foreground:        0 0% 100%;
+    --accent-soft:              228 73% 95%;
+    --warning:                  48 73% 47%;   /* #CFAB21 */
+    --warning-foreground:       228 21% 33%;
+    --card:                     0 0% 100%;
+    --card-foreground:          228 21% 33%;
+    --card-elevated:            0 0% 100%;
+    --secondary:                220 20% 97%;
+    --secondary-foreground:     228 21% 33%;
+    --muted:                    220 20% 97%;
+    --muted-foreground:         0 0% 29%;     /* #4a4a4a */
+    --popover:                  0 0% 100%;
+    --popover-foreground:       228 21% 33%;
+    --destructive:              0 84% 60%;    /* #EF4444 */
+    --destructive-foreground:   0 0% 100%;
+    --border:                   220 13% 90%;
+    --input:                    0 0% 100%;
+    --ring:                     228 73% 47%;
+    --success:                  142 71% 45%;
+    --info:                     228 73% 47%;
 
-    /* Surface Colors */
-    --card: 0 0% 100%;
-    --card-foreground: 228 21% 33%;
-    --card-elevated: 0 0% 100%;
+    /* ── Radius tokens ───────────────────────── */
+    --radius:       0.75rem;  /* 12px — card */
+    --radius-sm:    0.5rem;   /* 8px  — btn/input */
+    --radius-lg:    1rem;     /* 16px — glass */
+    --radius-modal: 1.25rem;  /* 20px — active modal */
 
-    /* Muted/Secondary */
-    --secondary: 220 20% 97%;
-    --secondary-foreground: 228 21% 33%;
-    --muted: 220 20% 97%;
-    --muted-foreground: 0 0% 29%; /* #4a4a4a */
+    /* ── Typography tokens ───────────────────── */
+    --font-body:    16px;
+    --font-label:   14px;
+    --font-helper:  12px;
 
-    /* Popover */
-    --popover: 0 0% 100%;
-    --popover-foreground: 228 21% 33%;
+    /* ── 8pt spacing grid (DESIGN_MASTER_SPEC §5) */
+    --space-1:  8px;
+    --space-2:  16px;
+    --space-3:  24px;
+    --space-4:  32px;
+    --space-5:  40px;
+    --space-6:  48px;
 
-    /* Destructive - Validation/Error #EF4444 */
-    --destructive: 0 84% 60%; /* #EF4444 */
-    --destructive-foreground: 0 0% 100%;
+    /* ── Border ──────────────────────────────── */
+    --border-thin:  1px;
 
-    /* Borders & Input */
-    --border: 220 13% 90%;
-    --input: 0 0% 100%;
-    --ring: 228 73% 47%;
+    /* ── Legacy shadows (kept for compatibility) */
+    --shadow-card:      0 2px 12px -2px hsl(220 20% 20% / 0.06);
+    --shadow-elevated:  0 8px 30px -4px hsl(220 20% 20% / 0.10);
+    --shadow-soft:      0 4px 20px -4px hsl(207 60% 50% / 0.15);
 
-    /* Radius */
-    --radius: 1rem;
-    --radius-sm: 0.75rem;
-    --radius-lg: 1.25rem;
+    /* ── Navigation ─────────────────────────── */
+    --nav-height:       5rem;
+    --nav-background:   0 0% 100%;
 
-    /* Typography Tokens (pt) */
-    --font-pt14: 14px;
-    --font-pt12: 12px;
-
-    /* Spacing Tokens */
-    --space-1: 4px;
-    --space-2: 8px;
-    --space-3: 12px;
-    --space-4: 16px;
-    --space-6: 24px;
-    --space-8: 32px;
-
-    /* Border Tokens */
-    --border-thin: 1px;
-    
-    /* Shadows */
-    --shadow-card: 0 2px 12px -2px hsl(220 20% 20% / 0.06);
-    --shadow-elevated: 0 8px 30px -4px hsl(220 20% 20% / 0.10);
-    --shadow-soft: 0 4px 20px -4px hsl(207 60% 50% / 0.15);
-    
-    /* Navigation */
-    --nav-height: 5rem;
-    --nav-background: 0 0% 100%;
-
-    /* Sidebar */
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 228 21% 33%;
-    --sidebar-primary: 228 73% 47%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 97%;
-    --sidebar-accent-foreground: 228 21% 33%;
-    --sidebar-border: 220 13% 90%;
-    --sidebar-ring: 228 73% 47%;
-
-    /* Status Colors */
-    --success: 142 71% 45%;
-    --info: 228 73% 47%;
+    /* ── Sidebar ─────────────────────────────── */
+    --sidebar-background:           0 0% 100%;
+    --sidebar-foreground:           228 21% 33%;
+    --sidebar-primary:              228 73% 47%;
+    --sidebar-primary-foreground:   0 0% 100%;
+    --sidebar-accent:               220 20% 97%;
+    --sidebar-accent-foreground:    228 21% 33%;
+    --sidebar-border:               220 13% 90%;
+    --sidebar-ring:                 228 73% 47%;
   }
 
+  /* ── Base element styles ─────────────────────── */
   body {
-    font-size: var(--font-pt14);
-    @apply font-sans text-brandText bg-background;
+    font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: var(--font-body);
+    @apply text-brandText bg-background;
   }
 
-  h1, h2, h3 {
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
     @apply text-brandText;
   }
 
   .dark {
-    /* dark mode overrides — keep as-is */
     --background: 220 20% 10%;
-    /* ... rest unchanged ... */
+    /* dark mode — minimal overrides, keep as-is */
   }
 }
 
@@ -123,9 +138,11 @@
 @tailwind utilities;
 
 /* ============================================
-   6. Custom utilities & scrollbar styles
+   5. Design system utilities
    ============================================ */
 @layer utilities {
+
+  /* ── Scrollbar utilities ──────────────────── */
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -133,11 +150,281 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
-  
-  /* Styled visible scrollbar */
   .scrollbar-visible {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--primary) / 0.3) transparent;
   }
-  /* ... rest of your utilities unchanged ... */
+
+  /* ── Elevation utilities (DESIGN_MASTER_SPEC §1.1) ── */
+
+  /* E0: Base page surface — flat, no shadow */
+  .surface-e0 {
+    background: #FFFFFF;
+  }
+
+  /* E1: Content cards */
+  .card-e1 {
+    background: #FFFFFF;
+    box-shadow: var(--shadow-e1);
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.04);
+  }
+
+  /* E2: Glass overlay (bottom sheets, modals, composer) */
+  .glass-e2 {
+    background: var(--glass-bg-e2);
+    backdrop-filter: blur(var(--glass-blur-e2));
+    -webkit-backdrop-filter: blur(var(--glass-blur-e2));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-e2);
+    border-radius: 16px;
+  }
+
+  /* E2 fallback when backdrop-filter unsupported */
+  @supports not (backdrop-filter: blur(1px)) {
+    .glass-e2 {
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+    }
+  }
+
+  /* E3: Active modal (critical confirmations, payment, KYC) */
+  .glass-e3 {
+    background: var(--glass-bg-e3);
+    backdrop-filter: blur(var(--glass-blur-e3));
+    -webkit-backdrop-filter: blur(var(--glass-blur-e3));
+    border: 1px solid var(--glass-border-e3);
+    box-shadow: var(--shadow-e3);
+    border-radius: 20px;
+  }
+
+  @supports not (backdrop-filter: blur(1px)) {
+    .glass-e3 {
+      background: rgba(255, 255, 255, 0.97);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.20);
+    }
+  }
+
+  /* Glass contrast scrim — REQUIRED when glass overlaps media/maps/photos */
+  .glass-scrim {
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-scrim::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(255,255,255,0.55) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+    border-radius: inherit;
+  }
+  .glass-scrim > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Neumorphic utilities (DESIGN_MASTER_SPEC §2) ── */
+  /* ONLY for: CTA buttons, icon buttons, toggle chips, FAB, segmented controls */
+
+  .neu-raised {
+    background: linear-gradient(145deg, #ffffff, #f0f0f0);
+    box-shadow: 6px 6px 12px rgba(0,0,0,0.08), -4px -4px 8px rgba(255,255,255,0.8);
+    transition: transform 150ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+  }
+  .neu-raised:active {
+    box-shadow: inset 3px 3px 6px rgba(0,0,0,0.10),
+                inset -2px -2px 4px rgba(255,255,255,0.60);
+    transform: scale(0.98);
+  }
+  .neu-raised:disabled {
+    background: #f3f4f6;
+    box-shadow: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Primary CTA — Huddle Blue */
+  .neu-primary {
+    background: linear-gradient(145deg, #2349dd, #1d3bb5);
+    box-shadow: 6px 6px 12px rgba(33,69,207,0.25), -4px -4px 8px rgba(60,100,255,0.4);
+    color: white;
+    transition: transform 150ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+  }
+  .neu-primary:active {
+    box-shadow: inset 3px 3px 6px rgba(0,0,0,0.12),
+                inset -2px -2px 4px rgba(255,255,255,0.25);
+    transform: scale(0.98);
+  }
+  .neu-primary:disabled {
+    background: #f3f4f6;
+    box-shadow: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+    color: #9ca3af;
+  }
+
+  /* Gold tier CTA */
+  .neu-gold {
+    background: linear-gradient(145deg, #d9b733, #c29e1d);
+    box-shadow: 6px 6px 12px rgba(207,171,33,0.25), -4px -4px 8px rgba(240,200,80,0.4);
+    color: #1f2937;
+    transition: transform 150ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+  }
+  .neu-gold:active {
+    box-shadow: inset 3px 3px 6px rgba(0,0,0,0.10),
+                inset -2px -2px 4px rgba(255,255,255,0.30);
+    transform: scale(0.98);
+  }
+  .neu-gold:disabled {
+    background: #f3f4f6;
+    box-shadow: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Icon button (44×44px circle) */
+  .neu-icon {
+    background: linear-gradient(145deg, #fafafa, #f0f0f0);
+    box-shadow: 4px 4px 8px rgba(0,0,0,0.06), -3px -3px 6px rgba(255,255,255,0.8);
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 150ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+    flex-shrink: 0;
+  }
+  .neu-icon:active {
+    box-shadow: inset 3px 3px 6px rgba(0,0,0,0.10),
+                inset -2px -2px 4px rgba(255,255,255,0.60);
+    transform: scale(0.98);
+  }
+  .neu-icon:disabled {
+    box-shadow: none;
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Toggle chip (filter pills, tabs) */
+  .neu-chip {
+    background: linear-gradient(145deg, #ffffff, #f0f0f0);
+    box-shadow: 4px 4px 8px rgba(0,0,0,0.06), -3px -3px 6px rgba(255,255,255,0.8);
+    border-radius: 9999px;
+    transition: transform 150ms cubic-bezier(0.4,0,0.2,1),
+                box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+  }
+  .neu-chip.active,
+  .neu-chip[data-active="true"] {
+    background: linear-gradient(145deg, #2349dd, #1d3bb5);
+    box-shadow: inset 2px 2px 4px rgba(0,0,0,0.12),
+                inset -1px -1px 2px rgba(255,255,255,0.10);
+    color: white;
+  }
+  .neu-chip:active {
+    transform: scale(0.97);
+  }
+
+  /* ── Focus ring (WCAG 2.1 AA) ─────────────── */
+  .focusable:focus-visible {
+    outline: 2px solid #2145CF;
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+
+  /* Apply focus ring to interactive elements globally */
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid #2145CF;
+    outline-offset: 2px;
+  }
+
+  /* ── Skeleton shimmer ────────────────────── */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: #f3f4f6;
+  }
+  .skeleton-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255,255,255,0.6) 50%,
+      transparent 100%
+    );
+    animation: skeleton-shimmer 1.5s linear infinite;
+  }
+
+  /* ── Safe area bottom ─────────────────────── */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pb-nav-safe {
+    padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ── Emergency warm-red accent ───────────── */
+  .text-emergency { color: #F97316; }
+  .bg-emergency { background-color: #F97316; }
+  .border-emergency { border-color: #F97316; }
+
+  /* ── Typography helpers (display font) ──── */
+  .font-display {
+    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+  }
+  .text-hero-display {
+    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-size: 60px;
+    line-height: 1.1;
+    font-weight: 600;
+  }
+  .text-hero-sm-display {
+    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-size: 44px;
+    line-height: 1.1;
+    font-weight: 600;
+  }
+}
+
+/* ============================================
+   6. Reduced motion (DESIGN_MASTER_SPEC §12.4)
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .glass-e2,
+  .glass-e3 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .neu-raised:active,
+  .neu-primary:active,
+  .neu-gold:active,
+  .neu-icon:active {
+    transition: none;
+  }
+
+  .skeleton-shimmer::after {
+    animation: none;
+  }
 }

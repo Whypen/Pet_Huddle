@@ -5,6 +5,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { humanizeError } from "@/lib/humanizeError";
+
+type StatusFilter = "all" | "pending" | "verified" | "unverified";
 
 type VerificationUpload = {
   id: string;
@@ -16,6 +19,10 @@ type VerificationUpload = {
   legal_name: string | null;
   status: string;
   uploaded_at: string;
+  social_id: string | null;
+  email: string | null;
+  verification_status: string | null;
+  verification_comment: string | null;
 };
 
 const AdminKYCReview = () => {
@@ -26,23 +33,62 @@ const AdminKYCReview = () => {
   const [docUrl, setDocUrl] = useState<string | null>(null);
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const isAdmin = profile?.is_admin === true;
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const loadUploads = useCallback(async () => {
-    const { data, error } = await supabase
+    let query = supabase
       .from("verification_uploads")
-      .select("id, user_id, document_type, document_url, selfie_url, country, legal_name, status, uploaded_at")
-      .eq("status", "pending")
+      .select(
+        "id, user_id, document_type, document_url, selfie_url, country, legal_name, status, uploaded_at, profiles!verification_uploads_user_id_fkey(social_id, email, verification_status, verification_comment)"
+      )
       .order("uploaded_at", { ascending: false });
+
+    if (debouncedSearch) {
+      query = query.or(`profiles.social_id.ilike.%${debouncedSearch}%,profiles.email.ilike.%${debouncedSearch}%`);
+    }
+
+    if (statusFilter !== "all") {
+      query = query.eq("status", statusFilter);
+    }
+
+    const { data, error } = await query;
     if (error) {
-      toast.error(error.message);
+      toast.error(humanizeError(error));
       return;
     }
-    setUploads((data || []) as VerificationUpload[]);
-    if (!selected && data && data.length) {
-      setSelected(data[0] as VerificationUpload);
+    const mapped = (data || []).map((row: Record<string, unknown>) => {
+      const profileRow = row.profiles as Record<string, unknown> | null;
+      return {
+        id: row.id as string,
+        user_id: row.user_id as string,
+        document_type: row.document_type as string,
+        document_url: row.document_url as string,
+        selfie_url: row.selfie_url as string | null,
+        country: row.country as string | null,
+        legal_name: row.legal_name as string | null,
+        status: row.status as string,
+        uploaded_at: row.uploaded_at as string,
+        social_id: (profileRow?.social_id as string | null) ?? null,
+        email: (profileRow?.email as string | null) ?? null,
+        verification_status: (profileRow?.verification_status as string | null) ?? null,
+        verification_comment: (profileRow?.verification_comment as string | null) ?? null,
+      };
+    });
+    setUploads(mapped as VerificationUpload[]);
+    if (!selected && mapped.length) {
+      setSelected(mapped[0] as VerificationUpload);
     }
-  }, [selected]);
+  }, [debouncedSearch, selected, statusFilter]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -64,18 +110,23 @@ const AdminKYCReview = () => {
     void loadSigned();
   }, [selected]);
 
-  const handleReview = async (action: "approve" | "reject") => {
+  const handleReview = async (action: "verify" | "unverify") => {
     if (!selected) return;
-    const { error } = await supabase.rpc("handle_identity_review", {
-      target_user_id: selected.user_id,
-      action,
-      notes,
-    });
-    if (error) {
-      toast.error(error.message);
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !sessionData.session) {
+      toast.error("Please sign in again.");
       return;
     }
-    toast.success(action === "approve" ? "Approved" : "Rejected");
+    const { error } = await supabase.rpc("admin_set_verification_status", {
+      p_user_id: selected.user_id,
+      p_decision: action === "verify" ? "verified" : "unverified",
+      p_comment: notes || null,
+    });
+    if (error) {
+      toast.error(humanizeError(error));
+      return;
+    }
+    toast.success(action === "verify" ? "Verified" : "Unverified");
     setSelected(null);
     setDocUrl(null);
     setSelfieUrl(null);
@@ -86,7 +137,7 @@ const AdminKYCReview = () => {
   const selectedLabel = useMemo(
     () =>
       selected
-        ? `${selected.legal_name || "Unknown"} (${selected.document_type})`
+        ? `${selected.social_id || "unknown"} (${selected.document_type})`
         : "Select a submission",
     [selected],
   );
@@ -107,11 +158,28 @@ const AdminKYCReview = () => {
   return (
     <div className="min-h-screen bg-background px-6 py-6">
       <h1 className="text-xl font-bold text-brandText">KYC Review</h1>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-10"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="all">All</option>
+          <option value="pending">pending</option>
+          <option value="verified">verified</option>
+          <option value="unverified">unverified</option>
+        </select>
+      </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px,1fr]">
         <div className="space-y-2">
-          <div className="text-xs text-muted-foreground">Pending Submissions</div>
+          <div className="text-xs text-muted-foreground">Submissions</div>
           <div className="rounded-xl border border-border bg-white">
-            {uploads.length === 0 && <div className="p-4 text-xs text-muted-foreground">No pending items</div>}
+            {uploads.length === 0 && <div className="p-4 text-xs text-muted-foreground">No submissions</div>}
             {uploads.map((item) => (
               <button
                 key={item.id}
@@ -120,8 +188,9 @@ const AdminKYCReview = () => {
                 }`}
                 onClick={() => setSelected(item)}
               >
-                <div className="text-sm font-medium text-brandText">{item.legal_name || item.user_id}</div>
-                <div className="text-xs text-muted-foreground">{item.document_type}</div>
+                <div className="text-sm font-medium text-brandText">{item.social_id || "unknown"}</div>
+                <div className="text-xs text-muted-foreground">{item.legal_name || "—"}</div>
+                <div className="text-xs text-muted-foreground">{item.document_type} · {item.status}</div>
               </button>
             ))}
           </div>
@@ -150,15 +219,14 @@ const AdminKYCReview = () => {
             <Input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Reviewer notes (optional)"
-              className="h-9"
+              className="h-10"
             />
             <div className="flex gap-2">
-              <Button className="w-full h-10" onClick={() => handleReview("approve")} disabled={!selected}>
-                Approve
+              <Button className="w-full h-10" onClick={() => handleReview("verify")} disabled={!selected}>
+                Verify
               </Button>
-              <Button variant="destructive" className="w-full h-10" onClick={() => handleReview("reject")} disabled={!selected}>
-                Reject
+              <Button variant="destructive" className="w-full h-10" onClick={() => handleReview("unverify")} disabled={!selected}>
+                Unverify
               </Button>
             </div>
           </div>

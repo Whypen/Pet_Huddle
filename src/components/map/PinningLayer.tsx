@@ -178,7 +178,7 @@ const PinningLayer = ({
 
     setIsLoading(true);
     setShowManualInput(false);
-    console.log(`[PinningLayer] moveEnd — center: lat=${lat.toFixed(5)}, lng=${lng.toFixed(5)}`);
+    console.debug(`[PinningLayer] moveEnd — center: lat=${lat.toFixed(5)}, lng=${lng.toFixed(5)}`);
 
     // Get mapbox access token from the map instance
     const token = mapboxgl.accessToken as string;
@@ -186,7 +186,7 @@ const PinningLayer = ({
     // Nuclear baseline: disable geocoding + POI calls.
     const addr = "TEST LOCATION";
     const pois: NearbyPOI[] = [];
-    console.log(`[PinningLayer] Baseline address="${addr}", geocoding disabled`);
+    console.debug(`[PinningLayer] Baseline address="${addr}", geocoding disabled`);
 
     // Turf.js distance from device GPS to center pin
     let dist = 0;
@@ -248,7 +248,7 @@ const PinningLayer = ({
       <div className="absolute top-16 left-4 right-4 z-[1100]">
         {showManualInput && !isLoading ? (
           /* Manual address input fallback — shown when reverse geocoding times out */
-          <div className="bg-white/95 backdrop-blur-sm rounded-xl px-3 py-2 shadow-md">
+          <div className="bg-white/95  rounded-xl px-3 py-2 shadow-md">
             <p className="text-[10px] text-muted-foreground mb-1.5">
               Address lookup timed out. Type an address manually:
             </p>
@@ -258,21 +258,20 @@ const PinningLayer = ({
                 value={manualQuery}
                 onChange={(e) => setManualQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void handleManualSearch(); }}
-                placeholder="e.g. Central, Hong Kong"
-                className="flex-1 h-9 rounded-lg border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brandBlue/30"
+                className="flex-1 h-10 rounded-lg border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brandBlue/30"
                 autoFocus
               />
               <button
                 onClick={() => void handleManualSearch()}
                 disabled={isSearching || !manualQuery.trim()}
-                className="h-9 px-3 rounded-lg bg-brandBlue text-white text-sm font-medium flex items-center gap-1 disabled:opacity-50"
+                className="h-10 px-3 rounded-lg bg-brandBlue text-white text-sm font-medium flex items-center gap-1 disabled:opacity-50"
               >
                 {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
               </button>
             </div>
           </div>
         ) : (
-          <div className="bg-white/95 backdrop-blur-sm rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between">
+          <div className="bg-white/95  rounded-xl px-4 py-2.5 shadow-md flex items-center justify-between">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-brandText truncate">
                 {isLoading ? (
@@ -297,7 +296,7 @@ const PinningLayer = ({
             {nearbyPois.slice(0, 5).map((poi) => (
               <span
                 key={poi.id}
-                className="text-[10px] bg-white/90 backdrop-blur-sm px-2 py-1 rounded-full shadow-sm text-muted-foreground"
+                className="text-[10px] bg-white/90  px-2 py-1 rounded-full shadow-sm text-muted-foreground"
               >
                 {poi.type === "parking" ? "🅿️" : "🚌"} {poi.name} ({poi.distanceM}m)
               </span>

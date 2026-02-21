@@ -34,7 +34,7 @@ const ResetPassword = () => {
       <h1 className="text-xl font-bold text-brandText">Reset Password</h1>
       <p className="text-sm text-muted-foreground">Enter your email to receive a reset link.</p>
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">
-        <Input type="email" className={`h-9 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
+        <Input type="email" className={`h-10 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
         {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
         <Button type="submit" className="w-full h-10" disabled={!isValid}>Send reset link</Button>
       </form>

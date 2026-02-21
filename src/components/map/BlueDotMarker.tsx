@@ -31,7 +31,7 @@ const BlueDotMarker = ({ map, coords, displayName, isInvisible = false }: BlueDo
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
 
-    console.log("[MARKER_MOUNT]", { type: "gps", hasMap: true });
+    console.debug("[MARKER_MOUNT]", { type: "gps", hasMap: true });
 
     return () => {
       map.off("move", syncToMap);
@@ -56,8 +56,8 @@ const BlueDotMarker = ({ map, coords, displayName, isInvisible = false }: BlueDo
         opacity: isInvisible ? 0.5 : 1,
       }}
     >
-      <div className="h-12 w-12 rounded-full bg-[#2145CF] shadow-lg flex items-center justify-center">
-        <div className="h-9 w-9 rounded-full bg-[#A6D539] border-[3px] border-white text-white font-bold text-sm flex items-center justify-center">
+      <div className="h-12 w-12 rounded-full bg-brandBlue shadow-lg flex items-center justify-center">
+        <div className="h-10 w-10 rounded-full bg-[#A6D539] border-[3px] border-white text-white font-bold text-sm flex items-center justify-center">
           {initial}
         </div>
       </div>

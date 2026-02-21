@@ -144,6 +144,7 @@ using (id = auth.uid())
 with check (id = auth.uid());
 
 -- 4) Atomic RPC: thread + map_alert in one transaction
+drop function if exists public.create_alert_thread_and_pin(jsonb);
 create or replace function public.create_alert_thread_and_pin(payload jsonb)
 returns table(thread_id uuid, alert_id uuid)
 language plpgsql

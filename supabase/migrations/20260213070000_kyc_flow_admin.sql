@@ -156,8 +156,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_user UUID := auth.uid();
+  v_user UUID;
 BEGIN
+  v_user := auth.uid();
   IF v_user IS NULL THEN
     RAISE EXCEPTION 'Not authenticated';
   END IF;

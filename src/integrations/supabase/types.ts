@@ -330,11 +330,13 @@ export type Database = {
           has_car: boolean | null
           height: number | null
           id: string
-          is_verified: boolean | null
           languages: string[] | null
           legal_name: string | null
           location_name: string | null
           major: string | null
+          tier: string | null
+          effective_tier: string | null
+          last_active_at: string | null
           onboarding_completed: boolean | null
           owns_pets: boolean | null
           pet_experience: string[] | null
@@ -351,6 +353,8 @@ export type Database = {
           social_availability: boolean | null
           updated_at: string | null
           user_role: string | null
+          verification_comment: string | null
+          verification_status: string | null
           weight: number | null
           weight_unit: string | null
         }
@@ -368,11 +372,13 @@ export type Database = {
           has_car?: boolean | null
           height?: number | null
           id: string
-          is_verified?: boolean | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
           major?: string | null
+          tier?: string | null
+          effective_tier?: string | null
+          last_active_at?: string | null
           onboarding_completed?: boolean | null
           owns_pets?: boolean | null
           pet_experience?: string[] | null
@@ -389,6 +395,8 @@ export type Database = {
           social_availability?: boolean | null
           updated_at?: string | null
           user_role?: string | null
+          verification_comment?: string | null
+          verification_status?: string | null
           weight?: number | null
           weight_unit?: string | null
         }
@@ -406,11 +414,13 @@ export type Database = {
           has_car?: boolean | null
           height?: number | null
           id?: string
-          is_verified?: boolean | null
           languages?: string[] | null
           legal_name?: string | null
           location_name?: string | null
           major?: string | null
+          tier?: string | null
+          effective_tier?: string | null
+          last_active_at?: string | null
           onboarding_completed?: boolean | null
           owns_pets?: boolean | null
           pet_experience?: string[] | null
@@ -427,6 +437,8 @@ export type Database = {
           social_availability?: boolean | null
           updated_at?: string | null
           user_role?: string | null
+          verification_comment?: string | null
+          verification_status?: string | null
           weight?: number | null
           weight_unit?: string | null
         }
@@ -449,7 +461,6 @@ export type Database = {
           has_car: boolean | null
           height: number | null
           id: string | null
-          is_verified: boolean | null
           languages: string[] | null
           location_name: string | null
           major: string | null
@@ -459,6 +470,7 @@ export type Database = {
           school: string | null
           social_availability: boolean | null
           user_role: string | null
+          verification_status: string | null
           weight: number | null
           weight_unit: string | null
         }
@@ -476,7 +488,6 @@ export type Database = {
           has_car?: boolean | null
           height?: never
           id?: string | null
-          is_verified?: boolean | null
           languages?: string[] | null
           location_name?: string | null
           major?: never
@@ -486,6 +497,7 @@ export type Database = {
           school?: never
           social_availability?: boolean | null
           user_role?: string | null
+          verification_status?: never
           weight?: never
           weight_unit?: string | null
         }
@@ -503,7 +515,6 @@ export type Database = {
           has_car?: boolean | null
           height?: never
           id?: string | null
-          is_verified?: boolean | null
           languages?: string[] | null
           location_name?: string | null
           major?: never
@@ -513,6 +524,7 @@ export type Database = {
           school?: never
           social_availability?: boolean | null
           user_role?: string | null
+          verification_status?: never
           weight?: never
           weight_unit?: string | null
         }

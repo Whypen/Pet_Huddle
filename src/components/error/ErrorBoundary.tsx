@@ -39,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     // In production, you would send this to an error tracking service
-    // Example: Sentry.captureException(error, { extra: errorInfo });
+    // Example: Sentry.reportException(error, { extra: errorInfo });
   }
 
   handleRetry = () => {

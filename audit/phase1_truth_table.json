@@ -1,0 +1,501 @@
+{
+  "generated_at": "2026-02-18T16:21:11.132Z",
+  "routes": [
+    {
+      "path": "/auth",
+      "component": "Auth",
+      "componentFile": "src/pages/Auth.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/reset-password",
+      "component": "ResetPassword",
+      "componentFile": "src/pages/ResetPassword.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/auth/callback",
+      "component": "AuthCallback",
+      "componentFile": "src/pages/AuthCallback.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/signup/dob",
+      "component": "SignupDob",
+      "componentFile": "src/pages/signup/SignupDob.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/signup/name",
+      "component": "SignupName",
+      "componentFile": "src/pages/signup/SignupName.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/signup/credentials",
+      "component": "SignupCredentials",
+      "componentFile": "src/pages/signup/SignupCredentials.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": [
+        "profiles"
+      ]
+    },
+    {
+      "path": "/signup/verify",
+      "component": "SignupVerify",
+      "componentFile": "src/pages/signup/SignupVerify.tsx",
+      "specSection": "2.1 Social ID System",
+      "membershipFields": [],
+      "dbTables": [
+        "profiles"
+      ]
+    },
+    {
+      "path": "/onboarding",
+      "component": "Unknown",
+      "componentFile": null,
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/",
+      "component": "Index",
+      "componentFile": "src/pages/Index.tsx",
+      "specSection": "5. Social Discovery",
+      "membershipFields": [],
+      "dbTables": [
+        "pets"
+      ]
+    },
+    {
+      "path": "/social",
+      "component": "Social",
+      "componentFile": "src/pages/Social.tsx",
+      "specSection": "5. Social Discovery",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/threads",
+      "component": "Social",
+      "componentFile": "src/pages/Social.tsx",
+      "specSection": "7. Threads (Community Forum)",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/threads/:threadId",
+      "component": "Social",
+      "componentFile": "src/pages/Social.tsx",
+      "specSection": "7. Threads (Community Forum)",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/chats",
+      "component": "Chats",
+      "componentFile": "src/pages/Chats.tsx",
+      "specSection": "8. Chat Safety & Moderation",
+      "membershipFields": [
+        "membership_tier"
+      ],
+      "dbTables": [
+        "pets",
+        "chat_room_members",
+        "waves",
+        "profiles",
+        "social_album",
+        "notices",
+        "chat_rooms",
+        "notifications"
+      ]
+    },
+    {
+      "path": "/chat-dialogue",
+      "component": "ChatDialogue",
+      "componentFile": "src/pages/ChatDialogue.tsx",
+      "specSection": "8. Chat Safety & Moderation",
+      "membershipFields": [],
+      "dbTables": [
+        "chat_room_members",
+        "chat_messages",
+        "notices"
+      ]
+    },
+    {
+      "path": "/ai-vet",
+      "component": "AIVet",
+      "componentFile": "src/pages/AIVet.tsx",
+      "specSection": "4.1 Gemini AI Vet",
+      "membershipFields": [
+        "membership_tier"
+      ],
+      "dbTables": [
+        "pets"
+      ]
+    },
+    {
+      "path": "/map",
+      "component": "MapPage",
+      "componentFile": "src/pages/Map.tsx",
+      "specSection": "6. Broadcast Mesh Network",
+      "membershipFields": [
+        "membership_tier"
+      ],
+      "dbTables": [
+        "pins",
+        "profiles",
+        "poi_locations"
+      ]
+    },
+    {
+      "path": "/notifications",
+      "component": "Notifications",
+      "componentFile": "src/pages/Notifications.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/edit-profile",
+      "component": "EditProfile",
+      "componentFile": "src/pages/EditProfile.tsx",
+      "specSection": "9.1 Core Tables (profiles/pets)",
+      "membershipFields": [],
+      "dbTables": [
+        "social_album",
+        "pets",
+        "avatars",
+        "profiles"
+      ]
+    },
+    {
+      "path": "/edit-pet-profile",
+      "component": "EditPetProfile",
+      "componentFile": "src/pages/EditPetProfile.tsx",
+      "specSection": "9.1 Core Tables (profiles/pets)",
+      "membershipFields": [],
+      "dbTables": [
+        "pets"
+      ]
+    },
+    {
+      "path": "/pet-details",
+      "component": "PetDetails",
+      "componentFile": "src/pages/PetDetails.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": [
+        "pets"
+      ]
+    },
+    {
+      "path": "/settings",
+      "component": "Settings",
+      "componentFile": "src/pages/Settings.tsx",
+      "specSection": "4.2 Nanny Marketplace Escrow",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/account-settings",
+      "component": "AccountSettings",
+      "componentFile": "src/pages/AccountSettings.tsx",
+      "specSection": "9.1 Core Tables (profiles/pets)",
+      "membershipFields": [
+        "membership_tier"
+      ],
+      "dbTables": [
+        "profiles"
+      ]
+    },
+    {
+      "path": "/subscription",
+      "component": "Unknown",
+      "componentFile": null,
+      "specSection": "3. Membership Economy",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/premium",
+      "component": "Premium",
+      "componentFile": "src/pages/Premium.tsx",
+      "specSection": "3. Membership Economy",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/manage-subscription",
+      "component": "Unknown",
+      "componentFile": null,
+      "specSection": "3. Membership Economy",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/verify-identity",
+      "component": "VerifyIdentity",
+      "componentFile": "src/pages/auth/verify/VerifyIdentity.tsx",
+      "specSection": "2.2 Identity Verification (KYC)",
+      "membershipFields": [],
+      "dbTables": [
+        "identity_verification",
+        "profiles"
+      ]
+    },
+    {
+      "path": "/privacy",
+      "component": "Privacy",
+      "componentFile": "src/pages/Privacy.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/terms",
+      "component": "Terms",
+      "componentFile": "src/pages/Terms.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": []
+    },
+    {
+      "path": "/admin",
+      "component": "Admin",
+      "componentFile": "src/pages/Admin.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": [
+        "identity_verification"
+      ]
+    },
+    {
+      "path": "/admin/verifications",
+      "component": "AdminKYCReview",
+      "componentFile": "src/pages/admin/AdminKYCReview.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": [
+        "verification_uploads",
+        "identity_verification"
+      ]
+    },
+    {
+      "path": "/admin/control-center",
+      "component": "AdminDisputes",
+      "componentFile": "src/screens/AdminDisputes.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": [
+        "marketplace_bookings"
+      ]
+    },
+    {
+      "path": "/admin/reports",
+      "component": "AdminReports",
+      "componentFile": "src/pages/admin/AdminReports.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": [
+        "user_reports"
+      ]
+    },
+    {
+      "path": "*",
+      "component": "NotFound",
+      "componentFile": "src/pages/NotFound.tsx",
+      "specSection": "1. Product Definition",
+      "membershipFields": [],
+      "dbTables": []
+    }
+  ],
+  "routeDefinitions": [
+    {
+      "path": "/auth",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/reset-password",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/auth/callback",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/signup/dob",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/signup/name",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/signup/credentials",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/signup/verify",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/onboarding",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/social",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/threads",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/threads/:threadId",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/chats",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/chat-dialogue",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/ai-vet",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/map",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/notifications",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/edit-profile",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/edit-pet-profile",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/pet-details",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/settings",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/account-settings",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/subscription",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/premium",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/manage-subscription",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/verify-identity",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/privacy",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/terms",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/admin",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/admin/verifications",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/admin/control-center",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "/admin/reports",
+      "file": "src/App.tsx"
+    },
+    {
+      "path": "*",
+      "file": "src/App.tsx"
+    }
+  ],
+  "requiredRoutes": [
+    "/auth",
+    "/signup/dob",
+    "/signup/credentials",
+    "/signup/name",
+    "/signup/verify",
+    "/verify-identity",
+    "/edit-profile",
+    "/edit-pet-profile",
+    "/reset-password",
+    "/auth/callback",
+    "/premium",
+    "/"
+  ],
+  "fail": {
+    "missingRequiredRoutes": [],
+    "legacyFieldRefs": [
+      {
+        "field": "effective_tier",
+        "file": "src/lib/membership.ts",
+        "line": 20
+      }
+    ],
+    "mismatchedRouteStrings": [
+      {
+        "path": "/family-invite",
+        "locations": [
+          {
+            "file": "src/pages/AccountSettings.tsx"
+          }
+        ]
+      },
+      {
+        "path": "/change-password",
+        "locations": [
+          {
+            "file": "src/pages/AccountSettings.tsx"
+          }
+        ]
+      }
+    ]
+  }
+}

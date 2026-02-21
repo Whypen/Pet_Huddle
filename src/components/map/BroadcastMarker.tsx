@@ -31,7 +31,7 @@ const BroadcastMarker = ({ map, coords, alertType }: BroadcastMarkerProps) => {
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
 
-    console.log("[MARKER_MOUNT]", { type: "broadcast", hasMap: true });
+    console.debug("[MARKER_MOUNT]", { type: "broadcast", hasMap: true });
 
     return () => {
       map.off("move", syncToMap);

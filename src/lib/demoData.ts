@@ -12,7 +12,7 @@ export interface DemoUser {
   occupation?: string;
   isVerified: boolean;
   hasCar: boolean;
-  isPremium: boolean;
+  isPlus: boolean;
   gender: string;
   orientation?: string;
   languages: string[];
@@ -64,7 +64,7 @@ export interface DemoThread {
   author: {
     display_name: string | null;
     avatar_url: string | null;
-    is_verified: boolean;
+    verification_status: string | null;
   } | null;
 }
 
@@ -82,7 +82,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Professional Pet Sitter",
     isVerified: true,
     hasCar: true,
-    isPremium: true,
+    isPlus: true,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese", "Mandarin"],
@@ -109,7 +109,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Software Engineer",
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Male",
     orientation: "Gay/Lesbian",
     languages: ["English", "Cantonese"],
@@ -136,7 +136,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Shelter Volunteer",
     isVerified: true,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Bisexual",
     languages: ["English", "Cantonese", "Mandarin"],
@@ -161,7 +161,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Registered Nurse",
     isVerified: true,
     hasCar: true,
-    isPremium: true,
+    isPlus: true,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -188,7 +188,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Marketing Manager",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese", "Japanese"],
@@ -216,7 +216,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "University Professor",
     isVerified: true,
     hasCar: true,
-    isPremium: true,
+    isPlus: true,
     gender: "Male",
     orientation: "PNA",
     languages: ["English", "Cantonese", "Mandarin", "French"],
@@ -244,7 +244,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Pet Groomer",
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Queer",
     languages: ["Cantonese", "Mandarin"],
@@ -271,7 +271,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Financial Analyst",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -298,7 +298,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Graphic Designer",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -326,7 +326,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Retired Vet Tech",
     isVerified: true,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese", "Mandarin"],
@@ -354,7 +354,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "UX Designer",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -381,7 +381,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Pet Trainer",
     isVerified: true,
     hasCar: true,
-    isPremium: true,
+    isPlus: true,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese", "Mandarin"],
@@ -408,7 +408,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Project Manager",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Bisexual",
     languages: ["English", "Cantonese"],
@@ -435,7 +435,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Product Analyst",
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -462,7 +462,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Animal Care Specialist",
     isVerified: true,
     hasCar: true,
-    isPremium: true,
+    isPlus: true,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -489,7 +489,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Community Manager",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese", "Mandarin"],
@@ -514,7 +514,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Student",
     isVerified: false,
     hasCar: false,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -541,7 +541,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Caregiver",
     isVerified: true,
     hasCar: false,
-    isPremium: true,
+    isPlus: true,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -568,7 +568,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Photographer",
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Female",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -595,7 +595,7 @@ export const demoUsers: DemoUser[] = [
     occupation: "Sales Manager",
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     gender: "Male",
     orientation: "Straight",
     languages: ["English", "Cantonese"],
@@ -801,7 +801,7 @@ export const demoAlerts: DemoAlert[] = [
   {
     id: "lost-4",
     type: "Lost",
-    description: "Missing Siamese cat from Jordan area. Blue eyes, cream body. Indoor cat that escaped. Very scared.",
+    description: "Missing Siamese cat from Jordan area. Blue eyes, cream body. Indoor cat that ran off. Very scared.",
     latitude: 22.3050,
     longitude: 114.1710,
     location: { lat: 22.3050, lng: 114.1710 },
@@ -854,7 +854,7 @@ export const demoAlerts: DemoAlert[] = [
   {
     id: "lost-8",
     type: "Lost",
-    description: "Missing Corgi from Admiralty. Short legs, tri-colour. Escaped during walk. Has blue collar.",
+    description: "Missing Corgi from Admiralty. Short legs, tri-colour. Ran off during walk. Has blue collar.",
     latitude: 22.2783,
     longitude: 114.1647,
     location: { lat: 22.2783, lng: 114.1647 },
@@ -1006,7 +1006,7 @@ export const demoThreads: DemoThread[] = demoAlerts.map((alert) => {
     created_at: alert.createdAt,
     user_id: alert.creatorId,
     author: creator
-      ? { display_name: creator.name, avatar_url: creator.avatarUrl || null, is_verified: creator.isVerified }
+      ? { display_name: creator.name, avatar_url: creator.avatarUrl || null, verification_status: creator.isVerified ? "verified" : "unverified" }
       : null,
   };
 });
@@ -1061,7 +1061,7 @@ export const demoFriendPins: DemoFriendPin[] = [
 // Helper functions
 export const getVerifiedUsers = () => demoUsers.filter(u => u.isVerified);
 export const getUsersWithCar = () => demoUsers.filter(u => u.hasCar);
-export const getPremiumUsers = () => demoUsers.filter(u => u.isPremium);
+export const getPlusUsers = () => demoUsers.filter(u => u.isPlus);
 export const getUsersWithPets = () => demoUsers.filter(u => u.pets.length > 0);
 export const getOnlineUsers = () => demoUsers.filter(u => u.isOnline);
 export const getUsersByRole = (role: DemoUser["role"]) => demoUsers.filter(u => u.role === role);

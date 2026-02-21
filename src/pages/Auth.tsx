@@ -220,7 +220,7 @@ const Auth = () => {
                   <Input
                     type="email"
                     autoComplete="email"
-                    className={`h-9 pl-9 ${errors.email ? "border-red-500" : ""}`}
+                    className={`h-10 pl-9 ${errors.email ? "border-red-500" : ""}`}
                     placeholder="name@email.com"
                     {...register("email")}
                     autoFocus
@@ -235,7 +235,7 @@ const Auth = () => {
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     type={showPassword ? "text" : "password"}
-                    className={`h-9 pl-9 pr-10 ${errors.password || authError ? "border-red-500" : ""}`}
+                    className={`h-10 pl-9 pr-10 ${errors.password || authError ? "border-red-500" : ""}`}
                     placeholder="********"
                     {...register("password")}
                   />

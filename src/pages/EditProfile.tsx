@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import imageCompression from "browser-image-compression";
+import { compressImage } from "@/lib/imageCompression";
 
 // Option constants matching database schema
 const genderOptions = ["Male", "Female", "Non-binary", "PNA"];
@@ -44,13 +44,13 @@ const EditProfile = () => {
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [customLanguage, setCustomLanguage] = useState("");
   const [petsProfileCount, setPetsProfileCount] = useState(0);
   const [selectedCountry, setSelectedCountry] = useState("");
-  const isIdentityLocked = profile?.verification_status === "approved" || profile?.is_verified;
+  const isIdentityLocked = String(profile?.verification_status ?? "").toLowerCase() === "verified";
   const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState({
     legalName: "",
@@ -211,7 +211,7 @@ const EditProfile = () => {
   const handleSocialAlbumUpload = async (file: File) => {
     if (!user) return;
     const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true };
-    const compressed = await imageCompression(file, options);
+    const compressed = await compressImage(file, options);
     if (compressed.size > 500 * 1024) {
       toast.error(t("Image must be under 500KB"));
       return;
@@ -453,7 +453,7 @@ if (!formData.dob) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader onUpgradeClick={() => setIsPlusOpen(true)} />
 
       {/* Page Header */}
       <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
@@ -492,7 +492,7 @@ if (!formData.dob) {
 
             {/* Social ID - Display Only */}
             <div className="text-sm text-muted-foreground">
-              @{formData.social_id || "loading..."}
+              @{profile?.social_id || formData.social_id || "loading..."}
             </div>
 
             {/* Legal Name */}
@@ -507,7 +507,6 @@ if (!formData.dob) {
                   legalName: formData.legal_name.trim() ? "" : t("Legal name is required"),
                 }))
               }
-              placeholder={t("Your legal name")}
               className="rounded-[12px]"
               required
               disabled={isIdentityLocked}
@@ -528,7 +527,6 @@ if (!formData.dob) {
                   displayName: formData.display_name.trim() ? "" : t("Display name is required"),
                 }))
               }
-              placeholder={t("Your display name")}
               className="rounded-[12px]"
               required
               disabled={isIdentityLocked}
@@ -569,7 +567,6 @@ if (!formData.dob) {
                       console.error("Social ID availability check failed:", err);
                     }
                   }}
-                  placeholder="yourid"
                   className="rounded-[12px] pl-7"
                   disabled={isIdentityLocked}
                   aria-invalid={Boolean(fieldErrors.social_id)}
@@ -598,10 +595,9 @@ if (!formData.dob) {
                 }))
               }
               className={cn(
-                "phone-input-auth h-9 rounded-[12px] border border-brandText/40 bg-white px-2 py-1 text-left",
+                "phone-input-auth h-10 rounded-[12px] border border-brandText/40 bg-white px-2 py-1 text-left",
                 fieldErrors.phone && "border-red-500"
               )}
-              placeholder={t("Phone (+XXX)")}
               disabled={isIdentityLocked}
             />
             {fieldErrors.phone && <ErrorLabel message={fieldErrors.phone} />}
@@ -657,7 +653,6 @@ if (!formData.dob) {
               <Textarea
                 value={formData.bio}
                 onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-                placeholder={t("Tell others about yourself...")}
                 className="min-h-[100px] rounded-xl"
               />
             </div>
@@ -666,7 +661,7 @@ if (!formData.dob) {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">{t("Social Album")}</label>
-                <span className="text-xs text-muted-foreground">{t("Max 5, <500KB")}</span>
+                <span className="text-xs text-muted-foreground">{t("Keep it lightweight")}</span>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 {formData.social_album.map((path) => (
@@ -799,7 +794,6 @@ if (!formData.dob) {
                   const valid = NUMERIC_ONLY_REGEX.test(formData.height) && Number(formData.height) <= 300;
                   setFieldErrors((prev) => ({ ...prev, height: valid ? "" : t("Height must be a number up to 300") }));
                 }}
-                placeholder={t("Height in cm")}
                 className="rounded-[12px]"
                 min={0}
                 max={300}
@@ -834,7 +828,6 @@ if (!formData.dob) {
                     const valid = NUMERIC_ONLY_REGEX.test(formData.weight) && Number(formData.weight) <= 700;
                     setFieldErrors((prev) => ({ ...prev, weight: valid ? "" : t("Weight must be a number up to 700") }));
                   }}
-                  placeholder={t("0")}
                   className="rounded-[12px] flex-1"
                   min={0}
                   max={700}
@@ -844,7 +837,7 @@ if (!formData.dob) {
                 <select
                   value={formData.weight_unit}
                   onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
-                  className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                  className="h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                 >
                   <option value="kg">{t("kg")}</option>
                   <option value="lbs">{t("lbs")}</option>
@@ -888,7 +881,6 @@ if (!formData.dob) {
                 const invalid = NUMERIC_ONLY_REGEX.test(formData.school.trim()) && formData.school.trim().length > 0;
                 setFieldErrors((prev) => ({ ...prev, school: invalid ? t("School cannot be numbers only") : "" }));
               }}
-              placeholder={t("School Name")}
               className="h-11 rounded-lg"
               aria-invalid={Boolean(fieldErrors.school)}
             />
@@ -901,7 +893,6 @@ if (!formData.dob) {
                 const invalid = NUMERIC_ONLY_REGEX.test(formData.major.trim()) && formData.major.trim().length > 0;
                 setFieldErrors((prev) => ({ ...prev, major: invalid ? t("Major cannot be numbers only") : "" }));
               }}
-              placeholder={t("Major / Field of Study")}
               className="h-11 rounded-lg"
               aria-invalid={Boolean(fieldErrors.major)}
             />
@@ -926,7 +917,6 @@ if (!formData.dob) {
                   const invalid = NUMERIC_ONLY_REGEX.test(formData.occupation.trim()) && formData.occupation.trim().length > 0;
                   setFieldErrors((prev) => ({ ...prev, occupation: invalid ? t("Occupation cannot be numbers only") : "" }));
                 }}
-                placeholder={t("Job title / Occupation")}
                 className="h-11 rounded-lg"
                 aria-invalid={Boolean(fieldErrors.occupation)}
               />
@@ -949,7 +939,6 @@ if (!formData.dob) {
             <Textarea
               value={formData.affiliation}
               onChange={(e) => setFormData(prev => ({ ...prev, affiliation: e.target.value }))}
-              placeholder={t("Shelters, clubs, organizations...")}
               className="min-h-[80px] rounded-xl"
             />
           </div>
@@ -973,7 +962,7 @@ if (!formData.dob) {
               <select
                 value={formData.relationship_status}
                 onChange={(e) => setFormData(prev => ({ ...prev, relationship_status: e.target.value }))}
-                className="w-full h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                className="w-full h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
               >
                 <option value="">{t("Select...")}</option>
                 {relationshipOptions.map(r => (
@@ -1034,7 +1023,6 @@ if (!formData.dob) {
                 <Input
                   value={customLanguage}
                   onChange={(e) => setCustomLanguage(e.target.value)}
-                  placeholder={t("Add other language...")}
                   className="h-10 rounded-lg flex-1"
                   onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addCustomLanguage())}
                 />
@@ -1058,7 +1046,7 @@ if (!formData.dob) {
                       location_name: `${prev.location_district || ""}${countryLabel ? `, ${countryLabel}` : ""}`.trim(),
                     }));
                   }}
-                  className="h-9 rounded-lg bg-muted border border-border px-3 text-sm flex-1"
+                  className="h-10 rounded-lg bg-muted border border-border px-3 text-sm flex-1"
                 >
                   <option value="">{t("Select country")}</option>
                   {countryOptions.map((country) => (
@@ -1077,7 +1065,6 @@ if (!formData.dob) {
                     location_name: `${e.target.value}${prev.location_country ? `, ${prev.location_country}` : ""}`.trim(),
                   }))
                 }
-                placeholder={t("Your district")}
                 className="rounded-[12px]"
               />
             </div>
@@ -1142,7 +1129,6 @@ if (!formData.dob) {
                     const valid = !!formData.experience_years && NUMERIC_ONLY_REGEX.test(formData.experience_years);
                     setFieldErrors((prev) => ({ ...prev, experienceYears: valid ? "" : t("Years of experience must be numeric") }));
                   }}
-                  placeholder={t("0")}
                   className="rounded-[12px] w-28"
                   inputMode="numeric"
                   aria-invalid={Boolean(fieldErrors.experienceYears)}
@@ -1233,7 +1219,7 @@ if (!formData.dob) {
         </div>
       </StyledScrollArea>
 
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
     </div>
   );
 };

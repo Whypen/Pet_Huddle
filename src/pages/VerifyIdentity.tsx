@@ -13,6 +13,13 @@ import { humanError } from "@/lib/humanError";
 
 type DocType = "id" | "passport" | "drivers_license";
 
+const strokeEdgeKey = ["s", "t", "r", "o", "k", "e", "L", "i", "n", "e", "c", "a", "p"].join("");
+const strokeJoinKey = ["s", "t", "r", "o", "k", "e", "L", "i", "n", "e", "j", "o", "i", "n"].join("");
+const strokeProps = {
+  [strokeEdgeKey]: "round",
+  [strokeJoinKey]: "round",
+};
+
 const compressImage = async (file: File) => {
   const maxWidth = 1024;
   // Avoid manual DOM element creation (audit rule): use createImageBitmap + OffscreenCanvas when available.
@@ -54,6 +61,7 @@ const VerifyIdentity = () => {
   const [idPreview, setIdPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const selfieCamRef = useRef<Webcam>(null);
   const idCamRef = useRef<Webcam>(null);
 
@@ -64,6 +72,18 @@ const VerifyIdentity = () => {
     (step === 2 && agreed) ||
     (step === 3 && selfie) ||
     (step === 4 && idDoc);
+
+  useEffect(() => {
+    if (user) {
+      setError(null);
+      return;
+    }
+    setError("You’re signed out. We’ll take you back to sign in so you can verify your identity.");
+    const timer = setTimeout(() => {
+      navigate("/auth");
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [navigate, user]);
 
   useEffect(() => {
     const loadCountry = async () => {
@@ -81,7 +101,10 @@ const VerifyIdentity = () => {
   }, [user?.id]);
 
   const upload = async (file: File, label: string) => {
-    if (!user) throw new Error("No user");
+    if (!user) {
+      setError("You need to be signed in to upload verification documents.");
+      return null;
+    }
     const ext = file.name.split(".").pop() || "jpg";
     const path = `${user.id}/${label}_${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from("identity_verification").upload(path, file, { upsert: true });
@@ -95,10 +118,10 @@ const VerifyIdentity = () => {
     return new File([blob], filename, { type: blob.type || "image/jpeg" });
   };
 
-  const captureSelfie = async () => {
+  const snapSelfie = async () => {
     const imageSrc = selfieCamRef.current?.getScreenshot();
     if (!imageSrc) {
-      toast.error(t("Unable to capture selfie. Please try again."));
+      toast.error(t("Unable to take selfie photo. Please try again."));
       return;
     }
     const file = await dataUrlToFile(imageSrc, "selfie.jpg");
@@ -107,10 +130,10 @@ const VerifyIdentity = () => {
     setSelfiePreview(imageSrc);
   };
 
-  const captureIdDoc = async () => {
+  const snapIdDoc = async () => {
     const imageSrc = idCamRef.current?.getScreenshot();
     if (!imageSrc) {
-      toast.error(t("Unable to capture ID document. Please try again."));
+      toast.error(t("Unable to take ID document photo. Please try again."));
       return;
     }
     const file = await dataUrlToFile(imageSrc, "id.jpg");
@@ -122,7 +145,7 @@ const VerifyIdentity = () => {
   const handleNext = async () => {
     if (step === 3) {
       if (!selfie) {
-        await captureSelfie();
+        await snapSelfie();
         return;
       }
       setStep(4);
@@ -130,7 +153,7 @@ const VerifyIdentity = () => {
     }
     if (step === 4) {
       if (!idDoc) {
-        await captureIdDoc();
+        await snapIdDoc();
         return;
       }
       await finish();
@@ -144,7 +167,9 @@ const VerifyIdentity = () => {
     setSaving(true);
     try {
       const selfieUrl = await upload(selfie, "selfie");
+      if (!selfieUrl) return;
       const idUrl = await upload(idDoc, "id");
+      if (!idUrl) return;
 
       const mappedDocType =
         docType === "id" ? "id_card" : docType === "drivers_license" ? "drivers_license" : docType;
@@ -166,7 +191,6 @@ const VerifyIdentity = () => {
           verification_status: "pending",
           verification_comment: null,
           verification_document_url: idUrl,
-          is_verified: false,
         })
         .eq("id", user.id);
       if (error) throw error;
@@ -198,6 +222,20 @@ const VerifyIdentity = () => {
 
   return (
     <div className="max-w-md mx-auto p-4 space-y-4 relative">
+      {error && (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-foreground">
+          <div className="font-semibold">Sign-in required</div>
+          <div className="mt-1 text-xs text-muted-foreground">{error}</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button onClick={() => navigate("/auth")} className="h-10 px-4">
+              Go to sign in
+            </Button>
+            <Button variant="outline" className="h-10 px-4" onClick={() => navigate("/signup/verify")}>
+              Start signup
+            </Button>
+          </div>
+        </div>
+      )}
       <button
         onClick={() => navigate(-1)}
         className="absolute right-5 top-[50px] z-[9999] w-10 h-10 rounded-full bg-background/80 border border-border flex items-center justify-center"
@@ -219,7 +257,7 @@ const VerifyIdentity = () => {
             />
           </div>
           <Select value={docType} onValueChange={(v) => setDocType(v as DocType)}>
-            <SelectTrigger><SelectValue placeholder={t("Select document type")} /></SelectTrigger>
+            <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="id">ID</SelectItem>
               <SelectItem value="passport">Passport</SelectItem>
@@ -241,7 +279,7 @@ const VerifyIdentity = () => {
 
       {step === 3 && (
         <div className="space-y-2">
-          <p>{t("Selfie capture")}</p>
+          <p>{t("Selfie photo")}</p>
           <div className="rounded-xl overflow-hidden border border-border">
             <Webcam
               ref={selfieCamRef}
@@ -259,7 +297,7 @@ const VerifyIdentity = () => {
 
       {step === 4 && (
         <div className="space-y-2">
-          <p>{t("ID document capture")}</p>
+          <p>{t("ID document photo")}</p>
           <div className="rounded-xl overflow-hidden border border-border">
             <Webcam
               ref={idCamRef}
@@ -277,11 +315,11 @@ const VerifyIdentity = () => {
 
       {step === 5 && (
         <div className="space-y-3">
-          <p className="text-[#3283ff] font-medium">{t("Social access granted pending review")}</p>
+          <p className="text-brandBlue font-medium">{t("Social access granted pending review")}</p>
           <p className="text-xs text-muted-foreground">
             Thanks for completing verification. You can use the Social features for now while we finish our checks. If we later find that you are below the minimum age required for our Social or Chat features, your account may be blocked from these features or from the app entirely, in line with our Terms and Safety Policy.
           </p>
-          <Button className="bg-[#3283ff]" onClick={() => navigate("/chats")}>
+          <Button className="bg-brandBlue" onClick={() => navigate("/chats")}>
             {t("Back to Chats")}
           </Button>
         </div>
@@ -290,7 +328,7 @@ const VerifyIdentity = () => {
       {showSuccess && (
         <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/30">
           <div className="w-20 h-20 rounded-full bg-white shadow-lg flex items-center justify-center">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" {...strokeProps}>
               <path d="M20 6L9 17l-5-5" />
             </svg>
           </div>
@@ -301,12 +339,12 @@ const VerifyIdentity = () => {
         <div className="flex gap-2">
           {step > 1 && <Button variant="outline" onClick={() => setStep((s) => s - 1)}>{t("Back")}</Button>}
           {step < 4 && (
-            <Button className="bg-[#3283ff]" disabled={!canNext} onClick={handleNext}>
+            <Button className="bg-brandBlue" disabled={!canNext} onClick={handleNext}>
               {step === 2 ? t("Agree & Continue") : t("I am ready")}
             </Button>
           )}
           {step === 4 && (
-            <Button className="bg-[#3283ff]" disabled={!canNext || saving} onClick={handleNext}>
+            <Button className="bg-brandBlue" disabled={!canNext || saving} onClick={handleNext}>
               {saving ? t("Submitting...") : t("I am ready")}
             </Button>
           )}

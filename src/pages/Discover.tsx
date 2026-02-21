@@ -4,7 +4,7 @@ import { HandMetal, Star, X, Loader2, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsell } from "@/hooks/useUpsell";
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 import { demoUsers } from "@/lib/demoData";
+import { normalizeMembershipTier } from "@/lib/membership";
 
 type DiscoveryPet = {
   species?: string | null;
@@ -23,7 +24,7 @@ type DiscoveryProfile = {
   id: string;
   display_name: string | null;
   avatar_url?: string | null;
-  is_verified?: boolean;
+  verification_status?: string | null;
   has_car?: boolean;
   bio?: string | null;
   relationship_status?: string | null;
@@ -33,6 +34,7 @@ type DiscoveryProfile = {
   school?: string | null;
   major?: string | null;
   tier?: string | null;
+  effective_tier?: string | null;
   pets?: DiscoveryPet[] | null;
   pet_species?: string[] | null;
   pet_size?: string | null;
@@ -69,7 +71,7 @@ const Discover = () => {
   const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryRole, setDiscoveryRole] = useState("playdates");
@@ -90,10 +92,10 @@ const Discover = () => {
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
   const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const isPlus = membershipTier === "plus" || membershipTier === "gold";
 
-  // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
+  // UAT: Free users have a discovery limit. After limit: blur overlay and upsell.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
   const discoveryKey = useMemo(() => {
     const d = new Date();
@@ -151,7 +153,7 @@ const Discover = () => {
           petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
           minAge,
           maxAge,
-          advanced: isPremium,
+          advanced: isPlus,
         };
         const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
         if (error) throw error;
@@ -174,7 +176,7 @@ const Discover = () => {
     discoverySpecies,
     discoveryMinAge,
     discoveryMaxAge,
-    isPremium,
+    isPlus,
   ]);
 
   useEffect(() => {
@@ -205,7 +207,7 @@ const Discover = () => {
     id: u.id,
     display_name: u.name,
     avatar_url: u.avatarUrl || null,
-    is_verified: u.isVerified,
+    verification_status: u.isVerified ? "verified" : "unverified",
     has_car: u.hasCar,
     bio: u.bio,
     relationship_status: u.relationshipStatus || null,
@@ -214,7 +216,8 @@ const Discover = () => {
     occupation: u.occupation || null,
     school: u.education || null,
     major: u.degree || null,
-    tier: u.isPremium ? "premium" : "free",
+    tier: u.isPlus ? "plus" : "free",
+    effective_tier: u.isPlus ? "plus" : "free",
     pets: u.pets || [],
     pet_species: (u.pets || []).map((p) => p.species),
     pet_size: null,
@@ -269,13 +272,13 @@ const Discover = () => {
   return (
     <div className="min-h-screen bg-background pb-nav relative">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
       {isMinor && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
+          <div className="rounded-xl border border-brandBlue/30 bg-background/90  px-4 py-3 text-sm font-medium text-brandBlue shadow-card">
             {t("Social features restricted for users under 16.")}
           </div>
         </div>
@@ -288,7 +291,7 @@ const Discover = () => {
             <select
               value={discoveryRole}
               onChange={(e) => setDiscoveryRole(e.target.value)}
-              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+              className="h-10 rounded-lg border border-border bg-background px-3 text-xs"
             >
               <option value="playdates">{t("Playdates")}</option>
               <option value="nannies">{t("Nannies")}</option>
@@ -297,7 +300,7 @@ const Discover = () => {
             <select
               value={discoverySpecies}
               onChange={(e) => setDiscoverySpecies(e.target.value)}
-              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+              className="h-10 rounded-lg border border-border bg-background px-3 text-xs"
             >
               {discoverySpeciesOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -308,14 +311,14 @@ const Discover = () => {
             <select
               value={discoveryGender}
               onChange={(e) => setDiscoveryGender(e.target.value)}
-              className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
+              className="h-10 rounded-lg border border-border bg-background px-3 text-xs"
             >
               <option value="Any">{t("Any Gender")}</option>
               {["Male", "Female", "Non-binary", "PNA"].map((gender) => (
                 <option key={gender} value={gender}>{gender}</option>
               ))}
             </select>
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-10">
               <span className="text-[10px] text-muted-foreground">{t("Age")}</span>
               <input
                 type="number"
@@ -335,7 +338,7 @@ const Discover = () => {
                 className="w-12 bg-transparent text-[10px] outline-none"
               />
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-9">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 h-10">
               <span className="text-[10px] text-muted-foreground">{discoveryDistance}km</span>
               <input
                 type="range"
@@ -346,7 +349,7 @@ const Discover = () => {
                 className="w-24 accent-primary"
               />
             </div>
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-9">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-background px-2 h-10">
               <span className="text-[10px] text-muted-foreground">{t("Pet Size")}</span>
               <select
                 value={discoveryPetSize}
@@ -371,7 +374,7 @@ const Discover = () => {
               </div>
             )}
             {discoverySource.map((p, idx) => {
-              const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
+              const blocked = !isPlus && discoverySeenToday >= 40 && idx >= 40;
               const age = p?.dob
                 ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
                 : "";
@@ -406,13 +409,13 @@ const Discover = () => {
                     setShowDiscoveryModal(true);
                   }}
                 >
-                  {/* UAT: Blur overlay for free users after 40 cards/day */}
+                  {/* UAT: Blur overlay for free users after discovery limit */}
                   {blocked && (
-                    <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center gap-2 p-4">
+                    <div className="absolute inset-0 z-20 bg-white/70  flex flex-col items-center justify-center gap-2 p-4">
                       <Lock className="w-8 h-8 text-brandBlue" />
                       <p className="text-xs text-center font-semibold text-brandText">Upgrade for unlimited discovery</p>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsPremiumOpen(true); }}
+                        onClick={(e) => { e.stopPropagation(); setIsPlusOpen(true); }}
                         className="px-4 py-1.5 rounded-full bg-brandBlue text-white text-xs font-bold"
                       >
                         Upgrade
@@ -490,7 +493,7 @@ const Discover = () => {
               <div className="relative">
                 <button
                   onClick={() => setShowDiscoveryModal(false)}
-                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
+                  className="absolute top-3 right-3 z-10 w-10 h-10 min-w-[44px] min-h-[44px] rounded-full bg-black/50 flex items-center justify-center"
                 >
                   <X className="w-5 h-5 text-white" />
                 </button>
@@ -604,7 +607,7 @@ const Discover = () => {
       </AnimatePresence>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
       <UpsellModal
         isOpen={upsellModal.isOpen}
         type={upsellModal.type}

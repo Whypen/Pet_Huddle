@@ -23,7 +23,7 @@ export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40  z-50"
           />
 
           {/* Modal */}

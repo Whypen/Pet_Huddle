@@ -73,6 +73,11 @@ export const nameSchema = z.object({
     .min(2, "Name must be at least 2 characters")
     .max(30, "Name must be less than 30 characters")
     .regex(/^[a-zA-Z\s'-]+$/, "Only letters, spaces, hyphens, and apostrophes allowed"),
+  social_id: z
+    .string()
+    .min(6, "Social ID must be at least 6 characters")
+    .max(20, "Social ID must be less than 20 characters")
+    .regex(/^[a-z0-9._]+$/, "Only lowercase letters, numbers, dot, and underscore allowed"),
 });
 
 export const credentialsSchema = z

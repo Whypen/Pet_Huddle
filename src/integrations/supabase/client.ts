@@ -8,8 +8,8 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
 }
-console.log("Supabase URL initialized as:", SUPABASE_URL);
-console.log("[SUPABASE_ENV]", {
+console.debug("Supabase URL initialized as:", SUPABASE_URL);
+console.debug("[SUPABASE_ENV]", {
   url: SUPABASE_URL,
   keyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 8) : "missing",
 });

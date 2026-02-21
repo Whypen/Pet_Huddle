@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
+import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
+import { PLUS_ROUTE } from "@/lib/routes";
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -15,14 +17,14 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const { signOut, profile } = useAuth();
   const { t } = useLanguage();
 
-  const isVerified = profile?.is_verified;
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
+  const isVerified = verificationStatus === "verified";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
 
   const menuItems = [
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
     { icon: Settings, label: t("settings.title"), href: "/settings" },
-    { icon: Crown, label: t("premium.title"), href: "/premium" },
+    { icon: Crown, label: t("plus.title"), href: PLUS_ROUTE },
     { icon: FileText, label: t("Privacy & Safety Policy"), href: "/privacy" },
     { icon: Scale, label: t("settings.terms"), href: "/terms" },
   ];
@@ -50,7 +52,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/20 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/20  z-50"
           />
           
           {/* Drawer */}
@@ -105,12 +107,12 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                     <span
                       className={cn(
                         "inline-block mt-0.5 text-xs font-medium px-2 py-0.5 rounded-full",
-                        isPremium
+                        membershipTier !== "free"
                           ? "bg-primary/10 text-primary"
                           : "bg-muted text-muted-foreground"
                       )}
                     >
-                      {isPremium ? t("header.premium") : t("header.free")}
+                      {membershipTierLabel(membershipTier)}
                     </span>
                   </div>
                 </div>

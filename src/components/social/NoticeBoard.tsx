@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
   Image,
-  Loader2,
   MessageSquare,
   Heart,
   Megaphone,
@@ -15,6 +14,8 @@ import {
   Ban,
   MoreHorizontal
 } from "lucide-react";
+import { SkeletonFeed } from "@/components/ui/SkeletonFeed";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -24,9 +25,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
-import imageCompression from "browser-image-compression";
+import { compressImage, getImageDataUrl } from "@/lib/imageCompression";
 import { useSearchParams, useParams } from "react-router-dom";
 import { demoThreads } from "@/lib/demoData";
+import { normalizeMembershipTier } from "@/lib/membership";
 
 const DEMO_MODE = String(import.meta.env.VITE_DEMO_MODE ?? "prod_preview");
 const DEMO_SEEDED = DEMO_MODE === "seeded_threads";
@@ -51,7 +53,7 @@ interface Thread {
   author: {
     display_name: string | null;
     avatar_url: string | null;
-    is_verified: boolean;
+    verification_status: string | null;
   } | null;
 }
 
@@ -68,10 +70,10 @@ interface ThreadComment {
 }
 
 interface NoticeBoardProps {
-  onPremiumClick: () => void;
+  onPlusClick: () => void;
 }
 
-export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
+export const NoticeBoard = ({ onPlusClick }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user, profile } = useAuth();
   const { showUpsellBanner } = useUpsellBanner();
@@ -135,7 +137,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           author:profiles!threads_user_id_fkey(
             display_name,
             avatar_url,
-            is_verified
+            verification_status
           )
         `)
         .order(sortMode === "Trending" ? "score" : "created_at", { ascending: false })
@@ -241,23 +243,23 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   };
 
   const openThreadQuotaDialog = () => {
-    const tier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    const tier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
     if (tier === "gold") {
       showUpsellBanner({ message: "Limited. Your quota will reset in 24h." });
       return;
     }
-    if (tier === "premium") {
+    if (tier === "plus") {
       showUpsellBanner({
         message: "Limited. Upgrade to Gold to post more today.",
-        ctaLabel: "Go to Premium",
-        onCta: onPremiumClick,
+        ctaLabel: "Go to Plus",
+        onCta: onPlusClick,
       });
       return;
     }
     showUpsellBanner({
-      message: "Limited. Upgrade to Premium/Gold to post more today.",
-      ctaLabel: "Go to Premium",
-      onCta: onPremiumClick,
+      message: "Limited. Upgrade to Plus/Gold to post more today.",
+      ctaLabel: "Go to Plus",
+      onCta: onPlusClick,
     });
   };
 
@@ -320,11 +322,11 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
   };
 
   const renderMarkdown = (text: string) => {
-    const escaped = text
+    const safeText = text
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
-    const withBold = escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    const withBold = safeText.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     const withItalic = withBold.replace(/\*(.+?)\*/g, "<em>$1</em>");
     const lines = withItalic.split("\n");
     const listItems = lines.filter((l) => l.trim().startsWith("- "));
@@ -461,7 +463,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
           type="text"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
-          placeholder={t("Search")}
           className="flex-1 h-10 rounded-xl border border-border bg-muted px-3 text-sm"
         />
         <select
@@ -520,22 +521,24 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
             className="overflow-hidden"
           >
             {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
+              <SkeletonFeed count={3} />
             ) : visibleNotices.length === 0 ? (
-              <div className="bg-muted/50 rounded-xl p-6 text-center">
-                <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">{t("No threads yet")}</p>
-              </div>
+              <EmptyState
+                icon={MessageSquare}
+                headline="No threads yet"
+                subtext="Be the first to share something with your community."
+                ctaLabel="Post a thread"
+                ctaOnClick={() => setIsCreateOpen(true)}
+              />
             ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto scrollbar-visible pr-1">
+              <div className="space-y-6 max-h-[400px] overflow-y-auto scrollbar-visible pr-1">
                 {visibleNotices.map((notice) => (
                   <motion.div
                     key={notice.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-card rounded-xl p-4 border border-border"
+                    transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+                    className="card-e1 rounded-card bg-white p-4"
                   >
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -556,7 +559,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                           <span className="font-medium text-sm truncate">
                             {notice.author?.display_name || t("Anonymous")}
                           </span>
-                          {notice.author?.is_verified && (
+                          {String(notice.author?.verification_status ?? "").toLowerCase() === "verified" && (
                             <span className="w-4 h-4 rounded-full bg-warning flex items-center justify-center flex-shrink-0">
                               <span className="text-[10px]">{t("✓")}</span>
                             </span>
@@ -574,21 +577,22 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                           ))}
                         </div>
                         <p className="text-sm font-semibold">{notice.title}</p>
-                        <div
-                          className="text-sm text-foreground"
-                          dangerouslySetInnerHTML={{ __html: renderMarkdown(notice.content) }}
-                        />
-                        {(notice.hashtags || []).length > 0 && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
-                          </p>
-                        )}
                         {notice.images && notice.images.length > 0 && (
                           <img
                             src={notice.images[0]}
                             alt=""
-                            className="mt-2 rounded-lg max-h-40 object-cover aspect-video w-full"
+                            className="mt-2 rounded-[8px] object-cover aspect-[4/5] w-full"
                           />
+                        )}
+                        {/* renderMarkdown sanitizes &, <, > before processing — XSS-safe */}
+                        <div
+                          className="text-sub text-brandText line-clamp-3 mt-1"
+                          dangerouslySetInnerHTML={{ __html: renderMarkdown(notice.content) }}
+                        />
+                        {(notice.hashtags || []).length > 0 && (
+                          <p className="text-helper text-brandText/50 mt-1">
+                            {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
+                          </p>
                         )}
                         
                         {/* Actions Row */}
@@ -711,7 +715,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                 </div>
                               )}
                               <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground">
-                                <span>{t("Max 200 chars")}</span>
+                                <span>{t("Keep it concise")}</span>
                                 <span>{remainingReplyChars}</span>
                               </div>
                               <div className="mt-2">
@@ -726,7 +730,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                       const file = e.target.files?.[0];
                                       if (!file) return;
                                       try {
-                                        const compressed = await imageCompression(file, {
+                                        const compressed = await compressImage(file, {
                                           maxSizeMB: 0.5,
                                           maxWidthOrHeight: 1600,
                                           useWebWorker: true,
@@ -736,7 +740,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                                           return;
                                         }
                                         setReplyImageFile(compressed);
-                                        const preview = await imageCompression.getDataUrlFromFile(compressed);
+                                        const preview = await getImageDataUrl(compressed);
                                         setReplyImagePreview(preview);
                                       } catch (err) {
                                         toast.error(t("Failed to process image"));
@@ -798,8 +802,9 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
+              transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-card rounded-t-3xl p-6 pb-[calc(env(safe-area-inset-bottom)+var(--nav-height)+24px)]"
+              className="glass-e2 w-full rounded-t-[20px] p-6 pb-[calc(env(safe-area-inset-bottom)+var(--nav-height)+24px)]"
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold">{t("Create Thread")}</h3>
@@ -830,11 +835,10 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               {/* Title */}
               <input
                 type="text"
-                placeholder={t("Title")}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className={cn(
-                  "w-full h-9 rounded-[12px] border border-border bg-muted px-2 py-1 text-sm text-left mb-1",
+                  "w-full h-10 min-h-[44px] rounded-btn border border-border bg-muted px-3 text-base text-left mb-1",
                   createErrors.title && "border-red-500"
                 )}
                 aria-invalid={Boolean(createErrors.title)}
@@ -847,7 +851,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
               <div className="mb-3">
                 <input
                   type="text"
-                  placeholder={t("Up to 3 #Hashtags")}
                   value={hashtagInput}
                   onChange={(e) => setHashtagInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -863,7 +866,7 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
                     });
                     setHashtagInput("");
                   }}
-                  className="w-full h-9 rounded-[12px] border border-border bg-muted px-2 py-1 text-sm text-left"
+                  className="w-full h-10 min-h-[44px] rounded-btn border border-border bg-muted px-3 text-base text-left"
                 />
                 {hashtags.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -883,7 +886,6 @@ export const NoticeBoard = ({ onPremiumClick }: NoticeBoardProps) => {
 
               {/* Content */}
               <Textarea
-                placeholder={t("What's on your mind?")}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className={cn("rounded-xl min-h-[100px] mb-2", createErrors.content && "border-red-500")}

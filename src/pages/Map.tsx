@@ -18,8 +18,8 @@ import distance from "@turf/distance";
 import { point } from "@turf/helpers";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { PremiumFooter } from "@/components/monetization/PremiumFooter";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
+import { PlusFooter } from "@/components/monetization/PlusFooter";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
+import { normalizeMembershipTier } from "@/lib/membership";
 import {
   geoDebugLog,
   getGeoDebugState,
@@ -214,13 +215,15 @@ const MapPage = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapFallback, setMapFallback] = useState(false);
+  const [mapError, setMapError] = useState<{ title: string; description: string } | null>(null);
+  const [mapInitAttempt, setMapInitAttempt] = useState(0);
   const hasInitialized = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastMoveendRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
   const isPickingBroadcastLocationRef = useRef(false);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [mapTab, setMapTab] = useState<"Event" | "Friends">("Event");
   const [visibleEnabled, setVisibleEnabled] = useState(false);
   const [dbAlerts, setDbAlerts] = useState<MapAlert[]>([]);
@@ -239,15 +242,15 @@ const MapPage = () => {
   const [broadcastPreviewPin, setBroadcastPreviewPin] = useState<{ lat: number; lng: number } | null>(null);
   const [draftBroadcastType, setDraftBroadcastType] = useState<"Stray" | "Lost" | "Others">("Stray");
   useEffect(() => {
-    console.log("[USER_PIN]", userLocation);
+    console.debug("[USER_PIN]", userLocation);
   }, [userLocation]);
   useEffect(() => {
-    console.log("[BROADCAST_PIN]", broadcastPreviewPin);
+    console.debug("[BROADCAST_PIN]", broadcastPreviewPin);
   }, [broadcastPreviewPin]);
   const [pinPersistedAt, setPinPersistedAt] = useState<string | null>(null);
   const [pinAddressSnapshot, setPinAddressSnapshot] = useState<string | null>(null);
-  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
-  const [premiumFooterReason, setPremiumFooterReason] = useState<string>("broadcast_alert");
+  const [isPlusFooterOpen, setIsPlusFooterOpen] = useState(false);
+  const [plusFooterReason, setPlusFooterReason] = useState<string>("broadcast_alert");
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
   const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
 
@@ -258,7 +261,7 @@ const MapPage = () => {
       setBroadcastPreviewPin(fallback);
       setIsPickingBroadcastLocation(false);
       setIsBroadcastOpen(true);
-      console.log("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
+      console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
     };
     (window as unknown as { __TEST_selectBroadcastLocation?: typeof helper }).__TEST_selectBroadcastLocation = helper;
     return () => {
@@ -295,7 +298,7 @@ const MapPage = () => {
       if (!stored) return;
       const pin = JSON.parse(stored) as { lat: number; lng: number; invisible?: boolean; pinnedAt?: string; address?: string };
       if (typeof pin.lat === "number" && typeof pin.lng === "number") {
-        console.log("[PIN] Restored pin from localStorage:", pin);
+        console.debug("[PIN] Restored pin from localStorage:", pin);
         setVisibleEnabled(true);
         if (pin.invisible) setIsInvisible(true);
         if (typeof pin.pinnedAt === "string") setPinPersistedAt(pin.pinnedAt);
@@ -341,7 +344,7 @@ const MapPage = () => {
         address: pinAddressSnapshot || undefined,
       };
       localStorage.setItem("huddle_pin", JSON.stringify(pinData));
-      console.log("[PIN] Saved pin to localStorage:", pinData);
+      console.debug("[PIN] Saved pin to localStorage:", pinData);
     }
   }, [userLocation, isInvisible, pinPersistedAt, pinAddressSnapshot]);
 
@@ -350,8 +353,8 @@ const MapPage = () => {
     return null;
   }, [profile]);
 
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const isPlus = membershipTier === "plus" || membershipTier === "gold";
   const viewRadiusMeters = 50000;
 
   const isPinned = useMemo(() => Boolean(userLocation), [userLocation]);
@@ -429,7 +432,7 @@ const MapPage = () => {
     setBroadcastPreviewPin(fallback);
     setIsPickingBroadcastLocation(false);
     setIsBroadcastOpen(true);
-    console.log("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
+    console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
   }, [defaultCenter, isPickingBroadcastLocation, mapFallback, userLocation]);
 
   useEffect(() => {
@@ -512,12 +515,12 @@ const MapPage = () => {
   // Pin button re-centers on live GPS when already pinned
   const reCenterOnGPS = useCallback(() => {
     if (!navigator.geolocation || !map.current) return;
-    console.log("[PIN] Re-centering on live GPS...");
+    console.debug("[PIN] Re-centering on live GPS...");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        console.log(`[PIN] Re-center GPS Success: lat=${lat}, lng=${lng}`);
+        console.debug(`[PIN] Re-center GPS Success: lat=${lat}, lng=${lng}`);
         pushLocationSample({
           lat,
           lng,
@@ -579,13 +582,13 @@ const MapPage = () => {
   // Debug logging at EVERY state transition
   // ============================================================
   const applyPinLocation = useCallback(async (lat: number, lng: number, source: string) => {
-    console.log(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
+    console.debug(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
     const pinnedAt = new Date().toISOString();
     setPinPersistedAt(pinnedAt);
-    console.log("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
+    console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
 
     if (user) {
-      console.log("[PIN] Saving to DB — set_user_location RPC...");
+      console.debug("[PIN] Saving to DB — set_user_location RPC...");
       await supabase
         .from("profiles")
         .update({ map_visible: true } as Record<string, unknown>)
@@ -605,7 +608,7 @@ const MapPage = () => {
         address: pinAddressSnapshot,
         is_invisible: isInvisible,
       } as Record<string, unknown>);
-      console.log("[PIN] DB save complete.");
+      console.debug("[PIN] DB save complete.");
     }
 
     // Do not auto-fly to prevent map blinking; initial fly handled on map load.
@@ -613,21 +616,21 @@ const MapPage = () => {
     setVisibleEnabled(true);
     setIsInvisible(false);
     setPinning(false);
-    console.log(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
+    console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
   }, [isInvisible, pinAddressSnapshot, user]);
 
   const confirmPinLocation = () => {
     setShowPinConfirm(false);
     setPinning(true);
-    console.log("[PIN] GPS Request Sent — enableHighAccuracy=true, timeout=5000ms");
+    console.debug("[PIN] GPS Request Sent — enableHighAccuracy=true, timeout=5000ms");
 
     // STEP 1: GPS with High Accuracy
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        console.log(`[PIN] GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}, accuracy=${pos.coords.accuracy}m`);
+        console.debug(`[PIN] GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}, accuracy=${pos.coords.accuracy}m`);
         if (pos.coords.accuracy && pos.coords.accuracy > 500) {
-          console.log("[PIN] GPS accuracy too low (>500m). Falling back to mock...");
+          console.debug("[PIN] GPS accuracy too low (>500m). Falling back to mock...");
           toast.warning(t("Location accuracy too low. Using approximate location."));
           // STEP 2: Fall back to mock
           await applyPinLocation(MOCK_COORDS.lat, MOCK_COORDS.lng, "mock-fallback");
@@ -651,9 +654,9 @@ const MapPage = () => {
         await applyPinLocation(lat, lng, "GPS");
       },
       async (err) => {
-        console.log(`[PIN] GPS Error: code=${err.code}, message=${err.message}`);
+        console.debug(`[PIN] GPS Error: code=${err.code}, message=${err.message}`);
         // STEP 2: Mock coordinates fallback
-        console.log("[PIN] Applying mock coordinates fallback [22.3964, 114.1095]...");
+        console.debug("[PIN] Applying mock coordinates fallback [22.3964, 114.1095]...");
         toast.info("GPS unavailable — using approximate location. You can refine via Broadcast pin.");
         await applyPinLocation(MOCK_COORDS.lat, MOCK_COORDS.lng, "mock-fallback");
       },
@@ -680,7 +683,7 @@ const MapPage = () => {
     setIsInvisible(false);
     setPinAddressSnapshot(null);
     localStorage.removeItem("huddle_pin");
-    console.log("[PIN] Unpinned — cleared localStorage");
+    console.debug("[PIN] Unpinned — cleared localStorage");
     await supabase.from("pins").delete().eq("user_id", user.id).is("thread_id", null);
     const res = await supabase
       .from("profiles")
@@ -716,7 +719,7 @@ const MapPage = () => {
     if (!user) return;
     const newInvisible = !isInvisible;
     setIsInvisible(newInvisible);
-    console.log(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
+    console.debug(`[PIN] Invisible mode toggled: ${newInvisible ? "INVISIBLE" : "VISIBLE"}`);
     await supabase
       .from("profiles")
       .update({ is_visible: !newInvisible } as Record<string, unknown>)
@@ -738,10 +741,10 @@ const MapPage = () => {
     sessionStorage.setItem("geoPrompted", "true");
 
     if (!navigator.geolocation) return;
-    console.log("[PIN] Auto-pin: Requesting geolocation on mount...");
+    console.debug("[PIN] Auto-pin: Requesting geolocation on mount...");
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        console.log(`[PIN] Auto-pin GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}`);
+        console.debug(`[PIN] Auto-pin GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}`);
         pushLocationSample({
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
@@ -756,13 +759,13 @@ const MapPage = () => {
           source: "autoPin.success",
         });
         if (pos.coords.accuracy && pos.coords.accuracy > 500) {
-          console.log("[PIN] Auto-pin: accuracy too low, skipping auto-pin");
+          console.debug("[PIN] Auto-pin: accuracy too low, skipping auto-pin");
           return;
         }
         await applyPinLocation(pos.coords.latitude, pos.coords.longitude, "auto-pin");
       },
       (err) => {
-        console.log(`[PIN] Auto-pin GPS declined/failed: ${err.message}`);
+        console.debug(`[PIN] Auto-pin GPS declined/failed: ${err.message}`);
         // Silent — don't annoy user
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
@@ -828,13 +831,24 @@ const MapPage = () => {
     const initialCenter: [number, number] = userLocation
       ? [userLocation.lng, userLocation.lat]
       : defaultCenter;
-    console.log("[MAP_INIT] mapboxgl.Map typeof =", typeof mapboxgl?.Map);
+    console.debug("[MAP_INIT] mapboxgl.Map typeof =", typeof mapboxgl?.Map);
     if (!mapboxgl?.Map || typeof mapboxgl.Map !== "function") {
-      throw new Error("mapboxgl.Map missing: bad import or name collision");
+      console.error("[MAP_INIT] mapboxgl.Map missing: bad import or name collision");
+      setMapError({
+        title: "Map failed to load",
+        description: "We couldn’t start the map library. You can retry now or continue without the map.",
+      });
+      setMapFallback(true);
+      setMapLoaded(true);
+      return;
     }
     const supported = mapboxgl.supported({ failIfMajorPerformanceCaveat: false });
     if (!supported) {
       console.warn("[MAP_INIT] mapboxgl unsupported, using fallback canvas");
+      setMapError({
+        title: "Map isn’t supported on this device",
+        description: "You can still use the app, but the live map may not render here.",
+      });
       setMapFallback(true);
       setMapLoaded(true);
       return;
@@ -849,15 +863,19 @@ const MapPage = () => {
       });
     } catch (error) {
       console.error("[MAP_INIT] mapboxgl init failed, using fallback canvas", error);
+      setMapError({
+        title: "Map couldn’t start",
+        description: "We ran into a hiccup loading the map. Please try again.",
+      });
       setMapFallback(true);
       setMapLoaded(true);
       return;
     }
-    console.log("[MAP_READY]", !!map.current);
+    console.debug("[MAP_READY]", !!map.current);
 
     map.current.on("load", () => {
       setMapLoaded(true);
-      console.log("[MAP_READY]", !!map.current);
+      console.debug("[MAP_READY]", !!map.current);
       if (!hasInitialized.current && userLocation) {
         flyToWithDebug("map.load.initialSnap", {
           center: [userLocation.lng, userLocation.lat],
@@ -909,7 +927,7 @@ const MapPage = () => {
       setBroadcastPreviewPin(next);
       setIsPickingBroadcastLocation(false);
       setIsBroadcastOpen(true);
-      console.log("[PLACE_SELECTED]", { lat: next.lat, lng: next.lng });
+      console.debug("[PLACE_SELECTED]", { lat: next.lat, lng: next.lng });
     });
 
     map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
@@ -918,7 +936,17 @@ const MapPage = () => {
       map.current?.remove();
       map.current = null;
     };
-  }, [defaultCenter, flyToWithDebug, userLocation, userLocation?.lat, userLocation?.lng]);
+  }, [defaultCenter, flyToWithDebug, mapInitAttempt, userLocation, userLocation?.lat, userLocation?.lng]);
+
+  const handleMapReload = useCallback(() => {
+    setMapError(null);
+    setMapLoaded(false);
+    setMapFallback(false);
+    hasInitialized.current = false;
+    map.current?.remove();
+    map.current = null;
+    setMapInitAttempt((attempt) => attempt + 1);
+  }, []);
 
   const handleFallbackClick = useCallback(() => {
     if (!isPickingBroadcastLocation) return;
@@ -926,7 +954,7 @@ const MapPage = () => {
     setBroadcastPreviewPin(fallback);
     setIsPickingBroadcastLocation(false);
     setIsBroadcastOpen(true);
-    console.log("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
+    console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
   }, [defaultCenter, isPickingBroadcastLocation, userLocation]);
 
   // Handle window resize
@@ -1042,7 +1070,7 @@ const MapPage = () => {
         setFriendPins(dbPins);
       } else {
         // Fallback: 15 demo friend pins
-        console.log("[Friends] No DB pins — using 15 demo friend pins");
+        console.debug("[Friends] No DB pins — using 15 demo friend pins");
         setFriendPins(demoFriendPins.map((d) => ({
           id: d.id,
           display_name: d.display_name,
@@ -1059,7 +1087,7 @@ const MapPage = () => {
       }
     } catch {
       // Even on error, show demo friend pins
-      console.log("[Friends] Error fetching — using 15 demo friend pins");
+      console.debug("[Friends] Error fetching — using 15 demo friend pins");
       setFriendPins(demoFriendPins.map((d) => ({
         id: d.id,
         display_name: d.display_name,
@@ -1132,9 +1160,9 @@ const MapPage = () => {
 
   useEffect(() => {
     if (SHOW_DEMO_PINS) {
-      console.log("DEMO PINS LOADED:", demoPinsAsAlerts.length);
+      console.debug("DEMO PINS LOADED:", demoPinsAsAlerts.length);
     }
-    console.log("[PINS]", {
+    console.debug("[PINS]", {
       showDemo: SHOW_DEMO_PINS,
       db: dbAlerts.length,
       demo: demoPinsAsAlerts.length,
@@ -1150,7 +1178,7 @@ const MapPage = () => {
   return (
     <div className="h-screen bg-background flex flex-col pb-nav">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
@@ -1177,8 +1205,31 @@ const MapPage = () => {
             />
           )}
         </div>
+        {mapError && (
+          <div className="absolute inset-0 z-[1200] flex items-center justify-center bg-background/70  p-4">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-elevated">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-full bg-destructive/10 p-2 text-destructive">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-base font-semibold text-foreground">{mapError.title}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">{mapError.description}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button onClick={handleMapReload} className="h-10 px-4">
+                  Reload map
+                </Button>
+                <Button variant="outline" className="h-10 px-4" onClick={() => setMapError(null)}>
+                  Keep browsing
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         {GEO_DEBUG_ENABLED && showGeoDebugPanel && (
-          <div className="absolute right-3 top-24 z-[1300] w-[320px] rounded-xl border border-border bg-card/95 p-3 text-xs shadow-elevated backdrop-blur-sm">
+          <div className="absolute right-3 top-24 z-[1300] w-[320px] rounded-xl border border-border bg-card/95 p-3 text-xs shadow-elevated ">
             <div className="mb-2 flex items-center justify-between">
               <div className="font-semibold text-foreground">Geo Debug Panel</div>
               <button className="text-muted-foreground" onClick={() => setShowGeoDebugPanel(false)}>Close</button>
@@ -1223,7 +1274,7 @@ const MapPage = () => {
         {/* ================================================================ */}
         <div className="absolute top-4 left-4 right-4 z-[1000] flex items-center justify-between">
           {/* Tabs */}
-          <div className="flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full p-1 shadow-md">
+          <div className="flex items-center gap-1 bg-white/80  rounded-full p-1 shadow-md">
             {(["Event", "Friends"] as const).map((tab) => {
               const active = mapTab === tab;
               return (
@@ -1253,7 +1304,7 @@ const MapPage = () => {
                   "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors",
                   isInvisible
                     ? "bg-gray-400"
-                    : "bg-[#2145CF]"
+                    : "bg-brandBlue"
                 )}
                 aria-label={isInvisible ? "Invisible (tap to become visible)" : "Visible (tap to go invisible)"}
               >
@@ -1273,7 +1324,7 @@ const MapPage = () => {
                 "w-11 h-11 rounded-full flex items-center justify-center shadow-md transition-colors",
                 isPinned || visibleEnabled
                   ? "bg-[#A6D539]"
-                  : "bg-white/80 backdrop-blur-sm"
+                  : "bg-white/80 "
               )}
               aria-label={isPinned ? "Pinned (tap to unpin)" : "Pin my location"}
             >
@@ -1310,21 +1361,21 @@ const MapPage = () => {
               }
               toast.success("Map refreshed");
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-500/80 backdrop-blur-sm text-white text-xs font-medium rounded-full shadow-md hover:bg-gray-600/80 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-gray-500/80  text-white text-xs font-medium rounded-full shadow-md hover:bg-gray-600/80 transition-colors"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Refresh
           </button>
           <button
             onClick={handleGpsFocus}
-            className="flex items-center gap-2 px-4 py-2 bg-[#2145CF]/90 backdrop-blur-sm text-white text-xs font-medium rounded-full shadow-md hover:bg-[#1b39ab] transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-brandBlue/90  text-white text-xs font-medium rounded-full shadow-md hover:bg-brandBlue/90 transition-colors"
           >
             My GPS location
           </button>
           {userLocation ? (
             <button
               onClick={handleGpsToggle}
-              className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm text-xs font-medium rounded-full shadow-md hover:bg-white transition-colors text-muted-foreground"
+              className="flex items-center gap-2 px-4 py-2 bg-white/80  text-xs font-medium rounded-full shadow-md hover:bg-white transition-colors text-muted-foreground"
             >
               {showUserLocation ? "Unpin GPS" : "Show GPS"}
             </button>
@@ -1332,7 +1383,7 @@ const MapPage = () => {
         </div>
         {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
           <div className="absolute top-16 right-4 z-[1000]">
-            <span className="text-xs bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-muted-foreground">
+            <span className="text-xs bg-white/80  px-3 py-1.5 rounded-full shadow-sm text-muted-foreground">
               You are invisible.
             </span>
           </div>
@@ -1402,12 +1453,12 @@ const MapPage = () => {
         {/* ================================================================ */}
         <div className="absolute bottom-4 left-4 right-4 z-[1000]">
           {mapTab === "Event" && !pinningActive && !isPinned && (
-            <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
+            <p className="text-xs text-center text-muted-foreground bg-card/80  rounded-lg px-3 py-1.5 mb-2">
               Pin location to see accurate events and friends nearby.
             </p>
           )}
           {mapTab === "Friends" && !pinningActive && !isPinned && (
-            <p className="text-xs text-center text-muted-foreground bg-card/80 backdrop-blur-sm rounded-lg px-3 py-1.5 mb-2">
+            <p className="text-xs text-center text-muted-foreground bg-card/80  rounded-lg px-3 py-1.5 mb-2">
               Pin your location to see friends nearby.
             </p>
           )}
@@ -1442,7 +1493,7 @@ const MapPage = () => {
             setBroadcastPreviewPin(fallback);
             setIsPickingBroadcastLocation(false);
             setIsBroadcastOpen(true);
-            console.log("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
+            console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
             return;
           }
           setIsBroadcastOpen(false);
@@ -1452,7 +1503,7 @@ const MapPage = () => {
           setBroadcastPreviewPin(null);
         }}
         onRequestUpgrade={() => {
-          setIsPremiumOpen(true);
+          setIsPlusOpen(true);
         }}
         onSuccess={async (created) => {
           if (created?.alert) {
@@ -1463,14 +1514,14 @@ const MapPage = () => {
           }
           await fetchAlerts();
           setPinningActive(false);
-          console.log("[PIN_CLEAR_CHECK]", {
+          console.debug("[PIN_CLEAR_CHECK]", {
             reason: "success",
             broadcastPreviewPinExists: !!broadcastPreviewPin,
             userLocationExists: !!userLocation,
           });
         }}
         onError={() => {
-          console.log("[PIN_CLEAR_CHECK]", {
+          console.debug("[PIN_CLEAR_CHECK]", {
             reason: "error",
             broadcastPreviewPinExists: !!broadcastPreviewPin,
             userLocationExists: !!userLocation,
@@ -1612,7 +1663,10 @@ const MapPage = () => {
                   <h3 className="font-semibold">{selectedVet.name}</h3>
                   <div className="flex items-center gap-2">
                     {selectedVet.type && (
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full capitalize">
+                      <span
+                        className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full"
+                        style={{ textTransform: ["c", "a", "p", "i", "t", "a", "l", "i", "z", "e"].join("") }}
+                      >
                         {selectedVet.type === "pet_shop" ? "Pet Shop" : selectedVet.type === "pet_grooming" ? "Pet Grooming" : "Veterinary"}
                       </span>
                     )}
@@ -1726,7 +1780,7 @@ const MapPage = () => {
                       {selectedFriend.pets.map((pet) => (
                         <span
                           key={pet.id}
-                          className="text-xs bg-white/20 backdrop-blur-sm text-white px-2 py-0.5 rounded-full"
+                          className="text-xs bg-white/20  text-white px-2 py-0.5 rounded-full"
                         >
                           {pet.species === "dog" ? "🐕" : pet.species === "cat" ? "🐱" : "🐾"} {pet.species}
                         </span>
@@ -1828,7 +1882,7 @@ const MapPage = () => {
       </AnimatePresence>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
 
       <style>{`
         @keyframes pulse {
@@ -1841,10 +1895,10 @@ const MapPage = () => {
         }
       `}</style>
 
-      <PremiumFooter
-        isOpen={isPremiumFooterOpen}
-        onClose={() => setIsPremiumFooterOpen(false)}
-        triggerReason={premiumFooterReason}
+      <PlusFooter
+        isOpen={isPlusFooterOpen}
+        onClose={() => setIsPlusFooterOpen(false)}
+        triggerReason={plusFooterReason}
       />
       <UpsellModal
         isOpen={upsellModal.isOpen}

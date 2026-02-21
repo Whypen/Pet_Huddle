@@ -2,17 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, ChevronRight, Lock, Sparkles } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { PLUS_ROUTE } from "@/lib/routes";
 
-type TierTab = "Premium" | "Gold" | "Add-on";
+type TierTab = "Plus" | "Gold" | "Add-on";
 type Billing = "monthly" | "yearly";
 
 type Pricing = {
-  premium: { monthly: number; yearly: number };
+  plus: { monthly: number; yearly: number };
   gold: { monthly: number; yearly: number };
   addOn: { star_pack: number; emergency_alert: number; vet_media: number };
 };
@@ -27,35 +29,35 @@ type AddOn = {
 };
 
 const DEFAULT_PRICING: Pricing = {
-  premium: { monthly: 9.99, yearly: 80.99 },
-  gold: { monthly: 19.99, yearly: 180.99 },
+  plus: { monthly: 5.99, yearly: 59.99 },
+  gold: { monthly: 11.99, yearly: 109.99 },
   addOn: { star_pack: 4.99, emergency_alert: 2.99, vet_media: 3.99 },
 };
 
 const ADD_ONS: AddOn[] = [
   { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "emergency_alert", title: "Emergency Broadcast", subtitle: "+1 Broadcast (72h / 150km radius)", pill: "ADD-ON" },
-  { id: "vet_media", title: "Media (+10)", subtitle: "+10 Media", pill: "Extra" },
+  { id: "emergency_alert", title: "Emergency Broadcast", subtitle: "Extended broadcast coverage", pill: "ADD-ON" },
+  { id: "vet_media", title: "Media Boost", subtitle: "Extra media uploads", pill: "Extra" },
 ];
 
-const FEATURES = (tier: "premium" | "gold") =>
-  tier === "premium"
+const FEATURES = (tier: "plus" | "gold") =>
+  tier === "plus"
     ? [
         { title: "Unlimited", tip: "Unlimited discovery + standard ranking", icon: Sparkles },
-        { title: "Threads", tip: "5 posts/day", icon: CheckCircle2 },
-        { title: "Media", tip: "10/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "25km radius • 24h duration", icon: CheckCircle2 },
-        { title: "Filters", tip: "12 advanced filters (Premium)", icon: CheckCircle2 },
+        { title: "Threads", tip: "More daily posts", icon: CheckCircle2 },
+        { title: "Media", tip: "More media for AI Vet, chats, and threads", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "Expanded range and duration", icon: CheckCircle2 },
+        { title: "Filters", tip: "Advanced filters (Plus)", icon: CheckCircle2 },
         { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
       ]
     : [
         { title: "Unlimited", tip: "Unlimited discovery + priority ranking", icon: Sparkles },
-        { title: "Threads", tip: "20 posts/day", icon: CheckCircle2 },
+        { title: "Threads", tip: "Extended daily posts", icon: CheckCircle2 },
         { title: "Stars", tip: "3/cycle (direct chat)", icon: CheckCircle2 },
-        { title: "Media", tip: "50/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "50km radius • 48h duration", icon: CheckCircle2 },
-        { title: "Family", tip: "1 member (quota inheritance)", icon: CheckCircle2 },
-        { title: "Filters", tip: "All 15 filters (Gold exclusive)", icon: CheckCircle2 },
+        { title: "Media", tip: "Maximum media for AI Vet, chats, and threads", icon: CheckCircle2 },
+        { title: "Broadcast", tip: "Maximum range and duration", icon: CheckCircle2 },
+        { title: "Family", tip: "Family sharing", icon: CheckCircle2 },
+        { title: "Filters", tip: "All filters (Gold exclusive)", icon: CheckCircle2 },
         { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
       ];
 
@@ -63,14 +65,14 @@ function money(n: number) {
   return `$${n.toFixed(2)}`;
 }
 
-export default function PremiumPage() {
+export default function PlusPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { t } = useLanguage();
   const [searchParams] = useSearchParams();
 
-  // UAT: auto-select Premium on load.
-  const [tab, setTab] = useState<TierTab>("Premium");
+  // UAT: auto-select Plus on load.
+  const [tab, setTab] = useState<TierTab>("Plus");
   const [billing, setBilling] = useState<Billing>("monthly");
   const [pricing, setPricing] = useState<Pricing>(DEFAULT_PRICING);
   const [selected, setSelected] = useState<Record<AddOnId, boolean>>({
@@ -94,9 +96,9 @@ export default function PremiumPage() {
         if (error) throw error;
         const prices = data?.prices || {};
         setPricing((prev) => ({
-          premium: {
-            monthly: prices.premium_monthly?.amount ?? prev.premium.monthly,
-            yearly: prices.premium_annual?.amount ?? prev.premium.yearly,
+          plus: {
+            monthly: prices.plus_monthly?.amount ?? prev.plus.monthly,
+            yearly: prices.plus_annual?.amount ?? prev.plus.yearly,
           },
           gold: {
             monthly: prices.gold_monthly?.amount ?? prev.gold.monthly,
@@ -135,7 +137,7 @@ export default function PremiumPage() {
 
   useEffect(() => {
     const desired = searchParams.get("tab");
-    if (desired === "Gold" || desired === "Premium" || desired === "Add-on") {
+    if (desired === "Gold" || desired === "Plus" || desired === "Add-on") {
       setTab(desired);
       fade.current += 1;
     }
@@ -154,7 +156,7 @@ export default function PremiumPage() {
 
   const purchaseLabel = useMemo(() => {
     if (tab === "Add-on") return `Total ${money(cartTotal)}`;
-    const tier = tab === "Gold" ? "gold" : "premium";
+    const tier = tab === "Gold" ? "gold" : "plus";
     const p = pricing[tier][billing];
     return `${money(p)} / ${billing === "monthly" ? "month" : "year"}`;
   }, [billing, cartTotal, pricing, tab]);
@@ -174,8 +176,8 @@ export default function PremiumPage() {
             mode: "payment",
             items: cartItems.map((i) => ({ type: i.id, quantity: i.qty })),
             amount: Math.round(cartTotal * 100),
-            successUrl: `${window.location.origin}/premium`,
-            cancelUrl: `${window.location.origin}/premium`,
+            successUrl: `${window.location.origin}${PLUS_ROUTE}`,
+            cancelUrl: `${window.location.origin}${PLUS_ROUTE}`,
           },
         });
         if (error) throw error;
@@ -184,14 +186,14 @@ export default function PremiumPage() {
         return;
       }
 
-      const type = `${tab === "Gold" ? "gold" : "premium"}_${billing === "monthly" ? "monthly" : "annual"}`;
+      const type = `${tab === "Gold" ? "gold" : "plus"}_${billing === "monthly" ? "monthly" : "annual"}`;
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "subscription",
           type,
-          successUrl: `${window.location.origin}/premium`,
-          cancelUrl: `${window.location.origin}/premium`,
+          successUrl: `${window.location.origin}${PLUS_ROUTE}`,
+          cancelUrl: `${window.location.origin}${PLUS_ROUTE}`,
         },
       });
       if (error) throw error;
@@ -199,16 +201,15 @@ export default function PremiumPage() {
       if (url) window.location.assign(url);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      console.warn("[Premium] checkout failed", e);
-      window.alert(msg || "Checkout failed. Please try again.");
+      toast.error(msg || "Checkout failed. Please try again.");
     }
   };
 
   const TierTabs = (
-    <div className="sticky top-12 z-10 bg-background/95 backdrop-blur-sm border-b border-border/50 shadow-[0_6px_16px_-16px_rgba(0,0,0,0.35)]">
+    <div className="sticky top-12 z-10 bg-background border-b border-border/50 shadow-[0_6px_16px_-16px_rgba(0,0,0,0.35)]">
       <div className="px-4 pt-4 pb-3">
         <div className="flex items-center gap-2 rounded-[12px] border border-gray-300 p-1 bg-white">
-          {(["Premium", "Gold", "Add-on"] as const).map((tName) => {
+          {(["Plus", "Gold", "Add-on"] as const).map((tName) => {
             const active = tab === tName;
             return (
               <button
@@ -252,7 +253,7 @@ export default function PremiumPage() {
     >
       <div className="pt-4">
         <p className="text-sm text-gray-600">
-          {tab === "Premium"
+          {tab === "Plus"
             ? "Best for Pet Lovers"
             : tab === "Gold"
               ? "Ultimate Experience"
@@ -260,19 +261,19 @@ export default function PremiumPage() {
         </p>
       </div>
 
-      {tab === "Premium" || tab === "Gold" ? (
+      {tab === "Plus" || tab === "Gold" ? (
         <>
           <div className="mt-4 space-y-3">
             {([
               {
                 id: "monthly" as const,
                 label: "Monthly",
-                price: tab === "Gold" ? pricing.gold.monthly : pricing.premium.monthly,
+                price: tab === "Gold" ? pricing.gold.monthly : pricing.plus.monthly,
               },
               {
                 id: "yearly" as const,
                 label: "Yearly",
-                price: tab === "Gold" ? pricing.gold.yearly : pricing.premium.yearly,
+                price: tab === "Gold" ? pricing.gold.yearly : pricing.plus.yearly,
                 pill: tab === "Gold" ? "Save 25%" : "Save 26%",
               },
             ] as const).map((p) => {
@@ -308,7 +309,7 @@ export default function PremiumPage() {
           </div>
 
           <div className="mt-4">
-            {FEATURES(tab === "Gold" ? "gold" : "premium").map((f) => (
+            {FEATURES(tab === "Gold" ? "gold" : "plus").map((f) => (
               <button key={f.title} className="w-full flex items-start gap-3 py-3">
                 <f.icon className="w-6 h-6 text-brandBlue" />
                 <div className="flex-1 text-left">
@@ -359,7 +360,7 @@ export default function PremiumPage() {
                       onClick={() => setQty((x) => ({ ...x, [a.id]: Math.max(1, (x[a.id] ?? 1) - 1) }))}
                       disabled={!checked}
                       className={cn(
-                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
+                        "w-10 h-10 min-w-[44px] min-h-[44px] rounded-[10px] border border-gray-300 font-black",
                         !checked && "opacity-40"
                       )}
                     >
@@ -370,7 +371,7 @@ export default function PremiumPage() {
                       onClick={() => setQty((x) => ({ ...x, [a.id]: Math.min(10, (x[a.id] ?? 1) + 1) }))}
                       disabled={!checked}
                       className={cn(
-                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
+                        "w-10 h-10 min-w-[44px] min-h-[44px] rounded-[10px] border border-gray-300 font-black",
                         !checked && "opacity-40"
                       )}
                     >
@@ -417,7 +418,7 @@ export default function PremiumPage() {
                 ? `Cart ${cartItems.reduce((s, i) => s + i.qty, 0)}`
                 : tab === "Gold"
                   ? "Gold"
-                  : "Premium"}
+                  : "Plus"}
             </div>
             <div className="text-base font-bold text-brandText">{purchaseLabel}</div>
           </div>

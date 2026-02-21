@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +65,7 @@ const EditPetProfile = () => {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(!!petId);
   const [saving, setSaving] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [isNewPet, setIsNewPet] = useState(!petId);
@@ -442,7 +442,7 @@ const EditPetProfile = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader onUpgradeClick={() => setIsPlusOpen(true)} />
 
       {/* Page Header */}
       <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
@@ -487,7 +487,6 @@ const EditPetProfile = () => {
                   name: formData.name.trim() ? "" : t("Pet name is required"),
                 }));
               }}
-              placeholder={t("Pet's name")}
               className="rounded-[12px]"
               aria-invalid={Boolean(fieldErrors.name)}
             />
@@ -527,7 +526,6 @@ const EditPetProfile = () => {
                     customSpecies: formData.custom_species.trim() ? "" : t("Species is required"),
                   }));
                 }}
-                placeholder={t("Enter species...")}
                 className="rounded-[12px] mt-2"
                 aria-invalid={Boolean(fieldErrors.customSpecies)}
               />
@@ -543,7 +541,7 @@ const EditPetProfile = () => {
               <select
                 value={formData.breed}
                 onChange={(e) => setFormData(prev => ({ ...prev, breed: e.target.value }))}
-                className="h-9 w-full rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left"
+                className="h-10 w-full rounded-[12px] border border-brandText/30 bg-white px-2 py-1 text-sm text-left"
               >
                 <option value="">{t("Select breed")}</option>
                 {(speciesBreeds[formData.species] || ["Other"]).map((breed) => (
@@ -634,14 +632,13 @@ const EditPetProfile = () => {
                     setFieldErrors((prev) => ({ ...prev, weight: "" }));
                   }
                 }}
-                placeholder={t("0")}
                 className="rounded-[12px] flex-1"
                 aria-invalid={Boolean(fieldErrors.weight)}
               />
               <select
                 value={formData.weight_unit}
                 onChange={(e) => setFormData(prev => ({ ...prev, weight_unit: e.target.value }))}
-                className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                className="h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
               >
                 <option value="kg">{t("kg")}</option>
                 <option value="lbs">{t("lbs")}</option>
@@ -671,7 +668,7 @@ const EditPetProfile = () => {
                 <select
                   value={vaccinationInput.name}
                   onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
-                  className="flex-1 h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                  className="flex-1 h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                 >
                   <option value="">{t("Select vaccine...")}</option>
                   {VACCINATION_OPTIONS.map(v => (
@@ -694,7 +691,6 @@ const EditPetProfile = () => {
                       }));
                     }
                   }}
-                  placeholder={t("Select date")}
                   className="rounded-[12px] w-36"
                 />
                 <Button onClick={addVaccination} size="sm" variant="secondary">
@@ -757,20 +753,17 @@ const EditPetProfile = () => {
               <Input
                 value={medicationInput.name}
                 onChange={(e) => setMedicationInput(prev => ({ ...prev, name: e.target.value }))}
-                placeholder={t("Medication name")}
                 className="rounded-[12px]"
               />
               <div className="flex gap-2">
                 <Input
                   value={medicationInput.dosage}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, dosage: e.target.value }))}
-                  placeholder={t("Dosage")}
                   className="rounded-[12px] flex-1"
                 />
                 <Input
                   value={medicationInput.frequency}
                   onChange={(e) => setMedicationInput(prev => ({ ...prev, frequency: e.target.value }))}
-                  placeholder={t("Frequency")}
                   className="rounded-[12px] flex-1"
                 />
                 <Button onClick={addMedication} size="sm" variant="secondary">
@@ -807,13 +800,11 @@ const EditPetProfile = () => {
             <Input
               value={formData.clinic_name}
               onChange={(e) => setFormData(prev => ({ ...prev, clinic_name: e.target.value }))}
-              placeholder={t("Clinic name")}
               className="rounded-[12px]"
             />
             <Input
               value={formData.preferred_vet}
               onChange={(e) => setFormData(prev => ({ ...prev, preferred_vet: e.target.value }))}
-              placeholder={t("Preferred vet")}
               className="rounded-[12px]"
             />
             <PhoneInput
@@ -821,8 +812,7 @@ const EditPetProfile = () => {
               defaultCountry="HK"
               value={formData.phone_no}
               onChange={(value) => setFormData(prev => ({ ...prev, phone_no: value || "" }))}
-              className="phone-input-auth h-9 rounded-[12px] bg-white border border-brandText/40 px-2 py-1 text-left"
-              placeholder={t("Clinic phone (+XXX)")}
+              className="phone-input-auth h-10 rounded-[12px] bg-white border border-brandText/40 px-2 py-1 text-left"
             />
           </div>
 
@@ -839,7 +829,6 @@ const EditPetProfile = () => {
                   microchipId: formData.microchip_id.length !== 15 ? t("Microchip ID must be 15 digits") : "",
                 }));
               }}
-              placeholder={t("000000000000000")}
               className="rounded-[12px] font-mono"
               maxLength={15}
               aria-invalid={Boolean(fieldErrors.microchipId)}
@@ -857,7 +846,6 @@ const EditPetProfile = () => {
             <Textarea
               value={formData.bio}
               onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
-              placeholder={t("Tell us about your pet...")}
               className="min-h-[100px] rounded-xl"
             />
           </div>
@@ -868,7 +856,6 @@ const EditPetProfile = () => {
             <Textarea
               value={formData.routine}
               onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
-              placeholder={t("Feeding times, walks, play schedule...")}
               className="min-h-[80px] rounded-xl"
             />
           </div>
@@ -899,7 +886,7 @@ const EditPetProfile = () => {
         </div>
       </StyledScrollArea>
 
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
     </div>
   );
 };

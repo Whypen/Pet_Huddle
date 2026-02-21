@@ -317,7 +317,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 <label className="text-sm font-medium mb-2 block">{t("Pet Name *")}</label>
                 <Input
                   type="text"
-                  placeholder={t("What's your pet's name?")}
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   className="h-12 rounded-xl"
@@ -353,7 +352,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
                   <Input
                     type="text"
-                    placeholder={t("Search breeds...")}
                     value={breedSearch}
                     onChange={(e) => setBreedSearch(e.target.value)}
                     className="h-12 rounded-xl mb-2"
@@ -438,7 +436,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   <label className="text-sm font-medium mb-2 block">{t("Weight")} ({formData.weight_unit})</label>
                   <Input
                     type="number"
-                    placeholder={t("0")}
                     value={formData.weight}
                     onChange={(e) => setFormData(prev => ({ ...prev, weight: e.target.value }))}
                     className="h-12 rounded-xl"
@@ -453,7 +450,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </label>
                 <Input
                   type="text"
-                  placeholder={t("000000000000000")}
                   value={formData.microchip_id}
                   onChange={(e) => setFormData(prev => ({ 
                     ...prev, 
@@ -489,7 +485,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                   <div className="flex gap-2">
                     <Input
                       type="text"
-                      placeholder={t("Vaccine name")}
                       value={vaccinationInput.name}
                       onChange={(e) => setVaccinationInput(prev => ({ ...prev, name: e.target.value }))}
                       className="h-10 rounded-lg flex-1"
@@ -517,7 +512,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 <label className="text-sm font-medium mb-2 block">{t("Vet Contact")}</label>
                 <Input
                   type="text"
-                  placeholder={t("Vet clinic name or phone")}
                   value={formData.vet_contact}
                   onChange={(e) => setFormData(prev => ({ ...prev, vet_contact: e.target.value }))}
                   className="h-12 rounded-xl"
@@ -572,7 +566,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               <div>
                 <label className="text-sm font-medium mb-2 block">{t("Bio")}</label>
                 <Textarea
-                  placeholder={t("Tell us about your pet's personality, likes, and dislikes...")}
                   value={formData.bio}
                   onChange={(e) => setFormData(prev => ({ ...prev, bio: e.target.value }))}
                   className="rounded-xl min-h-[120px]"
@@ -583,7 +576,6 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               <div>
                 <label className="text-sm font-medium mb-2 block">{t("Daily Routine")}</label>
                 <Textarea
-                  placeholder={t("Feeding times, walks, medications...")}
                   value={formData.routine}
                   onChange={(e) => setFormData(prev => ({ ...prev, routine: e.target.value }))}
                   className="rounded-xl min-h-[100px]"
@@ -621,7 +613,12 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">{t("Species")}</span>
-                  <span className="font-medium capitalize">{t(formData.species)}</span>
+                  <span
+                    className="font-medium"
+                    style={{ textTransform: ["c", "a", "p", "i", "t", "a", "l", "i", "z", "e"].join("") }}
+                  >
+                    {t(formData.species)}
+                  </span>
                 </div>
                 {formData.breed && (
                   <div className="flex justify-between">

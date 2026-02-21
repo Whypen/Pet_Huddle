@@ -117,7 +117,7 @@ interface PinDetailModalProps {
         });
       } catch (err) {
         // User cancelled or share failed — silent
-        console.log("Share cancelled:", err);
+        console.debug("Share cancelled:", err);
       }
     } else {
       setSharePayload({ url: shareUrl, text: shareText });
@@ -371,7 +371,7 @@ interface PinDetailModalProps {
                       if (url.startsWith("http")) window.open(url, "_blank", "noopener,noreferrer");
                       else navigate(url);
                     }}
-                    className="text-sm font-medium text-[#2145CF] underline underline-offset-2"
+                    className="text-sm font-medium text-brandBlue underline underline-offset-2"
                   >
                     See more on Social
                   </button>

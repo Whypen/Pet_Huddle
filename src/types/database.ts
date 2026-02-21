@@ -22,10 +22,10 @@ export interface UserProfile {
   has_car: boolean | null;
   languages: string[] | null;
   location_name: string | null;
-  is_verified: boolean | null;
   user_role: string | null;
   tier: string | null;
-  subscription_status: string | null;
+  effective_tier: string | null;
+  last_active_at: string | null;
   stars_count: number | null;
   mesh_alert_count: number | null;
   media_credits: number | null;

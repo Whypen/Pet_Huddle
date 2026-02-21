@@ -47,7 +47,7 @@ export const OfflineBanner = () => {
         icon: <WifiOff className="w-4 h-4" />,
         message: "You're offline",
         bgColor: "bg-yellow-500",
-        textColor: "text-yellow-900",
+        textColor: "text-yellow-1000",
       };
     }
 

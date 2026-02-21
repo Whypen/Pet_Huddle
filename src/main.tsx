@@ -11,7 +11,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
       const headers = new Headers(init?.headers || (typeof input === "string" ? undefined : input.headers));
       const auth = headers.get("Authorization");
       const apikey = headers.get("apikey");
-      console.log("[UAT_FETCH]", {
+      console.debug("[UAT_FETCH]", {
         method: init?.method || (typeof input === "string" ? "GET" : input.method),
         url,
         hasAuthorizationHeader: Boolean(auth),

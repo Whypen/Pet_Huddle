@@ -1,5 +1,8 @@
 -- Purge fake phone placeholders and prevent future placeholders.
 
+-- Drop phone constraint temporarily
+alter table public.profiles drop constraint if exists profiles_phone_required;
+
 update public.profiles
 set phone = null
 where phone is not null and btrim(phone) in ('+0000000000', '+10000000000');

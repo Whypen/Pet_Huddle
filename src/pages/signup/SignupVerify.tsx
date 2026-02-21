@@ -14,7 +14,7 @@ import { humanizeError } from "@/lib/humanizeError";
 
 const SignupVerify = () => {
   const navigate = useNavigate();
-  const { data, update, reset } = useSignup();
+  const { data, update, reset, startVerificationSignup } = useSignup();
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
@@ -29,7 +29,7 @@ const SignupVerify = () => {
     defaultValues: { legal_name: data.legal_name || "" },
   });
 
-  const startVerificationSignup = async (legalName?: string) => {
+  const onStartVerification = async (values: { legal_name: string }) => {
     if (!data.display_name.trim()) {
       toast.error("Please enter a valid display name");
       return;
@@ -46,41 +46,24 @@ const SignupVerify = () => {
       toast.error("Please enter a valid phone number");
       return;
     }
-    setLoading(true);
-    try {
-      const { data: authData, error } = await supabase.auth.signUp({
-        email: data.email,
-        password: data.password,
-        options: {
-          data: {
-            display_name: data.display_name,
-            legal_name: legalName || data.legal_name || "",
-            dob: data.dob,
-            phone: data.phone,
-            social_id: data.social_id,
-          },
-        },
-      });
-      if (error) throw error;
 
+    setLoading(true);
+    const legalName = values.legal_name || data.legal_name;
+    const result = await startVerificationSignup(legalName);
+    if (result.ok) {
       update({ legal_name: legalName || "" });
       navigate("/verify-identity");
-    } catch (err: unknown) {
-      const message = humanizeError(err);
-      if (message.toLowerCase().includes("already") && message.toLowerCase().includes("registered")) {
-        toast.error("Email already registered. Please sign in.");
-        // Do not navigate away on error - stay on page
-        setLoading(false);
-        return;
-      }
-      toast.error(message);
-    } finally {
       setLoading(false);
+      return;
     }
-  };
 
-  const onStartVerification = (values: { legal_name: string }) => {
-    startVerificationSignup(values.legal_name || data.legal_name);
+    const message = humanizeError(result.error || "Signup failed");
+    if (message.toLowerCase().includes("already") && message.toLowerCase().includes("registered")) {
+      toast.error("Email already registered. Please sign in.");
+    } else {
+      toast.error(message);
+    }
+    setLoading(false);
   };
 
   const skipVerificationSignup = async () => {
@@ -121,7 +104,7 @@ const SignupVerify = () => {
       if (sessionUser) {
         const { error: profileError } = await supabase
           .from("profiles")
-          .update({ verification_status: "unverified", is_verified: false })
+          .update({ verification_status: "unverified" })
           .eq("id", sessionUser.id);
         if (profileError) throw profileError;
       }
@@ -148,7 +131,7 @@ const SignupVerify = () => {
   return (
     <div className="min-h-screen bg-background px-6">
       <div className="pt-6 flex items-center justify-between">
-        <button onClick={() => navigate("/signup/credentials")} className="p-2 -ml-2" aria-label="Back">
+        <button onClick={() => navigate("/signup/name")} className="p-2 -ml-2" aria-label="Back">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="text-sm text-muted-foreground">4 of 4</div>
@@ -172,7 +155,7 @@ const SignupVerify = () => {
           <div className="relative">
             <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              className={`h-9 pl-9 ${errors.legal_name ? "border-red-500" : ""}`}
+              className={`h-10 pl-9 ${errors.legal_name ? "border-red-500" : ""}`}
               placeholder="Enter your legal name"
               {...register("legal_name")}
             />
@@ -183,10 +166,10 @@ const SignupVerify = () => {
         <div className="rounded-2xl border border-brandBlue/40 bg-brandBlue/5 p-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-brandBlue" />
-            <span className="font-semibold">Get verified to access full app features</span>
+            <span className="font-semibold">Get verified</span>
           </div>
           <p className="text-sm text-muted-foreground mt-2">
-            Complete identity verification to unlock Social features, premium filters, and build trust in the community.
+            Helps us build a safer space where everyone feels truly connected in huddle.
           </p>
           <Button type="submit" className="w-full h-10 mt-4" disabled={loading}>
             Start Verification
@@ -201,10 +184,11 @@ const SignupVerify = () => {
       <Dialog open={showSkipConfirm} onOpenChange={setShowSkipConfirm}>
         <DialogContent className="max-w-sm">
           <DialogTitle className="text-brandText text-base font-semibold">
-            Skipping verification may affect your user journey
+            Skipping verification for now?
           </DialogTitle>
           <p className="text-sm text-muted-foreground mt-2">
-            Unverified users have limited access to certain community features and may appear less trustworthy to others.
+            It might make connections feel a bit less open and trusting.
+            Verifying helps us all feel safer and truly at home in Huddle.
           </p>
           <div className="mt-4 space-y-2">
             <Button type="button" variant="ghost" className="w-full h-10" onClick={() => setShowSkipConfirm(false)}>

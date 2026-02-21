@@ -25,12 +25,12 @@ import SignupCredentials from "./pages/signup/SignupCredentials";
 import SignupVerify from "./pages/signup/SignupVerify";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
-import Onboarding from "./pages/Onboarding";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
 import PetDetails from "./pages/PetDetails";
 import Settings from "./pages/Settings";
-import Premium from "./pages/Premium";
+import Plus from "./pages/Plus";
+import { PLUS_ROUTE } from "@/lib/routes";
 import AccountSettings from "./pages/AccountSettings";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
@@ -40,6 +40,7 @@ import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/auth/verify/VerifyIdentity";
 import AdminDisputes from "./screens/AdminDisputes";
 import AdminKYCReview from "./pages/admin/AdminKYCReview";
+import AdminReports from "./pages/admin/AdminReports";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 
@@ -82,15 +83,8 @@ const App = () => (
                   <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
                   <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
 
-                  {/* Onboarding Route (requires auth but not onboarding completion) */}
-                  <Route
-                    path="/onboarding"
-                    element={
-                      <ProtectedRoute requireOnboarding={false}>
-                        <Onboarding />
-                      </ProtectedRoute>
-                    }
-                  />
+                  {/* Onboarding deprecated */}
+                  <Route path="/onboarding" element={<Navigate to="/" replace />} />
 
                   {/* Protected Routes */}
                   <Route
@@ -240,15 +234,15 @@ const App = () => (
                     path="/subscription"
                     element={
                       <ProtectedRoute>
-                        <Navigate to="/premium" replace />
+                        <Navigate to={PLUS_ROUTE} replace />
                       </ProtectedRoute>
                     }
                   />
                   <Route
-                    path="/premium"
+                    path={PLUS_ROUTE}
                     element={
                       <ProtectedRoute>
-                        <Premium />
+                        <Plus />
                       </ProtectedRoute>
                     }
                   />
@@ -256,7 +250,7 @@ const App = () => (
                     path="/manage-subscription"
                     element={
                       <ProtectedRoute>
-                        <Navigate to="/premium" replace />
+                        <Navigate to={PLUS_ROUTE} replace />
                       </ProtectedRoute>
                     }
                   />
@@ -305,6 +299,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AdminDisputes />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/reports"
+                    element={
+                      <ProtectedRoute>
+                        <AdminReports />
                       </ProtectedRoute>
                     }
                   />

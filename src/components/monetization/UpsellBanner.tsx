@@ -27,8 +27,8 @@ export function UpsellBanner({ state, onClose }: { state: UpsellBannerState; onC
           role="status"
           aria-live="polite"
         >
-          <div className="flex items-start gap-3 rounded-2xl border border-brandGold bg-white/95 backdrop-blur-md px-4 py-3 shadow-elevated">
-            <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-brandGold/15 text-brandGold">
+          <div className="flex items-start gap-3 rounded-2xl border border-brandGold bg-white/95  px-4 py-3 shadow-elevated">
+            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-brandGold/15 text-brandGold">
               <Sparkles className="h-5 w-5" />
             </div>
 
@@ -39,7 +39,7 @@ export function UpsellBanner({ state, onClose }: { state: UpsellBannerState; onC
                 <div className="mt-2">
                   <Button
                     onClick={state.onCta}
-                    className="h-9 rounded-xl bg-brandBlue text-white hover:bg-brandBlue/90"
+                    className="h-10 rounded-xl bg-brandBlue text-white hover:bg-brandBlue/90"
                   >
                     {state.ctaLabel}
                   </Button>

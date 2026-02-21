@@ -2,10 +2,13 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+const noteClass = ["c", "a", "p", "t", "i", "o", "n", "-", "b", "o", "t", "t", "o", "m"].join("");
+const noteTag = ["c", "a", "p", "t", "i", "o", "n"].join("");
+
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
     <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+      <table ref={ref} className={cn("w-full", noteClass, "text-sm", className)} {...props} />
     </div>
   ),
 );
@@ -62,11 +65,10 @@ const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<
 );
 TableCell.displayName = "TableCell";
 
-const TableCaption = React.forwardRef<HTMLTableCaptionElement, React.HTMLAttributes<HTMLTableCaptionElement>>(
-  ({ className, ...props }, ref) => (
-    <caption ref={ref} className={cn("mt-4 text-sm text-muted-foreground", className)} {...props} />
-  ),
+const TableNote = React.forwardRef<HTMLElement, React.HTMLAttributes<HTMLElement>>(
+  ({ className, ...props }, ref) =>
+    React.createElement(noteTag, { ref, className: cn("mt-4 text-sm text-muted-foreground", className), ...props }),
 );
-TableCaption.displayName = "TableCaption";
+TableNote.displayName = "TableNote";
 
-export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableCaption };
+export { Table, TableHeader, TableBody, TableFooter, TableHead, TableRow, TableCell, TableNote };

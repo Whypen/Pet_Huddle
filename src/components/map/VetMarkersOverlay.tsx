@@ -82,7 +82,7 @@ const VetMarkersOverlay = ({ map, vets, onSelect }: Props) => {
             aria-label={`Open ${vet.name}`}
           >
             <span
-              className="relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-[#E5E7EB] bg-white shadow-[0_4px_12px_rgba(0,0,0,0.25)]"
+              className="relative flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#E5E7EB] bg-white shadow-[0_4px_12px_rgba(0,0,0,0.25)]"
               style={{ fontSize: 18 }}
             >
               {emoji}

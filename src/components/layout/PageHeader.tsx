@@ -12,7 +12,7 @@ export const PageHeader = ({ title, showBack, onSettingsClick }: PageHeaderProps
   const navigate = useNavigate();
 
   return (
-    <header className="flex items-center justify-between px-4 sticky top-0 bg-background/95 backdrop-blur-sm z-40 h-12">
+    <header className="flex items-center justify-between px-4 sticky top-0 bg-background z-40 h-12">
       <div className="flex items-center gap-3">
         {showBack && (
           <BackButton />

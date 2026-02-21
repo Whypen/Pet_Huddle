@@ -20,7 +20,9 @@ serve(async (req: Request) => {
       petSize,
       advanced,
       heightMin,
-      heightMax
+      heightMax,
+      recently_active,
+      active_only
     } = await req.json();
     if (!userId || lat == null || lng == null) {
       return new Response(JSON.stringify({ error: "Missing required parameters" }), {
@@ -33,6 +35,7 @@ serve(async (req: Request) => {
     const minAgeSafe = Math.max(16, minAge || 18);
     const maxAgeSafe = Math.min(99, maxAge || 99);
 
+    const recentlyActive = Boolean(recently_active ?? active_only);
     const { data, error } = await supabase.rpc("social_discovery", {
       p_user_id: userId,
       p_lat: lat,
@@ -47,6 +50,7 @@ serve(async (req: Request) => {
       p_advanced: Boolean(advanced),
       p_height_min: typeof heightMin === "number" ? heightMin : null,
       p_height_max: typeof heightMax === "number" ? heightMax : null,
+      p_recently_active: recentlyActive,
     });
 
     if (error) throw error;

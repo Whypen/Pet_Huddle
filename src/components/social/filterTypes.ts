@@ -8,9 +8,9 @@ export interface FilterState {
   gender: string;
   petSize: string;
   languages: string[]; // SPRINT 3: Language filter
-  // Premium filters (stored but not applied for free users)
+  // Plus filters (stored but not applied for free users)
   verifiedOnly: boolean;
-  activeNow: boolean;
+  recentlyActive: boolean;
   temperamentMatch: boolean;
   hasCar: boolean;
   petSchoolGrad: boolean;
@@ -28,7 +28,7 @@ export const defaultFilters: FilterState = {
   petSize: "",
   languages: [],
   verifiedOnly: false,
-  activeNow: false,
+  recentlyActive: false,
   temperamentMatch: false,
   hasCar: false,
   petSchoolGrad: false,

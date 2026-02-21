@@ -1,9 +1,12 @@
 // =====================================================
-// UPSELL MODAL - Smart Revenue Triggers
+// UPSELL MODAL — in-app purchase modal (stars, slots, media)
+// DESIGN_MASTER_SPEC §E3: glass active modal
+// MASTER_SPEC §2.5: no "Plus Tip:" or "Plus" in copy
+// Motion: spec-compliant 300ms cubic-bezier, no bounce
 // =====================================================
 
-import { motion, AnimatePresence } from "framer-motion";
-import { X, Star, AlertTriangle, Camera, Users, Sparkles } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertTriangle, Camera, Sparkles, Star, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -24,29 +27,6 @@ const ICON_MAP = {
   family_slot: Users,
 };
 
-const COLOR_MAP = {
-  star: {
-    bg: "from-brandBlue to-[#1B39AA]",
-    iconBg: "bg-primary/10 dark:bg-primary/20",
-    iconColor: "text-primary",
-  },
-  emergency_alert: {
-    bg: "from-brandBlue to-[#1B39AA]",
-    iconBg: "bg-primary/10 dark:bg-primary/20",
-    iconColor: "text-primary",
-  },
-  media: {
-    bg: "from-brandBlue to-[#1B39AA]",
-    iconBg: "bg-primary/10 dark:bg-primary/20",
-    iconColor: "text-primary",
-  },
-  family_slot: {
-    bg: "from-brandBlue to-[#1B39AA]",
-    iconBg: "bg-primary/10 dark:bg-primary/20",
-    iconColor: "text-primary",
-  },
-};
-
 export const UpsellModal = ({
   isOpen,
   type,
@@ -60,7 +40,6 @@ export const UpsellModal = ({
   if (!type) return null;
 
   const Icon = ICON_MAP[type];
-  const colors = COLOR_MAP[type];
 
   return (
     <AnimatePresence>
@@ -71,67 +50,68 @@ export const UpsellModal = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-black/50 z-50"
           />
 
-          {/* Modal */}
+          {/* Glass E3 modal */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto bg-card border border-border rounded-2xl p-6 z-50 shadow-2xl"
+            exit={{ opacity: 0, scale: 0.95, y: 16 }}
+            transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+            className="fixed inset-x-4 top-1/2 -translate-y-1/2 glass-e3 max-w-sm mx-auto p-6 z-50"
           >
-            {/* Close Button */}
+            {/* Close */}
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 p-2 rounded-full hover:bg-muted transition-colors"
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/5 transition-colors"
+              aria-label="Not now"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5 text-brandText/60" />
             </button>
 
             {/* Icon */}
             <div className="flex justify-center mb-4">
-              <div
-                className={`w-16 h-16 rounded-full ${colors.iconBg} flex items-center justify-center`}
-              >
-                <Icon className={`w-8 h-8 ${colors.iconColor}`} />
+              <div className="w-16 h-16 rounded-full bg-brandBlue/10 flex items-center justify-center">
+                <Icon className="w-8 h-8 text-brandBlue" />
               </div>
             </div>
 
             {/* Title */}
-            <h2 className="text-2xl font-bold text-center mb-2">{title}</h2>
+            <h2 className="font-display text-h2 font-semibold text-brandText text-center mb-2">
+              {title}
+            </h2>
 
             {/* Description */}
-            <p className="text-center text-muted-foreground mb-6">{description}</p>
+            <p className="text-center text-brandSubtext text-sub mb-6">{description}</p>
 
             {/* Price */}
-            <div className="bg-muted/50 rounded-xl p-4 mb-6 text-center">
-              <p className="text-sm text-muted-foreground mb-1">{t("One-time purchase")}</p>
-              <p className="text-3xl font-bold">${price.toFixed(2)}</p>
+            <div className="bg-[#F3F4F6] rounded-card p-4 mb-6 text-center">
+              <p className="text-helper text-brandText/60 mb-1">{t("One-time purchase")}</p>
+              <p className="font-display text-h1 font-semibold text-brandText">
+                ${price.toFixed(2)}
+              </p>
             </div>
 
             {/* Actions */}
             <div className="flex gap-3">
-              <Button onClick={onClose} variant="outline" className="flex-1">
-                {t("Maybe Later")}
+              <Button onClick={onClose} variant="ghost" className="flex-1">
+                {t("Not now")}
               </Button>
-              <Button
-                onClick={onBuy}
-                className="flex-1 bg-primary hover:bg-primary/90 text-white"
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
+              <Button onClick={onBuy} variant="default" className="flex-1">
+                <Sparkles className="w-4 h-4 mr-1" />
                 {t("Buy Now")}
               </Button>
             </div>
 
-            {/* Premium Upsell (for media type) */}
+            {/* Contextual hint for media type — no "Plus Tip:" copy */}
             {type === "media" && (
-              <div className="mt-4 p-3 bg-primary/10 rounded-lg border border-primary/20">
-                <p className="text-xs text-center text-muted-foreground">
-                  {t("Premium Tip:")}{" "}
-                  <span className="font-semibold">
-                    {t("Get unlimited media uploads + more features for just $8.99/month")}
+              <div className="mt-4 p-3 bg-brandBlue/5 rounded-btn border border-brandBlue/10">
+                <p className="text-helper text-center text-brandText/60">
+                  <span className="font-semibold text-brandBlue">
+                    {t("Plus includes unlimited media uploads and more")}
                   </span>
                 </p>
               </div>

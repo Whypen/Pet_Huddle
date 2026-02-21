@@ -11,6 +11,9 @@ import { PetSetupStep } from "@/components/onboarding/PetSetupStep";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { humanError } from "@/lib/humanError";
 
+// LEGACY: Onboarding page is retained for reference only.
+// Do not route to `/onboarding`; App.tsx hard-redirects to `/`.
+
 type OnboardingPhase = "security" | "profile" | "pet";
 
 type ProfileSetupData = {
@@ -52,7 +55,7 @@ const Onboarding = () => {
   // Security step data
   const [legalName, setLegalName] = useState("");
   const [phone, setPhone] = useState("");
-  const [verificationStatus, setVerificationStatus] = useState<"pending" | "skipped" | "none">("none");
+  const [verificationStatus, setVerificationStatus] = useState<"pending" | "none">("none");
   
   // Track if user owns pets (from profile step)
   const [ownsPets, setOwnsPets] = useState(false);
@@ -87,13 +90,7 @@ const Onboarding = () => {
         .update({
           legal_name: legalName.trim() ? legalName.trim() : null,
           phone: phone.trim() ? phone.trim() : null,
-          is_verified: false,
-          verification_status:
-            verificationStatus === "pending"
-              ? "pending"
-              : verificationStatus === "skipped"
-              ? "skipped"
-              : null,
+          verification_status: verificationStatus === "pending" ? "pending" : null,
         })
         .eq("id", user.id);
 
@@ -213,7 +210,7 @@ const Onboarding = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary-soft via-background to-accent-soft">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-background/80 backdrop-blur-md border-b border-border">
+      <div className="sticky top-0 z-20 bg-background/80  border-b border-border">
         <div className="px-6 py-4">
           <div className="flex items-center justify-center gap-2">
             <div className="w-8 h-8 rounded-full overflow-hidden">

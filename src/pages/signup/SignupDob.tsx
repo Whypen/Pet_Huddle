@@ -88,7 +88,7 @@ const SignupDob = () => {
   const onSubmit = () => {
     if (!canContinue) return;
     update({ dob: assembledDob });
-    navigate("/signup/name");
+    navigate("/signup/credentials");
   };
 
   const fieldErrorClass = dobError ? "border-red-500 focus:border-red-500" : "";

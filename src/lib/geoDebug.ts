@@ -108,7 +108,7 @@ export function geoDebugLog(event: string, payload: Record<string, unknown>): vo
     at: new Date().toISOString(),
     ...payload,
   };
-  console.log("[GEO_DEBUG]", JSON.stringify(body));
+  console.debug("[GEO_DEBUG]", JSON.stringify(body));
 }
 
 if (typeof window !== "undefined") {

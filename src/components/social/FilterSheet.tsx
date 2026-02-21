@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart, Bird, PawPrint } from "lucide-react";
+import { X, Lock, Dog, Cat, User, Car, Medal, Shield, Zap, Users, Heart, Bird, PawPrint } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SPECIES_LIST } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -11,7 +11,7 @@ interface FilterSheetProps {
   onClose: () => void;
   filters: FilterState;
   onApply: (filters: FilterState) => void;
-  onPremiumClick: () => void;
+  onPlusClick: () => void;
 }
 
 const roles = [
@@ -51,7 +51,7 @@ const languageOptions = [
   "Japanese", "Korean", "German", "Portuguese", "Italian"
 ];
 
-export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick }: FilterSheetProps) => {
+export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPlusClick }: FilterSheetProps) => {
   const { t } = useLanguage();
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
 
@@ -68,8 +68,8 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
     }));
   };
 
-  const handlePremiumToggle = (key: keyof FilterState) => {
-    onPremiumClick();
+  const handlePlusToggle = (key: keyof FilterState) => {
+    onPlusClick();
   };
 
   const handleApply = () => {
@@ -87,7 +87,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40  z-50"
           />
 
           {/* Sheet */}
@@ -254,7 +254,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                             ...prev, 
                             ageRange: [parseInt(e.target.value), prev.ageRange[1]] 
                           }))}
-                          className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
+                          className="w-full h-10 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                         />
                         <span className="text-muted-foreground">-</span>
                         <input
@@ -266,7 +266,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                             ...prev, 
                             ageRange: [prev.ageRange[0], parseInt(e.target.value)] 
                           }))}
-                          className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
+                          className="w-full h-10 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                         />
                       </div>
                     </div>
@@ -277,7 +277,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                       <select
                         value={localFilters.gender}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, gender: e.target.value }))}
-                        className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
+                        className="w-full h-10 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
                       >
                         {genderOptions.map(opt => (
                           <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
@@ -291,7 +291,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                       <select
                         value={localFilters.petSize}
                         onChange={(e) => setLocalFilters(prev => ({ ...prev, petSize: e.target.value }))}
-                        className="w-full h-9 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
+                        className="w-full h-10 px-2 py-1 rounded-[12px] bg-white border border-brandText/30 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm appearance-none"
                       >
                         {petSizeOptions.map(opt => (
                           <option key={opt} value={opt === "Any" ? "" : opt}>{t(opt)}</option>
@@ -333,11 +333,11 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                 </div>
               </div>
 
-              {/* Premium Filters Section */}
+              {/* Plus Filters Section */}
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                    {t("Premium Filters")}
+                    {t("Plus Filters")}
                   </h3>
                   <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-brandBlue to-[#1B39AA] text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
@@ -347,30 +347,30 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
                 <div className="space-y-3">
                   {/* Verification */}
-                  <PremiumToggle
+                  <PlusToggle
                     icon={Shield}
                     label={t("Verified Only")}
                     description={t("ID-checked users only")}
                     checked={localFilters.verifiedOnly}
-                    onToggle={() => handlePremiumToggle("verifiedOnly")}
+                    onToggle={() => handlePlusToggle("verifiedOnly")}
                   />
 
                   {/* Activity */}
-                  <PremiumToggle
+                  <PlusToggle
                     icon={Zap}
-                    label={t("Active Now")}
-                    description={t("Seen in last 24 hours")}
-                    checked={localFilters.activeNow}
-                    onToggle={() => handlePremiumToggle("activeNow")}
+                    label={t("Recently Active")}
+                    description={t("Seen in last 7 days")}
+                    checked={localFilters.recentlyActive}
+                    onToggle={() => handlePlusToggle("recentlyActive")}
                   />
 
                   {/* Compatibility */}
-                  <PremiumToggle
+                  <PlusToggle
                     icon={Heart}
                     label={t("Pet Temperament Match")}
                     description={t("Filter by personality sync")}
                     checked={localFilters.temperamentMatch}
-                    onToggle={() => handlePremiumToggle("temperamentMatch")}
+                    onToggle={() => handlePlusToggle("temperamentMatch")}
                   />
 
                   {/* Logistics & Skills */}
@@ -381,7 +381,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     </div>
                     <div className="flex gap-2 flex-wrap">
                       <button
-                        onClick={() => handlePremiumToggle("hasCar")}
+                        onClick={() => handlePlusToggle("hasCar")}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2 rounded-full text-sm border transition-all",
                           localFilters.hasCar
@@ -393,7 +393,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                         {t("Has a Car")}
                       </button>
                       <button
-                        onClick={() => handlePremiumToggle("petSchoolGrad")}
+                        onClick={() => handlePlusToggle("petSchoolGrad")}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2 rounded-full text-sm border transition-all",
                           localFilters.petSchoolGrad
@@ -401,19 +401,19 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                             : "bg-card border-border text-muted-foreground"
                         )}
                       >
-                        <GraduationCap className="w-4 h-4" />
+                        <Medal className="w-4 h-4" />
                         {t("Pet School Graduates")}
                       </button>
                     </div>
                   </div>
 
                   {/* Connections */}
-                  <PremiumToggle
+                  <PlusToggle
                     icon={Users}
                     label={t("Common Huddle Friends")}
                     description={t("Show mutual connections")}
                     checked={localFilters.commonFriends}
-                    onToggle={() => handlePremiumToggle("commonFriends")}
+                    onToggle={() => handlePlusToggle("commonFriends")}
                   />
                 </div>
               </div>
@@ -436,7 +436,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
   );
 };
 
-interface PremiumToggleProps {
+interface PlusToggleProps {
   icon: React.ElementType;
   label: string;
   description: string;
@@ -444,7 +444,7 @@ interface PremiumToggleProps {
   onToggle: () => void;
 }
 
-const PremiumToggle = ({ icon: Icon, label, description, checked, onToggle }: PremiumToggleProps) => (
+const PlusToggle = ({ icon: Icon, label, description, checked, onToggle }: PlusToggleProps) => (
   <button
     onClick={onToggle}
     className="w-full flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border hover:border-primary/30 transition-all"

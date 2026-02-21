@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { humanizeError } from "@/lib/humanizeError";
 
 const AuthCallback = () => {
   const [ready, setReady] = useState(false);
@@ -22,7 +23,7 @@ const AuthCallback = () => {
         }
       }
       if (type !== "recovery") {
-        navigate("/onboarding");
+        navigate("/");
         return;
       }
       setReady(true);
@@ -33,7 +34,7 @@ const AuthCallback = () => {
   const updatePassword = async () => {
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
-      toast.error(error.message || "Failed to update password");
+      toast.error(humanizeError(error));
       return;
     }
     toast.success("Password updated");
@@ -48,7 +49,7 @@ const AuthCallback = () => {
       <div className="mt-6 space-y-3">
         <Input
           type="password"
-          className="h-9"
+          className="h-10"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="New password"

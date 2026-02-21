@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { getBroadcastPinStyle, normalizeBroadcastAlertType } from "@/lib/broadcastPinStyle";
 import { humanError } from "@/lib/humanError";
 import { toast } from "sonner";
+import { normalizeMembershipTier } from "@/lib/membership";
 
 interface BroadcastModalProps {
   isOpen: boolean;
@@ -64,12 +65,12 @@ const BroadcastModal = ({
   const [creating, setCreating] = useState(false);
   const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
   const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
-  const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
-  const baseRangeKm = tier === "gold" ? 50 : tier === "premium" ? 25 : 10;
-  const baseDurationHours = tier === "gold" ? 48 : tier === "premium" ? 24 : 12;
+  const tier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const baseRangeKm = tier === "gold" ? 50 : tier === "plus" ? 25 : 10;
+  const baseDurationHours = tier === "gold" ? 48 : tier === "plus" ? 24 : 12;
   const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
-  const capRangeKm = extraBroadcast72h > 0 ? 150 : baseRangeKm;
-  const capDurationHours = extraBroadcast72h > 0 ? 72 : baseDurationHours;
+  const maxRangeKm = extraBroadcast72h > 0 ? 150 : baseRangeKm;
+  const maxDurationHours = extraBroadcast72h > 0 ? 72 : baseDurationHours;
   const [rangeKm, setRangeKm] = useState<number>(baseRangeKm);
   const [durationHours, setDurationHours] = useState<number>(baseDurationHours);
   const [showUpsell, setShowUpsell] = useState(false);
@@ -98,9 +99,9 @@ const BroadcastModal = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    setRangeKm((current) => Math.min(current, capRangeKm));
-    setDurationHours((current) => Math.min(current, capDurationHours));
-  }, [capDurationHours, capRangeKm, isOpen]);
+    setRangeKm((current) => Math.min(current, maxRangeKm));
+    setDurationHours((current) => Math.min(current, maxDurationHours));
+  }, [maxDurationHours, maxRangeKm, isOpen]);
 
   const showUpsellOncePerDrag = () => {
     if (upsellOnceRef.current) return;
@@ -113,8 +114,8 @@ const BroadcastModal = ({
   };
 
   const handleRangeChange = (nextValue: number) => {
-    if (nextValue > capRangeKm) {
-      setRangeKm(capRangeKm);
+    if (nextValue > maxRangeKm) {
+      setRangeKm(maxRangeKm);
       showUpsellOncePerDrag();
       return;
     }
@@ -122,8 +123,8 @@ const BroadcastModal = ({
   };
 
   const handleDurationChange = (nextValue: number) => {
-    if (nextValue > capDurationHours) {
-      setDurationHours(capDurationHours);
+    if (nextValue > maxDurationHours) {
+      setDurationHours(maxDurationHours);
       showUpsellOncePerDrag();
       return;
     }
@@ -135,8 +136,8 @@ const BroadcastModal = ({
       toast.error("Pin location first");
       return;
     }
-    if (rangeKm > capRangeKm || durationHours > capDurationHours) {
-      toast.error(`Tier limit exceeded. Max ${capRangeKm}km and ${capDurationHours}h for your plan.`);
+    if (rangeKm > maxRangeKm || durationHours > maxDurationHours) {
+      toast.error("Range or duration exceeds your plan. Upgrade for extended broadcasts.");
       onError();
       return;
     }
@@ -153,31 +154,9 @@ const BroadcastModal = ({
         photoUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
       }
 
-      console.log("[BROADCAST_PAYLOAD]", {
-        type: normalizedType,
-        title: alertTitle.trim(),
-        lat: selectedLocation.lat,
-        lng: selectedLocation.lng,
-        rangeKm,
-        durationHours,
-        postOnThreads,
-        hasImage: Boolean(photoUrl),
-      });
-
       const expiresAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
       const rangeMeters = Math.round(rangeKm * 1000);
       const locationLabel = "Pinned Location";
-
-      const sessionRes = await supabase.auth.getSession();
-      const session = sessionRes.data.session;
-      console.log("[UAT_AUTH_STATE]", {
-        sessionPresent: Boolean(session),
-        accessTokenPresent: Boolean(session?.access_token),
-        sessionUserId: session?.user?.id ?? null,
-        contextUserId: user?.id ?? null,
-      });
-      const { data: whoami, error: whoErr } = await supabase.rpc("debug_whoami");
-      console.log("[UAT_WHOAMI]", { whoami, error: whoErr?.message ?? null });
 
       const { data, error } = await supabase
         .from("map_alerts")
@@ -233,7 +212,6 @@ const BroadcastModal = ({
           .single();
 
         if (threadError) {
-          console.error("[SOCIAL_DUPLICATION_ERROR]", threadError);
           toast.error(`Pinned, but Social failed: ${humanError(threadError)}`);
           await supabase
           .from("map_alerts")
@@ -253,8 +231,6 @@ const BroadcastModal = ({
             .eq("id", data.id);
         }
       }
-
-      console.log("[RPC_RESULT]", { alert_id: data.id, thread_id: threadId, mode: "direct_insert_map_alerts" });
 
       onSuccess({
         alertId: data.id,
@@ -291,7 +267,6 @@ const BroadcastModal = ({
       if (createdAlertId) {
         await supabase.from("map_alerts").delete().eq("id", createdAlertId);
       }
-      console.error("[BASELINE_INSERT_ERROR]", err);
       toast.error(`Broadcast failed: ${humanError(err)}`);
       onError();
     } finally {
@@ -306,16 +281,16 @@ const BroadcastModal = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] bg-black/50 flex items-end"
+          className="fixed inset-0 z-50 bg-black/40 flex items-end"
           onClick={onClose}
         >
         <motion.div
           initial={{ y: "100%" }}
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
           onClick={(e) => e.stopPropagation()}
-          className="relative w-full bg-card rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
+          className="glass-e2 relative w-full rounded-t-[20px] p-6 max-h-[90vh] overflow-auto"
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
@@ -331,8 +306,8 @@ const BroadcastModal = ({
                   }
                 }}
                 className={[
-                  "h-9 rounded-full px-4 text-xs font-semibold",
-                  selectedLocation ? "bg-muted text-muted-foreground hover:bg-muted" : "bg-[#2145CF] text-white hover:bg-[#1b39ab]",
+                  "h-10 min-h-[44px] rounded-full px-4 text-xs font-semibold",
+                  selectedLocation ? "bg-muted text-muted-foreground hover:bg-muted" : "bg-brandBlue text-white hover:bg-brandBlue/90",
                 ].join(" ")}
               >
                 {selectedLocation ? "Remove Location" : "Pin location"}
@@ -359,7 +334,7 @@ const BroadcastModal = ({
 
             <div className="mb-4 rounded-xl border border-border p-3">
               <div className="text-xs text-muted-foreground mb-2">
-                Tier limit: up to {baseRangeKm}km and {baseDurationHours}h
+                {tier === "gold" ? "Extended range & duration" : tier === "plus" ? "Enhanced range & duration" : "Standard range & duration"} — upgrade for more
               </div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
                 Range: {rangeKm} km

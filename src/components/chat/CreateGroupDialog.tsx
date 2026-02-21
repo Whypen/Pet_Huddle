@@ -93,7 +93,7 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40  z-50"
           />
 
           {/* Dialog */}
@@ -128,7 +128,6 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
                   id="groupName"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
-                  placeholder={t("Enter group name...")}
                   className="h-12 rounded-xl"
                 />
               </div>
@@ -168,7 +167,6 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t("Search verified contacts...")}
                   className="h-11 rounded-xl"
                 />
                 

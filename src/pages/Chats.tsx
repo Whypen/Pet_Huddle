@@ -4,7 +4,7 @@ import { Users, MessageSquare, Search, X, Loader2, HandMetal, Star, SlidersHoriz
 import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Switch } from "@/components/ui/switch";
@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { demoUsers } from "@/lib/demoData";
+import { normalizeMembershipTier } from "@/lib/membership";
+import { compressImage } from "@/lib/imageCompression";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = ["Male", "Female", "Non-binary", "PNA"] as const;
@@ -46,7 +48,7 @@ type DiscoveryFilters = {
   languages: string[];
   verifiedOnly: boolean;
   whoWavedAtMe: boolean;
-  activeOnly: boolean;
+  recentlyActive: boolean;
 };
 
 const DEFAULT_FILTERS: DiscoveryFilters = {
@@ -66,28 +68,28 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   languages: [...ALL_LANGUAGES],
   verifiedOnly: true,
   whoWavedAtMe: true,
-  activeOnly: true,
+  recentlyActive: true,
 };
 
 type FilterKey = keyof DiscoveryFilters;
-type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "premium" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
+type FilterRowDef = { key: FilterKey; label: string; requiredTier: "free" | "plus" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
 
 const FILTER_ROWS: FilterRowDef[] = [
-  { key: "ageMin", label: "Age Range", tier: "free", type: "range" },
-  { key: "genders", label: "Gender", tier: "free", type: "multi" },
-  { key: "maxDistanceKm", label: "Distance", tier: "free", type: "slider" },
-  { key: "species", label: "Species", tier: "free", type: "multi" },
-  { key: "socialRoles", label: "Social Role", tier: "free", type: "multi" },
-  { key: "heightMin", label: "Height Range", tier: "premium", type: "range" },
-  { key: "orientations", label: "Sexual Orientation", tier: "premium", type: "multi" },
-  { key: "degrees", label: "Highest Degree", tier: "premium", type: "multi" },
-  { key: "relationshipStatuses", label: "Relationship Status", tier: "premium", type: "multi" },
-  { key: "hasCar", label: "Car Badge", tier: "premium", type: "toggle" },
-  { key: "hasPetExperience", label: "Pet Experience", tier: "premium", type: "toggle" },
-  { key: "languages", label: "Language", tier: "premium", type: "multi" },
-  { key: "verifiedOnly", label: "Verified Users Only", tier: "gold", type: "toggle" },
-  { key: "whoWavedAtMe", label: "Who waved at you", tier: "gold", type: "toggle" },
-  { key: "activeOnly", label: "Active Users only", tier: "gold", type: "toggle" },
+  { key: "ageMin", label: "Age Range", requiredTier: "free", type: "range" },
+  { key: "genders", label: "Gender", requiredTier: "free", type: "multi" },
+  { key: "maxDistanceKm", label: "Distance", requiredTier: "free", type: "slider" },
+  { key: "species", label: "Species", requiredTier: "free", type: "multi" },
+  { key: "socialRoles", label: "Social Role", requiredTier: "free", type: "multi" },
+  { key: "heightMin", label: "Height Range", requiredTier: "plus", type: "range" },
+  { key: "orientations", label: "Sexual Orientation", requiredTier: "plus", type: "multi" },
+  { key: "degrees", label: "Highest Degree", requiredTier: "plus", type: "multi" },
+  { key: "relationshipStatuses", label: "Relationship Status", requiredTier: "plus", type: "multi" },
+  { key: "hasCar", label: "Car Badge", requiredTier: "plus", type: "toggle" },
+  { key: "hasPetExperience", label: "Pet Experience", requiredTier: "plus", type: "toggle" },
+  { key: "languages", label: "Language", requiredTier: "plus", type: "multi" },
+  { key: "verifiedOnly", label: "Verified Users Only", requiredTier: "gold", type: "toggle" },
+  { key: "whoWavedAtMe", label: "Who waved at you", requiredTier: "gold", type: "toggle" },
+  { key: "recentlyActive", label: "Recently active", requiredTier: "gold", type: "toggle" },
 ];
 
 /** Build a short summary for a filter row */
@@ -107,7 +109,7 @@ function filterSummary(filters: DiscoveryFilters, row: FilterRowDef): string {
     case "languages": return filters.languages.length === ALL_LANGUAGES.length ? "All" : filters.languages.slice(0, 2).join(", ") + (filters.languages.length > 2 ? "…" : "");
     case "verifiedOnly": return filters.verifiedOnly ? "Y" : "N";
     case "whoWavedAtMe": return filters.whoWavedAtMe ? "Y" : "N";
-    case "activeOnly": return filters.activeOnly ? "Y" : "N";
+    case "recentlyActive": return filters.recentlyActive ? "Y" : "N";
     default: return "";
   }
 }
@@ -121,7 +123,7 @@ type DiscoveryProfile = {
   id: string;
   display_name: string | null;
   avatar_url?: string | null;
-  is_verified?: boolean;
+  verification_status?: string | null;
   has_car?: boolean;
   bio?: string | null;
   relationship_status?: string | null;
@@ -131,6 +133,7 @@ type DiscoveryProfile = {
   school?: string | null;
   major?: string | null;
   tier?: string | null;
+  effective_tier?: string | null;
   pets?: DiscoveryPet[] | null;
   pet_species?: string[] | null;
   pet_size?: string | null;
@@ -173,7 +176,7 @@ interface ChatUser {
   avatarUrl?: string | null;
   isVerified: boolean;
   hasCar: boolean;
-  isPremium: boolean;
+  isPlus: boolean;
   lastMessage: string;
   time: string;
   unread: number;
@@ -201,7 +204,7 @@ const mockChats: ChatUser[] = [
     avatarUrl: null,
     isVerified: true,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     lastMessage: "Sure! Let's meet at Central Park around 3pm?",
     time: "2m ago",
     unread: 2,
@@ -215,7 +218,7 @@ const mockChats: ChatUser[] = [
     avatarUrl: null,
     isVerified: true,
     hasCar: false,
-    isPremium: true,
+    isPlus: true,
     lastMessage: "I can take care of Max this weekend!",
     time: "1h ago",
     unread: 0,
@@ -229,7 +232,7 @@ const mockChats: ChatUser[] = [
     avatarUrl: null,
     isVerified: false,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     lastMessage: "Thanks for the playdate! Bella had so much fun 🐕",
     time: "3h ago",
     unread: 0,
@@ -243,7 +246,7 @@ const mockChats: ChatUser[] = [
     avatarUrl: null,
     isVerified: true,
     hasCar: false,
-    isPremium: true,
+    isPlus: true,
     lastMessage: "New kittens just arrived! 🐱",
     time: "2d ago",
     unread: 3,
@@ -257,7 +260,7 @@ const mockChats: ChatUser[] = [
     avatarUrl: null,
     isVerified: true,
     hasCar: true,
-    isPremium: false,
+    isPlus: false,
     lastMessage: "I'll be available next Monday for pet sitting",
     time: "3d ago",
     unread: 0,
@@ -318,7 +321,7 @@ const Chats = () => {
   const { getConversations } = useApi();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [mainTab, setMainTab] = useState<MainTab>("playdates");
   const [chats, setChats] = useState<ChatUser[]>(mockChats);
@@ -371,15 +374,16 @@ const Chats = () => {
   const [sitterHourlyRate, setSitterHourlyRate] = useState<number | null>(null);
   const [bookingLocation, setBookingLocation] = useState("");
 
-  const isVerified = profile?.is_verified;
+  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
+  const isVerified = verificationStatus === "verified";
   const userAge = profile?.dob
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
   const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const isPlus = membershipTier === "plus" || membershipTier === "gold";
 
-  // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
+  // UAT: Free users have a discovery limit. After limit: blur overlay and upsell.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
   const discoveryKey = useMemo(() => {
     const d = new Date();
@@ -519,7 +523,7 @@ const Chats = () => {
           const sent = new Set(waves.filter((w: { from_user_id: string }) => w.from_user_id === profile.id).map((w: { to_user_id: string }) => w.to_user_id));
           const received = waves.filter((w: { to_user_id: string; from_user_id: string }) => w.to_user_id === profile.id && sent.has(w.from_user_id)).map((w: { from_user_id: string }) => w.from_user_id);
           if (received.length > 0) {
-            const { data: profiles } = await supabase.from("profiles").select("id, display_name, avatar_url").in("id", received);
+            const { data: profiles } = await supabase.rpc("get_public_profiles_by_ids", { p_ids: received });
             if (profiles) {
               setMutualWaves(profiles.map((p: { id: string; display_name: string | null; avatar_url: string | null }) => ({
                 id: p.id,
@@ -572,18 +576,18 @@ const Chats = () => {
           max_distance_km: filters.maxDistanceKm,
           species: filters.species,
           social_roles: filters.socialRoles,
-          height_min_cm: isPremium ? filters.heightMin : undefined,
-          height_max_cm: isPremium ? filters.heightMax : undefined,
-          orientations: isPremium ? filters.orientations : undefined,
-          degrees: isPremium ? filters.degrees : undefined,
-          relationship_statuses: isPremium ? filters.relationshipStatuses : undefined,
-          has_car: isPremium ? filters.hasCar : undefined,
-          has_pet_experience: isPremium ? filters.hasPetExperience : undefined,
-          languages: isPremium ? filters.languages : undefined,
-          verified_only: effectiveTier === "gold" ? filters.verifiedOnly : undefined,
-          who_waved_at_me: effectiveTier === "gold" ? filters.whoWavedAtMe : undefined,
-          active_only: effectiveTier === "gold" ? filters.activeOnly : undefined,
-          advanced: isPremium,
+          height_min_cm: isPlus ? filters.heightMin : undefined,
+          height_max_cm: isPlus ? filters.heightMax : undefined,
+          orientations: isPlus ? filters.orientations : undefined,
+          degrees: isPlus ? filters.degrees : undefined,
+          relationship_statuses: isPlus ? filters.relationshipStatuses : undefined,
+          has_car: isPlus ? filters.hasCar : undefined,
+          has_pet_experience: isPlus ? filters.hasPetExperience : undefined,
+          languages: isPlus ? filters.languages : undefined,
+          verified_only: membershipTier === "gold" ? filters.verifiedOnly : undefined,
+          who_waved_at_me: membershipTier === "gold" ? filters.whoWavedAtMe : undefined,
+          recently_active: membershipTier === "gold" ? filters.recentlyActive : undefined,
+          advanced: isPlus,
         };
         const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
         if (error) throw error;
@@ -600,8 +604,8 @@ const Chats = () => {
     profile?.last_lat,
     profile?.last_lng,
     filters,
-    isPremium,
-    effectiveTier,
+    isPlus,
+    membershipTier,
   ]);
 
   useEffect(() => {
@@ -680,7 +684,7 @@ const Chats = () => {
     id: u.id,
     display_name: u.name,
     avatar_url: u.avatarUrl || null,
-    is_verified: u.isVerified,
+    verification_status: u.isVerified ? "verified" : "unverified",
     has_car: u.hasCar,
     bio: u.bio,
     relationship_status: u.relationshipStatus || null,
@@ -689,7 +693,8 @@ const Chats = () => {
     occupation: u.occupation || null,
     school: u.education || null,
     major: u.degree || null,
-    tier: u.isPremium ? "premium" : "free",
+    tier: u.isPlus ? "plus" : "free",
+    effective_tier: u.isPlus ? "plus" : "free",
     pets: u.pets || [],
     pet_species: (u.pets || []).map((p) => p.species),
     pet_size: null,
@@ -741,15 +746,15 @@ const Chats = () => {
   );
 
   const handleCreateGroup = () => {
-    if (!isVerified || !isPremium) {
-      toast.error(t("Only verified premium users can create groups"));
+    if (!isVerified || !isPlus) {
+      toast.error(t("Only verified plus users can create groups"));
       return;
     }
     setIsCreateGroupOpen(true);
   };
 
   const handleGroupCreated = (groupData: { name: string; members: unknown[]; allowMemberControl: boolean }) => {
-    console.log("Group created:", groupData);
+    console.debug("Group created:", groupData);
     // Add to groups list
     const newGroup: Group = {
       id: `g${Date.now()}`,
@@ -798,13 +803,10 @@ const Chats = () => {
     setProfileSheetData(null);
     setProfileSheetLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role" as "*")
-        .eq("id", userId)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc("get_public_profile_by_id", { p_id: userId });
       if (error) throw error;
-      setProfileSheetData(data as Record<string, unknown> | null);
+      const row = Array.isArray(data) ? data[0] : data;
+      setProfileSheetData((row ?? null) as Record<string, unknown> | null);
     } catch {
       setProfileSheetData(null);
     } finally {
@@ -873,13 +875,13 @@ const Chats = () => {
   return (
     <div className="min-h-screen bg-background pb-nav relative">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
       {isMinor && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
+          <div className="rounded-xl border border-brandBlue/30 bg-background/90  px-4 py-3 text-sm font-medium text-brandBlue shadow-card">
             {t("Social features restricted for users under 16.")}
           </div>
         </div>
@@ -952,7 +954,7 @@ const Chats = () => {
                   </div>
                 )}
                 {discoverySource.map((p, idx) => {
-                  const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
+                  const blocked = !isPlus && discoverySeenToday >= 40 && idx >= 40;
                   const age = p?.dob
                     ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
                     : "";
@@ -998,7 +1000,7 @@ const Chats = () => {
 
                       {/* Badge overlays on card image — Verified + Car */}
                       <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                        {p.is_verified && (
+                        {String(p.verification_status ?? "").toLowerCase() === "verified" && (
                           <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
                         )}
                         {p.has_car && (
@@ -1070,18 +1072,18 @@ const Chats = () => {
                       </div>
 
                       {blocked ? (
-                        <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
+                        <div className="absolute inset-0  bg-white/80 flex items-center justify-center">
                           <div className="px-4 text-center">
-                            <div className="text-sm font-bold text-brandText">Unlock Premium to see more users</div>
-                            <div className="text-xs text-brandText/70 mt-2">Free users can view up to 40 profiles per day.</div>
+                            <div className="text-sm font-bold text-brandText">Unlock Plus to see more users</div>
+                            <div className="text-xs text-brandText/70 mt-2">Upgrade to Plus for unlimited discovery.</div>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setIsPremiumOpen(true);
+                                setIsPlusOpen(true);
                               }}
                               className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
                             >
-                              Explore Premium
+                              Explore Plus
                             </button>
                           </div>
                         </div>
@@ -1098,7 +1100,7 @@ const Chats = () => {
                       setFilters((f) => ({ ...f, maxDistanceKm: Math.min(150, f.maxDistanceKm + 15) }));
                       setHiddenDiscoveryIds(new Set());
                     }}
-                    className="text-xs font-medium text-[#3283ff] underline"
+                    className="text-xs font-medium text-brandBlue underline"
                   >
                     {t("Run out of huddlers? Expand search.")}
                   </button>
@@ -1123,7 +1125,6 @@ const Chats = () => {
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("Search conversations...")}
                 className="pl-10 pr-10 h-10 rounded-full"
                 autoFocus
               />
@@ -1420,8 +1421,7 @@ const Chats = () => {
                     if (!file || !groupManageId || !profile?.id) return;
                     setGroupImageUploading(true);
                     try {
-                      const { default: compress } = await import("browser-image-compression");
-                      const compressed = await compress(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
+                      const compressed = await compressImage(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
                       const ext = compressed.name.split(".").pop() || "jpg";
                       const path = `groups/${groupManageId}/${Date.now()}.${ext}`;
                       const { error: uploadErr } = await supabase.storage.from("notices").upload(path, compressed);
@@ -1529,7 +1529,7 @@ const Chats = () => {
 
       {/* Connection Status */}
       {!isConnected && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-500/90 text-yellow-900 text-xs font-medium rounded-full shadow-lg">
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-500/90 text-yellow-1000 text-xs font-medium rounded-full shadow-lg">
           {t("chats.connecting")}
         </div>
       )}
@@ -1554,7 +1554,7 @@ const Chats = () => {
               <div className="relative">
                 <button
                   onClick={() => setShowDiscoveryModal(false)}
-                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
+                  className="absolute top-3 right-3 z-10 w-10 h-10 min-w-[44px] min-h-[44px] rounded-full bg-black/50 flex items-center justify-center"
                 >
                   <X className="w-5 h-5 text-white" />
                 </button>
@@ -1668,7 +1668,7 @@ const Chats = () => {
       </AnimatePresence>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
       <CreateGroupDialog
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
@@ -1785,8 +1785,7 @@ const Chats = () => {
                   type="text"
                   value={bookingLocation}
                   onChange={(e) => setBookingLocation(e.target.value)}
-                  placeholder={t("Enter service location")}
-                  className="w-full h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
+                  className="w-full h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left outline-none focus:border-brandBlue focus:shadow-sm"
                 />
               </div>
 
@@ -1796,7 +1795,7 @@ const Chats = () => {
                   <select
                     value={bookingCurrency}
                     onChange={(e) => setBookingCurrency(e.target.value)}
-                    className="h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
+                    className="h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm text-left"
                   >
                     <option value="USD">USD</option>
                     <option value="HKD">HKD</option>
@@ -1809,7 +1808,7 @@ const Chats = () => {
                     min="1"
                     max="500"
                     disabled={!!sitterHourlyRate}
-                    className="flex-1 h-9 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm font-semibold text-left outline-none focus:border-brandBlue focus:shadow-sm"
+                    className="flex-1 h-10 rounded-[12px] bg-white border border-brandText/30 px-2 py-1 text-sm font-semibold text-left outline-none focus:border-brandBlue focus:shadow-sm"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
@@ -1884,7 +1883,7 @@ const Chats = () => {
               {/* Close button */}
               <button
                 onClick={() => setProfileSheetUser(null)}
-                className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
+                className="absolute top-3 right-3 z-10 w-10 h-10 min-w-[44px] min-h-[44px] rounded-full bg-black/50 flex items-center justify-center"
               >
                 <X className="w-5 h-5 text-white" />
               </button>
@@ -1926,7 +1925,7 @@ const Chats = () => {
                     {/* Overlays at bottom of image: Name, Age, Social Role, Pet Species, Verified + Car Badge */}
                     <div className="absolute bottom-3 left-3 right-3 text-white">
                       <div className="flex items-center gap-1.5 mb-1">
-                        {profileSheetData.is_verified && (
+                        {String(profileSheetData.verification_status ?? "").toLowerCase() === "verified" && (
                           <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
                         )}
                         {profileSheetData.has_car && (
@@ -2056,7 +2055,7 @@ const Chats = () => {
         {isFilterModalOpen && (
           <>
             <motion.div
-              className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[70]"
+              className="fixed inset-0 bg-foreground/30  z-[70]"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -2088,15 +2087,15 @@ const Chats = () => {
                 <div className="divide-y divide-border">
                   {FILTER_ROWS.map((row) => {
                     const locked =
-                      (row.tier === "premium" && effectiveTier === "free") ||
-                      (row.tier === "gold" && effectiveTier !== "gold");
+                      (row.requiredTier === "plus" && membershipTier === "free") ||
+                      (row.requiredTier === "gold" && membershipTier !== "gold");
                     return (
                       <button
                         key={row.key}
                         className="w-full flex items-center justify-between px-5 py-3.5 text-sm"
                         onClick={() => {
                           if (locked) {
-                            const target = row.tier === "gold" ? "Gold" : "Premium";
+                            const target = row.requiredTier === "gold" ? "Gold" : "Plus";
                             toast.error(`Unlock ${target} to use this filter`);
                             return;
                           }
@@ -2111,9 +2110,9 @@ const Chats = () => {
                           {locked && (
                             <span className={cn(
                               "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white",
-                              row.tier === "gold" ? "bg-brandGold" : "bg-brandBlue"
+                              row.requiredTier === "gold" ? "bg-brandGold" : "bg-brandBlue"
                             )}>
-                              {row.tier === "gold" ? "Gold" : "Premium"}
+                              {row.requiredTier === "gold" ? "Gold" : "Plus"}
                             </span>
                           )}
                         </div>
@@ -2142,14 +2141,14 @@ const Chats = () => {
                           <label className="text-xs font-semibold text-brandText/70">Min Age</label>
                           <input type="number" min={18} max={99} value={filters.ageMin}
                             onChange={(e) => setFilters((f) => ({ ...f, ageMin: Math.max(18, Math.min(99, Number(e.target.value))) }))}
-                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                            className="w-full mt-1 h-10 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                         <span className="text-muted-foreground mt-5">–</span>
                         <div className="flex-1">
                           <label className="text-xs font-semibold text-brandText/70">Max Age</label>
                           <input type="number" min={18} max={99} value={filters.ageMax}
                             onChange={(e) => setFilters((f) => ({ ...f, ageMax: Math.max(f.ageMin, Math.min(99, Number(e.target.value))) }))}
-                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                            className="w-full mt-1 h-10 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground text-center">{filters.ageMin} – {filters.ageMax} years old</div>
@@ -2163,14 +2162,14 @@ const Chats = () => {
                           <label className="text-xs font-semibold text-brandText/70">Min (cm)</label>
                           <input type="number" min={100} max={300} value={filters.heightMin}
                             onChange={(e) => setFilters((f) => ({ ...f, heightMin: Math.max(100, Math.min(300, Number(e.target.value))) }))}
-                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                            className="w-full mt-1 h-10 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                         <span className="text-muted-foreground mt-5">–</span>
                         <div className="flex-1">
                           <label className="text-xs font-semibold text-brandText/70">Max (cm)</label>
                           <input type="number" min={100} max={300} value={filters.heightMax}
                             onChange={(e) => setFilters((f) => ({ ...f, heightMax: Math.max(f.heightMin, Math.min(300, Number(e.target.value))) }))}
-                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
+                            className="w-full mt-1 h-10 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground text-center">{filters.heightMin} – {filters.heightMax} cm</div>
@@ -2302,10 +2301,10 @@ const Chats = () => {
                       <Switch checked={filters.whoWavedAtMe} onCheckedChange={(v) => setFilters((f) => ({ ...f, whoWavedAtMe: v }))} />
                     </div>
                   )}
-                  {activeFilterRow.key === "activeOnly" && (
+                  {activeFilterRow.key === "recentlyActive" && (
                     <div className="flex items-center justify-between py-3">
-                      <span className="text-sm font-medium text-brandText">Show Active Users only (24h)</span>
-                      <Switch checked={filters.activeOnly} onCheckedChange={(v) => setFilters((f) => ({ ...f, activeOnly: v }))} />
+                      <span className="text-sm font-medium text-brandText">Show Recently Active (7 days)</span>
+                      <Switch checked={filters.recentlyActive} onCheckedChange={(v) => setFilters((f) => ({ ...f, recentlyActive: v }))} />
                     </div>
                   )}
                   <button className="w-full rounded-xl bg-brandBlue text-white font-bold py-3 text-sm mt-4"

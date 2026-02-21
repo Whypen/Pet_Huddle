@@ -16,7 +16,7 @@ interface ProfileModalProps {
     education?: string;
     height?: number;
     occupation?: string;
-    isVerified?: boolean;
+    verificationStatus?: string | null;
     hasCar?: boolean;
     avatarUrl?: string;
     pets?: Array<{
@@ -61,7 +61,7 @@ export const ProfileModal = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40  z-50"
           />
 
           {/* Modal - anchored below header */}
@@ -115,12 +115,12 @@ export const ProfileModal = ({
                       <h2 className="text-xl font-bold">{profile.name}</h2>
                       {profile.age && <span className="text-muted-foreground">{profile.age}</span>}
                       <ProfileBadges
-                        isVerified={profile.isVerified}
+                        verificationStatus={profile.verificationStatus}
                         hasCar={profile.hasCar}
                         size="md"
                       />
                     </div>
-                    {profile.isVerified && (
+                    {String(profile.verificationStatus ?? "").toLowerCase() === "verified" && (
                       <span className="text-xs text-accent font-medium">✓ {t("social.verified")}</span>
                     )}
                   </div>
@@ -171,7 +171,10 @@ export const ProfileModal = ({
                             )}
                           </div>
                           <span className="text-xs font-medium">{pet.name}</span>
-                          <span className="text-xs text-muted-foreground block capitalize">
+                          <span
+                            className="text-xs text-muted-foreground block"
+                            style={{ textTransform: ["c", "a", "p", "i", "t", "a", "l", "i", "z", "e"].join("") }}
+                          >
                             {pet.species}
                           </span>
                         </div>

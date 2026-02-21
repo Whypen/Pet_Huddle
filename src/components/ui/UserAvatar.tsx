@@ -91,7 +91,7 @@ export const UserAvatar = ({
             </div>
           )}
 
-          {/* Verification Badge - Bottom Right (UAT: no crown/premium) */}
+          {/* Verification Badge - Bottom Right (UAT: no crown/plus) */}
           <div
             className={cn(
               "absolute -bottom-1 -right-1 rounded-full flex items-center justify-center ring-2 ring-white",

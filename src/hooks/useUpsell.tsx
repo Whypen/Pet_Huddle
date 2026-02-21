@@ -7,6 +7,9 @@ import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
+import { MembershipTier, normalizeMembershipTier, resolveMembershipTier } from "@/lib/membership";
+import { PLUS_ROUTE } from "@/lib/routes";
+import { toast } from "sonner";
 
 export type UpsellType = "star" | "emergency_alert" | "media" | "family_slot" | null;
 
@@ -20,12 +23,14 @@ interface UpsellModalState {
 
 type QuotaSnapshot = {
   user_id: string;
-  tier: string;
+  tier: MembershipTier;
+  effective_tier: MembershipTier;
   thread_posts_today: number;
   discovery_views_today: number;
   media_usage_today: number;
   stars_used_cycle: number;
   broadcast_alerts_week: number;
+  broadcast_month_used: number;
   extra_stars: number;
   extra_media_10: number;
   extra_broadcast_72h: number;
@@ -52,11 +57,18 @@ export const useUpsell = () => {
     // Supabase RPC returns either a row or an array depending on the generated types,
     // so normalize defensively.
     const row = Array.isArray(r.data) ? r.data[0] : r.data;
-    return (row ?? null) as QuotaSnapshot | null;
+    const raw = (row ?? null) as Record<string, unknown> | null;
+    if (!raw) return null;
+    return {
+      ...(raw as Record<string, unknown>),
+      tier: normalizeMembershipTier(raw?.tier as string | null),
+      effective_tier: resolveMembershipTier(raw),
+    } as QuotaSnapshot;
   }, [user]);
 
   const effectiveTier = useCallback(
-    (snap: QuotaSnapshot | null) => String(profile?.effective_tier || profile?.tier || snap?.tier || "free").toLowerCase(),
+    (snap: QuotaSnapshot | null) =>
+      normalizeMembershipTier(profile?.effective_tier ?? profile?.tier ?? snap?.effective_tier ?? snap?.tier ?? "free"),
     [profile?.effective_tier, profile?.tier]
   );
 
@@ -69,7 +81,7 @@ export const useUpsell = () => {
 
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "gold" ? 3 : 0;
+    const base = tier === "gold" ? 10 : tier === "plus" ? 4 : 0;
     const used = snap?.stars_used_cycle ?? 0;
     const extra = snap?.extra_stars ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
@@ -98,8 +110,8 @@ export const useUpsell = () => {
     // Broadcast usage is enforced server-side by trigger, but we can provide an early upsell hint.
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "free" ? 5 : 20;
-    const used = snap?.broadcast_alerts_week ?? 0;
+    const base = tier === "gold" ? 80 : tier === "plus" ? 40 : 10;
+    const used = snap?.broadcast_month_used ?? 0;
     const extra = snap?.extra_broadcast_72h ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
 
@@ -107,9 +119,9 @@ export const useUpsell = () => {
       setUpsellModal({
         isOpen: true,
         type: "emergency_alert",
-        title: t("No Emergency Alerts Left"),
-        description: t("Buy an additional Broadcast token to send one more alert."),
-        price: 2.99,
+        title: t("You've reached your broadcast limit"),
+        description: t("Upgrade to Plus for more monthly broadcasts"),
+        price: 5.99,
       });
       return false;
     }
@@ -126,7 +138,7 @@ export const useUpsell = () => {
 
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "gold" ? 50 : tier === "premium" ? 10 : 0;
+    const base = tier === "gold" ? 50 : tier === "plus" ? 10 : 0;
     const used = snap?.media_usage_today ?? 0;
     const extra = snap?.extra_media_10 ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
@@ -153,9 +165,7 @@ export const useUpsell = () => {
     if (!user) return false;
 
     const ownerId = profile?.family_owner_id || user.id;
-    const snap = await fetchQuotaSnapshot();
-    const tier = effectiveTier(snap);
-    const totalSlots = tier === "gold" ? 1 : 0;
+    const totalSlots = 2;
 
     const { count } = await supabase
       .from("family_members" as "profiles")
@@ -166,18 +176,12 @@ export const useUpsell = () => {
     const currentFamilyCount = count || 0;
 
     if (currentFamilyCount >= totalSlots) {
-      setUpsellModal({
-        isOpen: true,
-        type: "family_slot",
-        title: t("Family Limit Reached"),
-        description: t("Upgrade to Gold to invite 1 family member."),
-        price: 5.99,
-      });
+      toast.error(t("Family limit reached"));
       return false;
     }
 
     return true;
-  }, [effectiveTier, fetchQuotaSnapshot, t, user, profile?.family_owner_id]);
+  }, [t, user, profile?.family_owner_id]);
 
   /**
    * Close upsell modal
@@ -193,13 +197,13 @@ export const useUpsell = () => {
   }, []);
 
   /**
-   * Navigate to Premium page with pre-selected add-on
+   * Navigate to Plus/Gold page with pre-selected add-on
    */
   const buyAddOn = useCallback((type: UpsellType) => {
     if (!type) return;
-    // Store selected add-on in session storage for Premium page to auto-select
+    // Store selected add-on in session storage for Plus/Gold page to auto-select
     sessionStorage.setItem("pending_addon", type);
-    window.location.href = "/premium";
+    window.location.href = PLUS_ROUTE;
   }, []);
 
   return {

@@ -8,6 +8,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { membershipTierLabel } from "@/lib/membership";
+import { plusTabRoute } from "@/lib/routes";
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
@@ -29,10 +31,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
-  const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const tierLabel = effectiveTier === "gold" ? "Gold" : effectiveTier === "premium" ? "Premium" : "Free";
+  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
+  const isVerified = verificationStatus === "verified";
+  const isPending = verificationStatus === "pending";
+  const tierLabel = membershipTierLabel(profile?.effective_tier ?? profile?.tier);
   const initials = useMemo(() => {
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
@@ -119,7 +121,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const firstPet = pets[0];
 
   return (
-    <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
+    <header className="sticky top-0 z-20 bg-white border-b border-border/30">
       <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
         {/* Left: Notification Bell */}
         <button
@@ -183,7 +185,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                     </div>
                     <span className={cn(
                       "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold",
-                      tierLabel === "Gold" ? "bg-brandGold/20 text-brandGold" : tierLabel === "Premium" ? "bg-brandBlue/20 text-brandBlue" : "bg-gray-100 text-brandText/60"
+                      tierLabel === "Gold" ? "bg-brandGold/20 text-brandGold" : tierLabel === "Plus" ? "bg-brandBlue/20 text-brandBlue" : "bg-gray-100 text-brandText/60"
                     )}>
                       {tierLabel}
                     </span>
@@ -192,15 +194,15 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                 </div>
               </div>
 
-              {/* 2. Unlock Premium block */}
+              {/* 2. Unlock Plus block */}
               <SheetClose asChild>
                 <button
-                  onClick={() => navigate("/premium?tab=Premium")}
+                  onClick={() => navigate(plusTabRoute("Plus"))}
                   className="w-full rounded-[16px] bg-brandBlue text-white p-3 text-left"
                 >
                   <div className="flex items-center gap-2">
                     <Diamond className="w-4 h-4 text-white" />
-                    <div className="text-sm font-extrabold">Unlock Premium</div>
+                    <div className="text-sm font-extrabold">Unlock Plus</div>
                   </div>
                   <div className="text-xs text-white/80 mt-1">Manage your privileges</div>
                 </button>
@@ -209,7 +211,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
               {/* 3. Unlock Gold block */}
               <SheetClose asChild>
                 <button
-                  onClick={() => navigate("/premium?tab=Gold")}
+                  onClick={() => navigate(plusTabRoute("Gold"))}
                   className="w-full rounded-[16px] bg-brandGold text-white p-3 text-left"
                 >
                   <div className="flex items-center gap-2">

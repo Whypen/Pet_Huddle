@@ -37,13 +37,13 @@ serve(async (req: Request) => {
     }
 
     const subject =
-      status === "approved" ? "Identity verification approved" : "Identity verification rejected";
+      status === "verified" ? "Identity verification verified" : "Identity verification unverified";
     const text = [
       `Hi ${profile.display_name || "there"},`,
       "",
-      status === "approved"
-        ? "Your identity verification has been approved. You now have full access to Social and Chat features."
-        : "Your identity verification was rejected. Please review the feedback below and resubmit your documents.",
+      status === "verified"
+        ? "Your identity verification has been verified. You now have full access to Social and Chat features."
+        : "Your identity verification was marked unverified. Please review the feedback below and resubmit your documents.",
       comment ? `\nReviewer note: ${comment}` : "",
       "",
       "If you have questions, reply to this email.",

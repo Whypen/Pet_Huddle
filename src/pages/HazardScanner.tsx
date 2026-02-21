@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import imageCompression from "browser-image-compression";
+import { compressImage } from "@/lib/imageCompression";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 interface HazardResult {
@@ -31,7 +31,7 @@ const HazardScanner = () => {
     const file = e.target.files?.[0];
     if (file) {
       try {
-        // COST OPTIMIZATION: Compress images to max 200KB before upload
+        // COST OPTIMIZATION: Compress images to target size before upload
         // This reduces storage costs and GPT-4o-mini Vision API token usage
         const options = {
           maxSizeMB: 0.2, // 200KB
@@ -40,7 +40,7 @@ const HazardScanner = () => {
           fileType: 'image/jpeg'
         };
 
-        const compressedFile = await imageCompression(file, options);
+        const compressedFile = await compressImage(file, options);
 
         setImageFile(compressedFile);
         const reader = new FileReader();

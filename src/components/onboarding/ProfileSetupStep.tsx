@@ -352,7 +352,7 @@ export const ProfileSetupStep = ({ userId, initialData, onComplete }: ProfileSet
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div className="text-center space-y-2 sticky top-0 bg-background/95 backdrop-blur-sm py-4 -mx-6 px-6 z-10">
+      <div className="text-center space-y-2 sticky top-0 bg-background/95  py-4 -mx-6 px-6 z-10">
         <h2 className="text-2xl font-bold text-foreground">{t("Profile Setup")}</h2>
         <p className="text-sm text-muted-foreground flex items-center justify-center gap-2">
           <Sparkles className="w-4 h-4 text-warning" />

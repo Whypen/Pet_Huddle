@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { NoticeBoard } from "@/components/social/NoticeBoard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -13,7 +13,7 @@ const Social = () => {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const getUserAge = () => {
@@ -34,13 +34,13 @@ const Social = () => {
   return (
     <div className="min-h-screen bg-background pb-nav relative">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
       {isUnder16 && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
+          <div className="rounded-xl border border-brandBlue/30 bg-background/90  px-4 py-3 text-sm font-medium text-brandBlue shadow-card">
             {t("Social features restricted for users under 16.")}
           </div>
         </div>
@@ -48,12 +48,12 @@ const Social = () => {
 
       <div className={cn(isUnder16 && "pointer-events-none opacity-70")}>
         <section className="px-5 py-2 pb-8">
-          <NoticeBoard onPremiumClick={() => setIsPremiumOpen(true)} />
+          <NoticeBoard onPlusClick={() => setIsPlusOpen(true)} />
         </section>
       </div>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
       <UpsellModal
         isOpen={upsellModal.isOpen}
         type={upsellModal.type}

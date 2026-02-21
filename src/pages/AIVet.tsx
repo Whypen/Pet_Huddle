@@ -5,15 +5,16 @@ import { useNavigate } from "react-router-dom";
 import aiVetAvatar from "@/assets/ai-vet-avatar.jpg";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { PremiumFooter } from "@/components/monetization/PremiumFooter";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
+import { PlusFooter } from "@/components/monetization/PlusFooter";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
-import imageCompression from "browser-image-compression";
+import { compressImage, getImageDataUrl } from "@/lib/imageCompression";
+import { normalizeMembershipTier } from "@/lib/membership";
 
 interface Message {
   id: string;
@@ -43,8 +44,8 @@ const AIVet = () => {
   const navigate = useNavigate();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [isPremiumFooterOpen, setIsPremiumFooterOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
+  const [isPlusFooterOpen, setIsPlusFooterOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -56,10 +57,27 @@ const AIVet = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [showEmergencyPrompt, setShowEmergencyPrompt] = useState(false);
+  const [sendError, setSendError] = useState<{ title: string; description: string } | null>(null);
+  const lastSendRef = useRef<{
+    content: string;
+    petId?: string | null;
+    petProfile?: {
+      name: string;
+      species: string;
+      breed: string | null;
+      age: number | null;
+      weight: number | null;
+      weight_unit: string | null;
+      history: string;
+      medications: Array<{ name?: string; dosage?: string; frequency?: string; notes?: string }>;
+      vaccinations: Array<{ name?: string; date?: string }>;
+    };
+    imageBase64?: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const isPlus = membershipTier === "plus" || membershipTier === "gold";
 
   // Fetch user's pets
   useEffect(() => {
@@ -70,10 +88,10 @@ const AIVet = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Contract override: AI Vet media is gated by QMS on upload. UI allows attach for Premium/Gold
-  // and relies on the Edge Function to enforce per-tier daily limits.
-  // Free=0 uploads, Premium=10/day, Gold=20/day (spec). UI gate: show lock if not premium/gold.
-  const hasMediaCredits = isPremium;
+  // Contract override: AI Vet media is gated by QMS on upload. UI allows attach for Plus/Gold
+  // and relies on the Edge Function to enforce plan limits.
+  // UI gate: show lock if not plus/gold.
+  const hasMediaCredits = isPlus;
 
   // Add initial greeting when conversation starts
   useEffect(() => {
@@ -111,7 +129,7 @@ const AIVet = () => {
   };
 
   const checkUsage = async () => {
-    if (!isPremium) {
+    if (!isPlus) {
       const result = await getAiVetUsage() as { success?: boolean; data?: { remaining?: number } };
       if (result.success && result.data) {
         setRemaining(result.data.remaining);
@@ -127,28 +145,56 @@ const AIVet = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || isLoading) return;
+  const buildPetProfile = () => {
+    if (!selectedPet) return undefined;
+    return {
+      name: selectedPet.name,
+      species: selectedPet.species,
+      breed: selectedPet.breed,
+      age: selectedPet.dob
+        ? Math.floor((Date.now() - new Date(selectedPet.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : null,
+      weight: selectedPet.weight,
+      weight_unit: selectedPet.weight_unit,
+      history: selectedPet.bio || selectedPet.routine || "",
+      medications: selectedPet.medications || [],
+      vaccinations: selectedPet.vaccinations || [],
+    };
+  };
+
+  const sendMessage = async (options: { content: string; appendUserMessage: boolean; imageBase64Override?: string }) => {
+    const trimmed = options.content.trim();
+    if (!trimmed || isLoading) return;
 
     // Check rate limit for free users
-    if (!isPremium && remaining !== null && remaining <= 0) {
+    if (!isPlus && remaining !== null && remaining <= 0) {
       setShowUpgradeModal(true);
-      setIsPremiumOpen(true);
+      setIsPlusOpen(true);
       return;
     }
 
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: inputValue,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue("");
+    setSendError(null);
+    if (options.appendUserMessage) {
+      const userMessage: Message = {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: trimmed,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, userMessage]);
+      setInputValue("");
+    }
     setIsLoading(true);
 
     try {
+      const petProfile = buildPetProfile();
+      lastSendRef.current = {
+        content: trimmed,
+        petId: selectedPet?.id ?? null,
+        petProfile,
+        imageBase64: options.imageBase64Override,
+      };
+
       // Create conversation if needed
       let currentConversationId = conversationId;
       if (!currentConversationId) {
@@ -157,37 +203,42 @@ const AIVet = () => {
           currentConversationId = createResult.data.id;
           setConversationId(currentConversationId);
         } else {
-          throw new Error("Failed to create conversation");
+          setSendError({
+            title: "We couldn’t start the chat",
+            description: "Please try again in a moment. If this keeps happening, check your connection.",
+          });
+          return;
         }
       }
 
       // Send message to backend
-      const petProfile = selectedPet
-        ? {
-            name: selectedPet.name,
-            species: selectedPet.species,
-            breed: selectedPet.breed,
-            age: selectedPet.dob
-              ? Math.floor((Date.now() - new Date(selectedPet.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-              : null,
-            weight: selectedPet.weight,
-            weight_unit: selectedPet.weight_unit,
-            history: selectedPet.bio || selectedPet.routine || "",
-            medications: selectedPet.medications || [],
-            vaccinations: selectedPet.vaccinations || [],
-          }
-        : undefined;
-      let imageBase64: string | undefined;
-      if (imageFile) {
-        const reader = new FileReader();
-        imageBase64 = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(String(reader.result || ""));
-          reader.onerror = reject;
-          reader.readAsDataURL(imageFile);
-        });
-        imageBase64 = imageBase64.split(",")[1] || imageBase64;
+      let imageBase64 = options.imageBase64Override;
+      if (!imageBase64 && imageFile) {
+        try {
+          const reader = new FileReader();
+          imageBase64 = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = reject;
+            reader.readAsDataURL(imageFile);
+          });
+          imageBase64 = imageBase64.split(",")[1] || imageBase64;
+        } catch (error) {
+          console.error("AI Vet image encoding error:", error);
+          setSendError({
+            title: "Image couldn’t be attached",
+            description: "Please try again or send your message without a photo.",
+          });
+          return;
+        }
       }
-      const result = await sendAiVetMessage(currentConversationId, inputValue, selectedPet?.id, petProfile, imageBase64) as { success?: boolean; data?: { message: string; remaining?: number; triage?: boolean }; error?: string };
+      lastSendRef.current = {
+        content: trimmed,
+        petId: selectedPet?.id ?? null,
+        petProfile,
+        imageBase64,
+      };
+
+      const result = await sendAiVetMessage(currentConversationId, trimmed, selectedPet?.id, petProfile, imageBase64) as { success?: boolean; data?: { message: string; remaining?: number; triage?: boolean }; error?: string };
 
       if (result.success && result.data) {
         const aiMessage: Message = {
@@ -199,47 +250,67 @@ const AIVet = () => {
         setMessages((prev) => [...prev, aiMessage]);
 
         // Update remaining count for free users
-        if (!isPremium && result.data.remaining !== undefined) {
+        if (!isPlus && result.data.remaining !== undefined) {
           setRemaining(result.data.remaining);
         }
         if (result.data.triage) {
           setShowEmergencyPrompt(true);
         }
+        setImageFile(null);
+        setImagePreview(null);
       } else if (result.error === "rate_limit_exceeded" || result.error === "quota_exceeded") {
         setShowUpgradeModal(true);
-        setIsPremiumOpen(true);
+        setIsPlusOpen(true);
         toast.error(t("ai.errors.free_limit"));
       } else {
-        throw new Error(result.error || "Failed to get response");
+        setSendError({
+          title: "We couldn’t get a response",
+          description: "Please retry your message. If the issue continues, check your connection.",
+        });
       }
     } catch (error: unknown) {
       console.error("AI Vet error:", error);
+      setSendError({
+        title: "We couldn’t get a response",
+        description: "Please retry your message. If the issue continues, check your connection.",
+      });
       toast.error(t("Failed to get response"));
     } finally {
       setIsLoading(false);
-      setImageFile(null);
-      setImagePreview(null);
     }
+  };
+
+  const handleSend = async () => {
+    void sendMessage({ content: inputValue, appendUserMessage: true });
+  };
+
+  const handleRetryLast = async () => {
+    if (!lastSendRef.current || isLoading) return;
+    void sendMessage({
+      content: lastSendRef.current.content,
+      appendUserMessage: false,
+      imageBase64Override: lastSendRef.current.imageBase64,
+    });
   };
 
   const handleMediaAccess = async () => {
     try {
       if (!user) return;
-      if (!isPremium) {
-        setIsPremiumOpen(true);
+      if (!isPlus) {
+        setIsPlusOpen(true);
         return;
       }
       imageInputRef.current?.click();
     } catch (error) {
       console.error("Failed to refresh media credits:", error);
-      setIsPremiumOpen(true);
+      setIsPlusOpen(true);
     }
   };
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-nav">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
 
@@ -298,7 +369,7 @@ const AIVet = () => {
         )}
 
         {/* Free tier remaining count */}
-        {!isPremium && remaining !== null && (
+        {!isPlus && remaining !== null && (
           <p className="text-xs text-center text-muted-foreground mt-1">
             {remaining > 0
               ? t("ai.free_remaining").replace("{count}", String(remaining))
@@ -309,6 +380,27 @@ const AIVet = () => {
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-[calc(var(--nav-height)+120px)]">
+        {sendError && (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-foreground">
+            <div className="font-semibold">{sendError.title}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{sendError.description}</div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleRetryLast}
+                className="inline-flex items-center justify-center rounded-full bg-destructive px-4 py-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+                disabled={isLoading}
+              >
+                Retry
+              </button>
+              <button
+                onClick={() => setSendError(null)}
+                className="inline-flex items-center justify-center rounded-full border border-border px-4 py-2 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {messages.map((message, index) => (
           <motion.div
             key={message.id}
@@ -361,7 +453,7 @@ const AIVet = () => {
       </div>
 
       {/* Safety Disclaimer */}
-      <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90 backdrop-blur-sm px-4 py-2 border-t border-border">
+      <div className="fixed bottom-[calc(var(--nav-height)+64px)] left-0 right-0 bg-muted/90  px-4 py-2 border-t border-border">
         <p className="text-[10px] text-muted-foreground text-center max-w-md mx-auto">
           huddle AI provides informational content, not veterinary diagnosis. In emergencies, seek professional care immediately.
         </p>
@@ -370,7 +462,7 @@ const AIVet = () => {
       {/* Input Area */}
       <div className="fixed bottom-nav left-0 right-0 bg-card border-t border-border px-4 py-3">
         <div className="flex items-center gap-3 max-w-md mx-auto">
-          {/* Photo upload - Premium only */}
+          {/* Photo upload - Plus only */}
           <button
             onClick={handleMediaAccess}
             className={cn("p-2 rounded-full hover:bg-muted transition-colors relative", !hasMediaCredits && "opacity-50")}
@@ -387,13 +479,13 @@ const AIVet = () => {
               const file = e.target.files?.[0];
               if (!file) return;
               try {
-                const compressed = await imageCompression(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
+                const compressed = await compressImage(file, { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true });
                 if (compressed.size > 500 * 1024) {
                   toast.error(t("Image must be under 500KB"));
                   return;
                 }
                 setImageFile(compressed);
-                const preview = await imageCompression.getDataUrlFromFile(compressed);
+                const preview = await getImageDataUrl(compressed);
                 setImagePreview(preview);
               } catch (err) {
                 toast.error(t("Failed to process image"));
@@ -409,11 +501,10 @@ const AIVet = () => {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && handleSend()}
-              placeholder={t("Type a message...")}
               className="w-full bg-muted rounded-full px-4 py-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-primary/50"
               disabled={isLoading}
             />
-            {/* Audio button - Premium only */}
+            {/* Audio button - Plus only */}
             <button
               onClick={handleMediaAccess}
               className={cn("absolute right-3 top-1/2 -translate-y-1/2 p-1", !hasMediaCredits && "opacity-50")}
@@ -457,10 +548,10 @@ const AIVet = () => {
       </div>
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
-      <PremiumFooter
-        isOpen={isPremiumFooterOpen}
-        onClose={() => setIsPremiumFooterOpen(false)}
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
+      <PlusFooter
+        isOpen={isPlusFooterOpen}
+        onClose={() => setIsPlusFooterOpen(false)}
         triggerReason="chat_media"
       />
     </div>

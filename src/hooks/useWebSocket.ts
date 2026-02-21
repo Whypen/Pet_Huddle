@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
-console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
+console.debug("CURRENT API URL:", import.meta.env.VITE_API_URL);
 
 interface Message {
   id: string;
@@ -13,7 +13,7 @@ interface Message {
   sender?: {
     display_name: string | null;
     avatar_url: string | null;
-    is_verified: boolean;
+    verification_status?: string | null;
   };
 }
 
@@ -55,12 +55,12 @@ export const useWebSocket = (): UseWebSocketReturn => {
       wsRef.current = new WebSocket(`${wsUrl}?token=${session.access_token}`);
 
       wsRef.current.onopen = () => {
-        console.log("WebSocket connected");
+        console.debug("WebSocket connected");
         setIsConnected(true);
       };
 
       wsRef.current.onclose = () => {
-        console.log("WebSocket disconnected");
+        console.debug("WebSocket disconnected");
         setIsConnected(false);
 
         // Attempt reconnection after 3 seconds
@@ -101,7 +101,7 @@ export const useWebSocket = (): UseWebSocketReturn => {
               break;
 
             default:
-              console.log("Unknown WebSocket message type:", data.type);
+              console.debug("Unknown WebSocket message type:", data.type);
           }
         } catch (error) {
           console.error("Error parsing WebSocket message:", error);

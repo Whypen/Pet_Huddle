@@ -1,17 +1,38 @@
+import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requireOnboarding?: boolean;
 }
 
-export const ProtectedRoute = ({ children, requireOnboarding = true }: ProtectedRouteProps) => {
-  const { user, profile, loading } = useAuth();
+export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
+  const { user, loading } = useAuth();
   const location = useLocation();
+  const [sessionCheck, setSessionCheck] = useState<"idle" | "checking" | "hasSession" | "noSession">("idle");
 
-  if (loading) {
+  useEffect(() => {
+    if (loading || user) return;
+    let cancelled = false;
+    setSessionCheck("checking");
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (cancelled) return;
+        setSessionCheck(session ? "hasSession" : "noSession");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSessionCheck("noSession");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, user]);
+
+  if (loading || (!user && (sessionCheck === "idle" || sessionCheck === "checking" || sessionCheck === "hasSession"))) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -21,11 +42,6 @@ export const ProtectedRoute = ({ children, requireOnboarding = true }: Protected
 
   if (!user) {
     return <Navigate to="/auth" state={{ from: location }} replace />;
-  }
-
-  // Redirect to onboarding if not completed
-  if (requireOnboarding && profile && !profile.onboarding_completed) {
-    return <Navigate to="/onboarding" replace />;
   }
 
   return <>{children}</>;

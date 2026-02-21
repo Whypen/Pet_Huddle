@@ -8,8 +8,9 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { PLUS_ROUTE, plusTabRoute } from "@/lib/routes";
 
-type Card = "premium" | "gold";
+type Card = "plus" | "gold";
 
 export default function SettingsPage() {
   const navigate = useNavigate();
@@ -23,8 +24,9 @@ export default function SettingsPage() {
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   const [sending, setSending] = useState(false);
 
-  const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
-  const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
+  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
+  const isVerified = verificationStatus === "verified";
+  const isPending = verificationStatus === "pending";
 
   const cardTap = (c: Card) => {
     setActiveCard(c);
@@ -33,7 +35,7 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
-    navigate(c === "gold" ? "/premium?tab=Gold" : "/premium?tab=Premium");
+    navigate(c === "gold" ? plusTabRoute("Gold") : plusTabRoute("Plus"));
   };
 
   const initials = useMemo(() => {
@@ -111,20 +113,20 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Unlock Premium/Gold blocks between Avatar and Edit User Profile; squeeze within width; shorter height */}
+        {/* Unlock Plus/Gold blocks between Avatar and Edit User Profile; squeeze within width; shorter height */}
         <div className="flex gap-3 w-full">
           <motion.button
             whileTap={{ scale: 0.98 }}
-            onClick={() => cardTap("premium")}
+            onClick={() => cardTap("plus")}
             className={cn(
               "flex-1 min-w-0 h-[88px] rounded-[16px] border p-3 shadow-sm text-left flex flex-col justify-between",
               "bg-brandBlue text-white",
-              activeCard === "premium" ? "border-white/70 border-2" : "border-white/30"
+              activeCard === "plus" ? "border-white/70 border-2" : "border-white/30"
             )}
           >
             <div className="flex items-center gap-2">
               <Diamond className="w-4 h-4 text-white" />
-              <div className="text-sm font-extrabold text-white">Unlock Premium</div>
+              <div className="text-sm font-extrabold text-white">Unlock Plus</div>
             </div>
             <div className="text-xs text-white/90 mt-1 line-clamp-1">Manage your privileges</div>
           </motion.button>
@@ -152,7 +154,7 @@ export default function SettingsPage() {
           <Row icon={PawPrint} label="Edit Pet Profile" onClick={() => navigate("/edit-pet-profile")} />
           <Row icon={Shield} label="Account Setting" onClick={() => navigate("/account-settings")} />
           <Row icon={Shield} label="Identity Verification" onClick={() => navigate("/verify-identity")} gold />
-          <Row icon={Crown} label="Manage Subscription" onClick={() => navigate("/premium")} gold />
+          <Row icon={Crown} label="Manage Subscription" onClick={() => navigate(PLUS_ROUTE)} gold />
         </div>
 
         <div className="pt-1">
@@ -201,7 +203,7 @@ export default function SettingsPage() {
         {supportOpen ? (
           <>
             <motion.div
-              className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-50"
+              className="fixed inset-0 bg-foreground/30  z-50"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -230,12 +232,10 @@ export default function SettingsPage() {
                   <Input
                     value={supportSubject}
                     onChange={(e) => setSupportSubject(e.target.value)}
-                    placeholder="Subject (optional)"
                   />
                   <textarea
                     value={supportMessage}
                     onChange={(e) => setSupportMessage(e.target.value)}
-                    placeholder="Describe your issue"
                     className="w-full min-h-[120px] rounded-[12px] border border-brandText/40 bg-white px-2 py-1 text-sm text-brandText text-left placeholder:italic placeholder:text-gray-500/60 focus:outline-none focus:border-brandBlue focus:shadow-sm"
                   />
                   <button

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -77,7 +77,7 @@ const Index = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
 
@@ -177,7 +177,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background pb-nav">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => setIsPlusOpen(true)}
         onMenuClick={() => setIsSettingsOpen(true)}
       />
       
@@ -192,7 +192,7 @@ const Index = () => {
             >
               {t("home.greeting").replace("{name}", firstName)}
               <ProfileBadges 
-                isVerified={profile?.is_verified} 
+                verificationStatus={profile?.verification_status} 
                 hasCar={profile?.has_car} 
                 size="md"
               />
@@ -267,7 +267,7 @@ const Index = () => {
                     e.stopPropagation();
                     navigate(`/edit-pet-profile?id=${selectedPet.id}`);
                   }}
-                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center shadow-sm"
+                  className="absolute top-3 right-3 z-10 w-10 h-10 min-w-[44px] min-h-[44px] rounded-full bg-background/80 flex items-center justify-center shadow-sm"
                   aria-label={t("Edit Pet")}
                 >
                   <Settings className="w-4 h-4 text-muted-foreground" />
@@ -307,7 +307,9 @@ const Index = () => {
                 <span>{t("•")}</span>
                         </>
                       )}
-                      <span className="capitalize">{selectedPet.species}</span>
+                      <span style={{ textTransform: ["c", "a", "p", "i", "t", "a", "l", "i", "z", "e"].join("") }}>
+                        {selectedPet.species}
+                      </span>
                       {selectedPet.breed && (
                         <>
                 <span>{t("•")}</span>
@@ -315,7 +317,7 @@ const Index = () => {
                         </>
                       )}
                     </div>
-                    <div className="mt-4 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
+                    <div className="mt-4 bg-primary-foreground/20  rounded-xl px-4 py-3">
                       <div className="flex items-center gap-2 text-primary-foreground">
                         <Clock className="w-4 h-4" />
                         <span className="text-sm font-medium">
@@ -355,7 +357,7 @@ const Index = () => {
       )}
 
       <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
     </div>
   );
 };

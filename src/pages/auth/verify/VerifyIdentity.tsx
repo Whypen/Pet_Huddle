@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router-dom";
 import Webcam from "react-webcam";
-import { ShieldCheck, CheckCircle, X } from "lucide-react";
+import { ShieldCheck, CheckCircle, X, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
@@ -12,9 +12,19 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { humanizeError } from "@/lib/humanizeError";
 
 type Step = 1 | 2 | 3 | 4 | 5;
+
 type DocType = "passport" | "drivers_license" | "id_card";
+
+type DocOption = { label: string; value: DocType };
+
+const docOptions: DocOption[] = [
+  { label: "ID Card", value: "id_card" },
+  { label: "Passport", value: "passport" },
+  { label: "Driver's Licence", value: "drivers_license" },
+];
 
 const countries = [
   "Argentina","Australia","Austria","Belgium","Brazil","Canada","Chile","China","Colombia","Denmark","Finland","France","Germany",
@@ -66,7 +76,7 @@ const dataUrlToFile = async (dataUrl: string, filename: string) => {
 
 const VerifyIdentity = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const { data, update } = useSignup();
   const [step, setStep] = useState<Step>(1);
   const [legalName, setLegalName] = useState(data.legal_name || "");
@@ -83,17 +93,44 @@ const VerifyIdentity = () => {
   const [saving, setSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [faceStatus, setFaceStatus] = useState("Face not found");
-  const [isLandscape, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
+  const [forceResubmit, setForceResubmit] = useState(false);
+  const [faceStatus, setFaceStatus] = useState("Ready");
+  const [isWide, setIsWide] = useState(window.innerWidth > window.innerHeight);
   const docCamRef = useRef<Webcam>(null);
   const selfieCamRef = useRef<Webcam>(null);
+
+  const phoneCountry = useMemo(() => {
+    const phone = profile?.phone || user?.phone || "";
+    if (phone.startsWith("+852")) return "Hong Kong";
+    return "";
+  }, [profile?.phone, user?.phone]);
+
+  const verificationStatus = String(profile?.verification_status ?? "").trim().toLowerCase();
+  const showVerified = verificationStatus === "verified";
+  const showUnverified = verificationStatus === "unverified" && Boolean(profile?.verification_comment);
+  const showPending = verificationStatus === "pending";
+  const showUploadForm = (!showVerified && !showPending && !showUnverified) || forceResubmit;
+
+  // Prefill legal name from profile on mount
+  useEffect(() => {
+    if (profile?.legal_name && !legalName) {
+      setLegalName(profile.legal_name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.legal_name]);
+
+  useEffect(() => {
+    if (!country && phoneCountry) {
+      setCountry(phoneCountry);
+    }
+  }, [country, phoneCountry]);
 
   useEffect(() => {
     update({ legal_name: legalName });
   }, [legalName, update]);
 
   useEffect(() => {
-    const onResize = () => setIsLandscape(window.innerWidth > window.innerHeight);
+    const onResize = () => setIsWide(window.innerWidth > window.innerHeight);
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
     return () => {
@@ -105,10 +142,10 @@ const VerifyIdentity = () => {
   const legalNameValid = useMemo(() => legalName.trim().split(/\s+/).length >= 2, [legalName]);
   const agreementsValid = agree1 && agree2 && agree3;
 
-  const handleCapture = async (ref: RefObject<Webcam>, label: string) => {
+  const handleSnap = async (ref: RefObject<Webcam>, label: string) => {
     const shot = ref.current?.getScreenshot();
     if (!shot) {
-      toast.error("Unable to capture image. Please try again.");
+      toast.error(humanizeError("Unable to take photo. Please try again."));
       return null;
     }
     const file = await dataUrlToFile(shot, `${label}.jpg`);
@@ -123,6 +160,12 @@ const VerifyIdentity = () => {
     const docPath = `${user.id}/${docType}_front_${timestamp}.jpg`;
     const selfiePath = `${user.id}/selfie_liveness_${timestamp}.jpg`;
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        toast.error("Please sign in again.");
+        return;
+      }
+
       const { error: docErr } = await supabase.storage.from("identity_verification").upload(docPath, docFile, { upsert: false });
       if (docErr) throw docErr;
 
@@ -133,11 +176,11 @@ const VerifyIdentity = () => {
       }
 
       const { error: finalizeError } = await supabase.rpc("finalize_identity_submission", {
-        doc_type: docType,
-        doc_path: docPath,
-        selfie_path: selfiePath,
-        country,
-        legal_name: legalName,
+        p_doc_type: docType,
+        p_doc_path: docPath,
+        p_selfie_path: selfiePath,
+        p_country: country,
+        p_legal_name: legalName,
       });
       if (finalizeError) {
         await supabase.storage.from("identity_verification").remove([docPath, selfiePath]);
@@ -147,19 +190,18 @@ const VerifyIdentity = () => {
       setShowSuccess(true);
       setTimeout(() => {
         setShowSuccess(false);
-        navigate("/onboarding");
+        navigate("/signup/verify", { state: { verificationSubmitted: true } });
       }, 1200);
       setStep(5);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      toast.error(message || "Verification upload failed");
+      toast.error(humanizeError(e));
     } finally {
       setSaving(false);
     }
   }, [country, docFile, docType, legalName, legalNameValid, navigate, selfieFile, user?.id]);
 
   useEffect(() => {
-    if (step !== 5) return;
+    if (step !== 4) return;
     type FaceDetectorCtor = new () => {
       detect: (source: HTMLVideoElement) => Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
     };
@@ -174,14 +216,14 @@ const VerifyIdentity = () => {
         try {
           const faces = await detector.detect(video);
           if (!faces.length) {
-            setFaceStatus("Face not found");
+            setFaceStatus("Positioning...");
           } else {
             const box = faces[0].boundingBox;
             const ratio = (box.width * box.height) / (video.videoWidth * video.videoHeight);
             setFaceStatus(ratio < 0.08 ? "Move closer" : "Looks good");
           }
         } catch {
-          setFaceStatus("Face not found");
+          setFaceStatus("Positioning...");
         }
       }
       requestAnimationFrame(tick);
@@ -193,28 +235,112 @@ const VerifyIdentity = () => {
   }, [step]);
 
   const docInstructions = docType === "passport"
-    ? "Rotate phone to Landscape. Align the photo page and the bottom text lines (MRZ)."
+    ? "Rotate phone to wide view. Align the photo page and the bottom text lines (MRZ)."
     : "Align the front of your card within the frame.";
+
+  const handleBack = () => {
+    if (step > 1) setStep((prev) => (prev - 1) as Step);
+  };
+
+  if (showVerified) {
+    return (
+      <div className="min-h-screen bg-background px-6 py-10 flex flex-col items-center justify-center text-center">
+        <ShieldCheck className="h-12 w-12 text-brandGold" />
+        <h1 className="mt-4 text-2xl font-bold text-brandText">You&apos;re Verified! 🎉</h1>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+          You&apos;ve now got a verified badge on your profile —
+          Thanks for being part of keeping huddle community genuine and warm.
+        </p>
+      </div>
+    );
+  }
+
+  if (showPending && !forceResubmit) {
+    return (
+      <div className="min-h-screen bg-background px-6 py-10 flex flex-col items-center justify-center text-center">
+        <ShieldCheck className="h-12 w-12 text-brandBlue" />
+        <h1 className="mt-4 text-2xl font-bold text-brandText">Verification in review</h1>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+          We&apos;re reviewing your documents now. You&apos;ll see your verified badge as soon as the review is complete.
+        </p>
+        <Button className="mt-6 h-10 bg-brandBlue" onClick={() => navigate("/")}>
+          Back to Home
+        </Button>
+      </div>
+    );
+  }
+
+  if (showUnverified) {
+    return (
+      <div className="min-h-screen bg-background px-6 py-10 flex flex-col items-center justify-center text-center">
+        <h1 className="text-2xl font-bold text-brandText">Verification Not Verified</h1>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+          We couldn&apos;t verify your identity based on the info provided
+          (common reasons: blurry photo, mismatched details, expired document, or unclear selfie).
+          Please try again.
+        </p>
+        <Button
+          className="mt-6 h-10 bg-brandBlue"
+          onClick={async () => {
+            if (!user?.id) return;
+            const { error } = await supabase
+              .from("profiles")
+              .update({ verification_comment: null })
+              .eq("id", user.id);
+            if (error) {
+              toast.error(humanizeError(error));
+              return;
+            }
+            await refreshProfile();
+            setStep(1);
+            setForceResubmit(true);
+          }}
+        >
+          Resubmit
+        </Button>
+      </div>
+    );
+  }
+
+  if (!showUploadForm) {
+    return (
+      <div className="min-h-screen bg-background px-6 py-10 flex flex-col items-center justify-center text-center">
+        <h1 className="text-2xl font-bold text-brandText">Verification in review</h1>
+        <p className="mt-2 text-sm text-muted-foreground max-w-sm">
+          We&apos;re reviewing your submission. You&apos;ll see an update here once it&apos;s completed.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background px-6 py-6">
       <div className="flex items-center justify-between">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2" aria-label="Back">
+        <button
+          onClick={handleBack}
+          className="p-2 -ml-2"
+          aria-label="Return"
+          disabled={step === 1}
+        >
+          <ArrowLeft className={`h-5 w-5 ${step === 1 ? "text-muted-foreground/40" : "text-brandText"}`} />
+        </button>
+        <button onClick={() => navigate("/signup/verify")} className="p-2" aria-label="Close">
           <X className="h-5 w-5" />
         </button>
-        <div className="text-sm text-muted-foreground">Step {step} of 5</div>
       </div>
 
       {step === 1 && (
         <div className="mt-8 space-y-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <div className="h-12 w-12 rounded-full bg-brandBlue/10 flex items-center justify-center">
               <ShieldCheck className="h-6 w-6 text-brandBlue animate-pulse" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-brandText">Verify your identity</h1>
               <p className="text-sm text-muted-foreground">
-                At huddle, trust is our foundation.... keep the 'huddle' safe for everyone.
+                At huddle, trust is our foundation. Verifying your identity helps us eliminate bad actors and ensures that when you connect
+                with a neighbor for a playdate or care, you’re dealing with a real, vetted member of our community. It’s how we keep the
+                'huddle' safe for everyone.
               </p>
             </div>
           </div>
@@ -229,7 +355,7 @@ const VerifyIdentity = () => {
           <div>
             <label className="text-xs text-muted-foreground">Legal Name</label>
             <Input
-              className={`h-9 ${!legalNameValid && legalName ? "border-red-500" : ""}`}
+              className={`h-10 ${!legalNameValid && legalName ? "border-red-500" : ""}`}
               value={legalName}
               onChange={(e) => setLegalName(e.target.value)}
               placeholder="Your legal name"
@@ -242,7 +368,7 @@ const VerifyIdentity = () => {
             <label className="text-xs text-muted-foreground">Country</label>
             <Popover open={countryOpen} onOpenChange={setCountryOpen}>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full h-9 justify-between">
+                <Button variant="outline" className="w-full h-10 justify-between">
                   {country || "Select a country"}
                   <span className="text-muted-foreground">▾</span>
                 </Button>
@@ -268,38 +394,33 @@ const VerifyIdentity = () => {
               </PopoverContent>
             </Popover>
           </div>
-          <Button className="w-full h-10" onClick={() => setStep(3)} disabled={!legalNameValid || !country}>
+          <div>
+            <label className="text-xs text-muted-foreground">Document type</label>
+            <div className="grid gap-3 mt-2">
+              {docOptions.map((option) => (
+                <button
+                  key={option.value}
+                  className={`rounded-xl border p-4 text-left hover:border-brandBlue ${
+                    docType === option.value ? "border-brandBlue" : "border-brandText/30"
+                  }`}
+                  onClick={() => setDocType(option.value)}
+                >
+                  <div className="font-semibold text-brandText">{option.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <Button
+            className="w-full h-10"
+            onClick={() => setStep(3)}
+            disabled={!legalNameValid || !country || !docType}
+          >
             Next
           </Button>
         </div>
       )}
 
-      {step === 3 && (
-        <div className="mt-6 space-y-4">
-          <h2 className="text-lg font-semibold text-brandText">Select document type</h2>
-          <div className="grid gap-3">
-            {[
-              { label: "Passport", value: "passport", sub: "Global" },
-              { label: "Driver's License", value: "drivers_license", sub: "Local" },
-              { label: "National ID", value: "id_card", sub: "Local" },
-            ].map((item) => (
-              <button
-                key={item.value}
-                className="rounded-xl border border-brandText/30 p-4 text-left hover:border-brandBlue"
-                onClick={() => {
-                  setDocType(item.value as DocType);
-                  setStep(4);
-                }}
-              >
-                <div className="font-semibold text-brandText">{item.label}</div>
-                <div className="text-xs text-muted-foreground">{item.sub}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {step === 4 && docType && (
+      {step === 3 && docType && (
         <div className="mt-6 space-y-4">
           <div className="text-sm text-muted-foreground">{docInstructions}</div>
           <div className="relative rounded-2xl overflow-hidden border border-brandText/20">
@@ -314,16 +435,16 @@ const VerifyIdentity = () => {
               <div className="absolute inset-0 flex items-center justify-center">
                 <div
                   className={`relative w-[85%] aspect-[3/2] border-2 rounded-lg ${
-                    isLandscape ? "shadow-[0_0_12px_rgba(207,171,33,0.7)]" : ""
+                    isWide ? "shadow-[0_0_12px_rgba(207,171,33,0.7)]" : ""
                   }`}
-                  style={{ borderColor: isLandscape ? "#CFAB21" : "#4a4a4a" }}
+                  style={{ borderColor: isWide ? "#CFAB21" : "#4a4a4a" }}
                 >
                   <div className="absolute bottom-0 left-0 right-0 h-10 bg-black/20" />
                 </div>
               </div>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="relative w-[70%] aspect-[2/3] border-2 border-brandBlue/60 rounded-lg">
+                <div className="relative w-[85%] aspect-[3/2] border-2 border-brandBlue/60 rounded-lg">
                   <div className="absolute -top-1 -left-1 h-5 w-5 border-t-2 border-l-2 border-brandBlue animate-pulse" />
                   <div className="absolute -top-1 -right-1 h-5 w-5 border-t-2 border-r-2 border-brandBlue animate-pulse" />
                   <div className="absolute -bottom-1 -left-1 h-5 w-5 border-b-2 border-l-2 border-brandBlue animate-pulse" />
@@ -344,24 +465,28 @@ const VerifyIdentity = () => {
             <Button
               className="w-full h-10"
               onClick={async () => {
-                const captured = await handleCapture(docCamRef, "document");
-                if (!captured) return;
-                setDocFile(captured.file);
-                setDocPreview(captured.preview);
+                if (!isWide) {
+                  toast.error("Please rotate to wide view to take your document photo.");
+                  return;
+                }
+                const shotResult = await handleSnap(docCamRef, "document");
+                if (!shotResult) return;
+                setDocFile(shotResult.file);
+                setDocPreview(shotResult.preview);
               }}
             >
-              Capture
+              Take photo
             </Button>
           )}
           {docPreview && (
-            <Button className="w-full h-10" onClick={() => setStep(5)}>
+            <Button className="w-full h-10" onClick={() => setStep(4)}>
               Looks good
             </Button>
           )}
         </div>
       )}
 
-      {step === 5 && (
+      {step === 4 && (
         <div className="mt-6 space-y-4">
           <div className="relative rounded-2xl overflow-hidden border border-brandText/20">
             <Webcam
@@ -371,17 +496,9 @@ const VerifyIdentity = () => {
               className="w-full h-64 object-cover"
               onUserMediaError={() => setPermissionDenied(true)}
             />
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  "radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(0,0,0,0.5) 42%)",
-                backdropFilter: "blur(4px)",
-              }}
-            />
-            {docPreview && (
-              <img src={docPreview} alt="Document thumbnail" className="absolute top-3 right-3 h-16 w-24 rounded-md border border-white" />
-            )}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-[55%] h-[70%] rounded-full border-2 border-green-500/80" />
+            </div>
           </div>
           <div className="text-xs text-muted-foreground">{faceStatus}</div>
           {selfiePreview && (
@@ -396,15 +513,43 @@ const VerifyIdentity = () => {
             <Button
               className="w-full h-10"
               onClick={async () => {
-                const captured = await handleCapture(selfieCamRef, "selfie");
-                if (!captured) return;
-                setSelfieFile(captured.file);
-                setSelfiePreview(captured.preview);
+                const shotResult = await handleSnap(selfieCamRef, "selfie");
+                if (!shotResult) return;
+                setSelfieFile(shotResult.file);
+                setSelfiePreview(shotResult.preview);
               }}
             >
-              Take Selfie
+              Take selfie
             </Button>
           )}
+          {selfiePreview && (
+            <Button className="w-full h-10" onClick={() => setStep(5)}>
+              Next
+            </Button>
+          )}
+        </div>
+      )}
+
+      {step === 5 && (
+        <div className="mt-6 space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="text-xs text-muted-foreground mb-2">Document</div>
+              {docPreview ? (
+                <img src={docPreview} alt="Document" className="w-full rounded-md" />
+              ) : (
+                <div className="text-xs text-muted-foreground">No document photo yet</div>
+              )}
+            </div>
+            <div className="rounded-xl border border-border bg-white p-3">
+              <div className="text-xs text-muted-foreground mb-2">Selfie</div>
+              {selfiePreview ? (
+                <img src={selfiePreview} alt="Selfie" className="w-full rounded-md" />
+              ) : (
+                <div className="text-xs text-muted-foreground">No selfie photo yet</div>
+              )}
+            </div>
+          </div>
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <Checkbox checked={agree1} onCheckedChange={(v) => setAgree1(Boolean(v))} />

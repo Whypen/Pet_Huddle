@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { MembershipTier, normalizeMembershipTier, resolveMembershipTier } from "@/lib/membership";
 
 export interface Profile {
   id: string;
@@ -8,6 +9,7 @@ export interface Profile {
   display_name: string | null;
   legal_name: string | null;
   phone: string | null;
+  social_id?: string | null;
   prefs?: Record<string, unknown> | null;
   verification_status?: string | null;
   verification_comment?: string | null;
@@ -33,12 +35,11 @@ export interface Profile {
   location_name: string | null;
   location_country?: string | null;
   location_district?: string | null;
-  is_verified: boolean;
   user_role: string;
-  tier?: string | null;
-  effective_tier?: string | null;
+  tier?: MembershipTier | null;
+  effective_tier?: MembershipTier | null;
+  last_active_at?: string | null;
   family_owner_id?: string | null;
-  subscription_status?: string | null;
   stars_count?: number | null;
   mesh_alert_count?: number | null;
   media_credits?: number | null;
@@ -106,34 +107,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "id, user_id, display_name, legal_name, phone, avatar_url, bio, gender_genre, orientation, dob, height, weight, weight_unit, degree, school, major, affiliation, occupation, pet_experience, experience_years, relationship_status, has_car, languages, location_name, location_country, location_district, is_verified, is_admin, user_role, tier, subscription_status, stars_count, mesh_alert_count, media_credits, family_slots, onboarding_completed, owns_pets, social_availability, availability_status, show_gender, show_orientation, show_age, show_height, show_weight, show_academic, show_affiliation, show_occupation, show_bio, last_lat, last_lng, care_circle, verification_status, verification_comment, show_relationship_status, social_album, prefs, map_visible" as "*"
+        "id, display_name, legal_name, phone, dob, social_id, verification_status, verification_comment, is_admin, onboarding_completed, tier, effective_tier, last_active_at" as "*"
       )
       .eq("id", userId)
       .maybeSingle();
 
     if (!error && data) {
-      let effectiveTier = data.tier || "free";
-      let familyOwnerId: string | null = null;
-      const { data: family } = await supabase
-        .from("family_members" as "profiles")
-        .select("inviter_user_id" as "*")
-        .eq("invitee_user_id" as "id", userId)
-        .eq("status" as "id", "accepted")
-        .maybeSingle() as unknown as { data: { inviter_user_id?: string } | null };
-
-      if (family?.inviter_user_id) {
-        familyOwnerId = family.inviter_user_id;
-        const { data: inviter } = await supabase
-          .from("profiles")
-          .select("tier")
-          .eq("id", family.inviter_user_id)
-          .maybeSingle() as unknown as { data: { tier?: string } | null };
-        if (inviter?.tier) {
-          effectiveTier = inviter.tier;
-        }
-      }
-
-      setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
+      const verificationStatus = String((data as Record<string, unknown>)?.verification_status ?? "")
+        .trim()
+        .toLowerCase();
+      setProfile({
+        ...(data as Profile),
+        verification_status: verificationStatus || null,
+        tier: normalizeMembershipTier((data as Record<string, unknown>)?.tier as string | null),
+        effective_tier: resolveMembershipTier(data as Record<string, unknown>),
+      });
+      void supabase.rpc("touch_last_active_at").catch(() => {
+        // Best-effort only; avoid blocking hydration on presence updates.
+      });
     }
   };
 
@@ -180,7 +171,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     consent?: { acceptedAtIso: string; version: string }
   ) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    console.log("Attempting Signup to:", supabaseUrl);
+    console.debug("Attempting Signup to:", supabaseUrl);
     const redirectUrl = `${window.location.origin}/`;
 
     let data: { user: { id: string } | null } | null = null;
@@ -210,31 +201,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return { error: e instanceof Error ? e : new Error(String(e)) };
     }
 
-    if (!error && data?.user?.id) {
-      await supabase
-        .from("profiles")
-        .upsert({
-          id: data.user.id,
-          display_name: displayName || email.split("@")[0],
-          phone,
-        });
-
+    if (!error && data?.user?.id && consent?.acceptedAtIso) {
       // Best-effort consent audit log. This will succeed when a session exists.
-      if (consent?.acceptedAtIso) {
-        await supabase
-          .from("consent_logs" as "profiles")
-          .insert({
-            user_id: data.user.id,
-            consent_type: "terms_privacy",
-            consent_version: consent.version,
-            accepted_at: consent.acceptedAtIso,
-            metadata: { source: "web_signup" },
-          } as Record<string, unknown>)
-          .throwOnError()
-          .catch(() => {
-            // If email confirmation is required, the user may not have an active session yet.
-          });
-      }
+      await supabase
+        .from("consent_logs" as "profiles")
+        .insert({
+          user_id: data.user.id,
+          consent_type: "terms_privacy",
+          consent_version: consent.version,
+          accepted_at: consent.acceptedAtIso,
+          metadata: { source: "web_signup" },
+        } as Record<string, unknown>)
+        .throwOnError()
+        .catch(() => {
+          // If email confirmation is required, the user may not have an active session yet.
+        });
     }
 
     return { error: error as Error | null };
@@ -242,7 +223,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signIn = async (email: string, password: string, phone?: string) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    console.log("Attempting Login to:", supabaseUrl);
+    console.debug("Attempting Login to:", supabaseUrl);
     // Support both email and phone login
     try {
       if (phone) {
@@ -268,9 +249,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!error) {
         const sessionRes = await supabase.auth.getSession();
         const userRes = await supabase.auth.getUser();
-        console.log("[AUTH_AUDIT] session", sessionRes.data.session ?? null);
-        console.log("[AUTH_AUDIT] session.user.id", sessionRes.data.session?.user?.id ?? null);
-        console.log("[AUTH_AUDIT] getUser", userRes.data.user ?? null);
+        console.debug("[AUTH_AUDIT] session", sessionRes.data.session ?? null);
+        console.debug("[AUTH_AUDIT] session.user.id", sessionRes.data.session?.user?.id ?? null);
+        console.debug("[AUTH_AUDIT] getUser", userRes.data.user ?? null);
         const { data } = await supabase.auth.getUser();
         const uid = data?.user?.id;
         if (uid) {

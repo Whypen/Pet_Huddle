@@ -24,23 +24,25 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { normalizeMembershipTier } from "@/lib/membership";
+import { PLUS_ROUTE } from "@/lib/routes";
 
 interface PlanFeature {
   name: string;
   free: boolean | string;
-  premium: boolean | string;
+  plus: boolean | string;
 }
 
 const planFeatures: PlanFeature[] = [
-  { name: "Badge Type", free: "Grey Badge", premium: "Gold Badge" },
-  { name: "All Chats", free: "Limited", premium: "All Access" },
-  { name: "AI Chat", free: "Text Only", premium: "Photo/Audio AI" },
-  { name: "Broadcast Range", free: "1 mile", premium: "5 miles" },
-  { name: "Filters", free: "Single Filter", premium: "Multi-select" },
-  { name: "Ghost Mode", free: false, premium: true },
-  { name: "Notice Board Posting", free: false, premium: true },
-  { name: "Priority Support", free: false, premium: true },
-  { name: "Ad-free Experience", free: false, premium: true },
+  { name: "Badge Type", free: "Grey Badge", plus: "Gold Badge" },
+  { name: "All Chats", free: "Limited", plus: "All Access" },
+  { name: "AI Chat", free: "Text Only", plus: "Photo/Audio AI" },
+  { name: "Broadcast Range", free: "Standard range", plus: "Expanded range" },
+  { name: "Filters", free: "Single Filter", plus: "Multi-select" },
+  { name: "Ghost Mode", free: false, plus: true },
+  { name: "Notice Board Posting", free: false, plus: true },
+  { name: "Priority Support", free: false, plus: true },
+  { name: "Ad-free Experience", free: false, plus: true },
 ];
 
 const paymentMethods = [
@@ -66,8 +68,8 @@ const Subscription = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
 
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const membershipTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const isPlusOrGold = membershipTier === "plus" || membershipTier === "gold";
 
   // Updated pricing per requirements
   const pricing = {
@@ -76,7 +78,7 @@ const Subscription = () => {
   };
 
   const handleUpgrade = () => {
-    navigate("/premium");
+    navigate(PLUS_ROUTE);
   };
 
   const handleManageBilling = async () => {
@@ -124,16 +126,16 @@ const Subscription = () => {
             />
           </div>
           <div className="relative text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20  flex items-center justify-center">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
+            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Plus")}</h2>
             <p className="text-white/90 text-sm">{t("Unlock all features")}</p>
           </div>
         </div>
 
         {/* Current Status */}
-        {isPremium && (
+        {isPlusOrGold && (
           <div className="bg-primary/10 rounded-xl p-4 mb-6">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
@@ -141,7 +143,7 @@ const Subscription = () => {
               </div>
               <div>
                 <p className="font-semibold text-primary">
-                  {t("You're a Premium Member!")}
+                  {t("You're a Plus Member!")}
                 </p>
                 <p className="text-sm text-primary/80">
                   {t("Next billing:")} {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
@@ -162,7 +164,7 @@ const Subscription = () => {
             </div>
             <div className="p-3 text-center border-l border-border bg-primary/5">
               <span className="text-sm font-semibold text-primary">
-                {t("Premium")}
+                {t("Plus")}
               </span>
             </div>
           </div>
@@ -185,15 +187,15 @@ const Subscription = () => {
                 )}
               </div>
               <div className="p-3 text-center border-l border-border bg-primary/5">
-                {typeof feature.premium === "boolean" ? (
-                  feature.premium ? (
+                {typeof feature.plus === "boolean" ? (
+                  feature.plus ? (
                     <Check className="w-4 h-4 text-primary mx-auto" />
                   ) : (
                     <X className="w-4 h-4 text-muted-foreground mx-auto" />
                   )
                 ) : (
                   <span className="text-xs font-medium text-primary">
-                    {feature.premium}
+                    {feature.plus}
                   </span>
                 )}
               </div>
@@ -201,8 +203,8 @@ const Subscription = () => {
           ))}
         </div>
 
-        {/* Plan Toggle - Only for non-premium */}
-        {!isPremium && (
+        {/* Plan Toggle - Only for non-plus */}
+        {!isPlusOrGold && (
           <>
             {/* Pricing Cards */}
             <div className="grid grid-cols-2 gap-3 mb-6">
@@ -270,7 +272,7 @@ const Subscription = () => {
         )}
 
         {/* Pricing CTA */}
-        {!isPremium && (
+        {!isPlusOrGold && (
           <div className="bg-card rounded-xl p-6 border border-border mb-6">
             <div className="text-center mb-4">
               <div className="flex items-baseline justify-center gap-1">
@@ -300,7 +302,7 @@ const Subscription = () => {
               ) : (
                 <>
                   <Sparkles className="w-5 h-5" />
-                  Upgrade to Premium
+                  {t("Upgrade to Plus")}
                 </>
               )}
             </Button>
@@ -317,7 +319,7 @@ const Subscription = () => {
             {addOns.map((item) => (
               <button
                 key={item.id}
-                onClick={() => navigate("/premium")}
+                onClick={() => navigate(PLUS_ROUTE)}
                 className="flex items-center gap-2 p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
               >
                 <item.icon className="w-4 h-4 text-primary" />
@@ -340,7 +342,7 @@ const Subscription = () => {
               <span className="font-medium">{t("Payment Methods")}</span>
             </div>
             <span className="text-sm text-muted-foreground">
-              {isPremium ? "•••• 4242" : "None"}
+              {isPlusOrGold ? "•••• 4242" : "None"}
             </span>
           </button>
 
@@ -364,11 +366,11 @@ const Subscription = () => {
                 className="overflow-hidden"
               >
                 <div className="p-4 bg-muted/50 rounded-xl space-y-3">
-                  {isPremium ? (
+                  {isPlusOrGold ? (
                     <>
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="text-sm font-medium">{t("Premium Subscription")}</p>
+                          <p className="text-sm font-medium">{t("Plus Subscription")}</p>
                           <p className="text-xs text-muted-foreground">
                             {new Date().toLocaleDateString()}
                           </p>
@@ -389,7 +391,7 @@ const Subscription = () => {
             )}
           </AnimatePresence>
 
-          {isPremium && (
+          {isPlusOrGold && (
             <button
               onClick={handleManageBilling}
               disabled={isProcessing}

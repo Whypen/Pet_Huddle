@@ -1,6 +1,6 @@
 export const theme = {
   colors: {
-    blue: "#3283ff",
+    blue: "#2145CF",
     green: "#a6d539",
     grey: "#a1a4a9",
     goldGradient: "linear-gradient(135deg, #FBBF24 0%, #F59E0B 50%, #D97706 100%)",

@@ -3,7 +3,7 @@ import { ArrowLeft, Edit, Calendar, Weight, Ruler, Syringe, Pill, Stethoscope, C
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { PlusUpsell } from "@/components/social/PlusUpsell";
 import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +41,7 @@ const PetDetails = () => {
   const petId = searchParams.get("id");
   const [loading, setLoading] = useState(true);
   const [pet, setPet] = useState<PetDetails | null>(null);
-  const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [isPlusOpen, setIsPlusOpen] = useState(false);
 
   const fetchPetDetails = useCallback(async () => {
     try {
@@ -94,7 +94,7 @@ const PetDetails = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+      <GlobalHeader onUpgradeClick={() => setIsPlusOpen(true)} />
 
       {/* Hero Header */}
       <div className="relative h-64 overflow-hidden">
@@ -109,14 +109,14 @@ const PetDetails = () => {
         <div className="absolute top-4 left-0 right-0 px-4 flex items-center justify-between">
           <button
             onClick={() => navigate("/")}
-            className="p-2 rounded-full bg-background/80 backdrop-blur-sm hover:bg-background transition-colors"
+            className="p-2 rounded-full bg-background/80  hover:bg-background transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <Button
             onClick={() => navigate(`/edit-pet-profile?id=${pet.id}`)}
             size="sm"
-            className="gap-2 bg-background/80 backdrop-blur-sm hover:bg-background text-foreground"
+            className="gap-2 bg-background/80  hover:bg-background text-foreground"
           >
             <Edit className="w-4 h-4" />
             Edit
@@ -259,7 +259,7 @@ const PetDetails = () => {
         </div>
       </StyledScrollArea>
 
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <PlusUpsell isOpen={isPlusOpen} onClose={() => setIsPlusOpen(false)} />
     </div>
   );
 };
