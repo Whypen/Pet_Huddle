@@ -8,7 +8,9 @@
       "Bash(npm run dev:*)",
       "Bash(npx supabase db remote execute:*)",
       "Bash(npx supabase functions deploy:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Skill(commit-commands:commit-push-pr:*)"
     ]
   }
 }
