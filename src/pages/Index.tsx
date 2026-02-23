@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -76,7 +75,6 @@ const Index = () => {
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
@@ -178,28 +176,23 @@ const Index = () => {
     <div className="min-h-screen bg-background pb-nav">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
-        onMenuClick={() => setIsSettingsOpen(true)}
       />
       
-      {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-4 pb-4">
-        <div className="flex items-center gap-3">
-          <div>
-            <motion.h1 
-              className="text-2xl font-bold flex items-center gap-2"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              {t("home.greeting").replace("{name}", firstName)}
-              <ProfileBadges 
-                isVerified={profile?.is_verified} 
-                hasCar={profile?.has_car} 
-                size="md"
-              />
-            </motion.h1>
-            <p className="text-muted-foreground text-sm">{t("home.subtitle")}</p>
-          </div>
+      {/* Page header — editorial cadence, no hype copy */}
+      <header className="px-5 pt-5 pb-2">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold text-brandText tracking-tight">
+            {firstName}
+          </h1>
+          <ProfileBadges
+            isVerified={profile?.is_verified}
+            hasCar={profile?.has_car}
+            size="md"
+          />
         </div>
+        <p className="text-sm text-brandSubtext/60 mt-0.5">
+          {selectedPet ? selectedPet.name : "Your pets"}
+        </p>
       </header>
 
       {pets.length === 0 ? (
@@ -245,11 +238,12 @@ const Index = () => {
                   )}
                 </motion.button>
               ))}
-              <button 
+              <button
                 onClick={() => navigate("/edit-pet-profile")}
-                className="flex-shrink-0 w-16 h-16 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors ml-1"
+                className="neu-icon flex-shrink-0 w-16 h-16 ml-1"
+                aria-label="Add pet"
               >
-                <Plus className="w-6 h-6 text-muted-foreground" />
+                <Plus className="w-6 h-6 text-brandBlue" />
               </button>
             </div>
           </section>
@@ -329,24 +323,22 @@ const Index = () => {
             </section>
           )}
 
-          {/* huddle Wisdom */}
+          {/* Pet care tip */}
           {selectedPet && (
-            <section className="px-5 py-4">
+            <section className="px-5 pb-4">
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-5 shadow-card"
+                className="card-e1 p-4 flex items-start gap-3"
               >
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-full bg-primary-foreground/20 flex items-center justify-center flex-shrink-0">
-                    <Lightbulb className="w-5 h-5 text-primary-foreground" />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-primary-foreground mb-1">{t("home.wisdom")}</h4>
-                    <p className="text-sm text-primary-foreground/90">
-                      {t(getRandomTip(selectedPet.species))}
-                    </p>
-                  </div>
+                <div className="neu-icon flex-shrink-0">
+                  <Lightbulb className="w-5 h-5 text-brandBlue" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-sm font-semibold text-brandText mb-1">{t("home.wisdom")}</h4>
+                  <p className="text-sm text-brandSubtext/80 leading-relaxed">
+                    {t(getRandomTip(selectedPet.species))}
+                  </p>
                 </div>
               </motion.div>
             </section>
@@ -354,7 +346,6 @@ const Index = () => {
         </>
       )}
 
-      <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>
   );

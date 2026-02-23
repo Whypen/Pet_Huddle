@@ -99,7 +99,7 @@ const FounderMessage = ({ onClose }: FounderMessageProps) => {
               className="w-full gap-2 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
             >
               <Heart className="w-4 h-4" />
-              {t("Let's Get Started")}
+              {t("Get Started")}
             </Button>
           </div>
         </motion.div>

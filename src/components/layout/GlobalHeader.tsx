@@ -8,6 +8,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { membershipTierLabel } from "@/lib/membership";
+import { plusTabRoute } from "@/lib/routes";
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
@@ -29,10 +31,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isVerified = !!profile?.is_verified || String(profile?.verification_status ?? "").toLowerCase() === "approved";
-  const isPending = !isVerified && String(profile?.verification_status ?? "").toLowerCase() === "pending";
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const tierLabel = effectiveTier === "gold" ? "Gold" : effectiveTier === "premium" ? "Premium" : "Free";
+  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
+  const isVerified = verificationStatus === "verified";
+  const isPending = verificationStatus === "pending";
+  const tierLabel = membershipTierLabel(profile?.effective_tier ?? profile?.tier);
   const initials = useMemo(() => {
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
@@ -119,17 +121,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const firstPet = pets[0];
 
   return (
-    <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-md border-b border-border/50">
+    <header className="sticky top-0 z-20 bg-white border-b border-border/30">
       <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
         {/* Left: Notification Bell */}
         <button
           onClick={() => navigate("/notifications")}
-          className="relative p-2 rounded-full hover:bg-muted transition-colors"
+          className="relative neu-icon min-w-[44px] min-h-[44px]"
           aria-label={t("Notifications")}
         >
-          <Bell className="w-5 h-5 text-muted-foreground" />
+          <Bell className="w-5 h-5 text-brandText/60" strokeWidth={1.75} />
           {unreadCount > 0 ? (
-            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500" />
+            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brandError" />
           ) : null}
         </button>
 
@@ -156,10 +158,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                 }
                 setMenuOpen(true);
               }}
-              className="p-2 rounded-full hover:bg-muted transition-colors"
+              className="neu-icon min-w-[44px] min-h-[44px]"
               aria-label={t("Settings")}
             >
-              <Settings className="w-5 h-5 text-muted-foreground" />
+              <Settings className="w-5 h-5 text-brandText/60" strokeWidth={1.75} />
             </button>
           </SheetTrigger>
           <SheetContent className="p-4 w-[320px] sm:max-w-sm flex flex-col">
@@ -182,8 +184,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                       {profile?.display_name || "User"}
                     </div>
                     <span className={cn(
-                      "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold",
-                      tierLabel === "Gold" ? "bg-brandGold/20 text-brandGold" : tierLabel === "Premium" ? "bg-brandBlue/20 text-brandBlue" : "bg-gray-100 text-brandText/60"
+                      "neu-chip",
+                      tierLabel === "Gold" ? "bg-brandGold/10 text-brandGold" : tierLabel !== "Plus" ? "bg-gray-100/80 text-brandText/50 shadow-none" : ""
                     )}>
                       {tierLabel}
                     </span>
@@ -192,31 +194,31 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
                 </div>
               </div>
 
-              {/* 2. Unlock Premium block */}
+              {/* 2. Unlock Plus block */}
               <SheetClose asChild>
                 <button
-                  onClick={() => navigate("/premium?tab=Premium")}
-                  className="w-full rounded-[16px] bg-brandBlue text-white p-3 text-left"
+                  onClick={() => navigate(plusTabRoute("Plus"))}
+                  className="w-full neu-primary rounded-2xl p-3 text-left"
                 >
                   <div className="flex items-center gap-2">
                     <Diamond className="w-4 h-4 text-white" />
-                    <div className="text-sm font-extrabold">Unlock Premium</div>
+                    <div className="text-sm font-extrabold">Plus</div>
                   </div>
-                  <div className="text-xs text-white/80 mt-1">Manage your privileges</div>
+                  <div className="text-xs text-white/80 mt-1">See what's included</div>
                 </button>
               </SheetClose>
 
               {/* 3. Unlock Gold block */}
               <SheetClose asChild>
                 <button
-                  onClick={() => navigate("/premium?tab=Gold")}
-                  className="w-full rounded-[16px] bg-brandGold text-white p-3 text-left"
+                  onClick={() => navigate(plusTabRoute("Gold"))}
+                  className="w-full neu-gold rounded-2xl p-3 text-left"
                 >
                   <div className="flex items-center gap-2">
                     <Star className="w-4 h-4 text-white" />
-                    <div className="text-sm font-extrabold">Unlock Gold</div>
+                    <div className="text-sm font-extrabold">Gold</div>
                   </div>
-                  <div className="text-xs text-white/80 mt-1">Manage your privileges</div>
+                  <div className="text-xs text-white/80 mt-1">See what's included</div>
                 </button>
               </SheetClose>
 

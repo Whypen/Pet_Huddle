@@ -21,25 +21,25 @@ export function UpsellBanner({ state, onClose }: { state: UpsellBannerState; onC
           transition={{ type: "spring", damping: 22, stiffness: 260 }}
           className={cn(
             "fixed left-1/2 -translate-x-1/2 z-[9999] w-[calc(min(28rem,100%-1rem))]",
-            // place above BottomNav (h-nav ~64px + safe padding)
-            "bottom-[84px]"
+            // slide up from BottomNav and respect safe-area
+            "bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom)+12px)]"
           )}
           role="status"
           aria-live="polite"
         >
-          <div className="flex items-start gap-3 rounded-2xl border border-brandGold bg-white/95 backdrop-blur-md px-4 py-3 shadow-elevated">
-            <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-brandGold/15 text-brandGold">
+          <div className="flex items-start gap-3 rounded-2xl border border-brandGold bg-white/95  px-4 py-3 shadow-elevated">
+            <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-brandGold/15 text-brandGold">
               <Sparkles className="h-5 w-5" />
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-brandText">Upgrade for more!</div>
+              <div className="text-sm font-semibold text-brandText">Available on Plus</div>
               <div className="text-xs text-brandText/80 mt-0.5 break-words">{state.message}</div>
               {state.ctaLabel && state.onCta ? (
                 <div className="mt-2">
                   <Button
                     onClick={state.onCta}
-                    className="h-9 rounded-xl bg-brandBlue text-white hover:bg-brandBlue/90"
+                    className="h-10 rounded-xl bg-brandBlue text-white hover:bg-brandBlue/90"
                   >
                     {state.ctaLabel}
                   </Button>
@@ -60,4 +60,3 @@ export function UpsellBanner({ state, onClose }: { state: UpsellBannerState; onC
     </AnimatePresence>
   );
 }
-

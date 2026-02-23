@@ -124,9 +124,9 @@ export default function SettingsPage() {
           >
             <div className="flex items-center gap-2">
               <Diamond className="w-4 h-4 text-white" />
-              <div className="text-sm font-extrabold text-white">Unlock Premium</div>
+              <div className="text-sm font-extrabold text-white">Plus</div>
             </div>
-            <div className="text-xs text-white/90 mt-1 line-clamp-1">Manage your privileges</div>
+            <div className="text-xs text-white/90 mt-1 line-clamp-1">See what's included</div>
           </motion.button>
 
           <motion.button
@@ -140,9 +140,9 @@ export default function SettingsPage() {
           >
             <div className="flex items-center gap-2">
               <Star className="w-4 h-4 text-white" />
-              <div className="text-sm font-extrabold text-white">Unlock Gold</div>
+              <div className="text-sm font-extrabold text-white">Gold</div>
             </div>
-            <div className="text-xs text-white/90 mt-1 line-clamp-1">Manage your privileges</div>
+            <div className="text-xs text-white/90 mt-1 line-clamp-1">See what's included</div>
           </motion.button>
         </div>
 

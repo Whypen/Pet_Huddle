@@ -136,7 +136,7 @@ const BroadcastModal = ({
       return;
     }
     if (rangeKm > capRangeKm || durationHours > capDurationHours) {
-      toast.error(`Tier limit exceeded. Max ${capRangeKm}km and ${capDurationHours}h for your plan.`);
+      toast.error("Adjust range or duration to continue.");
       onError();
       return;
     }
@@ -153,31 +153,9 @@ const BroadcastModal = ({
         photoUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
       }
 
-      console.log("[BROADCAST_PAYLOAD]", {
-        type: normalizedType,
-        title: alertTitle.trim(),
-        lat: selectedLocation.lat,
-        lng: selectedLocation.lng,
-        rangeKm,
-        durationHours,
-        postOnThreads,
-        hasImage: Boolean(photoUrl),
-      });
-
       const expiresAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
       const rangeMeters = Math.round(rangeKm * 1000);
       const locationLabel = "Pinned Location";
-
-      const sessionRes = await supabase.auth.getSession();
-      const session = sessionRes.data.session;
-      console.log("[UAT_AUTH_STATE]", {
-        sessionPresent: Boolean(session),
-        accessTokenPresent: Boolean(session?.access_token),
-        sessionUserId: session?.user?.id ?? null,
-        contextUserId: user?.id ?? null,
-      });
-      const { data: whoami, error: whoErr } = await supabase.rpc("debug_whoami");
-      console.log("[UAT_WHOAMI]", { whoami, error: whoErr?.message ?? null });
 
       const { data, error } = await supabase
         .from("map_alerts")
@@ -254,8 +232,6 @@ const BroadcastModal = ({
         }
       }
 
-      console.log("[RPC_RESULT]", { alert_id: data.id, thread_id: threadId, mode: "direct_insert_map_alerts" });
-
       onSuccess({
         alertId: data.id,
         threadId,
@@ -315,7 +291,7 @@ const BroadcastModal = ({
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           onClick={(e) => e.stopPropagation()}
-          className="relative w-full bg-card rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
+          className="relative w-full glass-e2 rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
         >
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
@@ -358,9 +334,6 @@ const BroadcastModal = ({
             </div>
 
             <div className="mb-4 rounded-xl border border-border p-3">
-              <div className="text-xs text-muted-foreground mb-2">
-                Tier limit: up to {baseRangeKm}km and {baseDurationHours}h
-              </div>
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
                 Range: {rangeKm} km
               </label>
@@ -405,13 +378,13 @@ const BroadcastModal = ({
               />
               {showUpsell && extraBroadcast72h <= 0 ? (
                 <div className="mt-3 rounded-xl border border-[#EAB308]/30 bg-[#FEF9C3] p-3 text-xs text-[#854D0E] flex items-center justify-between gap-3">
-                  <span>Upgrade your membership to enjoy this perk!</span>
+                  <span>Expand range and duration with Plus or Gold.</span>
                   <button
                     type="button"
                     onClick={onRequestUpgrade}
                     className="shrink-0 rounded-full bg-[#A6D539] px-3 py-1 text-[11px] font-semibold text-brandText"
                   >
-                    Upgrade
+                    View plans
                   </button>
                 </div>
               ) : null}

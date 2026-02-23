@@ -128,7 +128,7 @@ const Subscription = () => {
               <Crown className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
-            <p className="text-white/90 text-sm">{t("Unlock all features")}</p>
+            <p className="text-white/90 text-sm">{t("Everything included")}</p>
           </div>
         </div>
 
@@ -368,7 +368,7 @@ const Subscription = () => {
                     <>
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="text-sm font-medium">{t("Premium Subscription")}</p>
+                          <p className="text-sm font-medium">{t("Plus Subscription")}</p>
                           <p className="text-xs text-muted-foreground">
                             {new Date().toLocaleDateString()}
                           </p>

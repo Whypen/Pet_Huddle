@@ -38,8 +38,8 @@ const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
     body: "Free users get 2 mesh alerts per day. Upgrade for unlimited emergency broadcasts.",
   },
   default: {
-    title: "Unlock the full huddle experience",
-    body: "Premium gives you access to all features — starting at just $9.99/month.",
+    title: "Everything you need for your pet",
+    body: "Plus gives you access to all features — starting at $9.99/month.",
   },
 };
 

@@ -34,18 +34,8 @@ const fromStoredDob = (value: string) => {
 };
 
 const monthOptions = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
 ];
 
 const SignupDob = () => {
@@ -88,31 +78,40 @@ const SignupDob = () => {
   const onSubmit = () => {
     if (!canContinue) return;
     update({ dob: assembledDob });
-    navigate("/signup/name");
+    navigate("/signup/credentials");
   };
 
   const fieldErrorClass = dobError ? "border-red-500 focus:border-red-500" : "";
 
   return (
-    <div className="min-h-screen bg-background px-6">
+    <div className="min-h-screen bg-white px-6">
+      {/* Navigation + step indicator */}
       <div className="pt-6 flex items-center justify-between">
-        <button onClick={() => navigate("/auth")} className="p-2 -ml-2" aria-label="Back">
-          <ArrowLeft className="h-5 w-5" />
+        <button onClick={() => navigate("/auth")} className="p-2 -ml-2 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Back">
+          <ArrowLeft className="h-5 w-5 text-brandText" strokeWidth={1.75} />
         </button>
-        <div className="text-sm text-muted-foreground">1 of 4</div>
+        <span className="text-helper text-brandSubtext/60">Step 1 of 4</span>
       </div>
 
-      <div className="mt-4 h-2 w-full rounded-full bg-muted">
-        <div className="h-2 w-1/4 rounded-full bg-brandBlue" />
+      {/* Progress bar — thin */}
+      <div className="mt-3 h-1 w-full rounded-full bg-gray-100">
+        <div className="h-1 w-1/4 rounded-full bg-brandBlue transition-all" />
       </div>
 
-      <h1 className="mt-6 text-xl font-bold text-brandText">What is your date of birth?</h1>
-      <p className="text-sm text-muted-foreground">We use this to verify your age</p>
+      {/* Hero block */}
+      <div className="mt-8 space-y-2">
+        <h1 className="font-display text-[28px] leading-[1.1] font-semibold text-brandText">
+          When were you born?
+        </h1>
+        <p className="text-base text-brandSubtext/70 leading-relaxed">
+          We use this to verify your age.
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
+      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6" noValidate>
         <div>
-          <label className="text-xs text-muted-foreground">Date of birth</label>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <label className="text-sub font-medium text-brandText mb-2 block">Date of birth</label>
+          <div className="grid grid-cols-3 gap-2">
             <Controller
               control={control}
               name="dob_month"
@@ -121,7 +120,7 @@ const SignupDob = () => {
                   <SelectTrigger className={fieldErrorClass}>
                     <SelectValue placeholder="Month" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
                     {monthOptions.map((label, index) => {
                       const month = index + 1;
                       return (
@@ -142,7 +141,7 @@ const SignupDob = () => {
                   <SelectTrigger className={fieldErrorClass}>
                     <SelectValue placeholder="Day" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
                     {Array.from({ length: 31 }, (_, index) => {
                       const day = index + 1;
                       return (
@@ -163,7 +162,7 @@ const SignupDob = () => {
                   <SelectTrigger className={fieldErrorClass}>
                     <SelectValue placeholder="Year" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
                     {yearOptions.map((year) => (
                       <SelectItem key={year} value={String(year)}>
                         {year}
@@ -174,15 +173,15 @@ const SignupDob = () => {
               )}
             />
           </div>
-          {dobError && <p className="text-xs text-red-500 mt-1" aria-live="polite">{dobError}</p>}
+          {dobError && <p className="text-helper text-brandError mt-2" aria-live="polite">{dobError}</p>}
         </div>
 
-        <Button type="submit" className="w-full h-10" disabled={!canContinue}>
+        <Button type="submit" className="w-full neu-primary" disabled={!canContinue}>
           Continue
         </Button>
 
         {isUnder16 && (
-          <Button type="button" variant="outline" className="w-full h-10" onClick={() => navigate("/auth")}>
+          <Button type="button" variant="ghost" className="w-full" onClick={() => navigate("/auth")}>
             Return to Sign In
           </Button>
         )}

@@ -1072,8 +1072,8 @@ const Chats = () => {
                       {blocked ? (
                         <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
                           <div className="px-4 text-center">
-                            <div className="text-sm font-bold text-brandText">Unlock Premium to see more users</div>
-                            <div className="text-xs text-brandText/70 mt-2">Free users can view up to 40 profiles per day.</div>
+                            <div className="text-sm font-bold text-brandText">Plus includes more connections</div>
+                            <div className="text-xs text-brandText/70 mt-2">Free includes up to 40 profiles per day.</div>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1081,7 +1081,7 @@ const Chats = () => {
                               }}
                               className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
                             >
-                              Explore Premium
+                              Explore Plus
                             </button>
                           </div>
                         </div>
@@ -2096,8 +2096,8 @@ const Chats = () => {
                         className="w-full flex items-center justify-between px-5 py-3.5 text-sm"
                         onClick={() => {
                           if (locked) {
-                            const target = row.tier === "gold" ? "Gold" : "Premium";
-                            toast.error(`Unlock ${target} to use this filter`);
+                            const target = row.tier === "gold" ? "Gold" : "Plus";
+                            toast.error(`${target} includes this filter`);
                             return;
                           }
                           setActiveFilterRow(row);
@@ -2113,7 +2113,7 @@ const Chats = () => {
                               "ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white",
                               row.tier === "gold" ? "bg-brandGold" : "bg-brandBlue"
                             )}>
-                              {row.tier === "gold" ? "Gold" : "Premium"}
+                              {row.tier === "gold" ? "Gold" : "Plus"}
                             </span>
                           )}
                         </div>
