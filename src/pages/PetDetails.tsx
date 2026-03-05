@@ -7,7 +7,7 @@ import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuChip } from "@/components/ui/NeuChip";
-import { InsetPanel, InsetDivider } from "@/components/ui/InsetPanel";
+import { InsetDivider } from "@/components/ui/InsetPanel";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
@@ -298,46 +298,65 @@ const PetDetails = () => {
         }
       />
 
-      {/* Hero photo */}
+      {/* Hero photo with overlay */}
       <div className="relative h-[200px] flex-shrink-0 overflow-hidden mt-[56px]">
         {pet.photo_url ? (
           <img src={pet.photo_url} alt={pet.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-primary to-accent" />
         )}
-        <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/[0.28] to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 left-0 right-0 h-[70%] bg-gradient-to-t from-black/70 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 left-0 right-0 px-4 pb-3">
+          <h2 className="text-[26px] font-[700] text-white leading-tight mb-2">
+            {pet.name}
+          </h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <NeuChip as="span">
+              {toTitleCase(pet.species)}{pet.breed ? ` \u00b7 ${pet.breed}` : ""}
+            </NeuChip>
+            {pet.gender && <NeuChip as="span">{pet.gender}</NeuChip>}
+            {pet.neutered_spayed && (
+              <NeuChip as="span">{getSterilizedLabel(pet.gender)}</NeuChip>
+            )}
+          </div>
+        </div>
       </div>
 
       <StyledScrollArea className="flex-1 min-h-0">
         <div className="pb-[calc(64px+env(safe-area-inset-bottom))]">
 
-          {/* Identity strip */}
-          <div className="px-4 pt-4 pb-3">
-            <h2 className="text-[28px] font-[700] leading-tight text-[var(--text-primary)] mb-1">
-              {pet.name}
-            </h2>
-            <p className="text-[15px] text-[var(--text-secondary)] mb-3">
-              {toTitleCase(pet.species)}{pet.breed ? ` · ${pet.breed}` : ""}
-            </p>
-            <div className="flex items-center gap-2 flex-wrap">
+          {/* Stat blocks: DOB, Weight, Microchip */}
+          {(pet.dob || pet.weight || pet.microchip_id) && (
+            <div className="px-4 pt-4 pb-2 flex gap-3">
               {pet.dob && (
-                <NeuChip as="span">
-                  {formatBirthdayChip(pet.dob)}
-                  {calculateAge(pet.dob) !== null ? ` (${calculateAge(pet.dob)} y.o)` : ""}
-                </NeuChip>
+                <div className="flex-1 min-w-0 card-e1 p-3 rounded-xl flex flex-col items-center text-center">
+                  <CakeSlice size={18} strokeWidth={1.75} className="mb-1.5 text-primary" />
+                  <p className="text-[11px] text-[var(--text-tertiary)] leading-none mb-1">Birthday</p>
+                  <p className="text-[12px] font-[600] text-[var(--text-primary)] leading-tight">
+                    {formatBirthdayChip(pet.dob)}{calculateAge(pet.dob) !== null ? ` (${calculateAge(pet.dob)}y)` : ""}
+                  </p>
+                </div>
               )}
               {pet.weight && (
-                <NeuChip as="span">{pet.weight} {pet.weight_unit}</NeuChip>
+                <div className="flex-1 min-w-0 card-e1 p-3 rounded-xl flex flex-col items-center text-center">
+                  <Weight size={18} strokeWidth={1.75} className="mb-1.5 text-primary" />
+                  <p className="text-[11px] text-[var(--text-tertiary)] leading-none mb-1">Weight</p>
+                  <p className="text-[12px] font-[600] text-[var(--text-primary)] leading-tight">
+                    {pet.weight} {pet.weight_unit}
+                  </p>
+                </div>
               )}
               {pet.microchip_id && (
-                <NeuChip as="span">{pet.microchip_id}</NeuChip>
-              )}
-              {pet.gender && <NeuChip as="span">{pet.gender}</NeuChip>}
-              {pet.neutered_spayed && (
-                <NeuChip as="span">{getSterilizedLabel(pet.gender)}</NeuChip>
+                <div className="flex-1 min-w-0 card-e1 p-3 rounded-xl flex flex-col items-center text-center">
+                  <Cpu size={18} strokeWidth={1.75} className="mb-1.5 text-primary" />
+                  <p className="text-[11px] text-[var(--text-tertiary)] leading-none mb-1">Microchip</p>
+                  <p className="text-[12px] font-[600] text-[var(--text-primary)] leading-tight break-all">
+                    {pet.microchip_id}
+                  </p>
+                </div>
               )}
             </div>
-          </div>
+          )}
 
           {/* Bio card */}
           {pet.bio && (
@@ -367,174 +386,171 @@ const PetDetails = () => {
             </div>
           )}
 
-          {/* Health divider */}
+          {/* Health — unified card block */}
           {hasHealthData && (
-            <button
-              type="button"
-              onClick={() => setShowHealth((v) => !v)}
-              className="mx-4 mb-0 w-[calc(100%-32px)] h-[56px] rounded-[22px] glass-e2 flex items-center px-4 gap-3"
-              style={{ background: "linear-gradient(to right, rgba(33,69,207,0.08), rgba(255,255,255,0.06))" }}
-              aria-expanded={showHealth}
-            >
-              <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
-                Health
-              </span>
-              <ChevronDown
-                size={16}
-                strokeWidth={1.75}
-                className={cn("text-[var(--text-secondary)] transition-transform", showHealth && "rotate-180")}
-              />
-            </button>
-          )}
+            <div className="mx-4 mb-2 card-e1 rounded-[22px] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowHealth((v) => !v)}
+                className="w-full h-[56px] flex items-center px-4 gap-3"
+                aria-expanded={showHealth}
+              >
+                <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
+                  Health
+                </span>
+                <ChevronDown
+                  size={16}
+                  strokeWidth={1.75}
+                  className={cn("text-[var(--text-secondary)] transition-transform", showHealth && "rotate-180")}
+                />
+              </button>
 
-          {/* Health panel */}
-          {showHealth && (
-            <div className="mx-4 mb-0">
-              <InsetPanel>
+              {showHealth && (
+                <>
+                  <InsetDivider />
 
-                {/* Reminder row */}
-                <div className="flex items-start gap-3 px-4 py-3">
-                  <BellRing size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-[500] text-[var(--text-primary)]">
-                      {pet.set_reminder
-                        ? (pet.set_reminder.reason === "Others"
-                            ? pet.set_reminder.customReason || "Reminder"
-                            : pet.set_reminder.reason)
-                        : "No reminder set"}
-                    </p>
-                    {pet.set_reminder && (
-                      <p className="text-[11px] text-[var(--text-tertiary)]">{pet.set_reminder.reminderDate}</p>
-                    )}
+                  {/* Reminder row */}
+                  <div className="flex items-start gap-3 px-4 py-3">
+                    <BellRing size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-[500] text-[var(--text-primary)]">
+                        {pet.set_reminder
+                          ? (pet.set_reminder.reason === "Others"
+                              ? pet.set_reminder.customReason || "Reminder"
+                              : pet.set_reminder.reason)
+                          : "No reminder set"}
+                      </p>
+                      {pet.set_reminder && (
+                        <p className="text-[11px] text-[var(--text-tertiary)]">{pet.set_reminder.reminderDate}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <InsetDivider />
+                  <InsetDivider />
 
-                {/* Vet visit rows */}
-                {visibleVetVisits.length === 0 ? (
-                  <div className="px-4 py-3">
-                    <p className="text-[13px] text-[var(--text-tertiary)]">No vet visit records.</p>
-                  </div>
-                ) : (
-                  <>
-                    {visibleVetVisits.map((record, idx) => (
-                      <div key={`${record.visitDate}-${idx}`} className="flex items-start gap-3 px-4 py-3">
-                        <Stethoscope size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-[500] text-[var(--text-primary)]">
-                            {record.reason === "Others" ? record.customReason || "Visit" : record.reason}
-                            {record.vaccine ? ` · ${record.vaccine}` : ""}
-                          </p>
-                          <p className="text-[11px] text-[var(--text-tertiary)]">{record.visitDate}</p>
+                  {/* Vet visit rows */}
+                  {visibleVetVisits.length === 0 ? (
+                    <div className="px-4 py-3">
+                      <p className="text-[13px] text-[var(--text-tertiary)]">No vet visit records.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {visibleVetVisits.map((record, idx) => (
+                        <div key={`${record.visitDate}-${idx}`} className="flex items-start gap-3 px-4 py-3">
+                          <Stethoscope size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-[500] text-[var(--text-primary)]">
+                              {record.reason === "Others" ? record.customReason || "Visit" : record.reason}
+                              {record.vaccine ? ` \u00b7 ${record.vaccine}` : ""}
+                            </p>
+                            <p className="text-[11px] text-[var(--text-tertiary)]">{record.visitDate}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    {(pet.vet_visit_records ?? []).length > 3 && (
-                      <div className="px-4 pb-2">
-                        <NeuControl
-                          size="sm"
-                          variant="tertiary"
-                          onClick={() => setShowAllVetVisits((v) => !v)}
-                        >
-                          {showAllVetVisits
-                            ? "Show less"
-                            : `Show ${(pet.vet_visit_records ?? []).length - 3} more`}
-                        </NeuControl>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Medications */}
-                {(pet.medications ?? []).length > 0 && (
-                  <>
-                    <InsetDivider />
-                    {visibleMeds.map((med, idx) => (
-                      <div key={`${med.name}-${idx}`} className="flex items-start gap-3 px-4 py-3">
-                        <Pill size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-[500] text-[var(--text-primary)]">{med.name}</p>
-                          <p className="text-[11px] text-[var(--text-tertiary)]">
-                            {med.dose_amount != null && med.dose_unit
-                              ? `${med.dose_amount}${med.dose_unit}`
-                              : med.dosage || ""}
-                            {(med.frequency_value != null && med.frequency_unit)
-                              ? ` · Every ${med.frequency_value} ${med.frequency_unit}`
-                              : med.frequency
-                              ? ` · ${med.frequency}`
-                              : ""}
-                          </p>
+                      ))}
+                      {(pet.vet_visit_records ?? []).length > 3 && (
+                        <div className="px-4 pb-2">
+                          <NeuControl
+                            size="sm"
+                            variant="tertiary"
+                            onClick={() => setShowAllVetVisits((v) => !v)}
+                          >
+                            {showAllVetVisits
+                              ? "Show less"
+                              : `Show ${(pet.vet_visit_records ?? []).length - 3} more`}
+                          </NeuControl>
                         </div>
-                      </div>
-                    ))}
-                    {(pet.medications ?? []).length > 3 && (
-                      <div className="px-4 pb-2">
-                        <NeuControl
-                          size="sm"
-                          variant="tertiary"
-                          onClick={() => setShowAllMeds((v) => !v)}
-                        >
-                          {showAllMeds
-                            ? "Show less"
-                            : `Show ${(pet.medications ?? []).length - 3} more`}
-                        </NeuControl>
-                      </div>
-                    )}
-                  </>
-                )}
+                      )}
+                    </>
+                  )}
 
-              </InsetPanel>
+                  {/* Medications */}
+                  {(pet.medications ?? []).length > 0 && (
+                    <>
+                      <InsetDivider />
+                      {visibleMeds.map((med, idx) => (
+                        <div key={`${med.name}-${idx}`} className="flex items-start gap-3 px-4 py-3">
+                          <Pill size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-[500] text-[var(--text-primary)]">{med.name}</p>
+                            <p className="text-[11px] text-[var(--text-tertiary)]">
+                              {med.dose_amount != null && med.dose_unit
+                                ? `${med.dose_amount}${med.dose_unit}`
+                                : med.dosage || ""}
+                              {(med.frequency_value != null && med.frequency_unit)
+                                ? ` \u00b7 Every ${med.frequency_value} ${med.frequency_unit}`
+                                : med.frequency
+                                ? ` \u00b7 ${med.frequency}`
+                                : ""}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                      {(pet.medications ?? []).length > 3 && (
+                        <div className="px-4 pb-2">
+                          <NeuControl
+                            size="sm"
+                            variant="tertiary"
+                            onClick={() => setShowAllMeds((v) => !v)}
+                          >
+                            {showAllMeds
+                              ? "Show less"
+                              : `Show ${(pet.medications ?? []).length - 3} more`}
+                          </NeuControl>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
 
-          {/* Temperament & Routine divider */}
+          {/* Temperament & Routine — unified card block */}
           {hasTempRoutine && (
-            <button
-              type="button"
-              onClick={() => setShowTempRoutine((v) => !v)}
-              className="mx-4 mt-2 mb-2 w-[calc(100%-32px)] h-[56px] rounded-[22px] glass-e2 flex items-center px-4 gap-3"
-              style={{ background: "linear-gradient(to right, rgba(33,69,207,0.08), rgba(255,255,255,0.06))" }}
-              aria-expanded={showTempRoutine}
-            >
-              <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
-                Temperament &amp; Routine
-              </span>
-              <ChevronDown
-                size={16}
-                strokeWidth={1.75}
-                className={cn("text-[var(--text-secondary)] transition-transform", showTempRoutine && "rotate-180")}
-              />
-            </button>
-          )}
+            <div className="mx-4 mb-4 card-e1 rounded-[22px] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowTempRoutine((v) => !v)}
+                className="w-full h-[56px] flex items-center px-4 gap-3"
+                aria-expanded={showTempRoutine}
+              >
+                <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
+                  Temperament &amp; Routine
+                </span>
+                <ChevronDown
+                  size={16}
+                  strokeWidth={1.75}
+                  className={cn("text-[var(--text-secondary)] transition-transform", showTempRoutine && "rotate-180")}
+                />
+              </button>
 
-          {/* Temperament & Routine panel */}
-          {showTempRoutine && (
-            <div className="mx-4 mb-4">
-              <InsetPanel>
-                {pet.temperament && pet.temperament.length > 0 && (
-                  <div className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      {pet.temperament.map((temp) => (
-                        <NeuChip key={temp} as="span">{temp}</NeuChip>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {pet.temperament && pet.temperament.length > 0 && pet.routine && (
+              {showTempRoutine && (
+                <>
                   <InsetDivider />
-                )}
-                {pet.routine && (
-                  <div className="px-4 py-3">
-                    <p className="text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] mb-2">
-                      Daily Routine
-                    </p>
-                    <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)] whitespace-pre-wrap">
-                      {pet.routine}
-                    </p>
-                  </div>
-                )}
-              </InsetPanel>
+                  {pet.temperament && pet.temperament.length > 0 && (
+                    <div className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {pet.temperament.map((temp) => (
+                          <NeuChip key={temp} as="span">{temp}</NeuChip>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {pet.temperament && pet.temperament.length > 0 && pet.routine && (
+                    <InsetDivider />
+                  )}
+                  {pet.routine && (
+                    <div className="px-4 py-3">
+                      <p className="text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] mb-2">
+                        Daily Routine
+                      </p>
+                      <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)] whitespace-pre-wrap">
+                        {pet.routine}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
