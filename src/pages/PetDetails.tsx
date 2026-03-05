@@ -1,17 +1,41 @@
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Edit, Calendar, Weight, Ruler, Syringe, Pill, Stethoscope, Cpu, Loader2 } from "lucide-react";
+import { Pencil, Weight, Cpu, Loader2, Pill, BellRing, CakeSlice, Stethoscope, ChevronDown } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { PageHeader } from "@/layouts/PageHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { NeuControl } from "@/components/ui/NeuControl";
+import { NeuChip } from "@/components/ui/NeuChip";
+import { InsetPanel, InsetDivider } from "@/components/ui/InsetPanel";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { cn } from "@/lib/utils";
 
-interface PetDetails {
+type VetVisitRecord = {
+  reason: string;
+  customReason?: string | null;
+  visitDate: string;
+  vaccine?: string | null;
+};
+
+type SetReminder = {
+  reason: string;
+  customReason?: string | null;
+  reminderDate: string;
+};
+
+type MedicationRecord = {
+  name: string;
+  dose_amount: number | null;
+  dose_unit: string | null;
+  frequency_value: number | null;
+  frequency_unit: string | null;
+  dosage?: string | null;
+  frequency?: string | null;
+};
+
+interface PetDetailsData {
   id: string;
   name: string;
   species: string;
@@ -26,13 +50,110 @@ interface PetDetails {
   vet_contact: string | null;
   microchip_id: string | null;
   temperament: string[] | null;
-  vaccinations: { name: string; date: string }[] | null;
-  vaccination_dates: string[] | null;
-  next_vaccination_reminder: string | null;
-  medications: { name: string; dosage: string; frequency: string }[] | null;
+  vet_visit_records: VetVisitRecord[] | null;
+  set_reminder: SetReminder | null;
+  medications: MedicationRecord[] | null;
   photo_url: string | null;
   is_active: boolean;
 }
+
+const formatDateOnly = (value: unknown) => {
+  if (typeof value !== "string" || !value.trim()) return "";
+  return value.slice(0, 10);
+};
+
+const parseLegacyVaccinations = (vaccinations: unknown, vaccinationDates: unknown): VetVisitRecord[] => {
+  const out: VetVisitRecord[] = [];
+  const dates = Array.isArray(vaccinationDates)
+    ? vaccinationDates.filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+    : [];
+
+  if (!Array.isArray(vaccinations)) {
+    return dates.map((visitDate) => ({ reason: "Vaccination", visitDate: formatDateOnly(visitDate) })).filter((r) => r.visitDate);
+  }
+
+  vaccinations.forEach((item, index) => {
+    if (typeof item === "string") {
+      const visitDate = formatDateOnly(dates[index] ?? "");
+      if (!visitDate) return;
+      out.push({ reason: "Vaccination", vaccine: item, visitDate });
+      return;
+    }
+
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      const visitDate = formatDateOnly(record.visitDate ?? record.date ?? dates[index] ?? "");
+      if (!visitDate) return;
+      out.push({
+        reason: "Vaccination",
+        vaccine: typeof record.vaccine === "string" ? record.vaccine : typeof record.name === "string" ? record.name : null,
+        visitDate,
+      });
+    }
+  });
+
+  return out;
+};
+
+const parseReminder = (setReminder: unknown, legacyDate: unknown): SetReminder | null => {
+  const normalize = (raw: Record<string, unknown>): SetReminder | null => {
+    const reminderDate = formatDateOnly(raw.reminderDate);
+    if (!reminderDate) return null;
+    return {
+      reason: typeof raw.reason === "string" ? raw.reason : "Vaccination",
+      customReason: typeof raw.customReason === "string" ? raw.customReason : null,
+      reminderDate,
+    };
+  };
+  if (Array.isArray(setReminder)) {
+    const parsed = setReminder
+      .map((row) => (row && typeof row === "object" ? normalize(row as Record<string, unknown>) : null))
+      .filter((row): row is SetReminder => Boolean(row))
+      .sort((a, b) => new Date(a.reminderDate).getTime() - new Date(b.reminderDate).getTime());
+    if (parsed.length > 0) return parsed[0];
+  } else if (setReminder && typeof setReminder === "object") {
+    const single = normalize(setReminder as Record<string, unknown>);
+    if (single) return single;
+  }
+  const fallbackDate = formatDateOnly(legacyDate);
+  return fallbackDate ? { reason: "Vaccination", reminderDate: fallbackDate, customReason: null } : null;
+};
+
+const parseMedication = (item: unknown): MedicationRecord | null => {
+  if (!item || typeof item !== "object") return null;
+  const raw = item as Record<string, unknown>;
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name) return null;
+  return {
+    name,
+    dose_amount: typeof raw.dose_amount === "number" ? raw.dose_amount : null,
+    dose_unit: typeof raw.dose_unit === "string" ? raw.dose_unit : null,
+    frequency_value: typeof raw.frequency_value === "number" ? raw.frequency_value : null,
+    frequency_unit: typeof raw.frequency_unit === "string" ? raw.frequency_unit : null,
+    dosage: typeof raw.dosage === "string" ? raw.dosage : null,
+    frequency: typeof raw.frequency === "string" ? raw.frequency : null,
+  };
+};
+
+const getSterilizedLabel = (gender: string | null) => {
+  if (!gender) return "Sterilized";
+  return gender.toLowerCase() === "female" ? "Spayed" : "Neutered";
+};
+
+const toTitleCase = (value: string) =>
+  value
+    .split(/[\s_/-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+
+const formatBirthdayChip = (dob: string) => {
+  const date = new Date(dob);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = date.getDate().toString().padStart(2, "0");
+  const month = date.toLocaleString("en-US", { month: "short" });
+  return `${day}-${month}`;
+};
 
 const PetDetails = () => {
   const { t } = useLanguage();
@@ -40,8 +161,13 @@ const PetDetails = () => {
   const [searchParams] = useSearchParams();
   const petId = searchParams.get("id");
   const [loading, setLoading] = useState(true);
-  const [pet, setPet] = useState<PetDetails | null>(null);
+  const [pet, setPet] = useState<PetDetailsData | null>(null);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
+  const [showTempRoutine, setShowTempRoutine] = useState(false);
+  const [bioExpanded, setBioExpanded] = useState(false);
+  const [showAllVetVisits, setShowAllVetVisits] = useState(false);
+  const [showAllMeds, setShowAllMeds] = useState(false);
 
   const fetchPetDetails = useCallback(async () => {
     try {
@@ -52,9 +178,38 @@ const PetDetails = () => {
         .single();
 
       if (error) throw error;
-      setPet(data as unknown as PetDetails);
-    } catch (error) {
-      console.error("Error fetching pet:", error);
+      const row = data as Record<string, unknown>;
+
+      const vetVisits = Array.isArray(row.vet_visit_records)
+        ? (row.vet_visit_records as VetVisitRecord[])
+        : parseLegacyVaccinations(row.vaccinations, row.vaccination_dates);
+      const reminder = parseReminder(row.set_reminder, row.next_vaccination_reminder);
+      const meds = Array.isArray(row.medications)
+        ? (row.medications.map(parseMedication).filter(Boolean) as MedicationRecord[])
+        : [];
+
+      setPet({
+        id: String(row.id),
+        name: (row.name as string) || "",
+        species: (row.species as string) || "",
+        breed: (row.breed as string) || null,
+        gender: (row.gender as string) || null,
+        neutered_spayed: Boolean(row.neutered_spayed),
+        dob: (row.dob as string) || null,
+        weight: typeof row.weight === "number" ? row.weight : null,
+        weight_unit: (row.weight_unit as string) || "kg",
+        bio: (row.bio as string) || null,
+        routine: (row.routine as string) || null,
+        vet_contact: (row.vet_contact as string) || null,
+        microchip_id: (row.microchip_id as string) || null,
+        temperament: Array.isArray(row.temperament) ? (row.temperament as string[]) : null,
+        vet_visit_records: vetVisits,
+        set_reminder: reminder,
+        medications: meds,
+        photo_url: (row.photo_url as string) || null,
+        is_active: row.is_active !== false,
+      });
+    } catch {
       toast.error(t("Failed to load pet details"));
       navigate("/");
     } finally {
@@ -64,7 +219,7 @@ const PetDetails = () => {
 
   useEffect(() => {
     if (petId) {
-      fetchPetDetails();
+      void fetchPetDetails();
     }
   }, [fetchPetDetails, petId]);
 
@@ -82,180 +237,307 @@ const PetDetails = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="h-full min-h-0 flex flex-col">
+        {/* Skeleton header bar */}
+        <div className="h-[56px] flex-shrink-0 bg-[var(--bg-card)] border-b border-border/20" />
+        {/* Skeleton hero */}
+        <div className="h-[200px] flex-shrink-0 bg-muted animate-pulse" />
+        {/* Skeleton identity strip */}
+        <div className="px-4 pt-4 space-y-2">
+          <div className="h-7 w-32 rounded-lg bg-muted animate-pulse" />
+          <div className="h-4 w-24 rounded-lg bg-muted animate-pulse" />
+          <div className="flex gap-2 pt-1">
+            <div className="h-6 w-20 rounded-full bg-muted animate-pulse" />
+            <div className="h-6 w-16 rounded-full bg-muted animate-pulse" />
+          </div>
+        </div>
+        {/* Skeleton section dividers */}
+        <div className="mx-4 mt-6 h-[56px] rounded-[22px] bg-muted animate-pulse" />
+        <div className="mx-4 mt-2 h-[56px] rounded-[22px] bg-muted animate-pulse" />
       </div>
     );
   }
 
-  if (!pet) {
-    return null;
-  }
+  if (!pet) return null;
+
+  const hasHealthData =
+    pet.set_reminder ||
+    (pet.vet_visit_records && pet.vet_visit_records.length > 0) ||
+    (pet.medications && pet.medications.length > 0);
+
+  const hasTempRoutine =
+    (pet.temperament && pet.temperament.length > 0) || !!pet.routine;
+
+  const visibleVetVisits = showAllVetVisits
+    ? (pet.vet_visit_records ?? [])
+    : (pet.vet_visit_records ?? []).slice(0, 3);
+
+  const visibleMeds = showAllMeds
+    ? (pet.medications ?? [])
+    : (pet.medications ?? []).slice(0, 3);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col pb-nav">
-      <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
+    <div className="h-full min-h-0 flex flex-col">
+      <PageHeader
+        title={
+          <span className="text-[13px] font-[500] text-[var(--text-secondary)] truncate">
+            {pet.name}
+          </span>
+        }
+        showBack
+        onBack={() => navigate("/")}
+        right={
+          <NeuControl
+            size="icon-md"
+            variant="tertiary"
+            aria-label="Edit pet"
+            onClick={() => navigate(`/edit-pet-profile?id=${pet.id}`)}
+          >
+            <Pencil size={18} strokeWidth={1.75} />
+          </NeuControl>
+        }
+      />
 
-      {/* Hero Header */}
-      <div className="relative h-64 overflow-hidden">
+      {/* Hero photo */}
+      <div className="relative h-[200px] flex-shrink-0 overflow-hidden mt-[56px]">
         {pet.photo_url ? (
           <img src={pet.photo_url} alt={pet.name} className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-primary to-accent" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
-
-        {/* Back & Edit Buttons */}
-        <div className="absolute top-4 left-0 right-0 px-4 flex items-center justify-between">
-          <button
-            onClick={() => navigate("/")}
-            className="p-2 rounded-full bg-background/80 backdrop-blur-sm hover:bg-background transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <Button
-            onClick={() => navigate(`/edit-pet-profile?id=${pet.id}`)}
-            size="sm"
-            className="gap-2 bg-background/80 backdrop-blur-sm hover:bg-background text-foreground"
-          >
-            <Edit className="w-4 h-4" />
-            Edit
-          </Button>
-        </div>
-
-        {/* Pet Name Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 p-6">
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-4xl font-bold text-foreground mb-2"
-          >
-            {pet.name}
-          </motion.h1>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Badge variant="secondary">{pet.species}</Badge>
-            {pet.breed && <Badge variant="outline">{pet.breed}</Badge>}
-            {pet.gender && <Badge variant="outline">{pet.gender}</Badge>}
-            {pet.neutered_spayed && <Badge variant="outline">{t("Fixed")}</Badge>}
-          </div>
-        </div>
+        <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/[0.28] to-transparent pointer-events-none" />
       </div>
 
-      <StyledScrollArea className="flex-1 px-4 py-6" maxHeight="calc(100vh - 300px)">
-        <div className="space-y-6 max-w-2xl mx-auto">
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {pet.dob && (
-              <div className="p-4 rounded-xl bg-muted/50 text-center">
-                <Calendar className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">{t("Age")}</p>
-                <p className="font-semibold">{calculateAge(pet.dob)} years</p>
-              </div>
-            )}
-            {pet.weight && (
-              <div className="p-4 rounded-xl bg-muted/50 text-center">
-                <Weight className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">{t("Weight")}</p>
-                <p className="font-semibold">{pet.weight} {pet.weight_unit}</p>
-              </div>
-            )}
-            {pet.microchip_id && (
-              <div className="p-4 rounded-xl bg-muted/50 text-center">
-                <Cpu className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">{t("Microchipped")}</p>
-                <p className="font-semibold text-xs">{pet.microchip_id.slice(0, 8)}...</p>
-              </div>
-            )}
-            {pet.vet_contact && (
-              <div className="p-4 rounded-xl bg-muted/50 text-center">
-                <Stethoscope className="w-5 h-5 mx-auto mb-2 text-primary" />
-                <p className="text-xs text-muted-foreground">{t("Vet On File")}</p>
-                <p className="font-semibold text-xs">{t("Yes")}</p>
-              </div>
-            )}
+      <StyledScrollArea className="flex-1 min-h-0">
+        <div className="pb-[calc(64px+env(safe-area-inset-bottom))]">
+
+          {/* Identity strip */}
+          <div className="px-4 pt-4 pb-3">
+            <h2 className="text-[28px] font-[700] leading-tight text-[var(--text-primary)] mb-1">
+              {pet.name}
+            </h2>
+            <p className="text-[15px] text-[var(--text-secondary)] mb-3">
+              {toTitleCase(pet.species)}{pet.breed ? ` · ${pet.breed}` : ""}
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {pet.dob && (
+                <NeuChip as="span">
+                  {formatBirthdayChip(pet.dob)}
+                  {calculateAge(pet.dob) !== null ? ` (${calculateAge(pet.dob)} y.o)` : ""}
+                </NeuChip>
+              )}
+              {pet.weight && (
+                <NeuChip as="span">{pet.weight} {pet.weight_unit}</NeuChip>
+              )}
+              {pet.microchip_id && (
+                <NeuChip as="span">{pet.microchip_id}</NeuChip>
+              )}
+              {pet.gender && <NeuChip as="span">{pet.gender}</NeuChip>}
+              {pet.neutered_spayed && (
+                <NeuChip as="span">{getSterilizedLabel(pet.gender)}</NeuChip>
+              )}
+            </div>
           </div>
 
-          {/* Bio */}
+          {/* Bio card */}
           {pet.bio && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-2">{t("About")} {pet.name}</h3>
-              <p className="text-sm text-muted-foreground">{pet.bio}</p>
-            </div>
-          )}
-
-          {/* Temperament */}
-          {pet.temperament && pet.temperament.length > 0 && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-3">{t("Temperament")}</h3>
-              <div className="flex flex-wrap gap-2">
-                {pet.temperament.map((temp) => (
-                  <Badge key={temp} variant="secondary">{temp}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Routine */}
-          {pet.routine && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <h3 className="text-sm font-semibold mb-2">{t("Daily Routine")}</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{pet.routine}</p>
-            </div>
-          )}
-
-          {/* Vaccinations */}
-          {pet.vaccinations && pet.vaccinations.length > 0 && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <div className="flex items-center gap-2 mb-3">
-                <Syringe className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">{t("Vaccinations")}</h3>
-              </div>
-              <div className="space-y-2">
-                {pet.vaccinations.map((vax, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-card">
-                    <span className="text-sm font-medium">{vax.name}</span>
-                    <span className="text-xs text-muted-foreground">{vax.date}</span>
-                  </div>
-                ))}
-              </div>
-              {pet.next_vaccination_reminder && (
-                <div className="mt-3 p-2 rounded-lg bg-primary/10 border border-primary/20">
-                  <p className="text-xs text-primary font-medium">{t("Next Reminder")}: {pet.next_vaccination_reminder}</p>
-                </div>
+            <div className="card-e1 mx-4 mb-4 p-4 rounded-xl">
+              <p className={cn(
+                "text-[14px] leading-[1.55] text-[var(--text-secondary)]",
+                !bioExpanded && "line-clamp-3"
+              )}>
+                {pet.bio}
+              </p>
+              {pet.bio.length > 120 && (
+                <NeuControl
+                  size="sm"
+                  variant="tertiary"
+                  className="mt-2 -ml-1"
+                  onClick={() => setBioExpanded((v) => !v)}
+                >
+                  <ChevronDown
+                    size={14}
+                    strokeWidth={1.75}
+                    className={cn("transition-transform mr-1", bioExpanded && "rotate-180")}
+                    aria-hidden
+                  />
+                  {bioExpanded ? "Show less" : "Show more"}
+                </NeuControl>
               )}
             </div>
           )}
 
-          {/* Medications */}
-          {pet.medications && pet.medications.length > 0 && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <div className="flex items-center gap-2 mb-3">
-                <Pill className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">{t("Medications")}</h3>
-              </div>
-              <div className="space-y-2">
-                {pet.medications.map((med, idx) => (
-                  <div key={idx} className="p-2 rounded-lg bg-card">
-                    <p className="text-sm font-medium">{med.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {med.dosage && `${med.dosage}`} {med.frequency && `• ${med.frequency}`}
+          {/* Health divider */}
+          {hasHealthData && (
+            <button
+              type="button"
+              onClick={() => setShowHealth((v) => !v)}
+              className="mx-4 mb-0 w-[calc(100%-32px)] h-[56px] rounded-[22px] glass-e2 flex items-center px-4 gap-3"
+              style={{ background: "linear-gradient(to right, rgba(33,69,207,0.08), rgba(255,255,255,0.06))" }}
+              aria-expanded={showHealth}
+            >
+              <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
+                Health
+              </span>
+              <ChevronDown
+                size={16}
+                strokeWidth={1.75}
+                className={cn("text-[var(--text-secondary)] transition-transform", showHealth && "rotate-180")}
+              />
+            </button>
+          )}
+
+          {/* Health panel */}
+          {showHealth && (
+            <div className="mx-4 mb-0">
+              <InsetPanel>
+
+                {/* Reminder row */}
+                <div className="flex items-start gap-3 px-4 py-3">
+                  <BellRing size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-[500] text-[var(--text-primary)]">
+                      {pet.set_reminder
+                        ? (pet.set_reminder.reason === "Others"
+                            ? pet.set_reminder.customReason || "Reminder"
+                            : pet.set_reminder.reason)
+                        : "No reminder set"}
                     </p>
+                    {pet.set_reminder && (
+                      <p className="text-[11px] text-[var(--text-tertiary)]">{pet.set_reminder.reminderDate}</p>
+                    )}
                   </div>
-                ))}
-              </div>
+                </div>
+
+                <InsetDivider />
+
+                {/* Vet visit rows */}
+                {visibleVetVisits.length === 0 ? (
+                  <div className="px-4 py-3">
+                    <p className="text-[13px] text-[var(--text-tertiary)]">No vet visit records.</p>
+                  </div>
+                ) : (
+                  <>
+                    {visibleVetVisits.map((record, idx) => (
+                      <div key={`${record.visitDate}-${idx}`} className="flex items-start gap-3 px-4 py-3">
+                        <Stethoscope size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-[500] text-[var(--text-primary)]">
+                            {record.reason === "Others" ? record.customReason || "Visit" : record.reason}
+                            {record.vaccine ? ` · ${record.vaccine}` : ""}
+                          </p>
+                          <p className="text-[11px] text-[var(--text-tertiary)]">{record.visitDate}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {(pet.vet_visit_records ?? []).length > 3 && (
+                      <div className="px-4 pb-2">
+                        <NeuControl
+                          size="sm"
+                          variant="tertiary"
+                          onClick={() => setShowAllVetVisits((v) => !v)}
+                        >
+                          {showAllVetVisits
+                            ? "Show less"
+                            : `Show ${(pet.vet_visit_records ?? []).length - 3} more`}
+                        </NeuControl>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Medications */}
+                {(pet.medications ?? []).length > 0 && (
+                  <>
+                    <InsetDivider />
+                    {visibleMeds.map((med, idx) => (
+                      <div key={`${med.name}-${idx}`} className="flex items-start gap-3 px-4 py-3">
+                        <Pill size={16} strokeWidth={1.75} className="text-[var(--text-secondary)] mt-[2px] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-[500] text-[var(--text-primary)]">{med.name}</p>
+                          <p className="text-[11px] text-[var(--text-tertiary)]">
+                            {med.dose_amount != null && med.dose_unit
+                              ? `${med.dose_amount}${med.dose_unit}`
+                              : med.dosage || ""}
+                            {(med.frequency_value != null && med.frequency_unit)
+                              ? ` · Every ${med.frequency_value} ${med.frequency_unit}`
+                              : med.frequency
+                              ? ` · ${med.frequency}`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {(pet.medications ?? []).length > 3 && (
+                      <div className="px-4 pb-2">
+                        <NeuControl
+                          size="sm"
+                          variant="tertiary"
+                          onClick={() => setShowAllMeds((v) => !v)}
+                        >
+                          {showAllMeds
+                            ? "Show less"
+                            : `Show ${(pet.medications ?? []).length - 3} more`}
+                        </NeuControl>
+                      </div>
+                    )}
+                  </>
+                )}
+
+              </InsetPanel>
             </div>
           )}
 
-          {/* Vet Contact */}
-          {pet.vet_contact && (
-            <div className="p-4 rounded-xl bg-muted/50">
-              <div className="flex items-center gap-2 mb-2">
-                <Stethoscope className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-semibold">{t("Veterinarian")}</h3>
-              </div>
-              <p className="text-sm">{pet.vet_contact}</p>
+          {/* Temperament & Routine divider */}
+          {hasTempRoutine && (
+            <button
+              type="button"
+              onClick={() => setShowTempRoutine((v) => !v)}
+              className="mx-4 mt-2 mb-2 w-[calc(100%-32px)] h-[56px] rounded-[22px] glass-e2 flex items-center px-4 gap-3"
+              style={{ background: "linear-gradient(to right, rgba(33,69,207,0.08), rgba(255,255,255,0.06))" }}
+              aria-expanded={showTempRoutine}
+            >
+              <span className="flex-1 text-left text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-secondary)]">
+                Temperament &amp; Routine
+              </span>
+              <ChevronDown
+                size={16}
+                strokeWidth={1.75}
+                className={cn("text-[var(--text-secondary)] transition-transform", showTempRoutine && "rotate-180")}
+              />
+            </button>
+          )}
+
+          {/* Temperament & Routine panel */}
+          {showTempRoutine && (
+            <div className="mx-4 mb-4">
+              <InsetPanel>
+                {pet.temperament && pet.temperament.length > 0 && (
+                  <div className="px-4 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      {pet.temperament.map((temp) => (
+                        <NeuChip key={temp} as="span">{temp}</NeuChip>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {pet.temperament && pet.temperament.length > 0 && pet.routine && (
+                  <InsetDivider />
+                )}
+                {pet.routine && (
+                  <div className="px-4 py-3">
+                    <p className="text-[11px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] mb-2">
+                      Daily Routine
+                    </p>
+                    <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)] whitespace-pre-wrap">
+                      {pet.routine}
+                    </p>
+                  </div>
+                )}
+              </InsetPanel>
             </div>
           )}
+
         </div>
       </StyledScrollArea>
 
