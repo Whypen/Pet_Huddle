@@ -51,10 +51,20 @@ type AddOnItem = {
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
-const PRICES = {
-  plus: { monthly: 5.99, annual: 4.99, annualBilled: 59.99 },
-  gold: { monthly: 11.99, annual: 9.16, annualBilled: 109.99 },
-} as const;
+// Live prices fetched from Stripe edge fn; quotaConfig amounts are the source-of-truth fallback
+type LivePriceMap = {
+  plus_monthly: number;
+  plus_annual:  number; // total annual charge (divide by 12 for /mo equivalent)
+  gold_monthly: number;
+  gold_annual:  number;
+};
+
+const FALLBACK_PRICES: LivePriceMap = {
+  plus_monthly: quotaConfig.stripePlans.plus.monthly.amount,
+  plus_annual:  quotaConfig.stripePlans.plus.annual.amount,
+  gold_monthly: quotaConfig.stripePlans.gold.monthly.amount,
+  gold_annual:  quotaConfig.stripePlans.gold.annual.amount,
+};
 
 // Folder card bg + text on that bg (white for blue/coral, dark-green for lime)
 const PLAN_THEMES = {
@@ -129,9 +139,8 @@ function fmtCurrency(n: number): string {
   }
 }
 
-function discountPct(tier: "plus" | "gold"): number {
-  const p = PRICES[tier];
-  return Math.round((1 - p.annual / p.monthly) * 100);
+function discountPct(monthlyAmt: number, annualTotal: number): number {
+  return Math.round((1 - annualTotal / 12 / monthlyAmt) * 100);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -151,6 +160,25 @@ export default function PremiumPage() {
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  // ── Live Stripe prices (fallback = quotaConfig amounts) ──────────────────────
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const { data, error } = await supabase.functions.invoke("stripe-pricing");
+      if (!active || error || !data?.prices) return;
+      const p = data.prices as Record<string, { amount?: number }>;
+      setLivePrices({
+        plus_monthly: typeof p.plus_monthly?.amount === "number" ? p.plus_monthly.amount : FALLBACK_PRICES.plus_monthly,
+        plus_annual:  typeof p.plus_annual?.amount  === "number" ? p.plus_annual.amount  : FALLBACK_PRICES.plus_annual,
+        gold_monthly: typeof p.gold_monthly?.amount === "number" ? p.gold_monthly.amount : FALLBACK_PRICES.gold_monthly,
+        gold_annual:  typeof p.gold_annual?.amount  === "number" ? p.gold_annual.amount  : FALLBACK_PRICES.gold_annual,
+      });
+    })();
+    return () => { active = false; };
+  }, []);
 
   // ── Sequential checkout: detect ?plan_done=1 ────────────────────────────────
   useEffect(() => {
@@ -300,8 +328,10 @@ export default function PremiumPage() {
 
   const renderPlanFolderCard = (tier: "plus" | "gold") => {
     const theme = PLAN_THEMES[tier];
-    const prices = PRICES[tier];
-    const pct = discountPct(tier);
+    const monthlyAmt  = livePrices[`${tier}_monthly` as keyof LivePriceMap];
+    const annualTotal = livePrices[`${tier}_annual`  as keyof LivePriceMap];
+    const annualPerMo = annualTotal / 12;
+    const pct = discountPct(monthlyAmt, annualTotal);
     const billing = tier === "plus" ? plusBilling : goldBilling;
     const setBilling = tier === "plus" ? setPlusBilling : setGoldBilling;
     const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
@@ -366,7 +396,7 @@ export default function PremiumPage() {
           {/* Price */}
           {!isAnnual ? (
             <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-              {fmtCurrency(prices.monthly)}
+              {fmtCurrency(monthlyAmt)}
               <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
             </p>
           ) : (
@@ -376,15 +406,15 @@ export default function PremiumPage() {
                   className="text-[15px] font-[400] line-through opacity-60"
                   style={{ color: theme.textOnBg }}
                 >
-                  {fmtCurrency(prices.monthly)}
+                  {fmtCurrency(monthlyAmt)}
                 </span>
                 <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                  {fmtCurrency(prices.annual)}
+                  {fmtCurrency(annualPerMo)}
                   <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
                 </p>
               </div>
               <p className="text-[12px] mt-0.5 opacity-75" style={{ color: theme.textOnBg }}>
-                {fmtCurrency(prices.annualBilled)} billed yearly
+                {fmtCurrency(annualTotal)} billed yearly
               </p>
             </div>
           )}
