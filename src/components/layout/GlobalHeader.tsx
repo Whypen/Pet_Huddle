@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   AlertCircle,
   Bell,
   ChevronRight,
   FileText,
   Heart,
   Info,
-  MessageCircle,
+  MessageSquare,
   Settings,
   Shield,
   Star,
@@ -69,11 +70,14 @@ function notifIcon(type: string) {
     return <Star size={18} strokeWidth={1.75} aria-hidden />;
   if (type === "heart" || type === "social")
     return <Heart size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "message" || type === "chat")
-    return <MessageCircle size={18} strokeWidth={1.75} aria-hidden />;
+  if (
+    type === "message" || type === "chat" || type === "comment" ||
+    type === "reply" || type === "mention" || type === "thread" || type === "conversation"
+  )
+    return <MessageSquare size={18} strokeWidth={1.75} aria-hidden />;
   if (type === "friend" || type === "follow" || type === "connect")
     return <UserPlus size={18} strokeWidth={1.75} aria-hidden />;
-  return <Bell size={18} strokeWidth={1.75} aria-hidden />;
+  return <Activity size={18} strokeWidth={1.75} aria-hidden />;
 }
 
 const allowedHref = (href: string) =>
@@ -343,7 +347,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full [&>button]:hidden"
           >
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
               <h3 className="text-[17px] font-[600] text-[var(--text-primary)]">
                 {t("Notifications")}
               </h3>

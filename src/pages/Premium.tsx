@@ -42,7 +42,7 @@ type FeatureRow = {
 
 type AddOnItem = {
   id: "superBroadcast" | "discoveryBoost" | "sharePerks";
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
   title: string;
   subtitle: string;
   price: number;
@@ -57,45 +57,32 @@ const PRICES = {
   gold: { monthly: 11.99, annual: 9.16, annualBilled: 109.99 },
 } as const;
 
-// Per-plan color tokens — tab active, annual toggle active, CTA, feature icon
-const PLAN_COLORS = {
-  plus: {
-    tabActive: { background: "#7CFF6B", color: "#194219" },
-    annualActive: { background: "#2145CF", color: "#FFFFFF" },
-    annualCardBg: "rgba(33,69,207,0.06)",
-    ctaBackground: "#7CFF6B",
-    ctaColor: "#194219",
-    featureIcon: "#2145CF",
-  },
-  gold: {
-    tabActive: { background: "#CFAB21", color: "#FFFFFF" },
-    annualActive: { background: "#CFAB21", color: "#FFFFFF" },
-    annualCardBg: "rgba(207,171,33,0.10)",
-    ctaBackground: "#CFAB21",
-    ctaColor: "#FFFFFF",
-    featureIcon: "#CFAB21",
-  },
-  addons: {
-    tabActive: { background: "#7CFF6B", color: "#194219" },
-  },
+// Per-plan theme: folder card bg + text colour on that bg
+const PLAN_THEMES = {
+  plus:   { bg: "#5BA4F5", textOnBg: "#FFFFFF" },
+  gold:   { bg: "#FF6452", textOnBg: "#FFFFFF" },
+  addons: { bg: "#7CFF6B", textOnBg: "#194219" },
 } as const;
 
+// All segmented-tab label texts use Brand Blue
+const BRAND_BLUE = "#2145CF";
+
 const PLUS_FEATURES: FeatureRow[] = [
-  { icon: Users,             label: "×2 Discovery",     sublabel: "More connections, less noise" },
-  { icon: Star,              label: "4 Stars / month",  sublabel: "Trigger conversations directly" },
+  { icon: Users,             label: "×2 Discovery",            sublabel: "More connections, less noise" },
+  { icon: Star,              label: "4 Stars / month",          sublabel: "Trigger conversations directly" },
   { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Alert your neighbourhood" },
-  { icon: SlidersHorizontal, label: "Advanced Filters", sublabel: "Find your kind of people" },
-  { icon: Heart,             label: "Link Family",      sublabel: "Connect all your pet accounts" },
+  { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Find your kind of people" },
+  { icon: Heart,             label: "Link Family",              sublabel: "Connect all your pet accounts" },
 ];
 
 const GOLD_FEATURES: FeatureRow[] = [
-  { icon: Globe,             label: "Wide Open Discovery",     sublabel: "Keep discovering" },
-  { icon: TrendingUp,        label: "3× Visibility priority",  sublabel: "Become a top profile" },
-  { icon: Star,              label: "10 Stars / month",        sublabel: "The most direct connections" },
-  { icon: Radio,             label: "Broadcasts · 50km · 48h", sublabel: "Maximum reach" },
-  { icon: SlidersHorizontal, label: "All Filters Access",      sublabel: "Including Active Now + Same Energy" },
-  { icon: Video,             label: "Video upload",            sublabel: "Gold-exclusive" },
-  { icon: Users2,            label: "Link Family",             sublabel: "Connect all your pet accounts" },
+  { icon: Globe,             label: "Wide Open Discovery",      sublabel: "Keep discovering" },
+  { icon: TrendingUp,        label: "3× Visibility priority",   sublabel: "Become a top profile" },
+  { icon: Star,              label: "10 Stars / month",         sublabel: "The most direct connections" },
+  { icon: Radio,             label: "Broadcasts · 50km · 48h",  sublabel: "Maximum reach" },
+  { icon: SlidersHorizontal, label: "All Filters Access",       sublabel: "Including Active Now + Same Energy" },
+  { icon: Video,             label: "Video upload",             sublabel: "Gold-exclusive" },
+  { icon: Users2,            label: "Link Family",              sublabel: "Connect all your pet accounts" },
 ];
 
 const ADD_ONS: AddOnItem[] = [
@@ -153,9 +140,10 @@ export default function PremiumPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
 
-  // Default tab: gold (Recommended)
   const [activeTab, setActiveTab] = useState<PlanTab>("gold");
-  const [billing, setBilling] = useState<Billing>("monthly");
+  // Independent billing state per plan card
+  const [plusBilling, setPlusBilling]   = useState<Billing>("monthly");
+  const [goldBilling, setGoldBilling]   = useState<Billing>("monthly");
   const [addonSelected, setAddonSelected] = useState<Record<AddOnItem["id"], boolean>>({
     superBroadcast: false,
     discoveryBoost: false,
@@ -195,7 +183,6 @@ export default function PremiumPage() {
           const a = ADD_ONS.find((x) => x.id === item.id);
           return sum + (a?.price ?? 0) * item.qty;
         }, 0);
-
         const { data, error } = await supabase.functions.invoke("create-checkout-session", {
           body: {
             userId: user.id,
@@ -225,7 +212,7 @@ export default function PremiumPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Checkout handlers ────────────────────────────────────────────────────────
+  // ── Checkout helpers ─────────────────────────────────────────────────────────
   const selectedAddonItems = useMemo(
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
@@ -240,11 +227,12 @@ export default function PremiumPage() {
     if (!user) { navigate("/auth"); return; }
     if (isCheckingOut) return;
 
+    const billing = tier === "plus" ? plusBilling : goldBilling;
+
     try {
       setIsCheckingOut(true);
       const plan = quotaConfig.stripePlans[tier][billing];
       const type = `${tier}_${billing}`;
-
       const hasAddons = selectedAddonItems.length > 0;
       const successUrl = hasAddons
         ? `${window.location.origin}/premium?plan_done=1`
@@ -308,260 +296,267 @@ export default function PremiumPage() {
     }
   };
 
-  // ── Render helpers ───────────────────────────────────────────────────────────
+  // ── Folder card: Plus / Gold ──────────────────────────────────────────────────
 
-  const renderBillingToggle = (tier: "plus" | "gold") => {
+  const renderPlanFolderCard = (tier: "plus" | "gold") => {
+    const theme = PLAN_THEMES[tier];
     const prices = PRICES[tier];
-    const colors = PLAN_COLORS[tier];
     const pct = discountPct(tier);
+    const billing = tier === "plus" ? plusBilling : goldBilling;
+    const setBilling = tier === "plus" ? setPlusBilling : setGoldBilling;
+    const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
     const isAnnual = billing === "annual";
+    const ctaLabel = tier === "plus" ? "Get Huddle+" : "Get Gold";
 
     return (
-      <div className="mt-4">
-        {/* Toggle pill */}
-        <div className="relative inline-flex">
-          {/* Discount % badge — floats above Annual button */}
-          <span
-            className="absolute -top-5 right-0 px-2 py-0.5 rounded-full text-[10px] font-[500]"
-            style={{ background: "#E0F2B6", color: "#2145CF" }}
-          >
-            -{pct}%
-          </span>
+      <div className="rounded-[20px] overflow-hidden">
+        {/* ── Folder tab row — outer bg is theme colour ── */}
+        <div className="flex h-[44px]" style={{ background: theme.bg }}>
 
-          <div className="inline-flex rounded-full p-[3px] gap-1"
-            style={{
-              background: "rgba(255,255,255,0.18)",
-              boxShadow: "inset 2px 2px 6px rgba(163,168,190,0.20)",
-            }}
+          {/* Monthly tab */}
+          <button
+            className="flex-1 flex items-center justify-center text-[13px] font-[600] h-full"
+            aria-pressed={!isAnnual}
+            onClick={() => setBilling("monthly")}
+            style={
+              !isAnnual
+                ? { color: theme.textOnBg }                              // active: transparent bg inherits theme
+                : {
+                    background: "#FFFFFF",
+                    color: theme.bg,
+                    borderBottomRightRadius: "14px",                     // fold corner
+                  }
+            }
           >
-            <button
-              onClick={() => setBilling("monthly")}
-              aria-pressed={!isAnnual}
-              className="h-[30px] px-4 rounded-full text-[13px] font-[500] transition-all duration-150"
-              style={
-                !isAnnual
-                  ? { background: "rgba(255,255,255,0.90)", color: "var(--text-primary)", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }
-                  : { background: "transparent", color: "var(--text-secondary)" }
-              }
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBilling("annual")}
-              aria-pressed={isAnnual}
-              className="h-[30px] px-4 rounded-full text-[13px] font-[500] transition-all duration-150"
-              style={
-                isAnnual
-                  ? { background: colors.annualActive.background, color: colors.annualActive.color }
-                  : { background: "transparent", color: "var(--text-secondary)" }
-              }
-            >
-              Annual
-            </button>
-          </div>
+            Monthly
+          </button>
+
+          {/* Annual tab */}
+          <button
+            className="flex-1 flex items-center justify-center gap-1.5 text-[13px] font-[600] h-full"
+            aria-pressed={isAnnual}
+            onClick={() => setBilling("annual")}
+            style={
+              isAnnual
+                ? { color: theme.textOnBg }
+                : {
+                    background: "#FFFFFF",
+                    color: theme.bg,
+                    borderBottomLeftRadius: "14px",                      // fold corner
+                  }
+            }
+          >
+            Annually
+            {/* Discount badge — only shown when Annual is the inactive tab */}
+            {!isAnnual && (
+              <span
+                className="px-1.5 py-0.5 rounded-full text-[10px] font-[500]"
+                style={{ background: theme.bg, color: theme.textOnBg }}
+              >
+                -{pct}%
+              </span>
+            )}
+          </button>
         </div>
 
-        {/* Price display */}
-        <div
-          className="mt-3 rounded-[14px] px-3 py-3 transition-colors duration-200"
-          style={{ background: isAnnual ? colors.annualCardBg : "transparent" }}
-        >
+        {/* ── Card body — same theme colour ── */}
+        <div className="px-5 pt-4 pb-5" style={{ background: theme.bg }}>
+
+          {/* Price block */}
           {!isAnnual ? (
-            <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
+            <p
+              className="text-[30px] font-[700] leading-tight"
+              style={{ color: theme.textOnBg }}
+            >
               {fmtCurrency(prices.monthly)}
-              <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
+              <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
             </p>
           ) : (
-            <>
+            <div>
               <div className="flex items-baseline gap-2">
-                <span className="text-[15px] font-[400] line-through text-[var(--text-tertiary)]">
+                <span
+                  className="text-[15px] font-[400] line-through opacity-60"
+                  style={{ color: theme.textOnBg }}
+                >
                   {fmtCurrency(prices.monthly)}
                 </span>
-                <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
+                <p
+                  className="text-[30px] font-[700] leading-tight"
+                  style={{ color: theme.textOnBg }}
+                >
                   {fmtCurrency(prices.annual)}
-                  <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
+                  <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
                 </p>
               </div>
-              <p className="text-[12px] text-[var(--text-secondary)] mt-1">
+              <p className="text-[12px] mt-0.5 opacity-75" style={{ color: theme.textOnBg }}>
                 {fmtCurrency(prices.annualBilled)} billed yearly
               </p>
-            </>
+            </div>
           )}
+
+          {/* Feature rows */}
+          <div className="mt-4 space-y-0">
+            {features.map((f) => (
+              <div key={f.label} className="flex items-start gap-3 py-2">
+                <f.icon
+                  size={18}
+                  strokeWidth={1.75}
+                  className="flex-shrink-0 mt-0.5"
+                  style={{ color: theme.textOnBg, opacity: 0.90 }}
+                  aria-hidden
+                />
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-[13px] font-[600] leading-tight"
+                    style={{ color: theme.textOnBg }}
+                  >
+                    {f.label}
+                  </p>
+                  <p
+                    className="text-[11px] font-[400] mt-0.5"
+                    style={{ color: theme.textOnBg, opacity: 0.72 }}
+                  >
+                    {f.sublabel}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA — white bg, themed text */}
+          <button
+            className="mt-5 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+            style={{
+              background: "#FFFFFF",
+              color: theme.bg,
+              opacity: isCheckingOut ? 0.6 : 1,
+            }}
+            disabled={isCheckingOut}
+            onClick={() => void startPlanCheckout(tier)}
+          >
+            <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
+            {isCheckingOut ? "Loading…" : ctaLabel}
+          </button>
         </div>
       </div>
     );
   };
 
-  const renderFeatureRows = (features: FeatureRow[], iconColor: string) => (
-    <div className="mt-5 space-y-0">
-      {features.map((f) => (
-        <div key={f.label} className="flex items-start gap-3 py-2.5">
-          <f.icon
-            size={20}
-            strokeWidth={1.75}
-            className="flex-shrink-0 mt-0.5"
-            style={{ color: iconColor }}
-            aria-hidden
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-[600] text-[var(--text-primary)] leading-tight">
-              {f.label}
-            </p>
-            <p className="text-[12px] font-[400] text-[var(--text-secondary)] mt-0.5">
-              {f.sublabel}
-            </p>
-          </div>
+  // ── Add-ons folder card (single tab) ─────────────────────────────────────────
+
+  const renderAddonsCard = () => {
+    const theme = PLAN_THEMES.addons;
+
+    return (
+      <div className="rounded-[20px] overflow-hidden">
+        {/* Single full-width header tab */}
+        <div
+          className="h-[44px] flex items-center px-5 gap-3"
+          style={{ background: theme.bg }}
+        >
+          <span className="text-[13px] font-[600]" style={{ color: theme.textOnBg }}>
+            Power-ups
+          </span>
+          <span className="text-[11px] opacity-65" style={{ color: theme.textOnBg }}>
+            Billed once
+          </span>
         </div>
-      ))}
-    </div>
-  );
 
-  // ── Tab content ──────────────────────────────────────────────────────────────
-
-  const renderPlusTab = () => (
-    <div className="px-5">
-      {renderBillingToggle("plus")}
-      {renderFeatureRows(PLUS_FEATURES, PLAN_COLORS.plus.featureIcon)}
-
-      {/* Plus CTA — Lime Green */}
-      <div className="mt-6">
-        <button
-          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
-          style={{
-            background: PLAN_COLORS.plus.ctaBackground,
-            color: PLAN_COLORS.plus.ctaColor,
-            opacity: isCheckingOut ? 0.6 : 1,
-          }}
-          disabled={isCheckingOut}
-          onClick={() => void startPlanCheckout("plus")}
-        >
-          <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
-          {isCheckingOut ? "Loading…" : "Get Huddle+"}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderGoldTab = () => (
-    <div className="px-5">
-      {renderBillingToggle("gold")}
-      {renderFeatureRows(GOLD_FEATURES, PLAN_COLORS.gold.featureIcon)}
-
-      {/* Gold CTA — Brand Gold */}
-      <div className="mt-6">
-        <button
-          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
-          style={{
-            background: "linear-gradient(135deg, #CFAB21 0%, #E0C435 100%)",
-            color: "#FFFFFF",
-            opacity: isCheckingOut ? 0.6 : 1,
-          }}
-          disabled={isCheckingOut}
-          onClick={() => void startPlanCheckout("gold")}
-        >
-          <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
-          {isCheckingOut ? "Loading…" : "Get Gold"}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderAddonsTab = () => (
-    <div className="px-5">
-      {/* Header copy */}
-      <div className="mt-6 mb-4">
-        <p
-          className="text-[11px] font-[500] uppercase tracking-[0.06em]"
-          style={{ color: "#2145CF" }}
-        >
-          Separate purchase
-        </p>
-        <p className="text-[13px] font-[400] text-[var(--text-secondary)] mt-1">
-          Add power-ups to any plan, billed once.
-        </p>
-      </div>
-
-      {/* Add-on rows */}
-      <div className="rounded-[20px] overflow-hidden glass-e1">
-        {ADD_ONS.map((addon, i) => {
-          const selected = addonSelected[addon.id];
-          return (
-            <div key={addon.id}>
-              {i > 0 && <div className="h-px bg-white/20 mx-4" />}
-              <div className="flex items-center gap-3 px-4 py-4">
-                <addon.icon
-                  size={20}
-                  strokeWidth={1.75}
-                  className="text-[var(--text-secondary)] flex-shrink-0"
-                  aria-hidden
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-[600] text-[var(--text-primary)] leading-tight">
-                    {addon.title}
-                  </p>
-                  <p className="text-[12px] font-[400] text-[var(--text-secondary)] mt-0.5">
-                    {addon.subtitle}
-                  </p>
-                  <p className="text-[13px] font-[600] text-[var(--text-primary)] mt-1">
-                    {addon.priceLabel}
-                  </p>
+        {/* Card body */}
+        <div className="px-4 pt-2 pb-4" style={{ background: theme.bg }}>
+          {ADD_ONS.map((addon, i) => {
+            const selected = addonSelected[addon.id];
+            return (
+              <div key={addon.id}>
+                {i > 0 && (
+                  <div
+                    className="h-px"
+                    style={{ background: theme.textOnBg, opacity: 0.15 }}
+                  />
+                )}
+                <div className="flex items-center gap-3 py-3.5">
+                  <addon.icon
+                    size={20}
+                    strokeWidth={1.75}
+                    className="flex-shrink-0"
+                    style={{ color: theme.textOnBg, opacity: 0.85 }}
+                    aria-hidden
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-[13px] font-[600] leading-tight"
+                      style={{ color: theme.textOnBg }}
+                    >
+                      {addon.title}
+                    </p>
+                    <p
+                      className="text-[11px] font-[400] mt-0.5"
+                      style={{ color: theme.textOnBg, opacity: 0.70 }}
+                    >
+                      {addon.subtitle}
+                    </p>
+                    <p
+                      className="text-[13px] font-[600] mt-1"
+                      style={{ color: theme.textOnBg }}
+                    >
+                      {addon.priceLabel}
+                    </p>
+                  </div>
+                  <NeuControl
+                    size="sm"
+                    variant={selected ? "primary" : "tertiary"}
+                    selected={selected}
+                    onClick={() =>
+                      setAddonSelected((prev) => ({ ...prev, [addon.id]: !prev[addon.id] }))
+                    }
+                    aria-label={`${selected ? "Remove" : "Add"} ${addon.title}`}
+                  >
+                    {selected ? "Remove" : "Add"}
+                  </NeuControl>
                 </div>
-                <NeuControl
-                  size="sm"
-                  variant={selected ? "primary" : "tertiary"}
-                  selected={selected}
-                  onClick={() =>
-                    setAddonSelected((prev) => ({ ...prev, [addon.id]: !prev[addon.id] }))
-                  }
-                  aria-label={`${selected ? "Remove" : "Add"} ${addon.title}`}
-                >
-                  {selected ? "Remove" : "Add"}
-                </NeuControl>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
 
-      {/* Add-ons CTA */}
-      <div className="mt-4">
-        <button
-          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
-          style={{
-            background: "#2145CF",
-            color: "#FFFFFF",
-            opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
-            pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
-          }}
-          disabled={!selectedAddonItems.length || isCheckingOut}
-          onClick={() => void startAddonOnlyCheckout()}
-        >
-          <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
-          {selectedAddonItems.length > 0
-            ? `Purchase Add-ons · ${fmtCurrency(addonTotal)}`
-            : "Purchase Add-ons"}
-        </button>
-      </div>
+          {/* Add-ons CTA — white bg, lime text */}
+          <button
+            className="mt-2 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+            style={{
+              background: "#FFFFFF",
+              color: theme.bg,
+              opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
+              pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
+            }}
+            disabled={!selectedAddonItems.length || isCheckingOut}
+            onClick={() => void startAddonOnlyCheckout()}
+          >
+            <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
+            {selectedAddonItems.length > 0
+              ? `Purchase Add-ons · ${fmtCurrency(addonTotal)}`
+              : "Purchase Add-ons"}
+          </button>
 
-      {/* Footer note */}
-      <p className="text-[11px] font-[400] text-[var(--text-tertiary)] text-center mt-4">
-        Add-ons are purchased separately from your subscription.
-      </p>
-    </div>
-  );
+          <p
+            className="text-[11px] font-[400] text-center mt-3"
+            style={{ color: theme.textOnBg, opacity: 0.55 }}
+          >
+            Add-ons are purchased separately from your subscription.
+          </p>
+        </div>
+      </div>
+    );
+  };
 
   // ── Main render ──────────────────────────────────────────────────────────────
   return (
     <div className="min-h-svh overflow-x-hidden">
-      {/* GlobalHeader with X close button */}
       <GlobalHeader closeButton={() => navigate(-1)} />
 
-      {/* Scrollable body */}
       <div
         className="overflow-y-auto"
         style={{ paddingBottom: "calc(90px + env(safe-area-inset-bottom))" }}
       >
-        {/* Hero block */}
+        {/* Hero */}
         <div className="px-5 pt-5">
           <h1
             className="font-[700] text-[var(--text-primary)] leading-tight"
@@ -570,65 +565,60 @@ export default function PremiumPage() {
             Every Pet Deserves More.
           </h1>
           <p
-            className="font-[400] text-[var(--text-secondary)] mt-2 whitespace-nowrap"
-            style={{ fontSize: "12px" }}
+            className="font-[400] text-[var(--text-secondary)] mt-2"
+            style={{ fontSize: "14px" }}
           >
             Connect wider. Care deeper. Make pet lives better.
           </p>
         </div>
 
         {/* Plan segmented control */}
-        <div className="px-5 mt-7 relative">
-          {/* "Recommended" badge — floats above Gold option */}
-          <div
-            className="absolute top-0 pointer-events-none"
-            style={{ left: "calc(5px + 33.33% + 8px)", transform: "translateY(-120%)" }}
-            aria-hidden
-          >
-            <span
-              className="px-2 py-0.5 rounded-full text-[10px] font-[500]"
-              style={{ background: "#E0F2B6", color: "#2145CF" }}
-            >
-              Recommended
-            </span>
-          </div>
-
-          {/* Segmented buttons — pure elements to avoid CSS transition blink */}
+        <div className="px-5 mt-7">
+          {/* Extra top margin so "Recommended" badge has room to breathe */}
           <div className="flex gap-2 mt-5">
             {(["plus", "gold", "addons"] as PlanTab[]).map((tab) => {
               const isActive = activeTab === tab;
-              const colors = PLAN_COLORS[tab].tabActive;
+              const isGold = tab === "gold";
+              const themeBg = PLAN_THEMES[tab].bg;
               return (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  aria-pressed={isActive}
-                  className="flex-1 h-[36px] rounded-[18px] text-[13px] font-[600]"
-                  style={
-                    isActive
-                      ? {
-                          background: colors.background,
-                          color: colors.color,
-                        }
-                      : {
-                          background: "rgba(255,255,255,0.18)",
-                          color: "var(--text-secondary)",
-                          boxShadow: "inset 2px 2px 6px rgba(163,168,190,0.20)",
-                        }
-                  }
-                >
-                  {tab === "plus" ? "Huddle+" : tab === "gold" ? "Gold" : "Add-ons"}
-                </button>
+                <div key={tab} className="flex-1 relative">
+                  {/* "Recommended" badge — floats above Gold button */}
+                  {isGold && (
+                    <span
+                      className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-[10px] font-[500] whitespace-nowrap pointer-events-none"
+                      style={{ background: "#E0F2B6", color: BRAND_BLUE }}
+                      aria-hidden
+                    >
+                      Recommended
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setActiveTab(tab)}
+                    aria-pressed={isActive}
+                    className="w-full h-[36px] rounded-[18px] text-[13px] font-[600]"
+                    style={
+                      isActive
+                        ? { background: themeBg, color: BRAND_BLUE }
+                        : {
+                            background: "rgba(255,255,255,0.18)",
+                            color: BRAND_BLUE,
+                            boxShadow: "inset 2px 2px 6px rgba(163,168,190,0.20)",
+                          }
+                    }
+                  >
+                    {tab === "plus" ? "Huddle+" : tab === "gold" ? "Gold" : "Add-ons"}
+                  </button>
+                </div>
               );
             })}
           </div>
         </div>
 
-        {/* Tab content */}
-        <div className="mt-2">
-          {activeTab === "plus" && renderPlusTab()}
-          {activeTab === "gold" && renderGoldTab()}
-          {activeTab === "addons" && renderAddonsTab()}
+        {/* Folder card content */}
+        <div className="px-5 mt-4">
+          {activeTab === "plus"   && renderPlanFolderCard("plus")}
+          {activeTab === "gold"   && renderPlanFolderCard("gold")}
+          {activeTab === "addons" && renderAddonsCard()}
         </div>
       </div>
     </div>
