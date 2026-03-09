@@ -1,444 +1,574 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { CheckCircle2, ChevronRight, Lock, Sparkles } from "lucide-react";
+/**
+ * Premium.tsx — Subscription redesign
+ * Design: 2026-03-09-subscription-notifications-redesign-design.md
+ * UI_CONTRACT v6.1 § Section 6 · MASTER_SPEC §2.5 / §2.6 / §2.11
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  Globe,
+  Heart,
+  Megaphone,
+  Radio,
+  ShoppingBag,
+  ShoppingCart,
+  SlidersHorizontal,
+  Star,
+  TrendingUp,
+  Users,
+  Users2,
+  Video,
+  Zap,
+} from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { NeuControl } from "@/components/ui/NeuControl";
+import { PaywallCTA } from "@/components/paywall/PaywallCTA";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { quotaConfig } from "@/config/quotaConfig";
 
-type TierTab = "Premium" | "Gold" | "Add-on";
-type Billing = "monthly" | "yearly";
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-type Pricing = {
-  premium: { monthly: number; yearly: number };
-  gold: { monthly: number; yearly: number };
-  addOn: { star_pack: number; emergency_alert: number; vet_media: number };
+type PlanTab = "plus" | "gold" | "addons";
+type Billing = "monthly" | "annual";
+
+type FeatureRow = {
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  label: string;
+  sublabel: string;
 };
 
-type AddOnId = keyof Pricing["addOn"];
-
-type AddOn = {
-  id: AddOnId;
+type AddOnItem = {
+  id: "superBroadcast" | "discoveryBoost" | "sharePerks";
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
   title: string;
   subtitle: string;
-  pill?: string;
+  price: number;
+  priceLabel: string;
 };
 
-const DEFAULT_PRICING: Pricing = {
-  premium: { monthly: 9.99, yearly: 80.99 },
-  gold: { monthly: 19.99, yearly: 180.99 },
-  addOn: { star_pack: 4.99, emergency_alert: 2.99, vet_media: 3.99 },
-};
+// ─── Static data ──────────────────────────────────────────────────────────────
 
-const ADD_ONS: AddOn[] = [
-  { id: "star_pack", title: "3 Star Pack", subtitle: "Superpower to trigger chats immediately" },
-  { id: "emergency_alert", title: "Emergency Broadcast", subtitle: "+1 Broadcast (72h / 150km radius)", pill: "ADD-ON" },
-  { id: "vet_media", title: "Media (+10)", subtitle: "+10 Media", pill: "Extra" },
+// Prices per MASTER_SPEC §2.5
+const PRICES = {
+  plus: { monthly: 5.99, annual: 4.99, annualBilled: 59.99 },
+  gold: { monthly: 11.99, annual: 9.16, annualBilled: 109.99 },
+} as const;
+
+const PLUS_FEATURES: FeatureRow[] = [
+  { icon: Users,             label: "×2 Discovery",     sublabel: "More connections, less noise" },
+  { icon: Star,              label: "4 Stars / month",  sublabel: "Trigger conversations directly" },
+  { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Alert your neighbourhood" },
+  { icon: SlidersHorizontal, label: "Advanced Filters", sublabel: "Find your kind of people" },
+  { icon: Heart,             label: "Link Family",      sublabel: "Connect all your pet accounts" },
 ];
 
-const FEATURES = (tier: "premium" | "gold") =>
-  tier === "premium"
-    ? [
-        { title: "Unlimited", tip: "Unlimited discovery + standard ranking", icon: Sparkles },
-        { title: "Threads", tip: "5 posts/day", icon: CheckCircle2 },
-        { title: "Media", tip: "10/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "25km radius • 24h duration", icon: CheckCircle2 },
-        { title: "Filters", tip: "12 advanced filters (Premium)", icon: CheckCircle2 },
-        { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
-      ]
-    : [
-        { title: "Unlimited", tip: "Unlimited discovery + priority ranking", icon: Sparkles },
-        { title: "Threads", tip: "20 posts/day", icon: CheckCircle2 },
-        { title: "Stars", tip: "3/cycle (direct chat)", icon: CheckCircle2 },
-        { title: "Media", tip: "50/day (AI Vet/Chats/Threads)", icon: CheckCircle2 },
-        { title: "Broadcast", tip: "50km radius • 48h duration", icon: CheckCircle2 },
-        { title: "Family", tip: "1 member (quota inheritance)", icon: CheckCircle2 },
-        { title: "Filters", tip: "All 15 filters (Gold exclusive)", icon: CheckCircle2 },
-        { title: "AI Vet", tip: "Unlimited chats + image analysis", icon: CheckCircle2 },
-      ];
+const GOLD_FEATURES: FeatureRow[] = [
+  { icon: Globe,             label: "Wide Open Discovery",   sublabel: "Keep discovering" },
+  { icon: TrendingUp,        label: "3× Visibility priority", sublabel: "Become a top profile" },
+  { icon: Star,              label: "10 Stars / month",      sublabel: "The most direct connections" },
+  { icon: Radio,             label: "Broadcasts · 50km · 48h", sublabel: "Maximum reach" },
+  { icon: SlidersHorizontal, label: "All Filters Access",   sublabel: "Including Active Now + Same Energy" },
+  { icon: Video,             label: "Video upload",          sublabel: "Gold-exclusive" },
+  { icon: Users2,            label: "Link Family",           sublabel: "Connect all your pet accounts" },
+];
 
-function money(n: number) {
+const ADD_ONS: AddOnItem[] = [
+  {
+    id: "superBroadcast",
+    icon: Megaphone,
+    title: "Super Broadcast",
+    subtitle: "72h · 150km · slot bypass",
+    price: 4.99,
+    priceLabel: "$4.99",
+  },
+  {
+    id: "discoveryBoost",
+    icon: Zap,
+    title: "Discovery Boost",
+    subtitle: "3× ranking weight · 24h",
+    price: 2.99,
+    priceLabel: "$2.99",
+  },
+  {
+    id: "sharePerks",
+    icon: Users2,
+    title: "Share Perks",
+    subtitle: "Mirror tier to 2 members",
+    price: 4.99,
+    priceLabel: "$4.99/mo",
+  },
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmt(n: number) {
   return `$${n.toFixed(2)}`;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function PremiumPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { t } = useLanguage();
-  const [searchParams] = useSearchParams();
 
-  // UAT: auto-select Premium on load.
-  const [tab, setTab] = useState<TierTab>("Premium");
+  // Default tab: gold (Recommended)
+  const [activeTab, setActiveTab] = useState<PlanTab>("gold");
   const [billing, setBilling] = useState<Billing>("monthly");
-  const [pricing, setPricing] = useState<Pricing>(DEFAULT_PRICING);
-  const [selected, setSelected] = useState<Record<AddOnId, boolean>>({
-    star_pack: false,
-    emergency_alert: false,
-    vet_media: false,
+  const [addonSelected, setAddonSelected] = useState<Record<AddOnItem["id"], boolean>>({
+    superBroadcast: false,
+    discoveryBoost: false,
+    sharePerks: false,
   });
-  const [qty, setQty] = useState<Record<AddOnId, number>>({
-    star_pack: 1,
-    emergency_alert: 1,
-    vet_media: 1,
-  });
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
-  const fade = useRef(0);
-
+  // ── Sequential checkout: detect ?plan_done=1 ────────────────────────────────
   useEffect(() => {
-    // UAT: dynamic pricing from Stripe if available (fallback to defaults).
+    const planDone = searchParams.get("plan_done");
+    if (planDone !== "1") return;
+
+    const raw = sessionStorage.getItem("pending_addons");
+    if (!raw) {
+      // Plan only — clear param
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    let pending: { id: string; qty: number }[] = [];
+    try {
+      pending = JSON.parse(raw) as { id: string; qty: number }[];
+    } catch {
+      sessionStorage.removeItem("pending_addons");
+      setSearchParams({}, { replace: true });
+      return;
+    }
+
+    sessionStorage.removeItem("pending_addons");
+    setSearchParams({}, { replace: true });
+
+    if (!pending.length || !user) return;
+
+    // Auto-trigger add-on payment session
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("stripe-pricing");
-        if (error) throw error;
-        const prices = data?.prices || {};
-        setPricing((prev) => ({
-          premium: {
-            monthly: prices.premium_monthly?.amount ?? prev.premium.monthly,
-            yearly: prices.premium_annual?.amount ?? prev.premium.yearly,
-          },
-          gold: {
-            monthly: prices.gold_monthly?.amount ?? prev.gold.monthly,
-            yearly: prices.gold_annual?.amount ?? prev.gold.yearly,
-          },
-          addOn: {
-            star_pack: prices.star_pack?.amount ?? prev.addOn.star_pack,
-            emergency_alert: prices.emergency_alert?.amount ?? prev.addOn.emergency_alert,
-            vet_media: prices.vet_media?.amount ?? prev.addOn.vet_media,
-          },
-        }));
-      } catch {
-        // ignore
-      }
-    })();
-  }, []);
+        setIsCheckingOut(true);
+        const total = pending.reduce((sum, item) => {
+          const a = ADD_ONS.find((x) => x.id === item.id);
+          return sum + (a?.price ?? 0) * item.qty;
+        }, 0);
 
-  useEffect(() => {
-    // Auto-select add-on tab when navigated from an upsell trigger.
-    const pending = sessionStorage.getItem("pending_addon");
-    if (!pending) return;
-    const map: Record<string, AddOnId | null> = {
-      star: "star_pack",
-      emergency_alert: "emergency_alert",
-      media: "vet_media",
-      family_slot: null,
-    };
-    const id = map[pending];
-    if (id) {
-      setTab("Add-on");
-      setSelected((s) => ({ ...s, [id]: true }));
-      setQty((q) => ({ ...q, [id]: Math.min(10, Math.max(1, q[id] ?? 1)) }));
-    }
-    sessionStorage.removeItem("pending_addon");
-  }, []);
-
-  useEffect(() => {
-    const desired = searchParams.get("tab");
-    if (desired === "Gold" || desired === "Premium" || desired === "Add-on") {
-      setTab(desired);
-      fade.current += 1;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const cartItems = useMemo(() => {
-    return ADD_ONS.filter((a) => selected[a.id]).map((a) => ({
-      ...a,
-      qty: Math.min(10, Math.max(1, qty[a.id] ?? 1)),
-      price: pricing.addOn[a.id],
-    }));
-  }, [pricing.addOn, qty, selected]);
-
-  const cartTotal = useMemo(() => cartItems.reduce((s, i) => s + i.qty * i.price, 0), [cartItems]);
-
-  const purchaseLabel = useMemo(() => {
-    if (tab === "Add-on") return `Total ${money(cartTotal)}`;
-    const tier = tab === "Gold" ? "gold" : "premium";
-    const p = pricing[tier][billing];
-    return `${money(p)} / ${billing === "monthly" ? "month" : "year"}`;
-  }, [billing, cartTotal, pricing, tab]);
-
-  const secureCheckout = async () => {
-    try {
-      if (!user) {
-        navigate("/auth");
-        return;
-      }
-      if (tab === "Add-on") {
-        if (!cartItems.length) return;
-        // UAT: cart multi-select; server-side checkout handled by Edge Function.
         const { data, error } = await supabase.functions.invoke("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "payment",
-            items: cartItems.map((i) => ({ type: i.id, quantity: i.qty })),
-            amount: Math.round(cartTotal * 100),
-            successUrl: `${window.location.origin}/premium`,
+            items: pending.map((p) => ({ type: p.id, quantity: p.qty })),
+            amount: Math.round(total * 100),
+            successUrl: `${window.location.origin}/premium?addon_done=1`,
             cancelUrl: `${window.location.origin}/premium`,
           },
         });
         if (error) throw error;
         const url = (data as { url?: string } | null)?.url;
         if (url) window.location.assign(url);
-        return;
+      } catch {
+        toast.error(t("Checkout unavailable. Please try again."));
+      } finally {
+        setIsCheckingOut(false);
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Detect addon_done ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (searchParams.get("addon_done") === "1") {
+      setSearchParams({}, { replace: true });
+      toast.success(t("Add-ons added to your account ✓"));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Checkout handlers ────────────────────────────────────────────────────────
+  const selectedAddonItems = useMemo(
+    () => ADD_ONS.filter((a) => addonSelected[a.id]),
+    [addonSelected]
+  );
+
+  const addonTotal = useMemo(
+    () => selectedAddonItems.reduce((sum, a) => sum + a.price, 0),
+    [selectedAddonItems]
+  );
+
+  const startPlanCheckout = async (tier: "plus" | "gold") => {
+    if (!user) { navigate("/auth"); return; }
+    if (isCheckingOut) return;
+
+    try {
+      setIsCheckingOut(true);
+      const plan = quotaConfig.stripePlans[tier][billing];
+      const type = `${tier}_${billing}`;
+
+      const hasAddons = selectedAddonItems.length > 0;
+      const successUrl = hasAddons
+        ? `${window.location.origin}/premium?plan_done=1`
+        : `${window.location.origin}/premium`;
+
+      if (hasAddons) {
+        sessionStorage.setItem(
+          "pending_addons",
+          JSON.stringify(selectedAddonItems.map((a) => ({ id: a.id, qty: 1 })))
+        );
       }
 
-      const type = `${tab === "Gold" ? "gold" : "premium"}_${billing === "monthly" ? "monthly" : "annual"}`;
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "subscription",
           type,
-          successUrl: `${window.location.origin}/premium`,
+          lookupKey: plan.lookupKey,
+          priceId: plan.priceId,
+          successUrl,
+          cancelUrl: `${window.location.origin}/premium`,
+        },
+      });
+      if (error) throw error;
+      const url = (data as { url?: string } | null)?.url;
+      if (url) {
+        console.log("[Premium] Checkout URL:", url); // live verification
+        window.location.assign(url);
+      }
+    } catch {
+      sessionStorage.removeItem("pending_addons");
+      toast.error(t("Checkout unavailable. Please try again."));
+    } finally {
+      setIsCheckingOut(false);
+    }
+  };
+
+  const startAddonOnlyCheckout = async () => {
+    if (!user) { navigate("/auth"); return; }
+    if (!selectedAddonItems.length || isCheckingOut) return;
+
+    try {
+      setIsCheckingOut(true);
+      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+        body: {
+          userId: user.id,
+          mode: "payment",
+          items: selectedAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
+          amount: Math.round(addonTotal * 100),
+          successUrl: `${window.location.origin}/premium?addon_done=1`,
           cancelUrl: `${window.location.origin}/premium`,
         },
       });
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (url) window.location.assign(url);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn("[Premium] checkout failed", e);
-      window.alert(msg || "Checkout failed. Please try again.");
+    } catch {
+      toast.error(t("Checkout unavailable. Please try again."));
+    } finally {
+      setIsCheckingOut(false);
     }
   };
 
-  const TierTabs = (
-    <div className="sticky top-12 z-10 bg-background/95 backdrop-blur-sm border-b border-border/50 shadow-[0_6px_16px_-16px_rgba(0,0,0,0.35)]">
-      <div className="px-4 pt-4 pb-3">
-        <div className="flex items-center gap-2 rounded-[12px] border border-gray-300 p-1 bg-white">
-          {(["Premium", "Gold", "Add-on"] as const).map((tName) => {
-            const active = tab === tName;
-            return (
-              <button
-                key={tName}
-                onClick={() => {
-                  setTab(tName);
-                  // UAT: 0.3s fade-in transition
-                  fade.current += 1;
-                }}
-                className={cn(
-                  "relative flex-1 h-10 rounded-[12px] text-sm transition-opacity",
-                  active ? "font-bold text-brandGold" : "text-brandText/70"
-                )}
-              >
-                <span className="relative inline-flex items-center justify-center w-full h-full">
-                  {tName === "Gold" ? (
-                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-purple-500 text-white font-semibold">
-                      Recommended
-                    </span>
-                  ) : null}
-                  {tName}
-                </span>
-                {active ? (
-                  <span className="absolute left-3 right-3 bottom-0 h-[2px] bg-brandGold rounded-full" />
-                ) : null}
-              </button>
-            );
-          })}
+  // ── Render helpers ───────────────────────────────────────────────────────────
+
+  const renderBillingToggle = (tier: "plus" | "gold") => {
+    const prices = PRICES[tier];
+    return (
+      <div className="mt-6">
+        {/* Toggle pill */}
+        <div className="inline-flex rounded-full bg-[rgba(255,255,255,0.18)] shadow-[inset_2px_2px_6px_rgba(163,168,190,0.20)] p-[4px] gap-1 relative">
+          {/* Annual -17% badge */}
+          <span
+            className="absolute -top-5 right-[4px] px-2 py-0.5 rounded-full text-[10px] font-[500]"
+            style={{ background: "#E0F2B6", color: "#2145CF" }}
+          >
+            -17%
+          </span>
+
+          <NeuControl
+            size="sm"
+            variant={billing === "monthly" ? "primary" : "tertiary"}
+            onClick={() => setBilling("monthly")}
+            aria-pressed={billing === "monthly"}
+          >
+            Monthly
+          </NeuControl>
+          <NeuControl
+            size="sm"
+            variant={billing === "annual" ? "primary" : "tertiary"}
+            onClick={() => setBilling("annual")}
+            aria-pressed={billing === "annual"}
+          >
+            Annual
+          </NeuControl>
         </div>
+
+        {/* Price display */}
+        <div className="mt-4">
+          {billing === "monthly" ? (
+            <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
+              {fmt(prices.monthly)}
+              <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
+            </p>
+          ) : (
+            <>
+              <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
+                {fmt(prices.annual)}
+                <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
+              </p>
+              <p className="text-[13px] text-[var(--text-secondary)] mt-1">
+                Billed {fmt(prices.annualBilled)}/yr
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFeatureRows = (features: FeatureRow[], iconColor: string) => (
+    <div className="mt-6 space-y-0">
+      {features.map((f) => (
+        <div key={f.label} className="flex items-start gap-3 py-3">
+          <f.icon
+            size={20}
+            strokeWidth={1.75}
+            className="flex-shrink-0 mt-0.5"
+            style={{ color: iconColor }}
+            aria-hidden
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-[600] text-[var(--text-primary)] leading-tight">
+              {f.label}
+            </p>
+            <p className="text-[12px] font-[400] text-[var(--text-secondary)] mt-0.5">
+              {f.sublabel}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // ── Tab content ──────────────────────────────────────────────────────────────
+
+  const renderPlusTab = () => (
+    <div className="px-5">
+      {renderBillingToggle("plus")}
+      {renderFeatureRows(PLUS_FEATURES, "#2145CF")}
+
+      {/* Plus CTA — PaywallCTA blackpill */}
+      <div className="mt-6">
+        <PaywallCTA
+          tier="plus"
+          label={isCheckingOut ? "Loading…" : "Get Huddle+"}
+          icon={<ShoppingCart size={18} strokeWidth={1.75} aria-hidden />}
+          iconPosition="left"
+          fullWidth
+          disabled={isCheckingOut}
+          onClick={() => void startPlanCheckout("plus")}
+        />
       </div>
     </div>
   );
 
-  const Content = (
-    <motion.div
-      key={`${tab}-${fade.current}`}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="px-4 pb-[110px]"
-    >
-      <div className="pt-4">
-        <p className="text-sm text-gray-600">
-          {tab === "Premium"
-            ? "Best for Pet Lovers"
-            : tab === "Gold"
-              ? "Ultimate Experience"
-              : "Add on extra privileges any time."}
+  const renderGoldTab = () => (
+    <div className="px-5">
+      {renderBillingToggle("gold")}
+
+      {/* RULE 8: Gold icon color #CFAB21 only inside Gold tab */}
+      {renderFeatureRows(GOLD_FEATURES, "#CFAB21")}
+
+      {/* Gold CTA — gold gradient per Section 6 Gold recipe */}
+      <div className="mt-6">
+        <NeuControl
+          variant="gold"
+          tier="gold"
+          size="xl"
+          fullWidth
+          disabled={isCheckingOut}
+          onClick={() => void startPlanCheckout("gold")}
+        >
+          <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
+          {isCheckingOut ? "Loading…" : "Get Gold"}
+        </NeuControl>
+      </div>
+    </div>
+  );
+
+  const renderAddonsTab = () => (
+    <div className="px-5">
+      {/* Header copy */}
+      <div className="mt-6 mb-4">
+        <p
+          className="text-[11px] font-[500] uppercase tracking-[0.06em]"
+          style={{ color: "#2145CF" }}
+        >
+          Separate purchase
+        </p>
+        <p className="text-[13px] font-[400] text-[var(--text-secondary)] mt-1">
+          Add power-ups to any plan, billed once.
         </p>
       </div>
 
-      {tab === "Premium" || tab === "Gold" ? (
-        <>
-          <div className="mt-4 space-y-3">
-            {([
-              {
-                id: "monthly" as const,
-                label: "Monthly",
-                price: tab === "Gold" ? pricing.gold.monthly : pricing.premium.monthly,
-              },
-              {
-                id: "yearly" as const,
-                label: "Yearly",
-                price: tab === "Gold" ? pricing.gold.yearly : pricing.premium.yearly,
-                pill: tab === "Gold" ? "Save 25%" : "Save 26%",
-              },
-            ] as const).map((p) => {
-              const active = billing === p.id;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => setBilling(p.id)}
-                  className={cn(
-                    "w-full flex items-center justify-between rounded-[12px] border p-3 transition-transform",
-                    active ? "border-brandGold" : "border-gray-300"
-                  )}
+      {/* Add-on rows — glass-e1 InsetPanel */}
+      <div className="rounded-[20px] overflow-hidden glass-e1">
+        {ADD_ONS.map((addon, i) => {
+          const selected = addonSelected[addon.id];
+          return (
+            <div key={addon.id}>
+              {i > 0 && <div className="h-px bg-white/20 mx-4" />}
+              <div className="flex items-center gap-3 px-4 py-4">
+                <addon.icon
+                  size={20}
+                  strokeWidth={1.75}
+                  className="text-[var(--text-secondary)] flex-shrink-0"
+                  aria-hidden
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-[600] text-[var(--text-primary)] leading-tight">
+                    {addon.title}
+                  </p>
+                  <p className="text-[12px] font-[400] text-[var(--text-secondary)] mt-0.5">
+                    {addon.subtitle}
+                  </p>
+                  <p className="text-[13px] font-[600] text-[var(--text-primary)] mt-1">
+                    {addon.priceLabel}
+                  </p>
+                </div>
+                <NeuControl
+                  size="sm"
+                  variant={selected ? "primary" : "tertiary"}
+                  selected={selected}
+                  onClick={() =>
+                    setAddonSelected((prev) => ({ ...prev, [addon.id]: !prev[addon.id] }))
+                  }
+                  aria-label={`${selected ? "Remove" : "Add"} ${addon.title}`}
                 >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={cn(
-                        "w-4 h-4 rounded-full border-2",
-                        active ? "border-brandGold bg-brandGold" : "border-gray-300"
-                      )}
-                    />
-                    <span className="text-sm font-semibold text-brandText">
-                      {p.label} {money(p.price)}
-                    </span>
-                  </div>
-                  {"pill" in p && p.pill ? (
-                    <span className={cn("text-xs px-2 py-1 rounded-full font-semibold", tab === "Gold" ? "bg-brandGold/15 text-brandGold" : "bg-brandBlue/10 text-brandBlue")}>
-                      {p.pill}
-                    </span>
-                  ) : null}
-                </button>
+                  {selected ? "Remove" : "Add"}
+                </NeuControl>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Add-ons CTA */}
+      <div className="mt-4">
+        <NeuControl
+          size="lg"
+          variant="primary"
+          fullWidth
+          disabled={!selectedAddonItems.length || isCheckingOut}
+          onClick={() => void startAddonOnlyCheckout()}
+          style={
+            !selectedAddonItems.length
+              ? { opacity: 0.38, pointerEvents: "none" }
+              : undefined
+          }
+        >
+          <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
+          {selectedAddonItems.length > 0
+            ? `Purchase Add-ons · ${fmt(addonTotal)}`
+            : "Purchase Add-ons"}
+        </NeuControl>
+      </div>
+
+      {/* Footer note */}
+      <p className="text-[11px] font-[400] text-[var(--text-tertiary)] text-center mt-4">
+        Add-ons are purchased separately from your subscription.
+      </p>
+    </div>
+  );
+
+  // ── Main render ──────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-svh overflow-x-hidden">
+      {/* GlobalHeader with X close button */}
+      <GlobalHeader closeButton={() => navigate(-1)} />
+
+      {/* Scrollable body */}
+      <div
+        className="overflow-y-auto"
+        style={{
+          paddingBottom: "calc(90px + env(safe-area-inset-bottom))",
+        }}
+      >
+        {/* Hero block */}
+        <div
+          className="px-5"
+          style={{ marginTop: "calc(56px + 24px)" }}
+        >
+          <h1
+            className="font-[700] text-[var(--text-primary)] leading-tight"
+            style={{ fontSize: "28px", maxWidth: "22ch" }}
+          >
+            Every Pet Deserves More.
+          </h1>
+          <p
+            className="font-[400] text-[var(--text-secondary)] mt-2"
+            style={{ fontSize: "15px", maxWidth: "36ch" }}
+          >
+            Connect wider. Care deeper. Make pet lives better.
+          </p>
+        </div>
+
+        {/* Plan segmented control */}
+        <div className="px-5 mt-8 relative">
+          {/* "Recommended" badge — floats above Gold option */}
+          <div
+            className="absolute top-0 pointer-events-none"
+            style={{ left: "calc(5px + 33.33% + 8px)", transform: "translateY(-120%)" }}
+            aria-hidden
+          >
+            <span
+              className="px-2 py-0.5 rounded-full text-[10px] font-[500]"
+              style={{ background: "#E0F2B6", color: "#2145CF" }}
+            >
+              Recommended
+            </span>
+          </div>
+
+          {/* Segmented buttons */}
+          <div className="flex gap-2 mt-5">
+            {(["plus", "gold", "addons"] as PlanTab[]).map((tab) => {
+              const isActive = activeTab === tab;
+              return (
+                <NeuControl
+                  key={tab}
+                  size="sm"
+                  variant={isActive ? "primary" : "tertiary"}
+                  onClick={() => setActiveTab(tab)}
+                  className="flex-1 text-[13px]"
+                  style={
+                    isActive
+                      ? {
+                          backgroundColor: "#FF4D4D",
+                          color: "#FFFFFF",
+                          border: "2px solid #2145CF",
+                        }
+                      : undefined
+                  }
+                  aria-pressed={isActive}
+                >
+                  {tab === "plus" ? "Huddle+" : tab === "gold" ? "Gold" : "Add-ons"}
+                </NeuControl>
               );
             })}
           </div>
-
-          <div className="mt-4">
-            {FEATURES(tab === "Gold" ? "gold" : "premium").map((f) => (
-              <button key={f.title} className="w-full flex items-start gap-3 py-3">
-                <f.icon className="w-6 h-6 text-brandBlue" />
-                <div className="flex-1 text-left">
-                  <div className="text-sm font-bold text-brandText">{f.title}</div>
-                  <div className="text-xs text-gray-600 mt-1">{f.tip}</div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-brandText/60 mt-1" />
-              </button>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {ADD_ONS.map((a) => {
-            const checked = selected[a.id];
-            const q = qty[a.id] ?? 1;
-            return (
-              <div key={a.id} className="rounded-2xl border border-gray-300 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setSelected((s) => ({ ...s, [a.id]: !s[a.id] }));
-                          setQty((x) => ({ ...x, [a.id]: Math.min(10, Math.max(1, x[a.id] ?? 1)) }));
-                        }}
-                        className={cn(
-                          "w-6 h-6 rounded-[8px] border-2",
-                          checked ? "border-brandGold bg-brandGold" : "border-gray-300"
-                        )}
-                        aria-label={a.title}
-                      />
-                      <div className="text-sm font-bold text-brandText">{a.title}</div>
-                      {a.pill ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-brandText/80 font-semibold">
-                          {a.pill}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-1">{a.subtitle}</div>
-                  </div>
-                  <div className="text-sm font-bold text-brandText">{money(pricing.addOn[a.id])}</div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setQty((x) => ({ ...x, [a.id]: Math.max(1, (x[a.id] ?? 1) - 1) }))}
-                      disabled={!checked}
-                      className={cn(
-                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
-                        !checked && "opacity-40"
-                      )}
-                    >
-                      -
-                    </button>
-                    <div className="w-8 text-center font-black text-brandText">{checked ? q : 0}</div>
-                    <button
-                      onClick={() => setQty((x) => ({ ...x, [a.id]: Math.min(10, (x[a.id] ?? 1) + 1) }))}
-                      disabled={!checked}
-                      className={cn(
-                        "w-9 h-9 rounded-[10px] border border-gray-300 font-black",
-                        !checked && "opacity-40"
-                      )}
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => setSelected((s) => ({ ...s, [a.id]: true }))}
-                    disabled={!checked}
-                    className={cn(
-                      "px-4 py-2 rounded-xl bg-brandBlue text-white font-bold",
-                      !checked && "opacity-50"
-                    )}
-                  >
-                    Add to Cart
-                  </button>
-                </div>
-              </div>
-            );
-          })}
         </div>
-      )}
-    </motion.div>
-  );
 
-  return (
-    <div className="min-h-screen bg-background pb-nav">
-      <GlobalHeader />
-
-      <div className="px-4 pt-4">
-        <h1 className="text-xl font-semibold text-brandText">Manage Subscription</h1>
-      </div>
-
-      {TierTabs}
-      {Content}
-
-      {/* UAT: fixed bottom purchase area (height: 90px) */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 bg-white shadow-[0_-10px_22px_-18px_rgba(0,0,0,0.35)] border-t border-border">
-        <div className="max-w-md mx-auto h-[90px] px-4 pt-3 pb-3">
-          <div className="flex items-center justify-between">
-            <div className="text-base font-bold text-brandText">
-              {tab === "Add-on"
-                ? `Cart ${cartItems.reduce((s, i) => s + i.qty, 0)}`
-                : tab === "Gold"
-                  ? "Gold"
-                  : "Premium"}
-            </div>
-            <div className="text-base font-bold text-brandText">{purchaseLabel}</div>
-          </div>
-
-          <button
-            onClick={secureCheckout}
-            disabled={tab === "Add-on" && cartItems.length === 0}
-            className={cn(
-              "mt-2 w-full rounded-lg bg-brandBlue text-white font-bold py-2 flex items-center justify-center gap-2",
-              tab === "Add-on" && cartItems.length === 0 && "opacity-50"
-            )}
-          >
-            <Lock className="w-4 h-4" />
-            Secure Privileges
-          </button>
-
-          <div className="mt-1 text-[10px] text-gray-500">
-            <button onClick={() => navigate("/terms")} className="text-brandBlue underline font-semibold">
-              Terms
-            </button>
-          </div>
+        {/* Tab content */}
+        <div className="mt-2">
+          {activeTab === "plus" && renderPlusTab()}
+          {activeTab === "gold" && renderGoldTab()}
+          {activeTab === "addons" && renderAddonsTab()}
         </div>
       </div>
     </div>

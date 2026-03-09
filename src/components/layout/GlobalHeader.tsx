@@ -1,6 +1,15 @@
-import { useMemo, useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
-import { Bell, ChevronRight, Diamond, FileText, LogOut, Settings, Shield, Star, User as UserIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircle,
+  Bell,
+  ChevronRight,
+  FileText,
+  Info,
+  Settings,
+  Shield,
+  User as UserIcon,
+  X,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,10 +19,61 @@ import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { membershipTierLabel } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
+import { NeuControl } from "@/components/ui/NeuControl";
+import { NeuChip } from "@/components/ui/NeuChip";
+import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
+import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
+
+// ─── Notification types & helpers ────────────────────────────────────────────
+
+type NotificationRow = {
+  id: string;
+  message: string;
+  type: "alert" | "admin" | string;
+  read: boolean;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+  data: Record<string, unknown> | null;
+  title?: string | null;
+  body?: string | null;
+};
+
+function timeAgo(iso: string) {
+  const then = new Date(iso).getTime();
+  const diff = Math.max(1, Date.now() - then);
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(days / 365);
+  return `${years}y ago`;
+}
+
+function notifIcon(type: string) {
+  if (type === "alert") return <AlertCircle size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "admin") return <Info size={18} strokeWidth={1.75} aria-hidden />;
+  return <Bell size={18} strokeWidth={1.75} aria-hidden />;
+}
+
+const allowedHref = (href: string) =>
+  /^\/(map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
+    href
+  );
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface GlobalHeaderProps {
   onUpgradeClick?: () => void;
   onMenuClick?: () => void;
+  /** When passed: right side renders X close button instead of Settings gear */
+  closeButton?: () => void;
 }
 
 interface Pet {
@@ -23,7 +83,9 @@ interface Pet {
   species: string;
 }
 
-export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps) => {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
   const { t } = useLanguage();
@@ -31,10 +93,18 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // ── Notification drawer state ──────────────────────────────────────────────
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const markedOnOpenRef = useRef(false);
+
   const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
   const isVerified = verificationStatus === "verified";
-  const isPending = verificationStatus === "pending";
   const tierLabel = membershipTierLabel(profile?.effective_tier ?? profile?.tier);
+  const avatarUrl = profile?.avatar_url ? String(profile.avatar_url) : "";
+  const isPlusOrAbove = tierLabel === "Plus" || tierLabel === "Gold";
+  const isGold = tierLabel === "Gold";
   const initials = useMemo(() => {
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
@@ -42,7 +112,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
 
   const fetchPets = useCallback(async () => {
     if (!user) return;
-
     try {
       const { data, error } = await supabase
         .from("pets")
@@ -50,29 +119,22 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
         .eq("owner_id", user.id)
         .eq("is_active", true)
         .limit(1);
-
-      if (!error && data) {
-        setPets(data);
-      }
+      if (!error && data) setPets(data);
     } catch (err) {
       console.error("Error fetching pets:", err);
     }
   }, [user]);
 
-  // Fetch user's pets
   useEffect(() => {
-    if (user) {
-      fetchPets();
-    }
+    if (user) fetchPets();
   }, [user, fetchPets]);
 
-  // Contract: Notification Hub bell + red dot when unread > 0.
+  // ── Unread badge: real-time subscription ────────────────────────────────────
   useEffect(() => {
     if (!user) {
       setUnreadCount(0);
       return;
     }
-
     let cancelled = false;
 
     const refreshUnread = async () => {
@@ -90,10 +152,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => {
-          // Re-fetch unread count on any change.
-          void refreshUnread();
-        }
+        () => { void refreshUnread(); }
       )
       .subscribe();
 
@@ -105,200 +164,389 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick }: GlobalHeaderProps)
     };
   }, [user]);
 
-  const handleLogoClick = () => {
-    navigate('/');
-  };
+  // ── Load notifications when drawer opens ────────────────────────────────────
+  useEffect(() => {
+    if (!notifOpen || !user) return;
 
-  const handlePetClick = () => {
-    if (pets.length > 0) {
-      navigate(`/edit-pet-profile?id=${pets[0].id}`);
+    let cancelled = false;
+    markedOnOpenRef.current = false;
+
+    const load = async () => {
+      setNotifLoading(true);
+      const res = await supabase
+        .from("notifications" as "profiles")
+        .select("id,message,type,title,body,read,created_at,metadata,data" as "*")
+        .eq("user_id" as "id", user.id)
+        .order("created_at" as "id", { ascending: false })
+        .limit(200);
+      if (cancelled) return;
+      const rows = (res.data ?? []) as NotificationRow[];
+      setNotifRows(rows);
+      setNotifLoading(false);
+
+      // Mark all as read on open
+      if (!markedOnOpenRef.current && rows.length > 0) {
+        markedOnOpenRef.current = true;
+        setNotifRows((prev) => prev.map((r) => ({ ...r, read: true })));
+        await supabase
+          .from("notifications" as "profiles")
+          .update({ read: true } as Record<string, unknown>)
+          .eq("user_id" as "created_at", user.id)
+          .eq("read" as "created_at", false);
+        // Refresh unread badge
+        setUnreadCount(0);
+      }
+    };
+
+    const channel = supabase
+      .channel(`notifications_drawer:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => void load()
+      )
+      .subscribe();
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [notifOpen, user]);
+
+  // ── Notification row interaction ─────────────────────────────────────────────
+  const handleNotifRowClick = (r: NotificationRow) => {
+    setNotifRows((prev) => prev.map((n) => (n.id === r.id ? { ...n, read: true } : n)));
+    void supabase
+      .from("notifications" as "profiles")
+      .update({ read: true } as Record<string, unknown>)
+      .eq("id" as "created_at", r.id)
+      .eq("user_id" as "created_at", user?.id ?? "");
+
+    const meta = (r.data ?? r.metadata ?? {}) as Record<string, unknown>;
+    const href = typeof meta.href === "string" ? meta.href : null;
+    if (href && allowedHref(href)) {
+      setNotifOpen(false);
+      navigate(href);
     } else {
-      navigate('/edit-pet-profile');
+      console.warn("Invalid notification href", { id: r.id, href });
     }
   };
 
-  const hasPets = pets.length > 0;
-  const firstPet = pets[0];
+  // ── Derived notification groups ─────────────────────────────────────────────
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, []);
 
-  return (
-    <header className="sticky top-0 z-20 bg-white border-b border-border/30">
-      <div className="flex items-center justify-between px-4 max-w-md mx-auto h-12">
-        {/* Left: Notification Bell */}
-        <button
-          onClick={() => navigate("/notifications")}
-          className="relative neu-icon min-w-[44px] min-h-[44px]"
-          aria-label={t("Notifications")}
+  const todayRows = useMemo(
+    () => notifRows.filter((r) => new Date(r.created_at) >= todayStart),
+    [notifRows, todayStart]
+  );
+  const earlierRows = useMemo(
+    () => notifRows.filter((r) => new Date(r.created_at) < todayStart),
+    [notifRows, todayStart]
+  );
+
+  const renderNotifRow = (r: NotificationRow) => {
+    const body = r.body ?? r.message ?? "";
+    return (
+      <div
+        key={r.id}
+        role="button"
+        tabIndex={0}
+        className={cn(
+          "relative overflow-hidden rounded-[16px] flex items-start gap-3 px-4 py-3 min-h-[72px] cursor-pointer",
+          "transition-[background] duration-150",
+          r.read ? "bg-transparent" : "glass-e2"
+        )}
+        onClick={() => handleNotifRowClick(r)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleNotifRowClick(r);
+          }
+        }}
+        aria-label={body}
+      >
+        {!r.read && (
+          <div className="absolute left-0 inset-y-0 w-[3px] bg-[var(--primary)] rounded-l-[16px] pointer-events-none" />
+        )}
+        <div
+          className={cn(
+            "mt-0.5 flex-shrink-0 h-[36px] w-[36px] rounded-full flex items-center justify-center",
+            "bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.25),inset_-1px_-1px_4px_rgba(255,255,255,0.80)]",
+            r.read ? "text-[var(--text-tertiary)]" : "text-[var(--primary)]"
+          )}
+          aria-hidden
         >
-          <Bell className="w-5 h-5 text-brandText/60" strokeWidth={1.75} />
-          {unreadCount > 0 ? (
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brandError" />
-          ) : null}
-        </button>
+          {notifIcon(r.type)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p
+            className={cn(
+              "text-[14px] leading-[1.4]",
+              r.read
+                ? "font-[400] text-[var(--text-secondary)]"
+                : "font-[500] text-[var(--text-primary)]"
+            )}
+          >
+            {body}
+          </p>
+          <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">{timeAgo(r.created_at)}</p>
+        </div>
+      </div>
+    );
+  };
 
-        {/* Centered Logo */}
+  const handleLogoClick = () => navigate("/");
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <header className="sticky top-0 z-[1700] bg-background border-b border-border/20">
+      <div className="flex items-center justify-between px-4 w-full max-w-[430px] mx-auto h-14">
+
+        {/* ── Left: Notification bell → opens left drawer ── */}
+        <Sheet open={notifOpen} onOpenChange={setNotifOpen}>
+          <SheetTrigger asChild>
+            <NeuControl
+              size="icon-md"
+              variant="tertiary"
+              aria-label={t("Notifications")}
+              className="relative shrink-0"
+            >
+              <Bell size={20} strokeWidth={1.75} aria-hidden />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-brandError pointer-events-none" />
+              )}
+            </NeuControl>
+          </SheetTrigger>
+
+          <SheetContent
+            side="left"
+            className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full"
+          >
+            {/* Drawer header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
+              <h3 className="text-[17px] font-[600] text-[var(--text-primary)]">
+                {t("Notifications")}
+              </h3>
+              <SheetClose asChild>
+                <NeuControl size="icon-md" variant="tertiary" aria-label={t("Close")}>
+                  <X size={20} strokeWidth={1.75} aria-hidden />
+                </NeuControl>
+              </SheetClose>
+            </div>
+
+            {/* Scrollable body */}
+            <div
+              className="flex-1 overflow-y-auto px-3 pb-6 space-y-1"
+              style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+            >
+              {/* Skeleton */}
+              {notifLoading &&
+                Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-3 px-4 py-3 min-h-[72px] rounded-[16px] animate-pulse"
+                  >
+                    <div className="mt-0.5 flex-shrink-0 h-[36px] w-[36px] rounded-full bg-white/40" />
+                    <div className="flex-1 space-y-2 pt-1">
+                      <div className="h-[14px] w-3/4 rounded-full bg-white/40" />
+                      <div className="h-[11px] w-1/3 rounded-full bg-white/30" />
+                    </div>
+                  </div>
+                ))}
+
+              {/* Empty state */}
+              {!notifLoading && notifRows.length === 0 && (
+                <div className="pt-10">
+                  <EmptyStateCard
+                    icon={<Bell size={28} strokeWidth={1.75} aria-hidden />}
+                    headline={t("You're all caught up.")}
+                  />
+                </div>
+              )}
+
+              {/* Today group */}
+              {!notifLoading && todayRows.length > 0 && (
+                <>
+                  <div className="px-4 pt-4 pb-1">
+                    <span className="text-[11px] font-semibold tracking-[0.07em] uppercase text-muted-foreground/50 select-none">
+                      {t("Today")}
+                    </span>
+                  </div>
+                  {todayRows.map(renderNotifRow)}
+                </>
+              )}
+
+              {/* Earlier group */}
+              {!notifLoading && earlierRows.length > 0 && (
+                <>
+                  <div className="px-4 pt-4 pb-1">
+                    <span className="text-[11px] font-semibold tracking-[0.07em] uppercase text-muted-foreground/50 select-none">
+                      {t("Earlier")}
+                    </span>
+                  </div>
+                  {earlierRows.map(renderNotifRow)}
+                </>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* ── Center: Logo ── */}
         <button
           onClick={handleLogoClick}
           className="absolute left-1/2 -translate-x-1/2 hover:opacity-80 transition-opacity"
+          aria-label={t("huddle")}
         >
           <img
             src={huddleLogo}
             alt={t("huddle")}
-            className="h-7 w-auto max-w-[140px] object-contain"
+            className="h-9 w-auto max-w-[180px] object-contain"
           />
         </button>
 
-        {/* Right: Settings (Gear) menu (popover/drawer) */}
-        <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-          <SheetTrigger asChild>
-            <button
-              onClick={() => {
-                if (onMenuClick) {
-                  onMenuClick();
-                  return;
-                }
-                setMenuOpen(true);
-              }}
-              className="neu-icon min-w-[44px] min-h-[44px]"
-              aria-label={t("Settings")}
-            >
-              <Settings className="w-5 h-5 text-brandText/60" strokeWidth={1.75} />
-            </button>
-          </SheetTrigger>
-          <SheetContent className="p-4 w-[320px] sm:max-w-sm flex flex-col">
-            {/* Menu order: Avatar/Name/Badge → Unlock blocks → Profile → Account Setting → Privacy → Terms → Logout */}
-            <div className="space-y-3 flex-1">
-              {/* 1. Avatar / Name / Badge */}
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    "w-12 h-12 rounded-full flex items-center justify-center font-extrabold bg-muted border-2 text-brandText",
-                    isVerified ? "border-brandGold" : "border-gray-300",
-                  )}
-                  aria-label="Avatar"
-                >
-                  {initials}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="text-base font-extrabold text-brandText truncate">
-                      {profile?.display_name || "User"}
-                    </div>
-                    <span className={cn(
-                      "neu-chip",
-                      tierLabel === "Gold" ? "bg-brandGold/10 text-brandGold" : tierLabel !== "Plus" ? "bg-gray-100/80 text-brandText/50 shadow-none" : ""
-                    )}>
-                      {tierLabel}
-                    </span>
-                  </div>
-                  <div className="text-xs text-brandText/60 truncate">{user?.email || ""}</div>
-                </div>
-              </div>
+        {/* ── Right: X close OR Settings drawer ── */}
+        {closeButton ? (
+          <NeuControl
+            size="icon-md"
+            variant="tertiary"
+            aria-label={t("Close")}
+            onClick={closeButton}
+            className="shrink-0"
+          >
+            <X size={20} strokeWidth={1.75} aria-hidden />
+          </NeuControl>
+        ) : (
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+            <SheetTrigger asChild>
+              <NeuControl
+                size="icon-md"
+                variant="tertiary"
+                aria-label={t("Settings")}
+                onClick={() => {
+                  if (onMenuClick) {
+                    onMenuClick();
+                    return;
+                  }
+                  setMenuOpen(true);
+                }}
+              >
+                <Settings size={20} strokeWidth={1.75} aria-hidden />
+              </NeuControl>
+            </SheetTrigger>
 
-              {/* 2. Unlock Plus block */}
-              <SheetClose asChild>
-                <button
-                  onClick={() => navigate(plusTabRoute("Plus"))}
-                  className="w-full neu-primary rounded-2xl p-3 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Diamond className="w-4 h-4 text-white" />
-                    <div className="text-sm font-extrabold">Plus</div>
-                  </div>
-                  <div className="text-xs text-white/80 mt-1">See what's included</div>
-                </button>
-              </SheetClose>
+            <SheetContent className="w-[320px] sm:max-w-sm flex flex-col gap-4 pt-6 px-4 pb-4">
 
-              {/* 3. Unlock Gold block */}
-              <SheetClose asChild>
-                <button
-                  onClick={() => navigate(plusTabRoute("Gold"))}
-                  className="w-full neu-gold rounded-2xl p-3 text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Star className="w-4 h-4 text-white" />
-                    <div className="text-sm font-extrabold">Gold</div>
-                  </div>
-                  <div className="text-xs text-white/80 mt-1">See what's included</div>
-                </button>
-              </SheetClose>
-
-              {/* 4. Profile */}
+              {/* 1. User identity row */}
               <SheetClose asChild>
                 <button
                   onClick={() => navigate("/edit-profile")}
-                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                  className="flex items-center gap-3 px-1 w-full text-left"
                 >
-                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
-                    <UserIcon className="w-5 h-5 text-brandText/70" />
-                    Profile
-                  </span>
-                  <ChevronRight className="w-5 h-5 text-brandText/50" />
+                  <div
+                    className={cn(
+                      "w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0",
+                      "bg-[rgba(33,69,207,0.10)]",
+                      isVerified && "ring-2 ring-brandGold ring-offset-1"
+                    )}
+                    aria-hidden
+                  >
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={profile?.display_name || "Avatar"}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-[18px] font-[600] text-[var(--color-brand,#2145CF)]">
+                        {initials}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-[16px] font-[600] text-[var(--text-primary,#424965)] truncate leading-tight">
+                      {profile?.display_name || "User"}
+                    </h3>
+                    <NeuChip as="span" className="mt-1.5 capitalize text-[11px]">
+                      {tierLabel}
+                    </NeuChip>
+                  </div>
+                  <ChevronRight
+                    size={16}
+                    strokeWidth={1.75}
+                    className="text-[var(--text-tertiary)] shrink-0 mr-1"
+                    aria-hidden
+                  />
                 </button>
               </SheetClose>
 
-              {/* 5. Account Setting */}
+              {/* 2. Manage Membership CTA */}
               <SheetClose asChild>
-                <button
-                  onClick={() => navigate("/account-settings")}
-                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
+                <NeuControl
+                  variant={isGold ? "gold" : "primary"}
+                  tier={isGold ? "gold" : undefined}
+                  size="lg"
+                  fullWidth
+                  onClick={() =>
+                    navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"))
+                  }
                 >
-                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
-                    <Shield className="w-5 h-5 text-brandText/70" />
-                    Account Setting
-                  </span>
-                  <ChevronRight className="w-5 h-5 text-brandText/50" />
-                </button>
+                  Manage Membership
+                </NeuControl>
               </SheetClose>
 
-              {/* 6. Privacy & Policy */}
-              <SheetClose asChild>
-                <button
-                  onClick={() => navigate("/privacy")}
-                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
-                >
-                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
-                    <FileText className="w-5 h-5 text-brandText/70" />
-                    Privacy & Policy
-                  </span>
-                  <ChevronRight className="w-5 h-5 text-brandText/50" />
-                </button>
-              </SheetClose>
+              {/* 3. Navigation panel */}
+              <InsetPanel>
+                <SheetClose asChild>
+                  <InsetRow
+                    label="Identity Verification"
+                    icon={<Shield size={16} strokeWidth={1.75} />}
+                    variant="nav"
+                    value={verificationStatus || "unverified"}
+                    onClick={() => navigate("/verify-identity")}
+                  />
+                </SheetClose>
+                <InsetDivider />
+                <SheetClose asChild>
+                  <InsetRow
+                    label="Account Settings"
+                    icon={<UserIcon size={16} strokeWidth={1.75} />}
+                    variant="nav"
+                    onClick={() => navigate("/settings")}
+                  />
+                </SheetClose>
+              </InsetPanel>
 
-              {/* 7. Terms of Service */}
-              <SheetClose asChild>
-                <button
-                  onClick={() => navigate("/terms")}
-                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-brandText/15 px-4 flex items-center justify-between bg-white"
-                >
-                  <span className="flex items-center gap-3 text-sm font-semibold text-brandText">
-                    <FileText className="w-5 h-5 text-brandText/70" />
-                    Terms of Service
-                  </span>
-                  <ChevronRight className="w-5 h-5 text-brandText/50" />
-                </button>
-              </SheetClose>
-            </div>
+              {/* 4. Legal panel */}
+              <InsetPanel>
+                <SheetClose asChild>
+                  <InsetRow
+                    label="Privacy & Policy"
+                    icon={<FileText size={16} strokeWidth={1.75} />}
+                    variant="nav"
+                    onClick={() => navigate("/privacy")}
+                  />
+                </SheetClose>
+                <InsetDivider />
+                <SheetClose asChild>
+                  <InsetRow
+                    label="Terms of Service"
+                    icon={<FileText size={16} strokeWidth={1.75} />}
+                    variant="nav"
+                    onClick={() => navigate("/terms")}
+                  />
+                </SheetClose>
+              </InsetPanel>
 
-            {/* 8. Logout — pinned low, just above bottom nav */}
-            <div className="pt-2 pb-nav">
-              <SheetClose asChild>
-                <button
-                  onClick={async () => {
-                    await supabase.auth.signOut();
-                    navigate("/auth");
-                  }}
-                  className="w-full h-10 min-h-[44px] rounded-[12px] border border-red-300 px-4 flex items-center justify-between bg-white"
-                >
-                  <span className="flex items-center gap-3 text-sm font-bold text-red-500">
-                    <LogOut className="w-5 h-5" />
-                    Logout
-                  </span>
-                  <ChevronRight className="w-5 h-5 text-red-400" />
-                </button>
-              </SheetClose>
-            </div>
-          </SheetContent>
-        </Sheet>
+            </SheetContent>
+          </Sheet>
+        )}
+
       </div>
     </header>
   );
