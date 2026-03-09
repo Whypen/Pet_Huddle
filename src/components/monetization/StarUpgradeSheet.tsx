@@ -1,12 +1,10 @@
 /**
- * StarUpgradeSheet — stars upsell bottom sheet
- * Fires when a user tries to send a star with no quota remaining.
+ * StarUpgradeSheet — stars upsell modal (center-screen)
+ * tier="plus"  → Free → Huddle+     (blue  #5BA4F5)
+ * tier="gold"  → Plus → Huddle Gold  (coral #FF6452)
  *
- * tier="plus"  → Free → Huddle+    (blue  #5BA4F5)
- * tier="gold"  → Plus → Huddle Gold (coral #FF6452)
- *
- * Prices fetched live from Stripe (cached at module level after first call).
- * Headline + subheadline sit inside the folder-tab card above the price.
+ * Layout: pure folder-tab card, centered on screen.
+ * "Maybe later" lives inside the card below the CTA.
  */
 
 import { useEffect, useState } from "react";
@@ -43,7 +41,7 @@ const TIER_THEMES = {
 
 const CARD_FLOAT_STYLE: React.CSSProperties = {
   border: "1.5px solid rgba(255,255,255,0.88)",
-  boxShadow: "0 8px 28px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07)",
+  boxShadow: "0 12px 40px rgba(0,0,0,0.18), 0 2px 10px rgba(0,0,0,0.10)",
 };
 
 const PLUS_HIGHLIGHTS: FeatureItem[] = [
@@ -88,8 +86,6 @@ export function StarUpgradeSheet({
   const theme      = TIER_THEMES[tier];
   const highlights = tier === "plus" ? PLUS_HIGHLIGHTS : GOLD_HIGHLIGHTS;
 
-  // Initialise with correct fallback prices (shown instantly); quietly
-  // updated from Stripe after first fetch (result cached for session).
   const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
 
   useEffect(() => {
@@ -112,50 +108,29 @@ export function StarUpgradeSheet({
           {/* ── Overlay ── */}
           <motion.div
             key="star-upgrade-overlay"
-            className="fixed inset-0 z-[5200] bg-[rgba(20,25,48,0.32)] backdrop-blur-[4px]"
+            className="fixed inset-0 z-[5200] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
             onClick={onClose}
           />
 
-          {/* ── Sheet ── */}
-          <motion.div
-            key="star-upgrade-sheet"
-            className="fixed inset-x-0 bottom-0 z-[5201] mx-auto w-full max-w-[var(--app-max-width,430px)]"
-            initial={{ y: "100%", opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: "100%", opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 28, mass: 0.9 }}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="overflow-hidden rounded-t-[28px] bg-[#F4F7FF] shadow-[0_-18px_48px_rgba(0,0,0,0.24)]">
+          {/* ── Centered modal ── */}
+          <div className="fixed inset-0 z-[5201] flex items-center justify-center px-5 pointer-events-none">
+            <motion.div
+              key="star-upgrade-modal"
+              className="w-full max-w-[390px] pointer-events-auto"
+              initial={{ scale: 0.92, opacity: 0, y: 16 }}
+              animate={{ scale: 1,    opacity: 1, y: 0  }}
+              exit={{    scale: 0.92, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 340, damping: 26, mass: 0.85 }}
+              role="dialog"
+              aria-modal="true"
+            >
+              {/* Pure folder-tab card */}
+              <div className="overflow-hidden rounded-[20px]" style={CARD_FLOAT_STYLE}>
 
-              {/* "Maybe later" pill — top right */}
-              <div className="flex justify-end px-4 pt-4 pb-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  aria-label="Dismiss"
-                  className="inline-flex h-[30px] items-center justify-center rounded-full px-3.5 text-[12px] font-[500] text-[#5A6580]"
-                  style={{
-                    background: "rgba(255,255,255,0.55)",
-                    border: "1px solid rgba(180,190,210,0.45)",
-                    backdropFilter: "blur(8px)",
-                    WebkitBackdropFilter: "blur(8px)",
-                  }}
-                >
-                  Maybe later
-                </button>
-              </div>
-
-              {/* ── Folder-tab card ── */}
-              <div
-                className="mx-5 mb-[calc(1.25rem+var(--nav-height,64px)+env(safe-area-inset-bottom))] overflow-hidden rounded-[20px]"
-                style={CARD_FLOAT_STYLE}
-              >
                 {/* Tab row */}
                 <div className="flex h-[44px]" style={{ background: theme.bg }}>
                   <button
@@ -197,7 +172,7 @@ export function StarUpgradeSheet({
                 {/* Card body */}
                 <div className="px-5 pb-5 pt-4" style={{ background: theme.bg }}>
 
-                  {/* Headline + subheadline — inside card above price */}
+                  {/* Headline + subheadline */}
                   <p className="text-[20px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
                     {copy.headline}
                   </p>
@@ -237,12 +212,7 @@ export function StarUpgradeSheet({
                   <div className="mt-3">
                     {highlights.map((h) => (
                       <div key={h.label} className="flex items-center gap-3 py-2.5">
-                        <h.icon
-                          size={18}
-                          strokeWidth={1.75}
-                          style={{ color: theme.textOnBg, opacity: 0.90 }}
-                          aria-hidden
-                        />
+                        <h.icon size={18} strokeWidth={1.75} style={{ color: theme.textOnBg, opacity: 0.90 }} aria-hidden />
                         <p className="text-[13px] font-[600] leading-tight" style={{ color: theme.textOnBg }}>
                           {h.label}
                         </p>
@@ -260,10 +230,20 @@ export function StarUpgradeSheet({
                   >
                     {loading ? "Loading…" : copy.cta}
                   </button>
+
+                  {/* Maybe later — below CTA, inside card */}
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="mt-3 w-full text-center text-[12px] font-[500] transition-opacity hover:opacity-100"
+                    style={{ color: theme.textOnBg, opacity: 0.65 }}
+                  >
+                    Maybe later
+                  </button>
                 </div>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          </div>
         </>
       )}
     </AnimatePresence>
