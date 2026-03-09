@@ -26,8 +26,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { NeuControl } from "@/components/ui/NeuControl";
-import { PaywallCTA } from "@/components/paywall/PaywallCTA";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
 
@@ -37,7 +35,7 @@ type PlanTab = "plus" | "gold" | "addons";
 type Billing = "monthly" | "annual";
 
 type FeatureRow = {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
   label: string;
   sublabel: string;
 };
@@ -59,6 +57,29 @@ const PRICES = {
   gold: { monthly: 11.99, annual: 9.16, annualBilled: 109.99 },
 } as const;
 
+// Per-plan color tokens — tab active, annual toggle active, CTA, feature icon
+const PLAN_COLORS = {
+  plus: {
+    tabActive: { background: "#7CFF6B", color: "#194219" },
+    annualActive: { background: "#2145CF", color: "#FFFFFF" },
+    annualCardBg: "rgba(33,69,207,0.06)",
+    ctaBackground: "#7CFF6B",
+    ctaColor: "#194219",
+    featureIcon: "#2145CF",
+  },
+  gold: {
+    tabActive: { background: "#CFAB21", color: "#FFFFFF" },
+    annualActive: { background: "#CFAB21", color: "#FFFFFF" },
+    annualCardBg: "rgba(207,171,33,0.10)",
+    ctaBackground: "#CFAB21",
+    ctaColor: "#FFFFFF",
+    featureIcon: "#CFAB21",
+  },
+  addons: {
+    tabActive: { background: "#7CFF6B", color: "#194219" },
+  },
+} as const;
+
 const PLUS_FEATURES: FeatureRow[] = [
   { icon: Users,             label: "×2 Discovery",     sublabel: "More connections, less noise" },
   { icon: Star,              label: "4 Stars / month",  sublabel: "Trigger conversations directly" },
@@ -68,13 +89,13 @@ const PLUS_FEATURES: FeatureRow[] = [
 ];
 
 const GOLD_FEATURES: FeatureRow[] = [
-  { icon: Globe,             label: "Wide Open Discovery",   sublabel: "Keep discovering" },
-  { icon: TrendingUp,        label: "3× Visibility priority", sublabel: "Become a top profile" },
-  { icon: Star,              label: "10 Stars / month",      sublabel: "The most direct connections" },
+  { icon: Globe,             label: "Wide Open Discovery",     sublabel: "Keep discovering" },
+  { icon: TrendingUp,        label: "3× Visibility priority",  sublabel: "Become a top profile" },
+  { icon: Star,              label: "10 Stars / month",        sublabel: "The most direct connections" },
   { icon: Radio,             label: "Broadcasts · 50km · 48h", sublabel: "Maximum reach" },
-  { icon: SlidersHorizontal, label: "All Filters Access",   sublabel: "Including Active Now + Same Energy" },
-  { icon: Video,             label: "Video upload",          sublabel: "Gold-exclusive" },
-  { icon: Users2,            label: "Link Family",           sublabel: "Connect all your pet accounts" },
+  { icon: SlidersHorizontal, label: "All Filters Access",      sublabel: "Including Active Now + Same Energy" },
+  { icon: Video,             label: "Video upload",            sublabel: "Gold-exclusive" },
+  { icon: Users2,            label: "Link Family",             sublabel: "Connect all your pet accounts" },
 ];
 
 const ADD_ONS: AddOnItem[] = [
@@ -106,8 +127,22 @@ const ADD_ONS: AddOnItem[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  return `$${n.toFixed(2)}`;
+function fmtCurrency(n: number): string {
+  try {
+    return new Intl.NumberFormat(navigator.language, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return `$${n.toFixed(2)}`;
+  }
+}
+
+function discountPct(tier: "plus" | "gold"): number {
+  const p = PRICES[tier];
+  return Math.round((1 - p.annual / p.monthly) * 100);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -135,7 +170,6 @@ export default function PremiumPage() {
 
     const raw = sessionStorage.getItem("pending_addons");
     if (!raw) {
-      // Plan only — clear param
       setSearchParams({}, { replace: true });
       return;
     }
@@ -154,7 +188,6 @@ export default function PremiumPage() {
 
     if (!pending.length || !user) return;
 
-    // Auto-trigger add-on payment session
     (async () => {
       try {
         setIsCheckingOut(true);
@@ -238,7 +271,7 @@ export default function PremiumPage() {
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (url) {
-        console.log("[Premium] Checkout URL:", url); // live verification
+        console.log("[Premium] Checkout URL:", url);
         window.location.assign(url);
       }
     } catch {
@@ -279,51 +312,78 @@ export default function PremiumPage() {
 
   const renderBillingToggle = (tier: "plus" | "gold") => {
     const prices = PRICES[tier];
+    const colors = PLAN_COLORS[tier];
+    const pct = discountPct(tier);
+    const isAnnual = billing === "annual";
+
     return (
-      <div className="mt-6">
+      <div className="mt-4">
         {/* Toggle pill */}
-        <div className="inline-flex rounded-full bg-[rgba(255,255,255,0.18)] shadow-[inset_2px_2px_6px_rgba(163,168,190,0.20)] p-[4px] gap-1 relative">
-          {/* Annual -17% badge */}
+        <div className="relative inline-flex">
+          {/* Discount % badge — floats above Annual button */}
           <span
-            className="absolute -top-5 right-[4px] px-2 py-0.5 rounded-full text-[10px] font-[500]"
+            className="absolute -top-5 right-0 px-2 py-0.5 rounded-full text-[10px] font-[500]"
             style={{ background: "#E0F2B6", color: "#2145CF" }}
           >
-            -17%
+            -{pct}%
           </span>
 
-          <NeuControl
-            size="sm"
-            variant={billing === "monthly" ? "primary" : "tertiary"}
-            onClick={() => setBilling("monthly")}
-            aria-pressed={billing === "monthly"}
+          <div className="inline-flex rounded-full p-[3px] gap-1"
+            style={{
+              background: "rgba(255,255,255,0.18)",
+              boxShadow: "inset 2px 2px 6px rgba(163,168,190,0.20)",
+            }}
           >
-            Monthly
-          </NeuControl>
-          <NeuControl
-            size="sm"
-            variant={billing === "annual" ? "primary" : "tertiary"}
-            onClick={() => setBilling("annual")}
-            aria-pressed={billing === "annual"}
-          >
-            Annual
-          </NeuControl>
+            <button
+              onClick={() => setBilling("monthly")}
+              aria-pressed={!isAnnual}
+              className="h-[30px] px-4 rounded-full text-[13px] font-[500] transition-all duration-150"
+              style={
+                !isAnnual
+                  ? { background: "rgba(255,255,255,0.90)", color: "var(--text-primary)", boxShadow: "0 1px 4px rgba(0,0,0,0.10)" }
+                  : { background: "transparent", color: "var(--text-secondary)" }
+              }
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setBilling("annual")}
+              aria-pressed={isAnnual}
+              className="h-[30px] px-4 rounded-full text-[13px] font-[500] transition-all duration-150"
+              style={
+                isAnnual
+                  ? { background: colors.annualActive.background, color: colors.annualActive.color }
+                  : { background: "transparent", color: "var(--text-secondary)" }
+              }
+            >
+              Annual
+            </button>
+          </div>
         </div>
 
         {/* Price display */}
-        <div className="mt-4">
-          {billing === "monthly" ? (
+        <div
+          className="mt-3 rounded-[14px] px-3 py-3 transition-colors duration-200"
+          style={{ background: isAnnual ? colors.annualCardBg : "transparent" }}
+        >
+          {!isAnnual ? (
             <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
-              {fmt(prices.monthly)}
+              {fmtCurrency(prices.monthly)}
               <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
             </p>
           ) : (
             <>
-              <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
-                {fmt(prices.annual)}
-                <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
-              </p>
-              <p className="text-[13px] text-[var(--text-secondary)] mt-1">
-                Billed {fmt(prices.annualBilled)}/yr
+              <div className="flex items-baseline gap-2">
+                <span className="text-[15px] font-[400] line-through text-[var(--text-tertiary)]">
+                  {fmtCurrency(prices.monthly)}
+                </span>
+                <p className="text-[28px] font-[700] text-[var(--text-primary)] leading-tight">
+                  {fmtCurrency(prices.annual)}
+                  <span className="text-[14px] font-[400] text-[var(--text-secondary)] ml-1">/mo</span>
+                </p>
+              </div>
+              <p className="text-[12px] text-[var(--text-secondary)] mt-1">
+                {fmtCurrency(prices.annualBilled)} billed yearly
               </p>
             </>
           )}
@@ -333,9 +393,9 @@ export default function PremiumPage() {
   };
 
   const renderFeatureRows = (features: FeatureRow[], iconColor: string) => (
-    <div className="mt-6 space-y-0">
+    <div className="mt-5 space-y-0">
       {features.map((f) => (
-        <div key={f.label} className="flex items-start gap-3 py-3">
+        <div key={f.label} className="flex items-start gap-3 py-2.5">
           <f.icon
             size={20}
             strokeWidth={1.75}
@@ -361,19 +421,23 @@ export default function PremiumPage() {
   const renderPlusTab = () => (
     <div className="px-5">
       {renderBillingToggle("plus")}
-      {renderFeatureRows(PLUS_FEATURES, "#2145CF")}
+      {renderFeatureRows(PLUS_FEATURES, PLAN_COLORS.plus.featureIcon)}
 
-      {/* Plus CTA — PaywallCTA blackpill */}
+      {/* Plus CTA — Lime Green */}
       <div className="mt-6">
-        <PaywallCTA
-          tier="plus"
-          label={isCheckingOut ? "Loading…" : "Get Huddle+"}
-          icon={<ShoppingCart size={18} strokeWidth={1.75} aria-hidden />}
-          iconPosition="left"
-          fullWidth
+        <button
+          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+          style={{
+            background: PLAN_COLORS.plus.ctaBackground,
+            color: PLAN_COLORS.plus.ctaColor,
+            opacity: isCheckingOut ? 0.6 : 1,
+          }}
           disabled={isCheckingOut}
           onClick={() => void startPlanCheckout("plus")}
-        />
+        >
+          <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
+          {isCheckingOut ? "Loading…" : "Get Huddle+"}
+        </button>
       </div>
     </div>
   );
@@ -381,23 +445,23 @@ export default function PremiumPage() {
   const renderGoldTab = () => (
     <div className="px-5">
       {renderBillingToggle("gold")}
+      {renderFeatureRows(GOLD_FEATURES, PLAN_COLORS.gold.featureIcon)}
 
-      {/* RULE 8: Gold icon color #CFAB21 only inside Gold tab */}
-      {renderFeatureRows(GOLD_FEATURES, "#CFAB21")}
-
-      {/* Gold CTA — gold gradient per Section 6 Gold recipe */}
+      {/* Gold CTA — Brand Gold */}
       <div className="mt-6">
-        <NeuControl
-          variant="gold"
-          tier="gold"
-          size="xl"
-          fullWidth
+        <button
+          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+          style={{
+            background: "linear-gradient(135deg, #CFAB21 0%, #E0C435 100%)",
+            color: "#FFFFFF",
+            opacity: isCheckingOut ? 0.6 : 1,
+          }}
           disabled={isCheckingOut}
           onClick={() => void startPlanCheckout("gold")}
         >
           <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
           {isCheckingOut ? "Loading…" : "Get Gold"}
-        </NeuControl>
+        </button>
       </div>
     </div>
   );
@@ -417,7 +481,7 @@ export default function PremiumPage() {
         </p>
       </div>
 
-      {/* Add-on rows — glass-e1 InsetPanel */}
+      {/* Add-on rows */}
       <div className="rounded-[20px] overflow-hidden glass-e1">
         {ADD_ONS.map((addon, i) => {
           const selected = addonSelected[addon.id];
@@ -461,23 +525,22 @@ export default function PremiumPage() {
 
       {/* Add-ons CTA */}
       <div className="mt-4">
-        <NeuControl
-          size="lg"
-          variant="primary"
-          fullWidth
+        <button
+          className="w-full h-[52px] rounded-[20px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+          style={{
+            background: "#2145CF",
+            color: "#FFFFFF",
+            opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
+            pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
+          }}
           disabled={!selectedAddonItems.length || isCheckingOut}
           onClick={() => void startAddonOnlyCheckout()}
-          style={
-            !selectedAddonItems.length
-              ? { opacity: 0.38, pointerEvents: "none" }
-              : undefined
-          }
         >
           <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
           {selectedAddonItems.length > 0
-            ? `Purchase Add-ons · ${fmt(addonTotal)}`
+            ? `Purchase Add-ons · ${fmtCurrency(addonTotal)}`
             : "Purchase Add-ons"}
-        </NeuControl>
+        </button>
       </div>
 
       {/* Footer note */}
@@ -496,15 +559,10 @@ export default function PremiumPage() {
       {/* Scrollable body */}
       <div
         className="overflow-y-auto"
-        style={{
-          paddingBottom: "calc(90px + env(safe-area-inset-bottom))",
-        }}
+        style={{ paddingBottom: "calc(90px + env(safe-area-inset-bottom))" }}
       >
         {/* Hero block */}
-        <div
-          className="px-5"
-          style={{ marginTop: "calc(56px + 24px)" }}
-        >
+        <div className="px-5 pt-5">
           <h1
             className="font-[700] text-[var(--text-primary)] leading-tight"
             style={{ fontSize: "28px", maxWidth: "22ch" }}
@@ -512,15 +570,15 @@ export default function PremiumPage() {
             Every Pet Deserves More.
           </h1>
           <p
-            className="font-[400] text-[var(--text-secondary)] mt-2"
-            style={{ fontSize: "15px", maxWidth: "36ch" }}
+            className="font-[400] text-[var(--text-secondary)] mt-2 whitespace-nowrap"
+            style={{ fontSize: "12px" }}
           >
             Connect wider. Care deeper. Make pet lives better.
           </p>
         </div>
 
         {/* Plan segmented control */}
-        <div className="px-5 mt-8 relative">
+        <div className="px-5 mt-7 relative">
           {/* "Recommended" badge — floats above Gold option */}
           <div
             className="absolute top-0 pointer-events-none"
@@ -535,30 +593,32 @@ export default function PremiumPage() {
             </span>
           </div>
 
-          {/* Segmented buttons */}
+          {/* Segmented buttons — pure elements to avoid CSS transition blink */}
           <div className="flex gap-2 mt-5">
             {(["plus", "gold", "addons"] as PlanTab[]).map((tab) => {
               const isActive = activeTab === tab;
+              const colors = PLAN_COLORS[tab].tabActive;
               return (
-                <NeuControl
+                <button
                   key={tab}
-                  size="sm"
-                  variant={isActive ? "primary" : "tertiary"}
                   onClick={() => setActiveTab(tab)}
-                  className="flex-1 text-[13px]"
+                  aria-pressed={isActive}
+                  className="flex-1 h-[36px] rounded-[18px] text-[13px] font-[600]"
                   style={
                     isActive
                       ? {
-                          backgroundColor: "#FF4D4D",
-                          color: "#FFFFFF",
-                          border: "2px solid #2145CF",
+                          background: colors.background,
+                          color: colors.color,
                         }
-                      : undefined
+                      : {
+                          background: "rgba(255,255,255,0.18)",
+                          color: "var(--text-secondary)",
+                          boxShadow: "inset 2px 2px 6px rgba(163,168,190,0.20)",
+                        }
                   }
-                  aria-pressed={isActive}
                 >
                   {tab === "plus" ? "Huddle+" : tab === "gold" ? "Gold" : "Add-ons"}
-                </NeuControl>
+                </button>
               );
             })}
           </div>

@@ -4,10 +4,14 @@ import {
   Bell,
   ChevronRight,
   FileText,
+  Heart,
   Info,
+  MessageCircle,
   Settings,
   Shield,
+  Star,
   User as UserIcon,
+  UserPlus,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -57,8 +61,18 @@ function timeAgo(iso: string) {
 }
 
 function notifIcon(type: string) {
-  if (type === "alert") return <AlertCircle size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "admin") return <Info size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "alert" || type === "mesh_alert" || type === "broadcast")
+    return <AlertCircle size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "admin" || type === "system" || type === "announcement")
+    return <Info size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "star" || type === "like")
+    return <Star size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "heart" || type === "social")
+    return <Heart size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "message" || type === "chat")
+    return <MessageCircle size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "friend" || type === "follow" || type === "connect")
+    return <UserPlus size={18} strokeWidth={1.75} aria-hidden />;
   return <Bell size={18} strokeWidth={1.75} aria-hidden />;
 }
 
@@ -258,7 +272,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         role="button"
         tabIndex={0}
         className={cn(
-          "relative overflow-hidden rounded-[16px] flex items-start gap-3 px-4 py-3 min-h-[72px] cursor-pointer",
+          "relative overflow-hidden rounded-[16px] flex items-start gap-3 px-4 py-2 min-h-[60px] cursor-pointer",
           "transition-[background] duration-150",
           r.read ? "bg-transparent" : "glass-e2"
         )}
@@ -326,7 +340,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
           <SheetContent
             side="left"
-            className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full"
+            className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full [&>button]:hidden"
           >
             {/* Drawer header */}
             <div className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0">
@@ -350,7 +364,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={i}
-                    className="flex items-start gap-3 px-4 py-3 min-h-[72px] rounded-[16px] animate-pulse"
+                    className="flex items-start gap-3 px-4 py-2 min-h-[60px] rounded-[16px] animate-pulse"
                   >
                     <div className="mt-0.5 flex-shrink-0 h-[36px] w-[36px] rounded-full bg-white/40" />
                     <div className="flex-1 space-y-2 pt-1">
@@ -373,7 +387,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               {/* Today group */}
               {!notifLoading && todayRows.length > 0 && (
                 <>
-                  <div className="px-4 pt-4 pb-1">
+                  <div className="px-4 pt-2 pb-1">
                     <span className="text-[11px] font-semibold tracking-[0.07em] uppercase text-muted-foreground/50 select-none">
                       {t("Today")}
                     </span>
@@ -385,7 +399,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               {/* Earlier group */}
               {!notifLoading && earlierRows.length > 0 && (
                 <>
-                  <div className="px-4 pt-4 pb-1">
+                  <div className="px-4 pt-2 pb-1">
                     <span className="text-[11px] font-semibold tracking-[0.07em] uppercase text-muted-foreground/50 select-none">
                       {t("Earlier")}
                     </span>
