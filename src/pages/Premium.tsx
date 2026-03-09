@@ -9,9 +9,10 @@ import {
   Globe,
   Heart,
   Megaphone,
+  Minus,
+  Plus,
   Radio,
   ShoppingBag,
-  ShoppingCart,
   SlidersHorizontal,
   Star,
   TrendingUp,
@@ -25,7 +26,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { NeuControl } from "@/components/ui/NeuControl";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
 
@@ -51,21 +51,25 @@ type AddOnItem = {
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 
-// Prices per MASTER_SPEC §2.5
 const PRICES = {
   plus: { monthly: 5.99, annual: 4.99, annualBilled: 59.99 },
   gold: { monthly: 11.99, annual: 9.16, annualBilled: 109.99 },
 } as const;
 
-// Per-plan theme: folder card bg + text colour on that bg
+// Folder card bg + text on that bg (white for blue/coral, dark-green for lime)
 const PLAN_THEMES = {
   plus:   { bg: "#5BA4F5", textOnBg: "#FFFFFF" },
   gold:   { bg: "#FF6452", textOnBg: "#FFFFFF" },
   addons: { bg: "#7CFF6B", textOnBg: "#194219" },
 } as const;
 
-// All segmented-tab label texts use Brand Blue
 const BRAND_BLUE = "#2145CF";
+
+// Folder card floating style — white border + soft shadow
+const CARD_FLOAT_STYLE: React.CSSProperties = {
+  border: "1.5px solid rgba(255,255,255,0.88)",
+  boxShadow: "0 8px 28px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07)",
+};
 
 const PLUS_FEATURES: FeatureRow[] = [
   { icon: Users,             label: "×2 Discovery",            sublabel: "More connections, less noise" },
@@ -141,9 +145,8 @@ export default function PremiumPage() {
   const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<PlanTab>("gold");
-  // Independent billing state per plan card
-  const [plusBilling, setPlusBilling]   = useState<Billing>("monthly");
-  const [goldBilling, setGoldBilling]   = useState<Billing>("monthly");
+  const [plusBilling, setPlusBilling] = useState<Billing>("monthly");
+  const [goldBilling, setGoldBilling] = useState<Billing>("monthly");
   const [addonSelected, setAddonSelected] = useState<Record<AddOnItem["id"], boolean>>({
     superBroadcast: false,
     discoveryBoost: false,
@@ -173,7 +176,6 @@ export default function PremiumPage() {
 
     sessionStorage.removeItem("pending_addons");
     setSearchParams({}, { replace: true });
-
     if (!pending.length || !user) return;
 
     (async () => {
@@ -204,7 +206,6 @@ export default function PremiumPage() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Detect addon_done ────────────────────────────────────────────────────────
   useEffect(() => {
     if (searchParams.get("addon_done") === "1") {
       setSearchParams({}, { replace: true });
@@ -212,7 +213,8 @@ export default function PremiumPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Checkout helpers ─────────────────────────────────────────────────────────
+  // ── Checkout handlers ─────────────────────────────────────────────────────────
+
   const selectedAddonItems = useMemo(
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
@@ -296,7 +298,7 @@ export default function PremiumPage() {
     }
   };
 
-  // ── Folder card: Plus / Gold ──────────────────────────────────────────────────
+  // ── Folder card: Plus / Huddle Gold ──────────────────────────────────────────
 
   const renderPlanFolderCard = (tier: "plus" | "gold") => {
     const theme = PLAN_THEMES[tier];
@@ -306,11 +308,12 @@ export default function PremiumPage() {
     const setBilling = tier === "plus" ? setPlusBilling : setGoldBilling;
     const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
     const isAnnual = billing === "annual";
-    const ctaLabel = tier === "plus" ? "Get Huddle+" : "Get Gold";
+    const ctaLabel = tier === "plus" ? "Get Huddle+" : "Get Huddle Gold";
 
     return (
-      <div className="rounded-[20px] overflow-hidden">
-        {/* ── Folder tab row — outer bg is theme colour ── */}
+      <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
+
+        {/* ── Folder tab row ── */}
         <div className="flex h-[44px]" style={{ background: theme.bg }}>
 
           {/* Monthly tab */}
@@ -320,11 +323,11 @@ export default function PremiumPage() {
             onClick={() => setBilling("monthly")}
             style={
               !isAnnual
-                ? { color: theme.textOnBg }                              // active: transparent bg inherits theme
+                ? { color: theme.textOnBg }                   // active: inherits theme bg, white text
                 : {
                     background: "#FFFFFF",
                     color: theme.bg,
-                    borderBottomRightRadius: "14px",                     // fold corner
+                    borderBottomRightRadius: "14px",           // fold corner
                   }
             }
           >
@@ -342,12 +345,12 @@ export default function PremiumPage() {
                 : {
                     background: "#FFFFFF",
                     color: theme.bg,
-                    borderBottomLeftRadius: "14px",                      // fold corner
+                    borderBottomLeftRadius: "14px",            // fold corner
                   }
             }
           >
             Annually
-            {/* Discount badge — only shown when Annual is the inactive tab */}
+            {/* Discount badge — visible only while Annual tab is inactive */}
             {!isAnnual && (
               <span
                 className="px-1.5 py-0.5 rounded-full text-[10px] font-[500]"
@@ -359,15 +362,12 @@ export default function PremiumPage() {
           </button>
         </div>
 
-        {/* ── Card body — same theme colour ── */}
+        {/* ── Card body ── */}
         <div className="px-5 pt-4 pb-5" style={{ background: theme.bg }}>
 
-          {/* Price block */}
+          {/* Price */}
           {!isAnnual ? (
-            <p
-              className="text-[30px] font-[700] leading-tight"
-              style={{ color: theme.textOnBg }}
-            >
+            <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
               {fmtCurrency(prices.monthly)}
               <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
             </p>
@@ -380,10 +380,7 @@ export default function PremiumPage() {
                 >
                   {fmtCurrency(prices.monthly)}
                 </span>
-                <p
-                  className="text-[30px] font-[700] leading-tight"
-                  style={{ color: theme.textOnBg }}
-                >
+                <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
                   {fmtCurrency(prices.annual)}
                   <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
                 </p>
@@ -394,8 +391,14 @@ export default function PremiumPage() {
             </div>
           )}
 
+          {/* Divider — price ↔ features */}
+          <div
+            className="mt-4 h-px"
+            style={{ background: "rgba(255,255,255,0.28)" }}
+          />
+
           {/* Feature rows */}
-          <div className="mt-4 space-y-0">
+          <div className="mt-3 space-y-0">
             {features.map((f) => (
               <div key={f.label} className="flex items-start gap-3 py-2">
                 <f.icon
@@ -434,7 +437,7 @@ export default function PremiumPage() {
             disabled={isCheckingOut}
             onClick={() => void startPlanCheckout(tier)}
           >
-            <ShoppingCart size={18} strokeWidth={1.75} aria-hidden />
+            <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
             {isCheckingOut ? "Loading…" : ctaLabel}
           </button>
         </div>
@@ -442,14 +445,15 @@ export default function PremiumPage() {
     );
   };
 
-  // ── Add-ons folder card (single tab) ─────────────────────────────────────────
+  // ── Add-ons folder card (single tab, white body) ───────────────────────────
 
   const renderAddonsCard = () => {
     const theme = PLAN_THEMES.addons;
 
     return (
-      <div className="rounded-[20px] overflow-hidden">
-        {/* Single full-width header tab */}
+      <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
+
+        {/* Single lime-green header tab */}
         <div
           className="h-[44px] flex items-center px-5 gap-3"
           style={{ background: theme.bg }}
@@ -462,8 +466,8 @@ export default function PremiumPage() {
           </span>
         </div>
 
-        {/* Card body */}
-        <div className="px-4 pt-2 pb-4" style={{ background: theme.bg }}>
+        {/* White card body */}
+        <div className="px-4 pt-2 pb-4" style={{ background: "#FFFFFF" }}>
           {ADD_ONS.map((addon, i) => {
             const selected = addonSelected[addon.id];
             return (
@@ -471,7 +475,7 @@ export default function PremiumPage() {
                 {i > 0 && (
                   <div
                     className="h-px"
-                    style={{ background: theme.textOnBg, opacity: 0.15 }}
+                    style={{ background: "rgba(33,69,207,0.10)" }}
                   />
                 )}
                 <div className="flex items-center gap-3 py-3.5">
@@ -479,51 +483,64 @@ export default function PremiumPage() {
                     size={20}
                     strokeWidth={1.75}
                     className="flex-shrink-0"
-                    style={{ color: theme.textOnBg, opacity: 0.85 }}
+                    style={{ color: BRAND_BLUE, opacity: 0.80 }}
                     aria-hidden
                   />
                   <div className="flex-1 min-w-0">
                     <p
                       className="text-[13px] font-[600] leading-tight"
-                      style={{ color: theme.textOnBg }}
+                      style={{ color: BRAND_BLUE }}
                     >
                       {addon.title}
                     </p>
                     <p
                       className="text-[11px] font-[400] mt-0.5"
-                      style={{ color: theme.textOnBg, opacity: 0.70 }}
+                      style={{ color: BRAND_BLUE, opacity: 0.65 }}
                     >
                       {addon.subtitle}
                     </p>
                     <p
                       className="text-[13px] font-[600] mt-1"
-                      style={{ color: theme.textOnBg }}
+                      style={{ color: BRAND_BLUE }}
                     >
                       {addon.priceLabel}
                     </p>
                   </div>
-                  <NeuControl
-                    size="sm"
-                    variant={selected ? "primary" : "tertiary"}
-                    selected={selected}
+
+                  {/* White (+/−) circle button */}
+                  <button
+                    className="flex-shrink-0 w-[32px] h-[32px] rounded-full flex items-center justify-center transition-colors"
+                    style={
+                      selected
+                        ? { background: BRAND_BLUE, color: "#FFFFFF" }
+                        : {
+                            background: "#FFFFFF",
+                            color: BRAND_BLUE,
+                            boxShadow: "0 1px 4px rgba(33,69,207,0.18), inset 0 0 0 1.5px rgba(33,69,207,0.22)",
+                          }
+                    }
                     onClick={() =>
                       setAddonSelected((prev) => ({ ...prev, [addon.id]: !prev[addon.id] }))
                     }
                     aria-label={`${selected ? "Remove" : "Add"} ${addon.title}`}
                   >
-                    {selected ? "Remove" : "Add"}
-                  </NeuControl>
+                    {selected
+                      ? <Minus size={15} strokeWidth={2.5} aria-hidden />
+                      : <Plus  size={15} strokeWidth={2.5} aria-hidden />
+                    }
+                  </button>
                 </div>
               </div>
             );
           })}
 
-          {/* Add-ons CTA — white bg, lime text */}
+          {/* Add-ons CTA */}
           <button
             className="mt-2 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
             style={{
               background: "#FFFFFF",
-              color: theme.bg,
+              color: BRAND_BLUE,
+              border: `1.5px solid rgba(33,69,207,0.18)`,
               opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
               pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
             }}
@@ -538,7 +555,7 @@ export default function PremiumPage() {
 
           <p
             className="text-[11px] font-[400] text-center mt-3"
-            style={{ color: theme.textOnBg, opacity: 0.55 }}
+            style={{ color: BRAND_BLUE, opacity: 0.45 }}
           >
             Add-ons are purchased separately from your subscription.
           </p>
@@ -548,6 +565,7 @@ export default function PremiumPage() {
   };
 
   // ── Main render ──────────────────────────────────────────────────────────────
+
   return (
     <div className="min-h-svh overflow-x-hidden">
       <GlobalHeader closeButton={() => navigate(-1)} />
@@ -574,18 +592,18 @@ export default function PremiumPage() {
 
         {/* Plan segmented control */}
         <div className="px-5 mt-7">
-          {/* Extra top margin so "Recommended" badge has room to breathe */}
           <div className="flex gap-2 mt-5">
             {(["plus", "gold", "addons"] as PlanTab[]).map((tab) => {
               const isActive = activeTab === tab;
               const isGold = tab === "gold";
               const themeBg = PLAN_THEMES[tab].bg;
+              const activeTextColor = PLAN_THEMES[tab].textOnBg;
               return (
                 <div key={tab} className="flex-1 relative">
-                  {/* "Recommended" badge — floats above Gold button */}
+                  {/* "Recommended" — centered on the top border of Gold button */}
                   {isGold && (
                     <span
-                      className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-[10px] font-[500] whitespace-nowrap pointer-events-none"
+                      className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 rounded-full text-[10px] font-[500] whitespace-nowrap pointer-events-none z-10"
                       style={{ background: "#E0F2B6", color: BRAND_BLUE }}
                       aria-hidden
                     >
@@ -598,7 +616,7 @@ export default function PremiumPage() {
                     className="w-full h-[36px] rounded-[18px] text-[13px] font-[600]"
                     style={
                       isActive
-                        ? { background: themeBg, color: BRAND_BLUE }
+                        ? { background: themeBg, color: activeTextColor }
                         : {
                             background: "rgba(255,255,255,0.18)",
                             color: BRAND_BLUE,
@@ -606,7 +624,7 @@ export default function PremiumPage() {
                           }
                     }
                   >
-                    {tab === "plus" ? "Huddle+" : tab === "gold" ? "Gold" : "Add-ons"}
+                    {tab === "plus" ? "Huddle+" : tab === "gold" ? "Huddle Gold" : "Add-ons"}
                   </button>
                 </div>
               );

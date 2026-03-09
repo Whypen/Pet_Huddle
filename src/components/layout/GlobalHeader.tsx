@@ -276,7 +276,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         role="button"
         tabIndex={0}
         className={cn(
-          "relative overflow-hidden rounded-[16px] flex items-start gap-3 px-4 py-2 min-h-[60px] cursor-pointer",
+          "relative overflow-hidden rounded-[16px] flex items-start px-4 py-2 min-h-[52px] cursor-pointer",
           "transition-[background] duration-150",
           r.read ? "bg-transparent" : "glass-e2"
         )}
@@ -292,16 +292,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         {!r.read && (
           <div className="absolute left-0 inset-y-0 w-[3px] bg-[var(--primary)] rounded-l-[16px] pointer-events-none" />
         )}
-        <div
-          className={cn(
-            "mt-0.5 flex-shrink-0 h-[36px] w-[36px] rounded-full flex items-center justify-center",
-            "bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.25),inset_-1px_-1px_4px_rgba(255,255,255,0.80)]",
-            r.read ? "text-[var(--text-tertiary)]" : "text-[var(--primary)]"
-          )}
-          aria-hidden
-        >
-          {notifIcon(r.type)}
-        </div>
         <div className="flex-1 min-w-0">
           <p
             className={cn(
@@ -347,7 +337,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full [&>button]:hidden"
           >
             {/* Drawer header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+            <div className="flex items-center justify-between px-5 pt-2 pb-1 shrink-0">
               <h3 className="text-[17px] font-[600] text-[var(--text-primary)]">
                 {t("Notifications")}
               </h3>
