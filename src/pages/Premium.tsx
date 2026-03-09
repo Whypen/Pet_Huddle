@@ -46,7 +46,7 @@ type AddOnItem = {
   title: string;
   subtitle: string;
   price: number;
-  priceLabel: string;
+  billingNote?: string; // e.g. "/mo" for recurring add-ons
 };
 
 // ─── Static data ──────────────────────────────────────────────────────────────
@@ -96,7 +96,6 @@ const ADD_ONS: AddOnItem[] = [
     title: "Super Broadcast",
     subtitle: "72h · 150km · slot bypass",
     price: 4.99,
-    priceLabel: "$4.99",
   },
   {
     id: "discoveryBoost",
@@ -104,7 +103,6 @@ const ADD_ONS: AddOnItem[] = [
     title: "Discovery Boost",
     subtitle: "3× ranking weight · 24h",
     price: 2.99,
-    priceLabel: "$2.99",
   },
   {
     id: "sharePerks",
@@ -112,7 +110,7 @@ const ADD_ONS: AddOnItem[] = [
     title: "Share Perks",
     subtitle: "Mirror tier to 2 members",
     price: 4.99,
-    priceLabel: "$4.99/mo",
+    billingNote: "/mo",
   },
 ];
 
@@ -503,7 +501,7 @@ export default function PremiumPage() {
                       className="text-[13px] font-[600] mt-1"
                       style={{ color: BRAND_BLUE }}
                     >
-                      {addon.priceLabel}
+                      {fmtCurrency(addon.price)}{addon.billingNote ?? ""}
                     </p>
                   </div>
 
@@ -538,9 +536,8 @@ export default function PremiumPage() {
           <button
             className="mt-2 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
             style={{
-              background: "#FFFFFF",
-              color: BRAND_BLUE,
-              border: `1.5px solid rgba(33,69,207,0.18)`,
+              background: "#7CFF6B",
+              color: "#194219",
               opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
               pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
             }}
