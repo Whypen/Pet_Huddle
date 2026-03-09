@@ -2,17 +2,18 @@
  * StarUpgradeSheet — stars upsell bottom sheet
  * Fires when a user tries to send a star with no quota remaining.
  *
- * tier="plus"  → Free user upgrading to Huddle+  (blue  #5BA4F5)
- * tier="gold"  → Plus user upgrading to Huddle Gold (coral #FF6452)
+ * tier="plus"  → Free → Huddle+    (blue  #5BA4F5)
+ * tier="gold"  → Plus → Huddle Gold (coral #FF6452)
  *
- * Matches folder-tab card design from Premium.tsx (UI_CONTRACT v6.1 §6).
+ * Prices fetched live from Stripe (cached at module level after first call).
+ * Headline + subheadline sit inside the folder-tab card above the price.
  */
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Globe, Radio, Star, TrendingUp, Users, X } from "lucide-react";
+import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,18 +40,6 @@ const TIER_THEMES = {
   plus: { bg: "#5BA4F5", textOnBg: "#FFFFFF" },
   gold: { bg: "#FF6452", textOnBg: "#FFFFFF" },
 } as const;
-
-// Source-of-truth fallback — matches Stripe plan amounts
-const FALLBACK_PRICES = {
-  plus: {
-    monthly: quotaConfig.stripePlans.plus.monthly.amount,
-    annual:  quotaConfig.stripePlans.plus.annual.amount,
-  },
-  gold: {
-    monthly: quotaConfig.stripePlans.gold.monthly.amount,
-    annual:  quotaConfig.stripePlans.gold.annual.amount,
-  },
-};
 
 const CARD_FLOAT_STYLE: React.CSSProperties = {
   border: "1.5px solid rgba(255,255,255,0.88)",
@@ -99,37 +88,22 @@ export function StarUpgradeSheet({
   const theme      = TIER_THEMES[tier];
   const highlights = tier === "plus" ? PLUS_HIGHLIGHTS : GOLD_HIGHLIGHTS;
 
-  const [livePrices, setLivePrices]     = useState(FALLBACK_PRICES[tier]);
-  const [pricingLoading, setPricingLoading] = useState(false);
+  // Initialise with correct fallback prices (shown instantly); quietly
+  // updated from Stripe after first fetch (result cached for session).
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
 
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    setPricingLoading(true);
-    (async () => {
-      const { data, error } = await supabase.functions.invoke("stripe-pricing");
-      if (!active) return;
-      if (!error && data?.prices) {
-        const p = data.prices as Record<string, { amount?: number }>;
-        const key = tier === "plus"
-          ? { m: "plus_monthly", a: "plus_annual" }
-          : { m: "gold_monthly", a: "gold_annual" };
-        setLivePrices({
-          monthly: typeof p[key.m]?.amount === "number" ? p[key.m]!.amount! : FALLBACK_PRICES[tier].monthly,
-          annual:  typeof p[key.a]?.amount === "number" ? p[key.a]!.amount! : FALLBACK_PRICES[tier].annual,
-        });
-      }
-      if (active) setPricingLoading(false);
-    })();
+    fetchLivePrices().then((p) => { if (active) setLivePrices(p); });
     return () => { active = false; };
-  }, [isOpen, tier]);
+  }, [isOpen]);
 
-  const isAnnual   = billing === "annual";
-  const monthlyAmt = livePrices.monthly;
-  const annualTotal  = livePrices.annual;
-  const annualPerMo  = annualTotal / 12;
-  const discountPct  = Math.round((1 - annualPerMo / monthlyAmt) * 100);
-  const canUpgrade   = !loading && !pricingLoading;
+  const isAnnual    = billing === "annual";
+  const monthlyAmt  = tier === "plus" ? livePrices.plus_monthly : livePrices.gold_monthly;
+  const annualTotal = tier === "plus" ? livePrices.plus_annual  : livePrices.gold_annual;
+  const annualPerMo = annualTotal / 12;
+  const discountPct = Math.round((1 - annualPerMo / monthlyAmt) * 100);
 
   return (
     <AnimatePresence>
@@ -157,26 +131,24 @@ export function StarUpgradeSheet({
             role="dialog"
             aria-modal="true"
           >
-            <div className="relative overflow-hidden rounded-t-[28px] bg-[#F4F7FF] shadow-[0_-18px_48px_rgba(0,0,0,0.24)]">
+            <div className="overflow-hidden rounded-t-[28px] bg-[#F4F7FF] shadow-[0_-18px_48px_rgba(0,0,0,0.24)]">
 
-              {/* Close button */}
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close upgrade"
-                className="absolute right-5 top-5 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[#424965]"
-              >
-                <X className="h-5 w-5" />
-              </button>
-
-              {/* Header copy */}
-              <div className="px-6 pb-4 pt-6">
-                <p className="text-[22px] font-extrabold leading-tight text-[#2F3B78]">
-                  {copy.headline}
-                </p>
-                <p className="mt-1 text-[13px] text-[#4C598E]">
-                  {copy.subheadline}
-                </p>
+              {/* "Maybe later" pill — top right */}
+              <div className="flex justify-end px-4 pt-4 pb-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Dismiss"
+                  className="inline-flex h-[30px] items-center justify-center rounded-full px-3.5 text-[12px] font-[500] text-[#5A6580]"
+                  style={{
+                    background: "rgba(255,255,255,0.55)",
+                    border: "1px solid rgba(180,190,210,0.45)",
+                    backdropFilter: "blur(8px)",
+                    WebkitBackdropFilter: "blur(8px)",
+                  }}
+                >
+                  Maybe later
+                </button>
               </div>
 
               {/* ── Folder-tab card ── */}
@@ -184,11 +156,8 @@ export function StarUpgradeSheet({
                 className="mx-5 mb-[calc(1.25rem+var(--nav-height,64px)+env(safe-area-inset-bottom))] overflow-hidden rounded-[20px]"
                 style={CARD_FLOAT_STYLE}
               >
-
                 {/* Tab row */}
                 <div className="flex h-[44px]" style={{ background: theme.bg }}>
-
-                  {/* Monthly tab */}
                   <button
                     type="button"
                     className="flex h-full flex-1 items-center justify-center text-[13px] font-[600]"
@@ -202,8 +171,6 @@ export function StarUpgradeSheet({
                   >
                     Monthly
                   </button>
-
-                  {/* Annual tab */}
                   <button
                     type="button"
                     className="flex h-full flex-1 items-center justify-center gap-1.5 text-[13px] font-[600]"
@@ -230,31 +197,38 @@ export function StarUpgradeSheet({
                 {/* Card body */}
                 <div className="px-5 pb-5 pt-4" style={{ background: theme.bg }}>
 
-                  {/* Price display */}
-                  {!isAnnual ? (
-                    <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                      {pricingLoading ? "—" : fmtCurrency(monthlyAmt)}
-                      <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
-                    </p>
-                  ) : (
-                    <div>
-                      <div className="flex items-baseline gap-2">
-                        <span
-                          className="text-[15px] font-[400] line-through opacity-60"
-                          style={{ color: theme.textOnBg }}
-                        >
-                          {pricingLoading ? "—" : fmtCurrency(monthlyAmt)}
-                        </span>
-                        <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                          {pricingLoading ? "—" : fmtCurrency(annualPerMo)}
-                          <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
+                  {/* Headline + subheadline — inside card above price */}
+                  <p className="text-[20px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
+                    {copy.headline}
+                  </p>
+                  <p className="mt-1 text-[12px] font-[400] leading-snug opacity-80" style={{ color: theme.textOnBg }}>
+                    {copy.subheadline}
+                  </p>
+
+                  {/* Price */}
+                  <div className="mt-4">
+                    {!isAnnual ? (
+                      <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
+                        {fmtCurrency(monthlyAmt)}
+                        <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
+                      </p>
+                    ) : (
+                      <div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[15px] font-[400] line-through opacity-60" style={{ color: theme.textOnBg }}>
+                            {fmtCurrency(monthlyAmt)}
+                          </span>
+                          <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
+                            {fmtCurrency(annualPerMo)}
+                            <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
+                          </p>
+                        </div>
+                        <p className="mt-0.5 text-[12px] opacity-75" style={{ color: theme.textOnBg }}>
+                          {fmtCurrency(annualTotal)} billed yearly
                         </p>
                       </div>
-                      <p className="mt-0.5 text-[12px] opacity-75" style={{ color: theme.textOnBg }}>
-                        {pricingLoading ? "Loading prices…" : `${fmtCurrency(annualTotal)} billed yearly`}
-                      </p>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {/* Divider */}
                   <div className="mt-4 h-px" style={{ background: "rgba(255,255,255,0.28)" }} />
@@ -280,11 +254,11 @@ export function StarUpgradeSheet({
                   <button
                     type="button"
                     onClick={onUpgrade}
-                    disabled={!canUpgrade}
+                    disabled={loading}
                     className="mt-5 inline-flex h-[50px] w-full items-center justify-center rounded-[16px] text-[15px] font-[600] transition-opacity disabled:opacity-60"
                     style={{ background: "#FFFFFF", color: theme.bg }}
                   >
-                    {loading ? "Loading…" : pricingLoading ? "Loading prices…" : copy.cta}
+                    {loading ? "Loading…" : copy.cta}
                   </button>
                 </div>
               </div>

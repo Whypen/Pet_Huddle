@@ -5,10 +5,12 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
   apiVersion: "2023-10-16",
   httpClient: Stripe.createFetchHttpClient(),
 });
+const stripeSecret = Deno.env.get("STRIPE_SECRET_KEY") || "";
+const stripeMode = stripeSecret.startsWith("sk_live_") ? "live" : "test";
 
 const PRICE_IDS: Record<string, string | undefined> = {
-  premium_monthly: Deno.env.get("STRIPE_PRICE_PREMIUM_MONTHLY"),
-  premium_annual: Deno.env.get("STRIPE_PRICE_PREMIUM_ANNUAL"),
+  plus_monthly: Deno.env.get("STRIPE_PRICE_PLUS_MONTHLY"),
+  plus_annual: Deno.env.get("STRIPE_PRICE_PLUS_ANNUAL"),
   gold_monthly: Deno.env.get("STRIPE_PRICE_GOLD_MONTHLY"),
   gold_annual: Deno.env.get("STRIPE_PRICE_GOLD_ANNUAL"),
   star_pack: Deno.env.get("STRIPE_PRICE_STAR_PACK"),
@@ -17,10 +19,10 @@ const PRICE_IDS: Record<string, string | undefined> = {
 };
 
 const DEFAULTS: Record<string, { amount: number; currency: string; interval?: string }> = {
-  premium_monthly: { amount: 9.99, currency: "usd", interval: "month" },
-  premium_annual: { amount: 80.99, currency: "usd", interval: "year" },
-  gold_monthly: { amount: 19.99, currency: "usd", interval: "month" },
-  gold_annual: { amount: 180.99, currency: "usd", interval: "year" },
+  plus_monthly: { amount: 5.99,  currency: "usd", interval: "month" },
+  plus_annual:  { amount: 59.99, currency: "usd", interval: "year" },
+  gold_monthly: { amount: 11.99, currency: "usd", interval: "month" },
+  gold_annual:  { amount: 109.99, currency: "usd", interval: "year" },
   star_pack: { amount: 4.99, currency: "usd" },
   emergency_alert: { amount: 2.99, currency: "usd" },
   vet_media: { amount: 3.99, currency: "usd" },
@@ -34,6 +36,13 @@ const json = (body: unknown, status = 200) =>
 
 serve(async () => {
   try {
+    const required = ["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"];
+    for (const key of required) {
+      if (!PRICE_IDS[key]) {
+        return json({ error: `Stripe config invalid: missing ${key} price id for ${stripeMode} mode` }, 500);
+      }
+    }
+
     const results: Record<string, { amount: number; currency: string; interval?: string }> = {};
     for (const [key, priceId] of Object.entries(PRICE_IDS)) {
       if (!priceId) {
@@ -48,7 +57,7 @@ serve(async () => {
       };
     }
 
-    return json({ prices: results, defaults: DEFAULTS });
+    return json({ prices: results, defaults: DEFAULTS, stripe_mode: stripeMode });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return json({ error: message || "Failed to fetch pricing" }, 500);

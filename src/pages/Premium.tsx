@@ -28,6 +28,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
+import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,21 +51,6 @@ type AddOnItem = {
 };
 
 // ─── Static data ──────────────────────────────────────────────────────────────
-
-// Live prices fetched from Stripe edge fn; quotaConfig amounts are the source-of-truth fallback
-type LivePriceMap = {
-  plus_monthly: number;
-  plus_annual:  number; // total annual charge (divide by 12 for /mo equivalent)
-  gold_monthly: number;
-  gold_annual:  number;
-};
-
-const FALLBACK_PRICES: LivePriceMap = {
-  plus_monthly: quotaConfig.stripePlans.plus.monthly.amount,
-  plus_annual:  quotaConfig.stripePlans.plus.annual.amount,
-  gold_monthly: quotaConfig.stripePlans.gold.monthly.amount,
-  gold_annual:  quotaConfig.stripePlans.gold.annual.amount,
-};
 
 // Folder card bg + text on that bg (white for blue/coral, dark-green for lime)
 const PLAN_THEMES = {
@@ -161,22 +147,12 @@ export default function PremiumPage() {
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
-  // ── Live Stripe prices (fallback = quotaConfig amounts) ──────────────────────
+  // ── Live Stripe prices — cached at module level after first fetch ────────────
   const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
 
   useEffect(() => {
     let active = true;
-    (async () => {
-      const { data, error } = await supabase.functions.invoke("stripe-pricing");
-      if (!active || error || !data?.prices) return;
-      const p = data.prices as Record<string, { amount?: number }>;
-      setLivePrices({
-        plus_monthly: typeof p.plus_monthly?.amount === "number" ? p.plus_monthly.amount : FALLBACK_PRICES.plus_monthly,
-        plus_annual:  typeof p.plus_annual?.amount  === "number" ? p.plus_annual.amount  : FALLBACK_PRICES.plus_annual,
-        gold_monthly: typeof p.gold_monthly?.amount === "number" ? p.gold_monthly.amount : FALLBACK_PRICES.gold_monthly,
-        gold_annual:  typeof p.gold_annual?.amount  === "number" ? p.gold_annual.amount  : FALLBACK_PRICES.gold_annual,
-      });
-    })();
+    fetchLivePrices().then((prices) => { if (active) setLivePrices(prices); });
     return () => { active = false; };
   }, []);
 
@@ -486,10 +462,10 @@ export default function PremiumPage() {
           className="h-[44px] flex items-center px-5 gap-3"
           style={{ background: theme.bg }}
         >
-          <span className="text-[13px] font-[600]" style={{ color: theme.textOnBg }}>
+          <span className="text-[13px] font-[600]" style={{ color: BRAND_BLUE }}>
             Power-ups
           </span>
-          <span className="text-[11px] opacity-65" style={{ color: theme.textOnBg }}>
+          <span className="text-[11px] opacity-65" style={{ color: BRAND_BLUE }}>
             Billed once
           </span>
         </div>
@@ -567,7 +543,7 @@ export default function PremiumPage() {
             className="mt-2 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
             style={{
               background: "#7CFF6B",
-              color: "#194219",
+              color: BRAND_BLUE,
               opacity: !selectedAddonItems.length || isCheckingOut ? 0.38 : 1,
               pointerEvents: !selectedAddonItems.length || isCheckingOut ? "none" : "auto",
             }}
