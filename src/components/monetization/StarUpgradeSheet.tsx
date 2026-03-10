@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
+import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,21 +56,6 @@ const GOLD_HIGHLIGHTS: FeatureItem[] = [
   { icon: TrendingUp,  label: "3× Visibility priority" },
   { icon: Globe,       label: "Wide Open Discovery" },
 ];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  try {
-    return new Intl.NumberFormat(navigator.language, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `$${n.toFixed(2)}`;
-  }
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -184,22 +170,22 @@ export function StarUpgradeSheet({
                   <div className="mt-4">
                     {!isAnnual ? (
                       <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                        {fmtCurrency(monthlyAmt)}
+                        <PriceDisplay n={monthlyAmt} />
                         <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
                       </p>
                     ) : (
                       <div>
                         <div className="flex items-baseline gap-2">
                           <span className="text-[15px] font-[400] line-through opacity-60" style={{ color: theme.textOnBg }}>
-                            {fmtCurrency(monthlyAmt)}
+                            <PriceDisplay n={monthlyAmt} />
                           </span>
                           <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                            {fmtCurrency(annualPerMo)}
+                            <PriceDisplay n={annualPerMo} />
                             <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
                           </p>
                         </div>
                         <p className="mt-0.5 text-[12px] opacity-75" style={{ color: theme.textOnBg }}>
-                          {fmtCurrency(annualTotal)} billed yearly
+                          <PriceDisplay n={annualTotal} /> billed yearly
                         </p>
                       </div>
                     )}
