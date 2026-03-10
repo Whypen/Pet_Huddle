@@ -577,7 +577,7 @@ export default function PremiumPage() {
             Every Pet Deserves More.
           </h1>
           <p
-            className="font-[400] text-[var(--text-secondary)] mt-2"
+            className="font-[400] text-[var(--text-secondary)] mt-0.5"
             style={{ fontSize: "14px" }}
           >
             Connect wider. Care deeper. Make pet lives better.
@@ -585,7 +585,7 @@ export default function PremiumPage() {
         </div>
 
         {/* Plan segmented control */}
-        <div className="px-5 mt-7">
+        <div className="px-5 mt-10">
           <div className="flex gap-2 mt-5">
             {(["plus", "gold", "addons"] as PlanTab[]).map((tab) => {
               const isActive = activeTab === tab;
@@ -597,7 +597,7 @@ export default function PremiumPage() {
                   {/* "Recommended" — centered on the top border of Gold button */}
                   {isGold && (
                     <span
-                      className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 rounded-full text-[10px] font-[500] whitespace-nowrap pointer-events-none z-10"
+                      className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[72%] px-2 py-0.5 rounded-full text-[10px] font-[500] whitespace-nowrap pointer-events-none z-10"
                       style={{ background: "#E0F2B6", color: BRAND_BLUE }}
                       aria-hidden
                     >
