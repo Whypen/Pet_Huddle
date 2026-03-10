@@ -9,6 +9,7 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { FormField, NeuCheckbox } from "@/components/ui";
 import { toast } from "sonner";
 import huddleLogo from "@/assets/huddle-logo-transparent.png";
+import huddleVideo from "@/assets/huddle video.mp4";
 import appleIcon from "@/assets/Apple icon.png";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { LegalModal } from "@/components/modals/LegalModal";
@@ -148,7 +149,17 @@ const Auth = () => {
     <div className="min-h-svh flex flex-col justify-center items-center px-6 pb-[calc(88px+env(safe-area-inset-bottom))]">
       <div className="w-full flex flex-col items-center">
         <div className="text-center">
-          <img src={huddleLogo} alt={t("app.name")} className="mx-auto h-28 w-28 object-contain" />
+          <video
+            autoPlay
+            muted
+            playsInline
+            loop
+            className="mx-auto h-28 w-28 object-contain"
+            aria-label={t("app.name")}
+          >
+            <source src={huddleVideo} type="video/mp4" />
+            <img src={huddleLogo} alt={t("app.name")} className="mx-auto h-28 w-28 object-contain" />
+          </video>
         </div>
 
         <div className="mt-8 w-full max-w-sm rounded-[24px] border border-white/55 bg-white/28 backdrop-blur-xl shadow-[0_12px_26px_rgba(66,73,101,0.14)] p-4">
