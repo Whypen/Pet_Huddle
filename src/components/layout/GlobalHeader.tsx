@@ -15,13 +15,13 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import huddleLogo from "@/assets/huddle-name-transparent.png";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { membershipTierLabel } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
 import { NeuControl } from "@/components/ui/NeuControl";
@@ -81,7 +81,7 @@ function notifIcon(type: string) {
 }
 
 const allowedHref = (href: string) =>
-  /^\/(map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
+  /^\/(chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
     href
   );
 
@@ -105,11 +105,20 @@ interface Pet {
 
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, profile } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Re-open settings drawer when returning from Account Settings or Identity Verification
+  useEffect(() => {
+    if ((location.state as { openSettings?: boolean } | null)?.openSettings) {
+      setMenuOpen(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location, navigate]);
 
   // ── Notification drawer state ──────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -243,12 +252,18 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       .eq("user_id" as "created_at", user?.id ?? "");
 
     const meta = (r.data ?? r.metadata ?? {}) as Record<string, unknown>;
+    const body = String(r.body ?? r.message ?? "");
+    const type = String((r.type || "")).toLowerCase();
     const href = typeof meta.href === "string" ? meta.href : null;
-    if (href && allowedHref(href)) {
+    const shouldForceDiscover =
+      type === "wave" ||
+      body.toLowerCase().includes("open discover to find out");
+    const resolvedHref = shouldForceDiscover ? "/chats?tab=discover" : href;
+    if (resolvedHref && allowedHref(resolvedHref)) {
       setNotifOpen(false);
-      navigate(href);
+      navigate(resolvedHref);
     } else {
-      console.warn("Invalid notification href", { id: r.id, href });
+      console.warn("Invalid notification href", { id: r.id, href: resolvedHref });
     }
   };
 
@@ -336,6 +351,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             side="left"
             className="w-[320px] sm:max-w-[320px] p-0 flex flex-col h-full [&>button]:hidden"
           >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("Notifications")}</SheetTitle>
+              <SheetDescription>{t("Notifications drawer")}</SheetDescription>
+            </SheetHeader>
             {/* Drawer header */}
             <div className="flex items-center justify-between px-5 pt-2 pb-1 shrink-0">
               <h3 className="text-[17px] font-[600] text-[var(--text-primary)]">
@@ -449,6 +468,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             </SheetTrigger>
 
             <SheetContent className="w-[320px] sm:max-w-sm flex flex-col gap-4 pt-6 px-4 pb-4">
+              <SheetHeader className="sr-only">
+                <SheetTitle>{t("Settings")}</SheetTitle>
+                <SheetDescription>{t("Settings drawer")}</SheetDescription>
+              </SheetHeader>
 
               {/* 1. User identity row */}
               <SheetClose asChild>
@@ -516,7 +539,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     icon={<Shield size={16} strokeWidth={1.75} />}
                     variant="nav"
                     value={verificationStatus || "unverified"}
-                    onClick={() => navigate("/verify-identity")}
+                    onClick={() => navigate("/verify-identity", { state: { from: location.pathname } })}
                   />
                 </SheetClose>
                 <InsetDivider />
@@ -525,7 +548,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     label="Account Settings"
                     icon={<UserIcon size={16} strokeWidth={1.75} />}
                     variant="nav"
-                    onClick={() => navigate("/settings")}
+                    onClick={() => navigate("/settings", { state: { from: location.pathname } })}
                   />
                 </SheetClose>
               </InsetPanel>

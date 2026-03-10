@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { CircleAlert, HelpCircle, Lock, ShieldAlert, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight } from "lucide-react";
 import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { toast } from "sonner";
@@ -11,6 +11,8 @@ import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuChip } from "@/components/ui/NeuChip";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import strayCatImage from "@/assets/notifications/Stray cat.png";
+import strayDogImage from "@/assets/notifications/Stray dog.png";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -32,7 +34,9 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, profile, signOut, refreshProfile } = useAuth();
+  const fromPage = (location.state as { from?: string } | null)?.from || null;
 
   const [loadingPrefs, setLoadingPrefs] = useState(true);
   const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
@@ -68,6 +72,26 @@ const Settings: React.FC = () => {
     .slice(0, 2) || "U";
   const effectiveTier = (p.effective_tier as string) || (p.tier as string) || "free";
   const verificationStatus = String(p.verification_status ?? "unverified").toLowerCase();
+  const speciesSource = [p.pet_species, p.pet_experience, p.species, p.pets]
+    .flatMap((value) => {
+      if (Array.isArray(value)) {
+        return value.flatMap((item) => {
+          if (item && typeof item === "object" && "species" in (item as Record<string, unknown>)) {
+            return [String((item as Record<string, unknown>).species || "").toLowerCase()];
+          }
+          return [String(item || "").toLowerCase()];
+        });
+      }
+      if (value && typeof value === "object" && "species" in (value as Record<string, unknown>)) {
+        return [String((value as Record<string, unknown>).species || "").toLowerCase()];
+      }
+      if (typeof value === "string") return [value.toLowerCase()];
+      return [];
+    })
+    .join(" ");
+  const hasCatSpecies = /\bcat(s)?\b/.test(speciesSource) || /\bfeline(s)?\b/.test(speciesSource);
+  const hasDogSpecies = /\bdog(s)?\b/.test(speciesSource) || /\bcanine(s)?\b/.test(speciesSource);
+  const turnOffMapImage = hasDogSpecies && !hasCatSpecies ? strayDogImage : strayCatImage;
 
   useEffect(() => {
     if (!profile) return;
@@ -304,7 +328,12 @@ const Settings: React.FC = () => {
 
   return (
     <div className="h-full min-h-0 w-full max-w-full flex flex-col">
-      <PageHeader title="Account Settings" showBack />
+      <PageHeader
+        title={<h1 className="text-base font-semibold text-[#424965] truncate">Account Settings</h1>}
+        titleClassName="justify-start"
+        showBack
+        onBack={() => fromPage ? navigate(fromPage, { state: { openSettings: true } }) : navigate(-1)}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="pt-[68px] px-4 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+20px)] space-y-4 max-w-md mx-auto">
@@ -641,16 +670,26 @@ const Settings: React.FC = () => {
       {/* ── Notification toggle-off confirm dialog ── */}
       <Dialog open={confirmToggleOff !== null} onOpenChange={(o) => { if (!o) setConfirmToggleOff(null); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
+          <DialogHeader className="space-y-2.5">
             <DialogTitle>Turn off notifications?</DialogTitle>
             <DialogDescription>Keep notifications on so our furry friends can count on you when they go missing.</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex gap-2 pt-2">
-            <NeuControl variant="secondary" className="flex-1" onClick={() => setConfirmToggleOff(null)}>
+          {confirmToggleOff !== null ? (
+            <div className="px-1 pb-1">
+              <img
+                src={turnOffMapImage}
+                alt="Missing pet alert illustration"
+                className="mx-auto w-full max-w-[320px] rounded-2xl object-cover"
+              />
+            </div>
+          ) : null}
+          <DialogFooter className="!flex-row gap-2 pt-1">
+            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setConfirmToggleOff(null)}>
               Keep on
             </NeuControl>
             <NeuControl
-              className="flex-1"
+              size="lg"
+              className="flex-1 min-w-0"
               onClick={() => {
                 const mode = confirmToggleOff;
                 setConfirmToggleOff(null);
