@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, HelpCircle, Lock, ShieldAlert, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight, ShoppingBag } from "lucide-react";
+import { CircleAlert, HelpCircle, Lock, ShieldAlert, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight } from "lucide-react";
 import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
-import { SharePerksModal } from "@/components/monetization/SharePerksModal";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,7 +9,6 @@ import { PageHeader } from "@/layouts/PageHeader";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuChip } from "@/components/ui/NeuChip";
-import { FormField, FormTextArea } from "@/components/ui";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
@@ -44,7 +42,7 @@ const Settings: React.FC = () => {
   const [hideFromMap, setHideFromMap] = useState(false);
 
   const [familySheetOpen, setFamilySheetOpen] = useState(false);
-  const [slotModalOpen, setSlotModalOpen] = useState(false);
+  const [familyUsedCount, setFamilyUsedCount] = useState(0);
 
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
@@ -79,6 +77,16 @@ const Settings: React.FC = () => {
     setNonSocial(nonSocialValue);
     setHideFromMap(hideFromMapValue);
   }, [profile]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from("family_members" as never)
+      .select("id", { count: "exact", head: true })
+      .eq("inviter_user_id", user.id)
+      .neq("status", "declined")
+      .then(({ count }) => setFamilyUsedCount(count ?? 0));
+  }, [user?.id, familySheetOpen]); // re-query when sheet closes
 
   const loadPrefs = async () => {
     if (!user?.id) return;
@@ -264,11 +272,27 @@ const Settings: React.FC = () => {
       return;
     }
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      toast.error("Your session expired. Please log in again.");
+      await signOut();
+      navigate("/auth", { replace: true });
+      return;
+    }
+
     setBusy(true);
-    const { error } = await supabase.functions.invoke("delete-account", { body: {} });
+    const { error } = await supabase.functions.invoke("delete-account", {
+      body: {},
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
     setBusy(false);
 
     if (error) {
+      console.error("[settings.delete_account.failed]", error);
       toast.error("We couldn't delete your account. Please retry.");
       return;
     }
@@ -282,7 +306,7 @@ const Settings: React.FC = () => {
     <div className="h-full min-h-0 w-full max-w-full flex flex-col">
       <PageHeader title="Account Settings" showBack />
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain">
+      <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="pt-[68px] px-4 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+20px)] space-y-4 max-w-md mx-auto">
 
         {/* ── UserHeader ── */}
@@ -315,27 +339,22 @@ const Settings: React.FC = () => {
             onClick={() => navigate("/premium")}
           />
           <InsetDivider />
-          <InsetRow
-            label="Family Account"
-            icon={<Users size={16} strokeWidth={1.75} />}
-            variant="nav"
-            trailingSlot={
-              (profile?.family_slots ?? 0) > 0 ? (
-                <span className="text-[11px] font-[600] px-2 py-0.5 rounded-full bg-[var(--surface-neu)] text-[var(--text-secondary)]">
-                  — / {Math.min(profile?.family_slots ?? 0, 3)}
-                </span>
-              ) : (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSlotModalOpen(true); }}
-                  className="flex items-center gap-1 text-[11px] font-[500] text-[var(--text-secondary)]"
-                >
-                  <ShoppingBag size={12} strokeWidth={1.75} />
-                  Member slot
-                </button>
-              )
-            }
+          <button
+            type="button"
             onClick={() => setFamilySheetOpen(true)}
-          />
+            className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
+          >
+            <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
+              <Users size={16} strokeWidth={1.75} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[14px] font-[500] text-[var(--text-primary)]">Family Account</span>
+              <span className="block text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                {familyUsedCount} of {Math.min(profile?.family_slots ?? 0, 3)} Slots
+              </span>
+            </span>
+            <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
+          </button>
         </InsetPanel>
 
         {/* ── VISIBILITY ── */}
@@ -503,23 +522,32 @@ const Settings: React.FC = () => {
             <DialogTitle>Help &amp; Support</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <FormField
-              label="Subject"
-              value={supportSubject}
-              onChange={(e) => setSupportSubject(e.target.value)}
-              placeholder="Subject (optional)"
-            />
-            <FormTextArea
-              label="Message"
-              value={supportMessage}
-              onChange={(e) => setSupportMessage(e.target.value)}
-              placeholder="How can we help?"
-              style={{ minHeight: "120px" }}
-            />
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Subject</label>
+              <div className="form-field-rest relative flex items-center">
+                <input
+                  value={supportSubject}
+                  onChange={(e) => setSupportSubject(e.target.value)}
+                  placeholder="Subject (optional)"
+                  className="field-input-core"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Message</label>
+              <div className="form-field-rest relative h-auto min-h-[96px] py-3">
+                <textarea
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  placeholder="How can we help?"
+                  className="field-input-core resize-none min-h-[72px]"
+                />
+              </div>
+            </div>
           </div>
-          <DialogFooter className="flex gap-2 pt-2">
-            <NeuControl variant="secondary" className="flex-1" onClick={() => setSupportOpen(false)}>Cancel</NeuControl>
-            <NeuControl className="flex-1" disabled={busy} onClick={submitSupport}>Send</NeuControl>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setSupportOpen(false)}>Cancel</NeuControl>
+            <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy} onClick={submitSupport}>Send</NeuControl>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -531,24 +559,34 @@ const Settings: React.FC = () => {
             <DialogTitle>Change Password</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <FormField
-              type="password"
-              label="New Password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="New password"
-            />
-            <FormField
-              type="password"
-              label="Confirm Password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Confirm password"
-            />
+          <div className="space-y-1.5">
+            <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">New Password</label>
+            <div className="form-field-rest relative flex items-center">
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New password"
+                className="field-input-core"
+              />
+            </div>
           </div>
-          <DialogFooter className="flex gap-2 pt-2">
-            <NeuControl variant="secondary" className="flex-1" onClick={() => setPasswordOpen(false)}>Cancel</NeuControl>
-            <NeuControl className="flex-1" disabled={busy} onClick={submitPasswordChange}>Update</NeuControl>
+          <div className="space-y-1.5">
+            <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Confirm Password</label>
+            <div className="form-field-rest relative flex items-center">
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm password"
+                className="field-input-core"
+              />
+            </div>
+          </div>
+          </div>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setPasswordOpen(false)}>Cancel</NeuControl>
+            <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy} onClick={submitPasswordChange}>Update</NeuControl>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -563,15 +601,20 @@ const Settings: React.FC = () => {
             </DialogTitle>
             <DialogDescription>Type DELETE to confirm permanent deletion.</DialogDescription>
           </DialogHeader>
-          <FormField
-            label="Confirmation"
-            value={deleteConfirm}
-            onChange={(e) => setDeleteConfirm(e.target.value)}
-            placeholder="DELETE"
-          />
-          <DialogFooter className="flex gap-2 pt-2">
-            <NeuControl variant="secondary" className="flex-1" onClick={() => setDeleteOpen(false)}>Cancel</NeuControl>
-            <NeuControl variant="danger" className="flex-1" disabled={busy} onClick={submitDeleteAccount}>Delete</NeuControl>
+          <div className="space-y-1.5">
+            <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Confirmation</label>
+            <div className="form-field-rest relative flex items-center">
+              <input
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder="DELETE"
+                className="field-input-core"
+              />
+            </div>
+          </div>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setDeleteOpen(false)}>Cancel</NeuControl>
+            <NeuControl size="lg" variant="danger" className="flex-1 min-w-0" disabled={busy} onClick={submitDeleteAccount}>Delete</NeuControl>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -579,26 +622,21 @@ const Settings: React.FC = () => {
       {/* ── Logout confirm dialog ── */}
       <Dialog open={logoutOpen} onOpenChange={(o) => { if (!o) setLogoutOpen(false); }}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-amber-600" />
-              Log out?
+          <DialogHeader className="space-y-4 text-center">
+            <DialogTitle className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap leading-none">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600" />
+              <span>Log out?</span>
             </DialogTitle>
-            <DialogDescription>You&apos;ll need to sign in again.</DialogDescription>
+            <DialogDescription className="mt-2">You&apos;ll need to sign in again.</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="flex gap-2 pt-2">
-            <NeuControl variant="tertiary" className="flex-1" onClick={() => setLogoutOpen(false)}>Cancel</NeuControl>
-            <NeuControl variant="danger" className="flex-1" onClick={async () => { await signOut(); navigate("/auth", { replace: true }); }}>Log out</NeuControl>
+          <DialogFooter className="!flex-row gap-2 pt-4">
+            <NeuControl size="lg" variant="tertiary" className="flex-1 min-w-0" onClick={() => setLogoutOpen(false)}>Cancel</NeuControl>
+            <NeuControl size="lg" variant="danger" className="flex-1 min-w-0" onClick={async () => { await signOut(); navigate("/auth", { replace: true }); }}>Log out</NeuControl>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <ManageFamilySheet isOpen={familySheetOpen} onClose={() => setFamilySheetOpen(false)} />
-      <SharePerksModal
-        isOpen={slotModalOpen}
-        onClose={() => setSlotModalOpen(false)}
-        tier={effectiveTier.toLowerCase()}
-      />
 
       {/* ── Notification toggle-off confirm dialog ── */}
       <Dialog open={confirmToggleOff !== null} onOpenChange={(o) => { if (!o) setConfirmToggleOff(null); }}>

@@ -1,8 +1,8 @@
 // src/components/monetization/ManageFamilySheet.tsx
 import { useState, useEffect, useCallback } from "react";
-import { Plus, ShoppingBag, Check, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { motion, useMotionValue, useTransform, animate } from "framer-motion";
-import { GlassSheet } from "@/components/ui/GlassSheet";
+import { GlassModal } from "@/components/ui/GlassModal";
 import { FamilySearchDrawer } from "./FamilySearchDrawer";
 import { SharePerksModal } from "./SharePerksModal";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,13 +11,7 @@ import { toast } from "sonner";
 
 const BRAND_BLUE = "#2145CF";
 const SWIPE_THRESHOLD = -60;
-
-const FEATURES_BASE = [
-  "Your filters access",
-  "Broadcast range & duration",
-  "More Discovery",
-];
-const FEATURES_GOLD = ["Video uploads", "Top Profile Visibility"];
+const MAX_MEMBERS = 3;
 
 interface FamilyMember {
   id: string;
@@ -56,11 +50,10 @@ function MemberRow({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[12px]">
-      {/* Trash background */}
+    <div className="relative overflow-hidden">
       {isOwner && (
         <motion.div
-          className="absolute inset-y-0 right-0 flex items-center justify-center w-14 bg-red-500 rounded-[12px]"
+          className="absolute inset-y-0 right-0 flex items-center justify-center w-14 bg-red-500"
           style={{ opacity: trashOpacity }}
         >
           <Trash2 size={16} color="#fff" strokeWidth={1.75} />
@@ -72,29 +65,18 @@ function MemberRow({
         dragElastic={0.1}
         onDragEnd={handleDragEnd}
         style={{ x }}
-        className="relative flex items-center gap-3 py-3 px-1 bg-[var(--surface-neu)] rounded-[12px]"
+        className="relative flex items-center gap-3 py-3"
       >
         <img
           src={member.peer.avatar_url ?? "/placeholder.svg"}
           alt={member.peer.display_name ?? ""}
           className="w-9 h-9 rounded-full object-cover flex-shrink-0"
         />
-        <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
-            {member.peer.display_name}
-          </p>
-          <span className="text-[10px] font-[600] text-white bg-[var(--brand-blue)] rounded-full px-2 py-0.5">
-            Family Member
-          </span>
-        </div>
-        <span
-          className={`text-[11px] font-[500] px-2 py-0.5 rounded-full ${
-            member.status === "accepted"
-              ? "bg-green-100 text-green-700"
-              : "bg-amber-100 text-amber-700"
-          }`}
-        >
-          {member.status === "accepted" ? "Active" : "Pending"}
+        <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
+          {member.peer.display_name}
+        </span>
+        <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
+          Member
         </span>
         {swiped && isOwner && (
           <button
@@ -119,15 +101,15 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const familySlots = profile?.family_slots ?? 0;
-  const MAX_MEMBERS = 3;
 
-  // Determine if current user is the owner of a family group
   const memberRow = members.find((m) => m.invitee_user_id === profile?.id);
   const ownerMembers = members.filter((m) => m.inviter_user_id === profile?.id);
   const isOwner = ownerMembers.length > 0 || !memberRow;
   const acceptedCount = ownerMembers.filter((m) => m.status !== "declined").length;
-  const canAdd = isOwner && acceptedCount < familySlots && acceptedCount < MAX_MEMBERS;
-  const canBuyMore = isOwner && acceptedCount >= familySlots && familySlots < MAX_MEMBERS;
+  const usedSlots = acceptedCount;
+  const totalSlots = Math.min(familySlots, MAX_MEMBERS);
+
+  const linkedIds = ownerMembers.map((m) => m.invitee_user_id);
 
   const loadMembers = useCallback(async () => {
     if (!profile?.id) return;
@@ -191,40 +173,46 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
     onClose();
   }
 
-  const features = tier === "gold" ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
-  const linkedIds = ownerMembers.map((m) => m.invitee_user_id);
+  function handleAddPress() {
+    if (familySlots === 0) {
+      // No slots purchased — open upsell
+      setShowSlotModal(true);
+    } else if (acceptedCount < Math.min(familySlots, MAX_MEMBERS)) {
+      // Has capacity — invite someone
+      setShowSearch(true);
+    } else {
+      // All slots used — offer to buy more (if under max)
+      setShowSlotModal(true);
+    }
+  }
 
   return (
     <>
-      <GlassSheet isOpen={isOpen} onClose={onClose} title="Family Account">
-        <div className="px-4 pb-6 space-y-3">
-          {/* Tier / slot subtitle — owner only */}
+      <GlassModal isOpen={isOpen} onClose={onClose} title="Family Account" maxWidth="max-w-sm">
+        <div className="px-1 pb-2">
+          {/* Slot count subtitle */}
           {isOwner && (
-            <p className="text-[12px] text-[var(--text-secondary)] -mt-1">
-              {tier.charAt(0).toUpperCase() + tier.slice(1)} ·{" "}
-              {acceptedCount} of {Math.min(familySlots, MAX_MEMBERS)} slot
-              {familySlots !== 1 ? "s" : ""} used
+            <p className="text-[12px] text-[var(--text-secondary)] mb-4">
+              {usedSlots} of {totalSlots} Slots
             </p>
           )}
 
           {/* Owner row */}
-          <div className="flex items-center gap-3 py-3 px-1">
+          <div className="flex items-center gap-3 py-3">
             <img
               src={profile?.avatar_url ?? "/placeholder.svg"}
               alt="you"
               className="w-9 h-9 rounded-full object-cover flex-shrink-0"
             />
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
-                {profile?.display_name}
-              </p>
-              <span className="text-[11px] text-[var(--text-tertiary)]">
-                {isOwner ? "You · Owner" : ""}
-              </span>
-            </div>
+            <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
+              {profile?.display_name}
+            </span>
+            <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
+              Owner
+            </span>
           </div>
 
-          {/* Member rows */}
+          {/* Member rows (owner's invited members) */}
           {loading ? (
             <p className="text-[13px] text-[var(--text-tertiary)] py-2">Loading…</p>
           ) : (
@@ -233,66 +221,39 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
             ))
           )}
 
-          {/* Member view: show owner */}
+          {/* Member view: show the owner they belong to */}
           {memberRow && (
-            <div className="flex items-center gap-3 py-3 px-1">
+            <div className="flex items-center gap-3 py-3">
               <img
                 src={memberRow.peer.avatar_url ?? "/placeholder.svg"}
                 alt={memberRow.peer.display_name ?? ""}
                 className="w-9 h-9 rounded-full object-cover flex-shrink-0"
               />
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
-                  {memberRow.peer.display_name}
-                </p>
-                <span className="text-[11px] text-[var(--text-tertiary)]">Family Owner</span>
-              </div>
+              <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
+                {memberRow.peer.display_name}
+              </span>
+              <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
+                Owner
+              </span>
             </div>
           )}
 
+          {/* Empty state */}
           {ownerMembers.length === 0 && !loading && isOwner && (
             <p className="text-[13px] text-[var(--text-tertiary)] py-1">No members yet.</p>
           )}
 
-          {/* Add / slot upsell */}
-          {canAdd && (
-            <button
-              onClick={() => setShowSearch(true)}
-              className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px]"
-              style={{ borderColor: BRAND_BLUE, color: BRAND_BLUE }}
-              aria-label="Add member"
-            >
-              <Plus size={16} strokeWidth={2.5} />
-            </button>
-          )}
-          {canBuyMore && (
-            <button
-              onClick={() => setShowSlotModal(true)}
-              className="flex items-center gap-2 text-[13px] font-[500] py-2"
-              style={{ color: BRAND_BLUE }}
-            >
-              <ShoppingBag size={15} strokeWidth={1.75} />
-              Member slot
-            </button>
-          )}
-
-          {/* What members get */}
-          {isOwner && familySlots > 0 && (
-            <div className="mt-2 rounded-[14px] overflow-hidden border border-[rgba(0,0,0,0.06)]"
-              style={{ background: "rgba(255,255,255,0.7)" }}>
-              <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)]">
-                <p className="text-[12px] font-[600] text-[var(--text-primary)]">
-                  What members get
-                </p>
-              </div>
-              <div className="px-4 py-3 space-y-2">
-                {features.map((f) => (
-                  <div key={f} className="flex items-center gap-2">
-                    <Check size={12} strokeWidth={2.5} style={{ color: BRAND_BLUE }} />
-                    <span className="text-[12px] text-[var(--text-primary)]">{f}</span>
-                  </div>
-                ))}
-              </div>
+          {/* [+] add button — always visible for owner */}
+          {isOwner && (
+            <div className="mt-4">
+              <button
+                onClick={handleAddPress}
+                className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px]"
+                style={{ borderColor: BRAND_BLUE, color: BRAND_BLUE }}
+                aria-label="Add member"
+              >
+                <Plus size={16} strokeWidth={2.5} />
+              </button>
             </div>
           )}
 
@@ -300,13 +261,13 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
           {memberRow && (
             <button
               onClick={leaveFamily}
-              className="w-full text-center text-[13px] font-[500] text-red-500 pt-2"
+              className="mt-4 w-full text-center text-[13px] font-[500] text-red-500"
             >
               Leave Family
             </button>
           )}
         </div>
-      </GlassSheet>
+      </GlassModal>
 
       <FamilySearchDrawer
         isOpen={showSearch}

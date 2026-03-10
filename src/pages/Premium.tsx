@@ -210,8 +210,11 @@ export default function PremiumPage() {
   );
 
   const addonTotal = useMemo(
-    () => selectedAddonItems.reduce((sum, a) => sum + a.price, 0),
-    [selectedAddonItems]
+    () => selectedAddonItems.reduce(
+      (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
+      0
+    ),
+    [selectedAddonItems, livePrices]
   );
 
   const startPlanCheckout = async (tier: "plus" | "gold") => {
@@ -494,7 +497,7 @@ export default function PremiumPage() {
                       className="text-[13px] font-[600] mt-1"
                       style={{ color: BRAND_BLUE }}
                     >
-                      {fmtCurrency(addon.price)}{addon.billingNote ?? ""}
+                      {fmtCurrency(livePrices[addon.id as keyof LivePriceMap] ?? addon.price)}{addon.billingNote ?? ""}
                     </p>
                   </div>
 

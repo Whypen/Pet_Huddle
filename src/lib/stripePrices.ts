@@ -13,6 +13,10 @@ export type LivePriceMap = {
   plus_annual:  number; // total annual charge; divide by 12 for /mo equiv
   gold_monthly: number;
   gold_annual:  number;
+  // Add-ons
+  superBroadcast:    number;
+  topProfileBooster: number;
+  sharePerks:        number;
 };
 
 /** Canonical fallback from quotaConfig — shown instantly before the fetch resolves */
@@ -21,6 +25,10 @@ export const FALLBACK_PRICES: LivePriceMap = {
   plus_annual:  quotaConfig.stripePlans.plus.annual.amount,
   gold_monthly: quotaConfig.stripePlans.gold.monthly.amount,
   gold_annual:  quotaConfig.stripePlans.gold.annual.amount,
+  // Add-on fallbacks (cents → dollars)
+  superBroadcast:    4.99,
+  topProfileBooster: 2.99,
+  sharePerks:        4.99,
 };
 
 let _cache: LivePriceMap | null = null;
@@ -51,10 +59,13 @@ export function fetchLivePrices(): Promise<LivePriceMap> {
       if (!error && data?.prices) {
         const p = data.prices as Record<string, { amount?: number }>;
         _cache = {
-          plus_monthly: typeof p.plus_monthly?.amount === "number" ? p.plus_monthly.amount : FALLBACK_PRICES.plus_monthly,
-          plus_annual:  typeof p.plus_annual?.amount  === "number" ? p.plus_annual.amount  : FALLBACK_PRICES.plus_annual,
-          gold_monthly: typeof p.gold_monthly?.amount === "number" ? p.gold_monthly.amount : FALLBACK_PRICES.gold_monthly,
-          gold_annual:  typeof p.gold_annual?.amount  === "number" ? p.gold_annual.amount  : FALLBACK_PRICES.gold_annual,
+          plus_monthly:      typeof p.plus_monthly?.amount      === "number" ? p.plus_monthly.amount      : FALLBACK_PRICES.plus_monthly,
+          plus_annual:       typeof p.plus_annual?.amount       === "number" ? p.plus_annual.amount       : FALLBACK_PRICES.plus_annual,
+          gold_monthly:      typeof p.gold_monthly?.amount      === "number" ? p.gold_monthly.amount      : FALLBACK_PRICES.gold_monthly,
+          gold_annual:       typeof p.gold_annual?.amount       === "number" ? p.gold_annual.amount       : FALLBACK_PRICES.gold_annual,
+          superBroadcast:    typeof p.superBroadcast?.amount    === "number" ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
+          topProfileBooster: typeof p.topProfileBooster?.amount === "number" ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
+          sharePerks:        typeof p.sharePerks?.amount        === "number" ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
         };
       } else {
         _cache = { ...FALLBACK_PRICES };
