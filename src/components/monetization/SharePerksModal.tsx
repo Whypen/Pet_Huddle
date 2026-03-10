@@ -6,11 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 const BRAND_BLUE = "#2145CF";
-const CARD_FLOAT_STYLE = {
-  border: "1.5px solid rgba(255,255,255,0.88)",
-  boxShadow: "0 8px 28px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07)",
-};
-
+const LIME = "#7CFF6B";
 const SHARE_PERKS_PRICE = 4.99;
 
 interface Props {
@@ -55,47 +51,51 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   }
 
   return (
-    <GlassModal isOpen={isOpen} onClose={onClose} title="Member Slot" maxWidth="max-w-sm">
-      <div className="rounded-[16px] overflow-hidden" style={CARD_FLOAT_STYLE}>
-        {/* Header stripe */}
-        <div
-          className="flex items-center gap-2 px-5 py-4"
+    <GlassModal isOpen={isOpen} onClose={onClose} hideClose maxWidth="max-w-sm" className="!p-0 overflow-hidden">
+      {/* Header stripe */}
+      <div
+        className="flex items-center gap-2 px-5 py-4"
+        style={{ background: BRAND_BLUE }}
+      >
+        <Users2 size={18} color="#fff" strokeWidth={1.75} />
+        <span className="text-[15px] font-[600] text-white">Share Perks</span>
+        <span className="ml-auto text-[13px] font-[500] text-white/80">
+          ${SHARE_PERKS_PRICE}/mo
+        </span>
+      </div>
+
+      {/* Body */}
+      <div className="px-5 pt-4 pb-5 space-y-2">
+        <p className="text-[13px] text-[var(--text-secondary)]">
+          Mirrors tier's access to exclusive features
+        </p>
+        <div className="space-y-1.5 pt-1">
+          {features.map((f) => (
+            <div key={f} className="flex items-center gap-2">
+              <span
+                className="flex items-center justify-center w-[18px] h-[18px] rounded-full flex-shrink-0"
+                style={{ background: LIME }}
+              >
+                <Check size={10} strokeWidth={3} color="#fff" />
+              </span>
+              <span className="text-[13px] text-[var(--text-primary)]">{f}</span>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={handlePurchase}
+          disabled={loading}
+          className="mt-4 w-full rounded-[12px] py-3 text-[14px] font-[600] text-white"
           style={{ background: BRAND_BLUE }}
         >
-          <Users2 size={18} color="#fff" strokeWidth={1.75} />
-          <span className="text-[15px] font-[600] text-white">Share Perks</span>
-          <span className="ml-auto text-[13px] font-[500] text-white/80">
-            ${SHARE_PERKS_PRICE}/mo
-          </span>
-        </div>
-        {/* Body */}
-        <div className="bg-white px-5 py-4 space-y-2">
-          <p className="text-[12px] text-[var(--text-secondary)]">
-            Mirrors tier's access to exclusive features
-          </p>
-          <div className="space-y-1.5 pt-1">
-            {features.map((f) => (
-              <div key={f} className="flex items-center gap-2">
-                <Check size={13} strokeWidth={2.5} style={{ color: BRAND_BLUE }} />
-                <span className="text-[13px] text-[var(--text-primary)]">{f}</span>
-              </div>
-            ))}
-          </div>
-          <button
-            onClick={handlePurchase}
-            disabled={loading}
-            className="mt-4 w-full rounded-[12px] py-3 text-[14px] font-[600] bg-white"
-            style={{ color: BRAND_BLUE, border: `1.5px solid ${BRAND_BLUE}` }}
-          >
-            {loading ? "Loading…" : "Purchase Member Slot"}
-          </button>
-          <button
-            onClick={onClose}
-            className="w-full text-center text-[12px] text-[var(--text-tertiary)] pt-1"
-          >
-            Maybe later
-          </button>
-        </div>
+          {loading ? "Loading…" : "Purchase Member Slot"}
+        </button>
+        <button
+          onClick={onClose}
+          className="w-full text-center text-[12px] text-[var(--text-tertiary)] pt-1"
+        >
+          Maybe later
+        </button>
       </div>
     </GlassModal>
   );
