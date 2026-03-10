@@ -391,14 +391,16 @@ const SignupCredentials = () => {
           {/* OTP verification */}
           {otpSent && (
             <div>
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1 mb-2 block">Verification code</label>
-              <div className="flex items-center gap-2">
+              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1 block" style={{ marginBottom: "var(--field-gap-lc, 6px)" }}>
+                Verification code
+              </label>
+              <div className="form-field-rest relative flex items-center">
                 <input
                   inputMode="numeric"
                   maxLength={6}
-                  placeholder="Enter 6-digit code"
+                  placeholder="6-digit code"
                   autoComplete="one-time-code"
-                  className="flex-1 h-10 px-3 rounded-[10px] bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)] border-0 outline-none text-[15px] font-medium text-[var(--text-primary,#424965)] placeholder:text-[rgba(74,73,101,0.35)] tracking-[0.18em]"
+                  className="field-input-core pl-4 pr-[88px] focus:outline-none peer tracking-[0.18em]"
                   value={otpValue}
                   onChange={(e) => {
                     const val = e.target.value.replace(/\D/g, "").slice(0, 6);
@@ -411,7 +413,7 @@ const SignupCredentials = () => {
                   size="sm"
                   onClick={verifyOtp}
                   disabled={otpVerified || otpValue.length !== 6}
-                  className={otpVerified ? "bg-brandSuccess hover:bg-brandSuccess text-white" : ""}
+                  className={`absolute right-2 ${otpVerified ? "bg-brandSuccess hover:bg-brandSuccess text-white" : ""}`}
                 >
                   {otpVerified ? "Verified ✓" : "Verify"}
                 </NeuButton>
