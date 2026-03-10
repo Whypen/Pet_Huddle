@@ -433,7 +433,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
           <img
             src={huddleLogo}
             alt={t("huddle")}
-            className="h-9 w-auto max-w-[180px] object-contain"
+            className="h-7 w-auto max-w-[140px] object-contain"
           />
         </button>
 
