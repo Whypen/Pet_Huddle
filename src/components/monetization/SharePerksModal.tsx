@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { Users2, Check } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
-import { fmtCurrency, fetchLivePrices, FALLBACK_PRICES } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES } from "@/lib/stripePrices";
+import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -70,7 +71,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <Users2 size={18} color="#fff" strokeWidth={1.75} />
         <span className="text-[15px] font-[600] text-white">Share Perks</span>
         <span className="ml-auto text-[13px] font-[500] text-white/80">
-          {fmtCurrency(livePrice)}/mo
+          <PriceDisplay n={livePrice} suffix="/mo" />
         </span>
       </div>
 

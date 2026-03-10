@@ -28,7 +28,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, fmtCurrency, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
+import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -362,7 +363,7 @@ export default function PremiumPage() {
           {/* Price */}
           {!isAnnual ? (
             <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-              {fmtCurrency(monthlyAmt)}
+              <PriceDisplay n={monthlyAmt} />
               <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
             </p>
           ) : (
@@ -372,15 +373,15 @@ export default function PremiumPage() {
                   className="text-[15px] font-[400] line-through opacity-60"
                   style={{ color: theme.textOnBg }}
                 >
-                  {fmtCurrency(monthlyAmt)}
+                  <PriceDisplay n={monthlyAmt} />
                 </span>
                 <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                  {fmtCurrency(annualPerMo)}
+                  <PriceDisplay n={annualPerMo} />
                   <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
                 </p>
               </div>
               <p className="text-[12px] mt-0.5 opacity-75" style={{ color: theme.textOnBg }}>
-                {fmtCurrency(annualTotal)} billed yearly
+                <PriceDisplay n={annualTotal} /> billed yearly
               </p>
             </div>
           )}
@@ -497,7 +498,7 @@ export default function PremiumPage() {
                       className="text-[13px] font-[600] mt-1"
                       style={{ color: BRAND_BLUE }}
                     >
-                      {fmtCurrency(livePrices[addon.id as keyof LivePriceMap] ?? addon.price)}{addon.billingNote ?? ""}
+                      <PriceDisplay n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price} suffix={addon.billingNote} />
                     </p>
                   </div>
 
@@ -542,7 +543,7 @@ export default function PremiumPage() {
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
             {selectedAddonItems.length > 0
-              ? `Purchase Add-ons · ${fmtCurrency(addonTotal)}`
+              ? <>Purchase Add-ons · <PriceDisplay n={addonTotal} /></>
               : "Purchase Add-ons"}
           </button>
 
