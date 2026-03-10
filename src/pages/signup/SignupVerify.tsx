@@ -190,7 +190,7 @@ const SignupVerify = () => {
         }
       >
         {/* Hero illustration */}
-        <img src={signupVerifyImg} alt="" aria-hidden className="w-full object-contain -mt-2 mb-6" />
+        <img src={signupVerifyImg} alt="" aria-hidden className="w-full object-contain max-h-[170px] -mt-2 mb-4" />
 
         {/* Headline */}
         <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
@@ -200,7 +200,7 @@ const SignupVerify = () => {
           Build the safest community for our pets and earn your <strong className="font-[600] text-[#424965]">Verified</strong> badge by completing a quick identity check.
         </p>
 
-        <form id={FORM_ID} onSubmit={handleSubmit(onStartVerification)} className="mt-8 space-y-6">
+        <form id={FORM_ID} onSubmit={handleSubmit(onStartVerification)} className="mt-5 space-y-3">
           {/* Legal name */}
           <FormField
             label="Legal Name (as shown on ID)"
@@ -225,7 +225,8 @@ const SignupVerify = () => {
               </span>
             </div>
             <p className="text-[13px] text-[rgba(74,73,101,0.70)] mt-[8px] leading-relaxed">
-              Let the community know you can be trusted for care and advice, and that you're ready to help any pet in need. Trust starts with you.
+              Let the community know you can be trusted for care and advice, and that you're ready to help any pet in need.
+              <br />Trust starts with you.
             </p>
           </div>
         </form>
