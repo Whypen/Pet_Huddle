@@ -4,7 +4,7 @@
  * All business logic (OTP, duplicate detection, password strength, dialog) preserved.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
