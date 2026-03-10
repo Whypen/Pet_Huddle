@@ -26,6 +26,20 @@ export const FALLBACK_PRICES: LivePriceMap = {
 let _cache: LivePriceMap | null = null;
 let _inflight: Promise<LivePriceMap> | null = null;
 
+/** Formats a number as a USD currency string using the browser locale. */
+export function fmtCurrency(n: number): string {
+  try {
+    return new Intl.NumberFormat(navigator.language, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return `$${n.toFixed(2)}`;
+  }
+}
+
 /** Returns live Stripe prices; result is cached for the entire app session. */
 export function fetchLivePrices(): Promise<LivePriceMap> {
   if (_cache) return Promise.resolve(_cache);

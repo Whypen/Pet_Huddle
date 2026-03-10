@@ -28,7 +28,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, fmtCurrency, type LivePriceMap } from "@/lib/stripePrices";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ type FeatureRow = {
 };
 
 type AddOnItem = {
-  id: "superBroadcast" | "discoveryBoost" | "sharePerks";
+  id: "superBroadcast" | "topProfileBooster" | "sharePerks";
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
   title: string;
   subtitle: string;
@@ -90,14 +90,14 @@ const ADD_ONS: AddOnItem[] = [
     id: "superBroadcast",
     icon: Megaphone,
     title: "Super Broadcast",
-    subtitle: "72h · 150km · slot bypass",
+    subtitle: "Highlighted for 72h · range 150km",
     price: 4.99,
   },
   {
-    id: "discoveryBoost",
+    id: "topProfileBooster",
     icon: Zap,
-    title: "Discovery Boost",
-    subtitle: "3× ranking weight · 24h",
+    title: "Top Profile Booster",
+    subtitle: "3x Prioritized Profile Visibility · 24h",
     price: 2.99,
   },
   {
@@ -111,19 +111,6 @@ const ADD_ONS: AddOnItem[] = [
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtCurrency(n: number): string {
-  try {
-    return new Intl.NumberFormat(navigator.language, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(n);
-  } catch {
-    return `$${n.toFixed(2)}`;
-  }
-}
 
 function discountPct(monthlyAmt: number, annualTotal: number): number {
   return Math.round((1 - annualTotal / 12 / monthlyAmt) * 100);
@@ -142,7 +129,7 @@ export default function PremiumPage() {
   const [goldBilling, setGoldBilling] = useState<Billing>("monthly");
   const [addonSelected, setAddonSelected] = useState<Record<AddOnItem["id"], boolean>>({
     superBroadcast: false,
-    discoveryBoost: false,
+    topProfileBooster: false,
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);

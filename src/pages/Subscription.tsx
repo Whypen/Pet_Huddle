@@ -1,407 +1,176 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+/**
+ * Subscription — C.3 scrollable fallback route (/subscription → /premium)
+ * Rendered when user navigates directly via Settings → "View plans"
+ * NOT triggered from a locked-feature paywall context (that uses PaywallModal)
+ *
+ * Layout:
+ *   Hero h1 + body → PlanToggle → PricingCards (Plus + Gold) → Feature section → FAQ → Footer
+ */
+
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  Crown,
-  Check,
-  X,
-  CreditCard,
-  History,
-  Sparkles,
-  Loader2,
-  Apple,
-  Star,
-  AlertTriangle,
-  Camera,
-  Users,
-  Shield,
-} from "lucide-react";
-import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { ArrowLeft, HelpCircle, ChevronDown } from "lucide-react";
+import { PricingCard } from "@/components/subscription/PricingCard";
+import { PlanToggle } from "@/components/ui/v3/PlanToggle";
+import { FeatureRow } from "@/components/subscription/FeatureRow";
+import { fmtCurrency } from "@/lib/stripePrices";
 
-interface PlanFeature {
-  name: string;
-  free: boolean | string;
-  premium: boolean | string;
-}
+// ─── FAQ ──────────────────────────────────────────────────────────────────────
 
-const planFeatures: PlanFeature[] = [
-  { name: "Badge Type", free: "Grey Badge", premium: "Gold Badge" },
-  { name: "All Chats", free: "Limited", premium: "All Access" },
-  { name: "AI Chat", free: "Text Only", premium: "Photo/Audio AI" },
-  { name: "Broadcast Range", free: "1 mile", premium: "5 miles" },
-  { name: "Filters", free: "Single Filter", premium: "Multi-select" },
-  { name: "Ghost Mode", free: false, premium: true },
-  { name: "Notice Board Posting", free: false, premium: true },
-  { name: "Priority Support", free: false, premium: true },
-  { name: "Ad-free Experience", free: false, premium: true },
+const FAQ_ITEMS = [
+  {
+    q: "Can I cancel anytime?",
+    a: "Yes — you can cancel your subscription at any time from Settings. Your access continues until the end of the billing period.",
+  },
+  {
+    q: "What payment methods are accepted?",
+    a: "We accept all major credit cards, Apple Pay, and Google Pay.",
+  },
+  {
+    q: "Is there a free trial?",
+    a: "New subscribers get a 7-day free trial on Plus. Gold upgrades are billed immediately.",
+  },
 ];
 
-const paymentMethods = [
-  { id: "apple", name: "Apple Pay", icon: Apple },
-  { id: "card", name: "Credit Card", icon: CreditCard },
-  { id: "paypal", name: "PayPal", icon: CreditCard },
+// ─── Feature table ────────────────────────────────────────────────────────────
+
+const FEATURES = [
+  { label: "Unlimited pet profiles",        icon: "check" as const, badge: null },
+  { label: "Advanced Social discovery",     icon: "check" as const, badge: "plus" as const },
+  { label: "Priority AI Vet responses",     icon: "check" as const, badge: "plus" as const },
+  { label: "Emergency broadcasts",          icon: "check" as const, badge: "plus" as const },
+  { label: "Gold verified badge",           icon: "lock" as const,  badge: "gold" as const },
+  { label: "Exclusive Gold community",      icon: "lock" as const,  badge: "gold" as const },
+  { label: "Priority nanny matching",       icon: "lock" as const,  badge: "gold" as const },
 ];
 
-const addOns = [
-  { id: "star_pack", name: "3 Star Pack", icon: Star },
-  { id: "emergency_alert", name: "Emergency Alert", icon: AlertTriangle },
-  { id: "vet_media", name: "AI Vet Media", icon: Camera },
-  { id: "family_slot", name: "Family Slot", icon: Users },
-  { id: "verified_badge", name: "Verified Badge", icon: Shield },
-];
+// ─── Component ────────────────────────────────────────────────────────────────
 
-const Subscription = () => {
+const Subscription: React.FC = () => {
   const navigate = useNavigate();
-  const { profile, user, refreshProfile } = useAuth();
-  const { t } = useLanguage();
-  const [selectedPlan, setSelectedPlan] = useState<"monthly" | "yearly">("monthly");
-  const [selectedPayment, setSelectedPayment] = useState<string>("apple");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showTransactions, setShowTransactions] = useState(false);
+  const [billing, setBilling] = useState<"monthly" | "annual">("annual");
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
-
-  // Updated pricing per requirements
-  const pricing = {
-    monthly: { price: 8.99, period: "month" },
-    yearly: { price: 80, period: "year", monthlyEquivalent: 6.67, savings: "Save 26%" },
-  };
-
-  const handleUpgrade = () => {
-    navigate("/premium");
-  };
-
-  const handleManageBilling = async () => {
-    if (!user) return;
-    setIsProcessing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("create-portal-session", {
-        body: {
-          userId: user.id,
-          returnUrl: `${window.location.origin}/subscription`,
-        },
-      });
-      if (error) throw error;
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      toast.error(message || "Failed to open billing portal");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  const isAnnual = billing === "annual";
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
-      <GlobalHeader />
-
-      {/* Header */}
-      <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
-          <ArrowLeft className="w-5 h-5" />
+    <div className="min-h-svh">
+      {/* Back header */}
+      <header className="glass-bar fixed top-0 inset-x-0 z-[20] h-[56px] flex items-center px-[16px] gap-[12px]">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="w-[40px] h-[40px] rounded-[12px] flex items-center justify-center text-[rgba(74,73,101,0.55)] hover:text-[#424965] hover:bg-[rgba(255,255,255,0.38)] [transition:background-color_120ms_cubic-bezier(0.0,0.0,0.2,1)]"
+          aria-label="Back"
+        >
+          <ArrowLeft size={24} strokeWidth={1.5} />
         </button>
-        <h1 className="text-xl font-bold">{t("Manage Subscription")}</h1>
+        <h1 className="text-[22px] font-[600] leading-[1.15] tracking-[-0.02em] text-[#424965]">
+          Plans
+        </h1>
       </header>
 
-      <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 140px)" }}>
-        {/* Hero */}
-        <div className="relative bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-6 mb-6 overflow-hidden">
-          <div className="absolute inset-0 overflow-hidden">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-              className="absolute -top-20 -right-20 w-40 h-40 bg-white/10 rounded-full"
-            />
-          </div>
-          <div className="relative text-center">
-            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <Crown className="w-8 h-8 text-white" />
-            </div>
-            <h2 className="text-2xl font-bold text-white mb-1">{t("huddle Premium")}</h2>
-            <p className="text-white/90 text-sm">{t("Everything included")}</p>
-          </div>
+      {/* Scrollable content */}
+      <div
+        className="px-[20px] pb-[40px]"
+        style={{
+          paddingTop: "calc(56px + 24px + env(safe-area-inset-top, 0px))",
+          paddingBottom: "calc(40px + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        {/* ── Hero ──────────────────────────────────────────────────────────── */}
+        <h1 className="text-[22px] font-[600] leading-[1.15] tracking-[-0.02em] text-[#424965] max-w-[22ch]">
+          Upgrade Huddle
+        </h1>
+        <p className="text-[15px] font-[400] leading-[1.55] text-[#4a4a4a] mt-[8px] max-w-[36ch]">
+          More safety. More connection.
+        </p>
+
+        {/* ── PlanToggle ─────────────────────────────────────────────────────── */}
+        <div className="mt-[32px] flex justify-center">
+          <PlanToggle
+            value={billing}
+            onChange={setBilling}
+            options={[
+              { value: "monthly", label: "Monthly" },
+              { value: "annual",  label: "Annual", saveBadge: "-17%" },
+            ]}
+          />
         </div>
 
-        {/* Current Status */}
-        {isPremium && (
-          <div className="bg-primary/10 rounded-xl p-4 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <p className="font-semibold text-primary">
-                  {t("You're a Premium Member!")}
-                </p>
-                <p className="text-sm text-primary/80">
-                  {t("Next billing:")} {new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ── Pricing cards ─────────────────────────────────────────────────── */}
+        <div className="mt-[32px] flex flex-col gap-[16px] items-center">
+          <PricingCard
+            tier="plus"
+            price={isAnnual ? fmtCurrency(3.99) : fmtCurrency(4.99)}
+            billedNote={isAnnual ? `Billed annually (${fmtCurrency(47.88)}/yr)` : "Billed monthly"}
+            features={[
+              { label: "Unlimited pet profiles", icon: "check" },
+              { label: "Advanced Social discovery", icon: "check", badge: "plus" },
+              { label: "Priority AI Vet", icon: "check", badge: "plus" },
+              { label: "Emergency broadcasts", icon: "check", badge: "plus" },
+            ]}
+            ctaLabel="Start Free Trial"
+            onCta={() => {}}
+            recommended
+          />
+          <PricingCard
+            tier="gold"
+            price={isAnnual ? fmtCurrency(7.99) : fmtCurrency(9.99)}
+            billedNote={isAnnual ? `Billed annually (${fmtCurrency(95.88)}/yr)` : "Billed monthly"}
+            features={[
+              { label: "Everything in Plus", icon: "check" },
+              { label: "Gold verified badge", icon: "lock", badge: "gold" },
+              { label: "Priority nanny matching", icon: "lock", badge: "gold" },
+              { label: "Exclusive Gold community", icon: "lock", badge: "gold" },
+            ]}
+            ctaLabel="Upgrade to Gold"
+            onCta={() => {}}
+          />
+        </div>
 
-        {/* Compare Plans Table - SPRINT 3: Moved between Banner and Pricing */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
-          <div className="grid grid-cols-3 bg-muted/50">
-            <div className="p-3">
-              <span className="text-sm font-medium text-muted-foreground">{t("Feature")}</span>
-            </div>
-            <div className="p-3 text-center border-l border-border">
-              <span className="text-sm font-medium">{t("Free")}</span>
-            </div>
-            <div className="p-3 text-center border-l border-border bg-primary/5">
-              <span className="text-sm font-semibold text-primary">
-                {t("Premium")}
-              </span>
-            </div>
-          </div>
-
-          {planFeatures.map((feature, i) => (
-            <div
-              key={feature.name}
-              className={cn("grid grid-cols-3", i % 2 === 0 && "bg-muted/30")}
-            >
-              <div className="p-3 text-sm">{feature.name}</div>
-              <div className="p-3 text-center border-l border-border">
-                {typeof feature.free === "boolean" ? (
-                  feature.free ? (
-                    <Check className="w-4 h-4 text-accent mx-auto" />
-                  ) : (
-                    <X className="w-4 h-4 text-muted-foreground mx-auto" />
-                  )
-                ) : (
-                  <span className="text-xs text-muted-foreground">{feature.free}</span>
-                )}
-              </div>
-              <div className="p-3 text-center border-l border-border bg-primary/5">
-                {typeof feature.premium === "boolean" ? (
-                  feature.premium ? (
-                    <Check className="w-4 h-4 text-primary mx-auto" />
-                  ) : (
-                    <X className="w-4 h-4 text-muted-foreground mx-auto" />
-                  )
-                ) : (
-                  <span className="text-xs font-medium text-primary">
-                    {feature.premium}
-                  </span>
-                )}
-              </div>
+        {/* ── Feature comparison ────────────────────────────────────────────── */}
+        <div className="glass-card mt-[40px] overflow-hidden" style={{ padding: 0 }}>
+          {FEATURES.map((f, i) => (
+            <div key={f.label} className={i > 0 ? "border-t border-white/15" : ""}>
+              <FeatureRow {...f} className="px-[16px]" />
             </div>
           ))}
         </div>
 
-        {/* Plan Toggle - Only for non-premium */}
-        {!isPremium && (
-          <>
-            {/* Pricing Cards */}
-            <div className="grid grid-cols-2 gap-3 mb-6">
-              {/* Monthly Card */}
+        {/* ── FAQ ───────────────────────────────────────────────────────────── */}
+        <div className="glass-card mt-[40px] overflow-hidden" style={{ padding: 0 }}>
+          {FAQ_ITEMS.map((item, i) => (
+            <div key={item.q} className={i > 0 ? "border-t border-white/15" : ""}>
               <button
-                onClick={() => setSelectedPlan("monthly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all",
-                  selectedPlan === "monthly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
+                type="button"
+                onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                className="w-full flex items-center gap-[12px] px-[16px] py-[14px] text-left"
+                aria-expanded={openFaq === i}
               >
-                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Monthly")}</p>
-                <p className="text-2xl font-bold">${pricing.monthly.price}</p>
-                <p className="text-xs text-muted-foreground">{t("per month")}</p>
+                <HelpCircle size={16} strokeWidth={1.5} className="text-[rgba(74,73,101,0.55)] flex-shrink-0" aria-hidden />
+                <span className="flex-1 text-[13px] font-[500] text-[#424965]">{item.q}</span>
+                <ChevronDown
+                  size={16}
+                  strokeWidth={1.5}
+                  className="text-[rgba(74,73,101,0.55)] transition-transform duration-[200ms]"
+                  style={{ transform: openFaq === i ? "rotate(180deg)" : "rotate(0deg)" }}
+                  aria-hidden
+                />
               </button>
-
-              {/* Yearly Card */}
-              <button
-                onClick={() => setSelectedPlan("yearly")}
-                className={cn(
-                  "p-4 rounded-xl border-2 text-left transition-all relative",
-                  selectedPlan === "yearly"
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50"
-                )}
-              >
-                <span className="absolute -top-2 right-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full font-medium">
-                  {t(pricing.yearly.savings)}
-                </span>
-                <p className="text-sm font-medium text-muted-foreground mb-1">{t("Yearly")}</p>
-                <p className="text-2xl font-bold">${pricing.yearly.price}</p>
-                <p className="text-xs text-muted-foreground">
-                  ${pricing.yearly.monthlyEquivalent.toFixed(2)}{t("/month")}
-                </p>
-              </button>
-            </div>
-
-            {/* Payment Method Selector - SPRINT 3: Apple Pay/Credit Card UI */}
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("Payment Method")}</h3>
-              <div className="space-y-2">
-                {paymentMethods.map((method) => (
-                  <button
-                    key={method.id}
-                    onClick={() => setSelectedPayment(method.id)}
-                    className={cn(
-                      "w-full flex items-center gap-3 p-3 rounded-xl border transition-all",
-                      selectedPayment === method.id
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    )}
-                  >
-                    <method.icon className="w-5 h-5 text-muted-foreground" />
-                    <span className="font-medium">{t(method.name)}</span>
-                    {selectedPayment === method.id && (
-                      <Check className="w-4 h-4 text-primary ml-auto" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Pricing CTA */}
-        {!isPremium && (
-          <div className="bg-card rounded-xl p-6 border border-border mb-6">
-            <div className="text-center mb-4">
-              <div className="flex items-baseline justify-center gap-1">
-                <span className="text-3xl font-bold">
-                  ${selectedPlan === "monthly" ? pricing.monthly.price : pricing.yearly.price}
-                </span>
-                <span className="text-muted-foreground">
-                  /{pricing[selectedPlan].period}
-                </span>
-              </div>
-              {selectedPlan === "yearly" && (
-                <p className="text-sm text-accent mt-1">
-                  That's only ${pricing.yearly.monthlyEquivalent.toFixed(2)}/month!
+              {openFaq === i && (
+                <p className="px-[16px] pb-[14px] text-[13px] font-[400] leading-[1.55] text-[rgba(74,73,101,0.70)] max-w-[36ch]">
+                  {item.a}
                 </p>
               )}
             </div>
-            <Button
-              onClick={handleUpgrade}
-              disabled={isProcessing}
-              className="w-full py-6 text-lg gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  Upgrade to Premium
-                </>
-              )}
-            </Button>
-            <p className="text-xs text-center text-muted-foreground mt-3">
-              Cancel anytime. No commitments.
-            </p>
-          </div>
-        )}
-
-        {/* Add-ons */}
-        <div className="bg-card rounded-xl p-6 border border-border mb-6">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3">{t("Add-ons")}</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {addOns.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => navigate("/premium")}
-                className="flex items-center gap-2 p-3 rounded-xl border border-border hover:bg-muted/50 transition-colors"
-              >
-                <item.icon className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">{item.name}</span>
-              </button>
-            ))}
-          </div>
+          ))}
         </div>
 
-        {/* Billing Section */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-2">{t("Billing")}</h3>
-
-          <button
-            className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
-            onClick={handleManageBilling}
-          >
-            <div className="flex items-center gap-3">
-              <CreditCard className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium">{t("Payment Methods")}</span>
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {isPremium ? "•••• 4242" : "None"}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setShowTransactions(!showTransactions)}
-            className="flex items-center justify-between w-full p-4 bg-card rounded-xl border border-border hover:bg-muted/50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <History className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium">{t("Transaction History")}</span>
-            </div>
-          </button>
-
-          {/* Transaction History Expandable */}
-          <AnimatePresence>
-            {showTransactions && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="p-4 bg-muted/50 rounded-xl space-y-3">
-                  {isPremium ? (
-                    <>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="text-sm font-medium">{t("Plus Subscription")}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date().toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-medium">{t("$8.99 USD")}</p>
-                          <p className="text-xs text-accent">{t("Completed")}</p>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center">
-                      No transactions yet
-                    </p>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {isPremium && (
-            <button
-              onClick={handleManageBilling}
-              disabled={isProcessing}
-              className="w-full p-4 text-center text-muted-foreground font-medium rounded-xl border border-border hover:bg-muted/50 transition-colors"
-            >
-              {isProcessing ? "Opening portal..." : "Manage Billing"}
-            </button>
-          )}
-        </div>
-
-        {/* UAT: remove version string */}
-        <div className="mt-8 text-center" />
+        {/* ── Footer ────────────────────────────────────────────────────────── */}
+        <p className="text-[11px] font-[400] text-[rgba(74,73,101,0.55)] text-center mt-[48px]">
+          Cancel anytime · Secure payment
+        </p>
       </div>
     </div>
   );

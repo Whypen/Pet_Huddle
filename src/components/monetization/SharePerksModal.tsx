@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Users2, Check } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
+import { fmtCurrency } from "@/lib/stripePrices";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -35,7 +36,10 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         "create-checkout-session",
         {
           body: {
-            addon: "sharePerks",
+            mode: "subscription",
+            type: "sharePerks",
+            priceId: "price_1SwQsp5QcAjQDse0RaD0z8nh",
+            lookupKey: "Family_Member",
             successUrl: `${window.location.origin}/settings?addon_done=1`,
             cancelUrl: window.location.href,
           },
@@ -60,7 +64,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <Users2 size={18} color="#fff" strokeWidth={1.75} />
         <span className="text-[15px] font-[600] text-white">Share Perks</span>
         <span className="ml-auto text-[13px] font-[500] text-white/80">
-          ${SHARE_PERKS_PRICE}/mo
+          {fmtCurrency(SHARE_PERKS_PRICE)}/mo
         </span>
       </div>
 
@@ -85,7 +89,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <button
           onClick={handlePurchase}
           disabled={loading}
-          className="mt-4 w-full rounded-[12px] py-3 text-[14px] font-[600] text-white"
+          className="mt-7 w-full rounded-[12px] py-3 text-[14px] font-[600] text-white"
           style={{ background: BRAND_BLUE }}
         >
           {loading ? "Loading…" : "Purchase Member Slot"}
