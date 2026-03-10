@@ -1,12 +1,20 @@
-import { useMemo } from "react";
+/**
+ * SignupDob — C.5  Step 1 of 4
+ * Date-of-birth selector. Uses SignupShell for layout + animations.
+ */
+
+import { useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { dobSchema, isAtLeast16, isNotFuture, isValidDate } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui";
+import { SignupShell } from "@/components/signup/SignupShell";
+import signupDobImg from "@/assets/Sign up/Signup_DOB.png";
+
+// ─── Helpers (unchanged from original) ───────────────────────────────────────
 
 type DobForm = { dob_day: string; dob_month: string; dob_year: string };
 
@@ -24,10 +32,7 @@ const fromStoredDob = (value: string) => {
     if (!p1 || !p2 || !p3) return { dob_day: "", dob_month: "", dob_year: "" };
     let mm = p1;
     let dd = p2;
-    if (Number(p1) > 12 && Number(p2) <= 12) {
-      dd = p1;
-      mm = p2;
-    }
+    if (Number(p1) > 12 && Number(p2) <= 12) { dd = p1; mm = p2; }
     return { dob_day: pad2(dd), dob_month: pad2(mm), dob_year: p3 };
   }
   return { dob_day: "", dob_month: "", dob_year: "" };
@@ -38,9 +43,19 @@ const monthOptions = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
+const FORM_ID = "signup-dob-form";
+
 const SignupDob = () => {
   const navigate = useNavigate();
   const { data, update } = useSignup();
+  const [isExiting, setIsExiting] = useState(false);
+
+  const goTo = (to: string) => {
+    setIsExiting(true);
+    setTimeout(() => navigate(to), 180);
+  };
 
   const {
     handleSubmit,
@@ -53,21 +68,23 @@ const SignupDob = () => {
     defaultValues: fromStoredDob(data.dob || ""),
   });
 
-  const dobDay = watch("dob_day");
+  const dobDay   = watch("dob_day");
   const dobMonth = watch("dob_month");
-  const dobYear = watch("dob_year");
+  const dobYear  = watch("dob_year");
   const allSelected = Boolean(dobDay && dobMonth && dobYear);
   const assembledDob = allSelected ? `${dobYear}-${pad2(dobMonth)}-${pad2(dobDay)}` : "";
+
   const currentYear = new Date().getFullYear();
   const maxYear = currentYear - 16;
   const yearOptions = useMemo(
-    () => Array.from({ length: maxYear - 1900 + 1 }, (_, index) => maxYear - index),
+    () => Array.from({ length: maxYear - 1900 + 1 }, (_, i) => maxYear - i),
     [maxYear],
   );
+
   const isCalendarValid = allSelected ? isValidDate(assembledDob) : false;
-  const isFutureValid = allSelected ? isNotFuture(assembledDob) : false;
-  const isUnder16 = allSelected && isCalendarValid && isFutureValid ? !isAtLeast16(assembledDob) : false;
-  const isInvalidDate = allSelected ? !isCalendarValid || !isFutureValid : false;
+  const isFutureValid   = allSelected ? isNotFuture(assembledDob) : false;
+  const isUnder16       = allSelected && isCalendarValid && isFutureValid ? !isAtLeast16(assembledDob) : false;
+  const isInvalidDate   = allSelected ? !isCalendarValid || !isFutureValid : false;
   const dobError = isUnder16
     ? "Some functions in this app are only available to users above 16 years old"
     : isInvalidDate
@@ -75,54 +92,81 @@ const SignupDob = () => {
       : errors.dob_day?.message;
   const canContinue = allSelected && isCalendarValid && isFutureValid && !isUnder16;
 
+  const fieldErrorClass = dobError ? "border-red-500 focus:border-red-500" : "";
+
   const onSubmit = () => {
     if (!canContinue) return;
     update({ dob: assembledDob });
-    navigate("/signup/credentials");
+    goTo("/signup/credentials");
   };
 
-  const fieldErrorClass = dobError ? "border-red-500 focus:border-red-500" : "";
-
   return (
-    <div className="min-h-screen bg-white px-6">
-      {/* Navigation + step indicator */}
-      <div className="pt-6 flex items-center justify-between">
-        <button onClick={() => navigate("/auth")} className="p-2 -ml-2 min-w-[44px] min-h-[44px] flex items-center justify-center" aria-label="Back">
-          <ArrowLeft className="h-5 w-5 text-brandText" strokeWidth={1.75} />
-        </button>
-        <span className="text-helper text-brandSubtext/60">Step 1 of 4</span>
-      </div>
+    <SignupShell
+      step={1}
+      onBack={() => goTo("/auth")}
+      isExiting={isExiting}
+      cta={
+        <Button
+          variant="primary"
+          type="submit"
+          form={FORM_ID}
+          disabled={!canContinue}
+          className="w-full h-12"
+        >
+          Continue
+        </Button>
+      }
+    >
+      {/* Hero illustration */}
+      <img
+        src={signupDobImg}
+        alt=""
+        aria-hidden
+        className="w-full object-contain -mt-2 mb-6"
+      />
 
-      {/* Progress bar — thin */}
-      <div className="mt-3 h-1 w-full rounded-full bg-gray-100">
-        <div className="h-1 w-1/4 rounded-full bg-brandBlue transition-all" />
-      </div>
+      {/* Headline */}
+      <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
+        When were you born?
+      </h1>
 
-      {/* Hero block */}
-      <div className="mt-8 space-y-2">
-        <h1 className="font-display text-[28px] leading-[1.1] font-semibold text-brandText">
-          When were you born?
-        </h1>
-        <p className="text-base text-brandSubtext/70 leading-relaxed">
-          We use this to verify your age.
-        </p>
-      </div>
+      {/* Body copy */}
+      <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-2">
+        Huddle is a cozy corner where you can{" "}
+        <strong className="font-[600] text-[#424965]">Discover</strong>{" "}
+        pet lovers, use{" "}
+        <strong className="font-[600] text-[#424965]">Social</strong>{" "}
+        to share thoughts, and{" "}
+        <strong className="font-[600] text-[#424965]">Chat</strong>{" "}
+        directly with trusted friends, nannies, groomers, and vets.
+      </p>
+      <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-2">
+        This helps keep our community safe and trusted for everyone.
+      </p>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6" noValidate>
+      {/* Form */}
+      <form
+        id={FORM_ID}
+        onSubmit={handleSubmit(onSubmit)}
+        className="mt-8 space-y-6"
+        noValidate
+      >
         <div>
-          <label className="text-sub font-medium text-brandText mb-2 block">Date of birth</label>
+          <label className="text-[13px] font-[500] text-[#424965] mb-2 block">
+            Date of birth
+          </label>
           <div className="grid grid-cols-3 gap-2">
             <Controller
               control={control}
               name="dob_month"
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className={fieldErrorClass}>
+                  <SelectTrigger className={fieldErrorClass} style={{ fontSize: "16px" }}>
                     <SelectValue placeholder="Month" />
                   </SelectTrigger>
                   <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
-                    {monthOptions.map((label, index) => {
-                      const month = index + 1;
+                    {monthOptions.map((label, i) => {
+                      const month = i + 1;
                       return (
                         <SelectItem key={month} value={pad2(String(month))}>
                           {label}
@@ -138,12 +182,12 @@ const SignupDob = () => {
               name="dob_day"
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className={fieldErrorClass}>
+                  <SelectTrigger className={fieldErrorClass} style={{ fontSize: "16px" }}>
                     <SelectValue placeholder="Day" />
                   </SelectTrigger>
                   <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
-                    {Array.from({ length: 31 }, (_, index) => {
-                      const day = index + 1;
+                    {Array.from({ length: 31 }, (_, i) => {
+                      const day = i + 1;
                       return (
                         <SelectItem key={day} value={pad2(String(day))}>
                           {day}
@@ -159,7 +203,7 @@ const SignupDob = () => {
               name="dob_year"
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger className={fieldErrorClass}>
+                  <SelectTrigger className={fieldErrorClass} style={{ fontSize: "16px" }}>
                     <SelectValue placeholder="Year" />
                   </SelectTrigger>
                   <SelectContent position="popper" className="max-h-[260px] overflow-y-auto">
@@ -173,20 +217,30 @@ const SignupDob = () => {
               )}
             />
           </div>
-          {dobError && <p className="text-helper text-brandError mt-2" aria-live="polite">{dobError}</p>}
+          {/* Privacy reassurance */}
+          <p className="text-[12px] text-[rgba(74,73,101,0.55)] mt-3">
+            Don't worry— your full birthday is kept safe with us.
+          </p>
+
+          {dobError && (
+            <p className="text-[12px] text-[#EF4444] mt-2" aria-live="polite">
+              {dobError}
+            </p>
+          )}
         </div>
 
-        <Button type="submit" className="w-full neu-primary" disabled={!canContinue}>
-          Continue
-        </Button>
-
+        {/* Under-16 return link (body, not CTA bar) */}
         {isUnder16 && (
-          <Button type="button" variant="ghost" className="w-full" onClick={() => navigate("/auth")}>
+          <button
+            type="button"
+            onClick={() => goTo("/auth")}
+            className="w-full text-[15px] font-[400] text-[rgba(74,73,101,0.55)] hover:text-[#424965] transition-colors duration-150 min-h-[44px]"
+          >
             Return to Sign In
-          </Button>
+          </button>
         )}
       </form>
-    </div>
+    </SignupShell>
   );
 };
 
