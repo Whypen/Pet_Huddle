@@ -104,7 +104,7 @@ const ADD_ONS: AddOnItem[] = [
     id: "sharePerks",
     icon: Users2,
     title: "Share Perks",
-    subtitle: "Mirror tier to 2 members",
+    subtitle: "Mirrors tier's access to exclusive features",
     price: 4.99,
     billingNote: "/mo",
   },
@@ -619,7 +619,7 @@ export default function PremiumPage() {
                     className="w-full h-[36px] rounded-[18px] text-[13px] font-[600]"
                     style={
                       isActive
-                        ? { background: themeBg, color: activeTextColor }
+                        ? { background: themeBg, color: tab === "addons" ? BRAND_BLUE : activeTextColor }
                         : {
                             background: "rgba(255,255,255,0.18)",
                             color: BRAND_BLUE,
