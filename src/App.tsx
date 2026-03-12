@@ -12,8 +12,10 @@ import { PublicRoute } from "@/components/auth/PublicRoute";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { OfflineBanner } from "@/components/network/OfflineBanner";
 import { BottomNav } from "@/components/layout/BottomNav";
+import { AppShell } from "@/components/layout/AppShell";
 import Index from "./pages/Index";
 import Social from "./pages/Social";
+import Discover from "./pages/Discover";
 import Chats from "./pages/Chats";
 import ChatDialogue from "./pages/ChatDialogue";
 import AIVet from "./pages/AIVet";
@@ -25,23 +27,27 @@ import SignupCredentials from "./pages/signup/SignupCredentials";
 import SignupVerify from "./pages/signup/SignupVerify";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
-import Onboarding from "./pages/Onboarding";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
 import PetDetails from "./pages/PetDetails";
+import SetProfile from "./pages/SetProfile";
+import SetPetProfile from "./pages/SetPetProfile";
 import Settings from "./pages/Settings";
+import SecuritySettings from "./pages/SecuritySettings";
 import Premium from "./pages/Premium";
-import AccountSettings from "./pages/AccountSettings";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import Notifications from "./pages/Notifications";
 import Admin from "./pages/Admin";
-import VerifyIdentity from "./pages/auth/verify/VerifyIdentity";
+import VerifyIdentity from "./pages/VerifyIdentity";
+import CarerProfile from "./pages/CarerProfile";
+import Marketplace from "./pages/Marketplace";
 import AdminDisputes from "./screens/AdminDisputes";
 import AdminKYCReview from "./pages/admin/AdminKYCReview";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
+import { AppBackground } from "@/components/ui/AppBackground";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -59,6 +65,7 @@ const App = () => (
       <LanguageProvider>
         <NetworkProvider>
           <TooltipProvider>
+            <AppBackground />
             <Toaster />
             <Sonner />
             <BrowserRouter
@@ -82,25 +89,15 @@ const App = () => (
                   <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
                   <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
 
-                  {/* Onboarding Route (requires auth but not onboarding completion) */}
-                  <Route
-                    path="/onboarding"
-                    element={
-                      <ProtectedRoute requireOnboarding={false}>
-                        <Onboarding />
-                      </ProtectedRoute>
-                    }
-                  />
-
                   {/* Protected Routes */}
                   <Route
                     path="/"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <Index />
                           <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -108,10 +105,21 @@ const App = () => (
                     path="/social"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <Social />
                           <BottomNav />
-                        </div>
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/discover"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <Discover />
+                          <BottomNav />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -119,21 +127,10 @@ const App = () => (
                     path="/threads"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <Social />
                           <BottomNav />
-                        </div>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/threads/:threadId"
-                    element={
-                      <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
-                          <Social />
-                          <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -141,10 +138,10 @@ const App = () => (
                     path="/chats"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <Chats />
                           <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -152,10 +149,10 @@ const App = () => (
                     path="/chat-dialogue"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <ChatDialogue />
                           <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -163,10 +160,10 @@ const App = () => (
                     path="/ai-vet"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <AIVet />
                           <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -174,10 +171,10 @@ const App = () => (
                     path="/map"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <MapPage />
                           <BottomNav />
-                        </div>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -185,10 +182,21 @@ const App = () => (
                     path="/notifications"
                     element={
                       <ProtectedRoute>
-                        <div className="max-w-md mx-auto min-h-screen bg-background relative">
+                        <AppShell>
                           <Notifications />
                           <BottomNav />
-                        </div>
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/marketplace"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <Marketplace />
+                          <BottomNav />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -198,7 +206,9 @@ const App = () => (
                     path="/edit-profile"
                     element={
                       <ProtectedRoute>
-                        <EditProfile />
+                        <AppShell>
+                          <EditProfile />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -206,7 +216,9 @@ const App = () => (
                     path="/edit-pet-profile"
                     element={
                       <ProtectedRoute>
-                        <EditPetProfile />
+                        <AppShell>
+                          <EditPetProfile />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -214,7 +226,9 @@ const App = () => (
                     path="/pet-details"
                     element={
                       <ProtectedRoute>
-                        <PetDetails />
+                        <AppShell>
+                          <PetDetails />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -224,15 +238,19 @@ const App = () => (
                     path="/settings"
                     element={
                       <ProtectedRoute>
-                        <Settings />
+                        <AppShell>
+                          <Settings />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
                   <Route
-                    path="/account-settings"
+                    path="/settings/security"
                     element={
                       <ProtectedRoute>
-                        <AccountSettings />
+                        <AppShell>
+                          <SecuritySettings />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -248,7 +266,9 @@ const App = () => (
                     path="/premium"
                     element={
                       <ProtectedRoute>
-                        <Premium />
+                        <AppShell>
+                          <Premium />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -264,7 +284,39 @@ const App = () => (
                     path="/verify-identity"
                     element={
                       <ProtectedRoute>
-                        <VerifyIdentity />
+                        <AppShell>
+                          <VerifyIdentity />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/carerprofile"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <CarerProfile />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/set-profile"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <SetProfile />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/set-pet"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <SetPetProfile />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -272,7 +324,9 @@ const App = () => (
                     path="/privacy"
                     element={
                       <ProtectedRoute>
-                        <Privacy />
+                        <AppShell>
+                          <Privacy />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -280,7 +334,9 @@ const App = () => (
                     path="/terms"
                     element={
                       <ProtectedRoute>
-                        <Terms />
+                        <AppShell>
+                          <Terms />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -288,7 +344,9 @@ const App = () => (
                     path="/admin"
                     element={
                       <ProtectedRoute>
-                        <Admin />
+                        <AppShell>
+                          <Admin />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -296,7 +354,9 @@ const App = () => (
                     path="/admin/verifications"
                     element={
                       <ProtectedRoute>
-                        <AdminKYCReview />
+                        <AppShell>
+                          <AdminKYCReview />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />
@@ -304,7 +364,9 @@ const App = () => (
                     path="/admin/control-center"
                     element={
                       <ProtectedRoute>
-                        <AdminDisputes />
+                        <AppShell>
+                          <AdminDisputes />
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />

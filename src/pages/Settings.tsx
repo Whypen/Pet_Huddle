@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { CircleAlert, HelpCircle, Lock, ShieldAlert, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CircleAlert, HelpCircle, Lock, Shield, ShieldAlert, ShieldCheck, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight } from "lucide-react";
+import { listTotpFactors } from "@/lib/mfa";
+import { listPasskeyFactors } from "@/lib/passkey";
 import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,8 +13,9 @@ import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuChip } from "@/components/ui/NeuChip";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import strayCatImage from "@/assets/notifications/Stray cat.png";
-import strayDogImage from "@/assets/notifications/Stray dog.png";
+import { GlassModal } from "@/components/ui/GlassModal";
+import strayCatImage from "@/assets/Notifications/Stray Cat.jpg";
+import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -34,9 +37,7 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user, profile, signOut, refreshProfile } = useAuth();
-  const fromPage = (location.state as { from?: string } | null)?.from || null;
 
   const [loadingPrefs, setLoadingPrefs] = useState(true);
   const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
@@ -52,6 +53,9 @@ const Settings: React.FC = () => {
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
 
+  const [hasMfa, setHasMfa] = useState(false);
+  const [hasPasskey, setHasPasskey] = useState(false);
+
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -60,6 +64,7 @@ const Settings: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [carerGateOpen, setCarerGateOpen] = useState(false);
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
@@ -72,6 +77,23 @@ const Settings: React.FC = () => {
     .slice(0, 2) || "U";
   const effectiveTier = (p.effective_tier as string) || (p.tier as string) || "free";
   const verificationStatus = String(p.verification_status ?? "unverified").toLowerCase();
+  const dob = (p.dob as string | null) ?? null;
+  const isAge18Plus = dob
+    ? (() => {
+        const birth = new Date(dob);
+        const now = new Date();
+        const age = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
+      })()
+    : false;
+  const handleCarerProfileRow = () => {
+    if (verificationStatus === "verified") {
+      navigate("/carerprofile");
+    } else {
+      setCarerGateOpen(true);
+    }
+  };
   const speciesSource = [p.pet_species, p.pet_experience, p.species, p.pets]
     .flatMap((value) => {
       if (Array.isArray(value)) {
@@ -171,6 +193,18 @@ const Settings: React.FC = () => {
   useEffect(() => {
     void loadPrefs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    Promise.all([
+      listTotpFactors(supabase).then((factors) =>
+        setHasMfa(factors.some((f) => f.status === "verified"))
+      ).catch(() => {}),
+      listPasskeyFactors(supabase).then((factors) =>
+        setHasPasskey(factors.some((f) => f.status === "verified"))
+      ).catch(() => {}),
+    ]);
   }, [user?.id]);
 
   const persistPrefs = async (next: NotificationPrefs) => {
@@ -316,6 +350,13 @@ const Settings: React.FC = () => {
     setBusy(false);
 
     if (error) {
+      // Extract the actual error body for debugging
+      const ctx = (error as { context?: Response }).context;
+      if (ctx?.json) {
+        ctx.json().then((body: unknown) => {
+          console.error("[settings.delete_account.error_body]", body);
+        }).catch(() => {});
+      }
       console.error("[settings.delete_account.failed]", error);
       toast.error("We couldn't delete your account. Please retry.");
       return;
@@ -332,7 +373,7 @@ const Settings: React.FC = () => {
         title={<h1 className="text-base font-semibold text-[#424965] truncate">Account Settings</h1>}
         titleClassName="justify-start"
         showBack
-        onBack={() => fromPage ? navigate(fromPage, { state: { openSettings: true } }) : navigate(-1)}
+        onBack={() => navigate(-1)}
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -488,6 +529,42 @@ const Settings: React.FC = () => {
           />
         </InsetPanel>
 
+        {/* ── COMMUNITY ── */}
+        <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">Being a Community Provider</p>
+        <InsetPanel>
+          <InsetRow
+            label="Identity Verification"
+            icon={
+              <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${verificationStatus === "verified" ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white"}`}>
+                <Shield size={12} strokeWidth={1.75} />
+              </span>
+            }
+            variant="nav"
+            value={
+              verificationStatus === "verified" ? "Verified"
+              : verificationStatus === "pending" ? "Pending"
+              : undefined
+            }
+            onClick={() => navigate("/verify-identity")}
+          />
+          {isAge18Plus && (
+            <>
+              <InsetDivider />
+              <button
+                type="button"
+                onClick={handleCarerProfileRow}
+                className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
+              >
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[15px] font-[500] text-[var(--text-primary)]">Pet-Care Profile</span>
+                  <span className="block text-[11px] text-[var(--text-tertiary)] mt-0.5">Customize how you offer trusted support</span>
+                </span>
+                <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
+              </button>
+            </>
+          )}
+        </InsetPanel>
+
         {/* ── SECURITY ── */}
         <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">SECURITY</p>
         <InsetPanel>
@@ -496,6 +573,19 @@ const Settings: React.FC = () => {
             variant="nav"
             icon={<Lock size={16} strokeWidth={1.75} />}
             onClick={() => setPasswordOpen(true)}
+          />
+          <InsetDivider />
+          <InsetRow
+            label="Extra Security"
+            variant="nav"
+            icon={<ShieldCheck size={16} strokeWidth={1.75} />}
+            value={
+              hasMfa && hasPasskey ? "Authenticator & Passkey"
+              : hasMfa ? "Authenticator"
+              : hasPasskey ? "Passkey"
+              : undefined
+            }
+            onClick={() => navigate("/settings/security")}
           />
         </InsetPanel>
 
@@ -648,22 +738,26 @@ const Settings: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Logout confirm dialog ── */}
-      <Dialog open={logoutOpen} onOpenChange={(o) => { if (!o) setLogoutOpen(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader className="space-y-4 text-center">
-            <DialogTitle className="w-full inline-flex items-center justify-center gap-2 whitespace-nowrap leading-none">
-              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600" />
-              <span>Log out?</span>
-            </DialogTitle>
-            <DialogDescription className="mt-2">You&apos;ll need to sign in again.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="!flex-row gap-2 pt-4">
-            <NeuControl size="lg" variant="tertiary" className="flex-1 min-w-0" onClick={() => setLogoutOpen(false)}>Cancel</NeuControl>
-            <NeuControl size="lg" variant="danger" className="flex-1 min-w-0" onClick={async () => { await signOut(); navigate("/auth", { replace: true }); }}>Log out</NeuControl>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ── Logout confirm modal ── */}
+      <GlassModal isOpen={logoutOpen} onClose={() => setLogoutOpen(false)} title="Log out?" hideClose>
+        <p className="text-[14px] leading-[1.55] text-[var(--text-secondary)] text-center mb-5">
+          You&apos;ll need to sign in again.
+        </p>
+        <div className="flex gap-3">
+          <NeuControl size="lg" variant="secondary" fullWidth onClick={() => setLogoutOpen(false)}>Cancel</NeuControl>
+          <NeuControl
+            size="lg"
+            variant="danger"
+            fullWidth
+            onClick={async () => {
+              await signOut();
+              navigate("/auth", { replace: true });
+            }}
+          >
+            Log out
+          </NeuControl>
+        </div>
+      </GlassModal>
 
       <ManageFamilySheet isOpen={familySheetOpen} onClose={() => setFamilySheetOpen(false)} />
 
@@ -703,6 +797,30 @@ const Settings: React.FC = () => {
               }}
             >
               Turn off
+            </NeuControl>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Carer profile gate ── */}
+      <Dialog open={carerGateOpen} onOpenChange={(o) => { if (!o) setCarerGateOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Identity verification required</DialogTitle>
+            <DialogDescription>
+              Finish verification to start offering trusted pet-care services.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setCarerGateOpen(false)}>
+              Not now
+            </NeuControl>
+            <NeuControl
+              size="lg"
+              className="flex-1 min-w-0"
+              onClick={() => { setCarerGateOpen(false); navigate("/verify-identity"); }}
+            >
+              Verify now
             </NeuControl>
           </DialogFooter>
         </DialogContent>
