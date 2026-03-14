@@ -40,6 +40,7 @@ import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/Fr
 import { getEventActorId, loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { MAP_PIN_STORAGE_KEY, buildScopedStorageKey } from "@/lib/signupOnboarding";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -276,6 +277,10 @@ const MapPage = () => {
   const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
   // Invisible mode — Eye toggle
   const [isInvisible, setIsInvisible] = useState(false);
+  const pinStorageKey = useMemo(
+    () => buildScopedStorageKey(MAP_PIN_STORAGE_KEY, user?.id || ""),
+    [user?.id]
+  );
 
   useEffect(() => {
     (window as typeof window & { __HUDDLE_MAP__?: { initialized: boolean; fallback: boolean } }).__HUDDLE_MAP__ = {
@@ -289,8 +294,9 @@ const MapPage = () => {
   // Spec: Pin survives tab switches and is permanent until unpinned.
   // ============================================================
   useEffect(() => {
+    if (!user?.id) return;
     try {
-      const stored = localStorage.getItem("huddle_pin");
+      const stored = localStorage.getItem(pinStorageKey);
       if (!stored) return;
       const pin = JSON.parse(stored) as { lat: number; lng: number; pinnedAt?: string; address?: string };
       if (typeof pin.lat === "number" && typeof pin.lng === "number") {
@@ -302,14 +308,14 @@ const MapPage = () => {
       }
     } catch {
       // Corrupted data
-      localStorage.removeItem("huddle_pin");
+      localStorage.removeItem(pinStorageKey);
     }
-  }, []);
+  }, [pinStorageKey, user?.id]);
 
   // Fallback: restore pin from DB if localStorage missing
   useEffect(() => {
     if (!user) return;
-    const stored = localStorage.getItem("huddle_pin");
+    const stored = localStorage.getItem(pinStorageKey);
     if (stored) return;
     (async () => {
       const { data, error } = await supabase
@@ -329,21 +335,21 @@ const MapPage = () => {
         if (typeof data.address === "string") setPinAddressSnapshot(data.address);
       }
     })();
-  }, [hideFromMap, user]);
+  }, [hideFromMap, pinStorageKey, user]);
 
   // Persist pin to localStorage whenever it changes
   useEffect(() => {
-    if (userLocation) {
+    if (userLocation && user?.id) {
       const pinData = {
         lat: userLocation.lat,
         lng: userLocation.lng,
         pinnedAt: pinPersistedAt || new Date().toISOString(),
         address: pinAddressSnapshot || undefined,
       };
-      localStorage.setItem("huddle_pin", JSON.stringify(pinData));
+      localStorage.setItem(pinStorageKey, JSON.stringify(pinData));
       if (import.meta.env.DEV) console.debug("[PIN] Saved pin to localStorage:", pinData);
     }
-  }, [pinPersistedAt, pinAddressSnapshot, userLocation]);
+  }, [pinPersistedAt, pinAddressSnapshot, pinStorageKey, user?.id, userLocation]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
@@ -391,8 +397,8 @@ const MapPage = () => {
         void supabase.rpc("set_user_location", {
           p_lat: lat,
           p_lng: lng,
-          p_pin_hours: 2,
-          p_retention_hours: 12,
+          p_pin_hours: 24 * 365 * 10,
+          p_retention_hours: 24 * 365 * 10,
           p_address: pinAddressSnapshot,
         });
       },
@@ -545,6 +551,8 @@ const MapPage = () => {
     if (import.meta.env.DEV) console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
 
     if (user) {
+      const resolvedAddress = pinAddressSnapshot || (await lookupBroadcastAddress(lat, lng)) || null;
+      if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
       if (import.meta.env.DEV) console.debug("[PIN] Saving to DB — set_user_location RPC...");
       await supabase
         .from("profiles")
@@ -553,9 +561,9 @@ const MapPage = () => {
       await supabase.rpc("set_user_location", {
         p_lat: lat,
         p_lng: lng,
-        p_pin_hours: 2,
-        p_retention_hours: 12,
-        p_address: pinAddressSnapshot,
+        p_pin_hours: 24 * 365 * 10,
+        p_retention_hours: 24 * 365 * 10,
+        p_address: resolvedAddress,
       });
       if (import.meta.env.DEV) console.debug("[PIN] DB save complete.");
     }
@@ -567,7 +575,7 @@ const MapPage = () => {
     setPinning(false);
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [flyToWithDebug, pinAddressSnapshot, user]);
+  }, [flyToWithDebug, lookupBroadcastAddress, pinAddressSnapshot, user]);
 
   const fallbackToLastKnownLocation = useCallback(async () => {
     const fallback =
@@ -687,7 +695,8 @@ const MapPage = () => {
     setBroadcastPreviewPin(null);
     setPinningActive(false);
     setPinAddressSnapshot(null);
-    localStorage.removeItem("huddle_pin");
+    localStorage.removeItem(pinStorageKey);
+    localStorage.removeItem(MAP_PIN_STORAGE_KEY);
     if (import.meta.env.DEV) console.debug("[PIN] Unpinned — cleared localStorage");
     setVisibleEnabled(false);
     toast.success("Unpinned");
@@ -1089,12 +1098,12 @@ const MapPage = () => {
         if (friendIds.length > 0) {
           const { data: profileRows } = await supabase
             .from("profiles")
-            .select("id,verification_status")
+            .select("id,is_verified")
             .in("id", friendIds);
           const verifiedById = new Map<string, boolean>(
-            ((profileRows || []) as Array<{ id: string; verification_status?: string | null }>).map((row) => [
+            ((profileRows || []) as Array<{ id: string; is_verified?: boolean | null }>).map((row) => [
               row.id,
-              String(row.verification_status || "").toLowerCase() === "verified",
+              row.is_verified === true,
             ])
           );
           setFriendPins(
@@ -1131,7 +1140,33 @@ const MapPage = () => {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (error || !data || typeof data.lat !== "number" || typeof data.lng !== "number") {
+    if (error) {
+      // Keep current UI pin state on transient fetch failure.
+      return userLocation;
+    }
+    if (!data || typeof data.lat !== "number" || typeof data.lng !== "number") {
+      try {
+        const stored = localStorage.getItem(pinStorageKey);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { lat?: number; lng?: number; pinnedAt?: string; address?: string };
+          if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+            const next = { lat: parsed.lat, lng: parsed.lng };
+            setUserLocation(next);
+            setVisibleEnabled(true);
+            setPinPersistedAt(typeof parsed.pinnedAt === "string" ? parsed.pinnedAt : pinPersistedAt);
+            setPinAddressSnapshot(typeof parsed.address === "string" ? parsed.address : pinAddressSnapshot);
+            setIsInvisible(hideFromMap);
+            return next;
+          }
+        }
+      } catch {
+        // fall through to current in-memory state
+      }
+      if (userLocation) {
+        setVisibleEnabled(true);
+        setIsInvisible(hideFromMap);
+        return userLocation;
+      }
       setUserLocation(null);
       setVisibleEnabled(false);
       setPinPersistedAt(null);
@@ -1146,7 +1181,7 @@ const MapPage = () => {
     setPinPersistedAt(typeof data.created_at === "string" ? data.created_at : null);
     setPinAddressSnapshot(typeof data.address === "string" ? data.address : null);
     return next;
-  }, [hideFromMap, user?.id]);
+  }, [hideFromMap, pinAddressSnapshot, pinPersistedAt, pinStorageKey, user?.id, userLocation]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1203,19 +1238,28 @@ const MapPage = () => {
   const refreshMapData = useCallback(async () => {
     setPullRefreshing(true);
     try {
+      const localPinSnapshot = userLocation;
       setBroadcastPreviewPin(null);
       setSelectedAlert(null);
       setSelectedVet(null);
       const [pinState] = await Promise.all([fetchCurrentPinState(), fetchAlerts(), fetchVetClinics(), fetchFriendPins()]);
       if (pinState) {
         flyToWithDebug("refresh.pinned", { center: [pinState.lng, pinState.lat], zoom: 15.5 });
-      } else if (isPinned || visibleEnabled) {
-        reCenterOnGPS();
+      } else if (localPinSnapshot) {
+        // Preserve local pin position when backend read momentarily lags.
+        flyToWithDebug("refresh.localPinned", { center: [localPinSnapshot.lng, localPinSnapshot.lat], zoom: 15.5 });
       } else if (userLocation && map.current) {
         flyToWithDebug("refresh.fallback", {
           center: [userLocation.lng, userLocation.lat],
           zoom: 14,
         });
+      } else if (isPinned || visibleEnabled) {
+        // Avoid forcing a fresh GPS read during manual refresh.
+        // This prevents browser/location-provider transient errors from breaking pin UX.
+        const geocoded = await resolveProfileLocationCenter();
+        if (geocoded) {
+          flyToWithDebug("refresh.visibleProfileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
+        }
       } else if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
         flyToWithDebug("refresh.profileLast", { center: [profile.last_lng, profile.last_lat], zoom: 14.5 });
       } else {
@@ -1236,7 +1280,6 @@ const MapPage = () => {
     isPinned,
     profile?.last_lat,
     profile?.last_lng,
-    reCenterOnGPS,
     resolveProfileLocationCenter,
     userLocation,
     visibleEnabled,
@@ -1517,7 +1560,7 @@ const MapPage = () => {
             coords={userLocation}
             displayName={profile?.display_name || user?.email || "Me"}
             avatarUrl={profile?.avatar_url || null}
-            isVerified={String(profile?.verification_status || "").toLowerCase() === "verified"}
+            isVerified={profile?.is_verified === true}
             isInvisible={isInvisible}
           />
         )}

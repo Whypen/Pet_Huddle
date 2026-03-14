@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { HandMetal, Star, X, Loader2, Lock } from "lucide-react";
+import { Star, X, Loader2, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,18 +11,26 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
-import { demoUsers } from "@/lib/demoData";
+import { MediaThumb } from "@/components/media/MediaThumb";
+import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
+import profilePlaceholder from "@/assets/users/Demo profile pic.png";
+import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
+import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
+import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
 
 type DiscoveryPet = {
   species?: string | null;
   name?: string | null;
+  is_active?: boolean | null;
+  is_public?: boolean | null;
 };
 
 type DiscoveryProfile = {
   id: string;
   display_name: string | null;
   avatar_url?: string | null;
-  is_verified?: boolean;
+  verification_status?: string | null;
+  is_verified?: boolean | null;
   has_car?: boolean;
   bio?: string | null;
   relationship_status?: string | null;
@@ -62,43 +69,82 @@ const discoverySpeciesOptions = [
   { value: "others", label: "Others" },
 ];
 
+const getVisiblePetSpecies = (profile: DiscoveryProfile) => {
+  const pets = Array.isArray(profile.pets) ? profile.pets : [];
+  const visibleFromPets = pets
+    .filter((pet) => pet && pet.is_active !== false && pet.is_public !== false)
+    .map((pet) => (pet.species || "").trim())
+    .filter((species) => species.length > 0);
+
+  if (visibleFromPets.length > 0) return visibleFromPets;
+  if (Array.isArray(profile.pet_species)) return profile.pet_species.filter((species): species is string => typeof species === "string" && species.length > 0);
+  return [];
+};
+
+const DISCOVER_MIN_AGE_MESSAGE = "User must be 16+ to access Discover feature on Chats.";
+const DISCOVER_AGE_GATE_BODY =
+  "Discover & Chat features are for 16+ only. For now, join the social conversation and help protect the pack by keeping an eye on the Map.";
+
+const extractDistrictToken = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const first = raw.split(",")[0]?.trim();
+  return first || raw || null;
+};
+
+const resolveDiscoveryLocationLabel = ({
+  liveLocationDistrict,
+  pinDistrict,
+  profileLocationDistrict,
+  profileLocationName,
+}: {
+  liveLocationDistrict?: string | null;
+  pinDistrict?: string | null;
+  profileLocationDistrict?: string | null;
+  profileLocationName?: string | null;
+}) =>
+  extractDistrictToken(liveLocationDistrict) ||
+  extractDistrictToken(pinDistrict) ||
+  extractDistrictToken(profileLocationDistrict) ||
+  String(profileLocationName || "").trim() ||
+  null;
+
 const Discover = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const { t } = useLanguage();
   const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [discoveryRole, setDiscoveryRole] = useState("playdates");
   const [discoveryDistance, setDiscoveryDistance] = useState(10);
   const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
   const [discoveryGender, setDiscoveryGender] = useState("Any");
   const [discoverySpecies, setDiscoverySpecies] = useState("Any");
-  const [discoveryMinAge, setDiscoveryMinAge] = useState(18);
+  const [discoveryMinAge, setDiscoveryMinAge] = useState(16);
   const [discoveryMaxAge, setDiscoveryMaxAge] = useState(99);
   const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
   const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryProfile | null>(null);
   const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
   const [activeAlbumIndex, setActiveAlbumIndex] = useState(0);
   const [albumUrls, setAlbumUrls] = useState<Record<string, string[]>>({});
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   const userAge = profile?.dob
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
-  const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
+  const discoverChatAgeBlocked = userAge !== null && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
 
-  // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
+  // Daily discovery quota by tier from canonical quota config.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
   const discoveryKey = useMemo(() => {
     const d = new Date();
-    return `discovery_seen_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }, []);
+    return `discovery_seen_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}_${profile?.id || "anon"}`;
+  }, [profile?.id]);
 
   useEffect(() => {
     try {
@@ -110,8 +156,11 @@ const Discover = () => {
     }
   }, [discoveryKey]);
 
-  // Quota removed — all tiers unlimited
+  const discoveryDailyCap = getQuotaCapsForTier(effectiveTier).discoveryViewsPerDay;
+  const discoveryQuotaReached = Number.isFinite(discoveryDailyCap) && discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
+
   const bumpDiscoverySeen = async (): Promise<boolean> => {
+    if (discoveryQuotaReached) return false;
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
       try { localStorage.setItem(discoveryKey, String(next)); } catch { /* intentionally empty */ }
@@ -129,35 +178,170 @@ const Discover = () => {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    setDiscoveryMinAge(Math.max(18, age - 3));
+    setDiscoveryMinAge(Math.max(16, age - 3));
     setDiscoveryMaxAge(Math.min(99, age + 3));
   }, [profile?.dob]);
 
   useEffect(() => {
     const runDiscovery = async () => {
-      if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
+      if (!profile?.id) return;
+      if (discoverChatAgeBlocked) {
+        setDiscoveryProfiles([]);
+        setDiscoveryError(null);
+        return;
+      }
       setDiscoveryLoading(true);
       try {
+        let anchorLat: number | null = typeof profile.last_lat === "number" ? profile.last_lat : null;
+        let anchorLng: number | null = typeof profile.last_lng === "number" ? profile.last_lng : null;
+        if (anchorLat == null || anchorLng == null) {
+          const { data: loc } = await supabase
+            .from("user_locations")
+            .select("location")
+            .eq("user_id", profile.id)
+            .eq("is_public", true)
+            .maybeSingle();
+          const point = (loc?.location || null) as unknown as { coordinates?: unknown } | null;
+          const coords = Array.isArray(point?.coordinates) ? point?.coordinates : null;
+          if (coords && typeof coords[0] === "number" && typeof coords[1] === "number") {
+            anchorLng = Number(coords[0]);
+            anchorLat = Number(coords[1]);
+          }
+        }
+        if (anchorLat == null || anchorLng == null) {
+          setDiscoveryProfiles([]);
+          setDiscoveryError("Discovery works best with location on.");
+          return;
+        }
         const minAge = Math.max(16, discoveryMinAge || 16);
         const maxAge = Math.max(minAge, discoveryMaxAge || 99);
-        const payload = {
-          userId: profile.id,
-          lat: profile.last_lat,
-          lng: profile.last_lng,
-          radiusKm: discoveryDistance,
-          role: discoveryRole,
-          gender: discoveryGender !== "Any" ? discoveryGender : null,
-          species: discoverySpecies !== "Any" ? [discoverySpecies] : null,
-          petSize: discoveryPetSize !== "Any" ? discoveryPetSize : null,
-          minAge,
-          maxAge,
-          advanced: isPremium,
-        };
-        const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
+        const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+          "social_discovery",
+          {
+            p_user_id: profile.id,
+            p_lat: anchorLat,
+            p_lng: anchorLng,
+            p_radius_m: Math.max(1000, Math.round((discoveryDistance || 5) * 1000)),
+            p_min_age: minAge,
+            p_max_age: maxAge,
+            p_role: discoveryRole,
+            p_gender: discoveryGender !== "Any" ? discoveryGender : null,
+            p_species: discoverySpecies !== "Any" ? [discoverySpecies] : null,
+            p_pet_size: discoveryPetSize !== "Any" ? discoveryPetSize : null,
+            p_advanced: isPremium,
+          }
+        );
         if (error) throw error;
-        setDiscoveryProfiles(data?.profiles || []);
+        let profiles = Array.isArray(data) ? data : [];
+        const pinDistrictByUserId = new Map<string, string | null>();
+        const liveLocationDistrictByUserId = new Map<string, string | null>();
+
+        if (profiles.length === 0) {
+          const { data: fallbackPins, error: fallbackError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+            "get_friend_pins_nearby",
+            {
+              p_lat: anchorLat,
+              p_lng: anchorLng,
+              p_radius_m: Math.max(1000, Math.round((discoveryDistance || 5) * 1000)),
+            }
+          );
+          if (!fallbackError && Array.isArray(fallbackPins) && fallbackPins.length > 0) {
+            const fallbackMeta = new Map(
+              (fallbackPins as Array<Record<string, unknown>>).map((row) => [
+                String(row.id),
+                {
+                  location_name: typeof row.location_name === "string" ? row.location_name : null,
+                  avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
+                  display_name: typeof row.display_name === "string" ? row.display_name : "User",
+                },
+              ])
+            );
+            for (const [id, meta] of fallbackMeta.entries()) {
+              pinDistrictByUserId.set(id, extractDistrictToken(meta.location_name || null));
+            }
+            const fallbackIds = Array.from(fallbackMeta.keys());
+            const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
+              .from("profiles")
+              .select("id, display_name, avatar_url, verification_status, is_verified, bio, relationship_status, dob, location_name, occupation, school, major, tier, social_album, pets(species,name,is_active,is_public)")
+              .in("id", fallbackIds)
+              .or("non_social.is.null,non_social.eq.false");
+
+            if (fallbackProfilesError) throw fallbackProfilesError;
+
+            profiles = (((fallbackProfiles || []) as unknown) as DiscoveryProfile[]).map((row) => {
+              const meta = fallbackMeta.get(row.id);
+              const pinDistrict = pinDistrictByUserId.get(row.id) || null;
+              return {
+                ...row,
+                display_name: row.display_name || meta?.display_name || "User",
+                avatar_url: row.avatar_url || meta?.avatar_url || null,
+                location_name: resolveDiscoveryLocationLabel({
+                  pinDistrict,
+                  profileLocationName: row.location_name || meta?.location_name || null,
+                }),
+              };
+            });
+          }
+        }
+        const profileIds = profiles
+          .map((row) => String((row as DiscoveryProfile).id || "").trim())
+          .filter(Boolean);
+        if (profileIds.length > 0) {
+          const { data: pinRows } = await supabase
+            .from("pins")
+            .select("user_id, address, created_at")
+            .in("user_id", profileIds)
+            .is("thread_id", null)
+            .order("created_at", { ascending: false });
+          for (const row of (pinRows || []) as Array<{ user_id?: string | null; address?: string | null }>) {
+            const userId = String(row.user_id || "").trim();
+            if (!userId || pinDistrictByUserId.has(userId)) continue;
+            pinDistrictByUserId.set(userId, extractDistrictToken(row.address || null));
+          }
+
+          const { data: liveRows } = await supabase
+            .from("user_locations")
+            .select("user_id, location_name, updated_at")
+            .in("user_id", profileIds)
+            .order("updated_at", { ascending: false });
+          for (const row of (liveRows || []) as Array<{ user_id?: string | null; location_name?: string | null }>) {
+            const userId = String(row.user_id || "").trim();
+            if (!userId || liveLocationDistrictByUserId.has(userId)) continue;
+            liveLocationDistrictByUserId.set(userId, extractDistrictToken(row.location_name || null));
+          }
+
+          const { data: profileRows } = await supabase
+            .from("profiles")
+            .select("id, location_name, location_district")
+            .in("id", profileIds);
+          const profileDistrictByUserId = new Map<string, string | null>();
+          const profileLocationByUserId = new Map<string, string | null>();
+          for (const row of (profileRows || []) as Array<{ id?: string | null; location_name?: string | null; location_district?: string | null }>) {
+            const userId = String(row.id || "").trim();
+            if (!userId) continue;
+            profileDistrictByUserId.set(userId, extractDistrictToken(row.location_district || null));
+            profileLocationByUserId.set(userId, String(row.location_name || "").trim() || null);
+          }
+
+          profiles = profiles.map((row) => {
+            const userId = String(row.id || "").trim();
+            return {
+              ...row,
+              location_name: resolveDiscoveryLocationLabel({
+                liveLocationDistrict: liveLocationDistrictByUserId.get(userId) || null,
+                pinDistrict: pinDistrictByUserId.get(userId) || null,
+                profileLocationDistrict: profileDistrictByUserId.get(userId) || null,
+                profileLocationName: profileLocationByUserId.get(userId) || row.location_name || null,
+              }),
+            };
+          });
+        }
+        setDiscoveryError(null);
+        setDiscoveryProfiles(profiles);
       } catch (err) {
-        console.warn("[Discover] Discovery failed", err);
+        console.warn("[Discover] discovery fetch failed", err);
+        setDiscoveryError("Live discovery is temporarily unavailable.");
+        setDiscoveryProfiles([]);
       } finally {
         setDiscoveryLoading(false);
       }
@@ -175,6 +359,7 @@ const Discover = () => {
     discoveryMinAge,
     discoveryMaxAge,
     isPremium,
+    discoverChatAgeBlocked,
   ]);
 
   useEffect(() => {
@@ -182,17 +367,9 @@ const Discover = () => {
       if (discoveryProfiles.length === 0) return;
       const next: Record<string, string[]> = {};
       for (const p of discoveryProfiles) {
-        const album = Array.isArray(p?.social_album) ? p.social_album : [];
+        const album = canonicalizeSocialAlbumEntries(Array.isArray(p?.social_album) ? p.social_album : []);
         if (!album.length) continue;
-        const resolved = await Promise.all(
-          album.map(async (path: string) => {
-            if (!path) return "";
-            if (path.startsWith("http")) return path;
-            const { data } = await supabase.storage.from("social_album").createSignedUrl(path, 60 * 60);
-            return data?.signedUrl || "";
-          })
-        );
-        next[p.id] = resolved.filter(Boolean);
+        next[p.id] = await resolveSocialAlbumUrlList(album, 60 * 60);
       }
       if (Object.keys(next).length > 0) {
         setAlbumUrls((prev) => ({ ...prev, ...next }));
@@ -201,89 +378,23 @@ const Discover = () => {
     loadAlbums();
   }, [discoveryProfiles]);
 
-  const demoProfiles = demoUsers.map((u) => ({
-    id: u.id,
-    display_name: u.name,
-    avatar_url: u.avatarUrl || null,
-    is_verified: u.isVerified,
-    has_car: u.hasCar,
-    bio: u.bio,
-    relationship_status: u.relationshipStatus || null,
-    dob: u.age ? new Date(Date.now() - u.age * 365.25 * 24 * 60 * 60 * 1000).toISOString() : null,
-    location_name: u.locationName,
-    occupation: u.occupation || null,
-    school: u.education || null,
-    major: u.degree || null,
-    tier: u.isPremium ? "premium" : "free",
-    pets: u.pets || [],
-    pet_species: (u.pets || []).map((p) => p.species),
-    pet_size: null,
-    height: u.height || null,
-    social_album: u.avatarUrl ? [u.avatarUrl] : [],
-    show_occupation: true,
-    show_academic: true,
-    show_bio: true,
-    show_relationship_status: true,
-    show_age: true,
-    show_gender: true,
-    show_orientation: true,
-    show_height: true,
-    show_weight: true,
-    social_role: u.role,
-    gender_genre: u.gender || null,
-    orientation: u.orientation || null,
-  }));
-
-  const resolveDemoPetSize = (profileRow: { pet_size?: string | null; pet_species?: string[] | null }) => {
-    if (profileRow?.pet_size) return profileRow.pet_size;
-    const species = (profileRow?.pet_species || []).map((s: string) => s.toLowerCase());
-    if (species.includes("dog")) return "Medium";
-    if (species.includes("cat") || species.includes("rabbit") || species.includes("hamster") || species.includes("bird")) {
-      return "Small";
-    }
-    return null;
-  };
-
-  const filteredDemoProfiles = demoProfiles.filter((p) => {
-    if (discoveryRole && p.social_role !== discoveryRole) return false;
-    if (discoverySpecies !== "Any") {
-      const species = (p.pet_species || []).map((s: string) => s.toLowerCase());
-      if (!species.includes(discoverySpecies.toLowerCase())) return false;
-    }
-    if (discoveryGender !== "Any" && p.gender_genre !== discoveryGender) return false;
-    const age = p.dob
-      ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-      : null;
-    if (age !== null && (age < discoveryMinAge || age > discoveryMaxAge)) return false;
-    if (discoveryPetSize !== "Any") {
-      const size = resolveDemoPetSize(p);
-      if (!size || size !== discoveryPetSize) return false;
-    }
-    return true;
-  });
-
-  const discoverySource = (discoveryProfiles.length > 0 ? discoveryProfiles : filteredDemoProfiles).filter(
-    (p) => !hiddenDiscoveryIds.has(p.id)
-  );
+  const discoverySource = discoveryProfiles.filter((p) => !hiddenDiscoveryIds.has(p.id));
 
   return (
-    <div className="min-h-screen bg-background pb-nav relative">
+    <div className="min-h-svh bg-background pb-nav relative">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
-        onMenuClick={() => setIsSettingsOpen(true)}
       />
 
-      {isMinor && (
-        <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
-            {t("Social features restricted for users under 16.")}
-          </div>
-        </div>
-      )}
-
-      <div className={cn(isMinor && "pointer-events-none opacity-70")}>
+      <div>
         <section className="px-5 pb-4 pt-4">
           <h1 className="text-2xl font-bold mb-3">{t("social.discovery")}</h1>
+          {discoveryError ? (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {discoveryError}
+              <button className="ml-2 underline" onClick={() => window.location.reload()}>Retry</button>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
             <select
               value={discoveryRole}
@@ -324,6 +435,7 @@ const Discover = () => {
                 value={discoveryMinAge}
                 onChange={(e) => setDiscoveryMinAge(Number(e.target.value || 16))}
                 className="w-12 bg-transparent text-[10px] outline-none"
+                onBlur={() => setDiscoveryMinAge((prev) => Math.max(16, Math.min(99, Number.isFinite(prev) ? prev : 16)))}
               />
               <span className="text-[10px] text-muted-foreground">-</span>
               <input
@@ -360,8 +472,25 @@ const Discover = () => {
               </select>
             </div>
           </div>
+          {Number.isFinite(discoveryMinAge) && discoveryMinAge < 16 && (
+            <p className="mt-2 text-center text-xs text-[#7D86A6]">{DISCOVER_MIN_AGE_MESSAGE}</p>
+          )}
         </section>
 
+        {discoverChatAgeBlocked ? (
+          <section className="px-5 pt-3 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)]">
+            <div className="mx-auto flex w-full max-w-md flex-col items-center">
+              <img
+                src={discoverAgeGateImage}
+                alt="Discover age gate"
+                className="w-full max-w-[360px] object-contain"
+              />
+              <p className="mt-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+                {DISCOVER_AGE_GATE_BODY}
+              </p>
+            </div>
+          </section>
+        ) : (
         <section className="px-5">
           <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2">
             {discoveryLoading && (
@@ -370,16 +499,12 @@ const Discover = () => {
                 {t("Loading discovery...")}
               </div>
             )}
-            {discoverySource.map((p, idx) => {
-              const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
+            {discoverySource.map((p) => {
+              const blocked = !!discoveryQuotaReached;
               const age = p?.dob
                 ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
                 : "";
-              const petSpeciesList = Array.isArray(p?.pet_species)
-                ? p.pet_species
-                : Array.isArray(p?.pets) && p.pets.length > 0
-              ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
-              : [];
+              const petSpeciesList = getVisiblePetSpecies(p);
               const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
               const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
                 ? albumUrls[p.id]
@@ -388,7 +513,7 @@ const Discover = () => {
                 : p.avatar_url
                 ? [p.avatar_url]
                 : [];
-              const cover = album[0];
+              const cover = album[0] || profilePlaceholder;
 
               return (
                 <div
@@ -406,24 +531,20 @@ const Discover = () => {
                     setShowDiscoveryModal(true);
                   }}
                 >
-                  {/* UAT: Blur overlay for free users after 40 cards/day */}
+                  {/* Quota lock overlay */}
                   {blocked && (
                     <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center gap-2 p-4">
                       <Lock className="w-8 h-8 text-brandBlue" />
-                      <p className="text-xs text-center font-semibold text-brandText">Upgrade for unlimited discovery</p>
+                      <p className="text-xs text-center font-semibold text-brandText">{quotaConfig.copy.discovery.exhausted.free}</p>
                       <button
                         onClick={(e) => { e.stopPropagation(); setIsPremiumOpen(true); }}
                         className="px-4 py-1.5 rounded-full bg-brandBlue text-white text-xs font-bold"
                       >
-                        Upgrade
+                        {t("See plans")}
                       </button>
                     </div>
                   )}
-                  {cover ? (
-                    <img src={cover} alt={p.display_name || ""} className="h-44 w-full object-cover" loading="lazy" />
-                  ) : (
-                    <div className="h-44 w-full bg-muted" />
-                  )}
+                  <MediaThumb src={cover} alt={p.display_name || ""} className="h-44 w-full rounded-none border-0" />
                   <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
 
                   <div className="absolute top-2 right-2 flex gap-1">
@@ -432,15 +553,14 @@ const Discover = () => {
                         e.stopPropagation();
                         toast.success(t("Wave sent"));
                       }}
-                      className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
+                      className="flex h-8 w-8 items-center justify-center rounded-full transition-transform duration-150 hover:scale-[1.03] active:scale-[0.98]"
                     >
-                      <HandMetal className="w-4 h-4" />
+                      <WaveHandIcon size={32} />
                     </button>
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        // Quota removed — stars unlimited for all tiers
-                        navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
+                        navigate(`/chats?with=${encodeURIComponent(p.id)}&name=${encodeURIComponent(p.display_name || "Conversation")}`);
                       }}
                       className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
                     >
@@ -469,6 +589,7 @@ const Discover = () => {
             })}
           </div>
         </section>
+        )}
       </div>
 
       <AnimatePresence>
@@ -502,31 +623,14 @@ const Discover = () => {
                     : selectedDiscovery.avatar_url
                     ? [selectedDiscovery.avatar_url]
                     : [];
-                  const current = album[activeAlbumIndex] || album[0];
+                  const current = album[activeAlbumIndex] || album[0] || profilePlaceholder;
                   return (
                     <>
-                      {current ? (
-                        <img
-                          src={current}
-                          alt=""
-                          className="w-full h-72 object-cover"
-                          loading="lazy"
-                          onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
-                          onTouchEnd={(e) => {
-                            if (touchStartX == null || album.length <= 1) return;
-                            const delta = touchStartX - e.changedTouches[0].clientX;
-                            if (Math.abs(delta) > 40) {
-                              const nextIndex = delta > 0
-                                ? Math.min(activeAlbumIndex + 1, album.length - 1)
-                                : Math.max(activeAlbumIndex - 1, 0);
-                              setActiveAlbumIndex(nextIndex);
-                            }
-                            setTouchStartX(null);
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-72 bg-muted" />
-                      )}
+                      <MediaThumb
+                        src={current}
+                        alt={selectedDiscovery.display_name || "Discovery profile"}
+                        className="w-full h-72 rounded-none border-0"
+                      />
                       {album.length > 1 && (
                         <div className="absolute inset-x-0 bottom-3 flex items-center justify-center gap-1">
                           {album.map((_: string, idx: number) => (
@@ -551,10 +655,7 @@ const Discover = () => {
                   const age = selectedDiscovery?.dob
                     ? Math.floor((Date.now() - new Date(selectedDiscovery.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
                     : null;
-                  const pets = Array.isArray(selectedDiscovery?.pets) ? selectedDiscovery.pets : [];
-                  const petSpecies = Array.isArray(selectedDiscovery?.pet_species)
-                    ? selectedDiscovery.pet_species
-                    : pets.map((pet: { species?: string | null }) => pet.species || "");
+                  const petSpecies = selectedDiscovery ? getVisiblePetSpecies(selectedDiscovery) : [];
                   return (
                     <>
                       <h3 className="text-xl font-bold">{selectedDiscovery.display_name}</h3>
@@ -603,7 +704,6 @@ const Discover = () => {
         )}
       </AnimatePresence>
 
-      <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
       <UpsellModal
         isOpen={upsellModal.isOpen}

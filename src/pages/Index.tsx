@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -10,7 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import { computeAgeYears, computeNextEvent, formatNextEventLabel, type PetReminder } from "@/utils/petLogic";
+import { formatPetAge, computeNextEvent, formatNextEventLabel, type PetReminder } from "@/utils/petLogic";
 
 interface Pet {
   id: string;
@@ -69,6 +69,13 @@ const wisdomTips: Record<string, string[]> = {
   ],
 };
 
+const formatSpeciesLabel = (value: string) =>
+  String(value || "")
+    .split(/[\s_/-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+
 const Index = () => {
   const navigate = useNavigate();
   const { profile, user } = useAuth();
@@ -78,6 +85,9 @@ const Index = () => {
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
+  const [selectedPetIndex, setSelectedPetIndex] = useState(0);
+  const carouselRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
   const fetchPets = useCallback(async () => {
     try {
@@ -91,9 +101,14 @@ const Index = () => {
 
       if (error) throw error;
 
-      setPets(data || []);
-      if (data && data.length > 0) {
-        setSelectedPet(data[0]);
+      const nextPets = data || [];
+      setPets(nextPets);
+      if (nextPets.length > 0) {
+        setSelectedPetIndex(0);
+        setSelectedPet(nextPets[0]);
+      } else {
+        setSelectedPetIndex(0);
+        setSelectedPet(null);
       }
     } catch (error) {
       console.error("Error fetching pets:", error);
@@ -124,6 +139,60 @@ const Index = () => {
       supabase.removeChannel(channel);
     };
   }, [fetchPets]);
+
+  useEffect(() => {
+    if (pets.length === 0) {
+      setSelectedPet(null);
+      setSelectedPetIndex(0);
+      return;
+    }
+    const safeIndex = Math.min(selectedPetIndex, pets.length - 1);
+    if (safeIndex !== selectedPetIndex) {
+      setSelectedPetIndex(safeIndex);
+      return;
+    }
+    const nextSelected = pets[safeIndex] || null;
+    if (!nextSelected) return;
+    if (selectedPet?.id !== nextSelected.id) {
+      setSelectedPet(nextSelected);
+    }
+  }, [pets, selectedPet?.id, selectedPetIndex]);
+
+  const scrollToPetIndex = useCallback((index: number, behavior: ScrollBehavior = "smooth") => {
+    const container = carouselRef.current;
+    const card = cardRefs.current[index];
+    if (!container || !card) return;
+    const left = card.offsetLeft - (container.clientWidth - card.clientWidth) / 2;
+    container.scrollTo({ left: Math.max(0, left), behavior });
+  }, []);
+
+  useEffect(() => {
+    if (pets.length <= 1) return;
+    const timer = window.setTimeout(() => {
+      scrollToPetIndex(selectedPetIndex, "auto");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [pets.length, scrollToPetIndex, selectedPetIndex]);
+
+  const handleCarouselScroll = useCallback(() => {
+    const container = carouselRef.current;
+    if (!container) return;
+    const centerX = container.scrollLeft + container.clientWidth / 2;
+    let nextIndex = selectedPetIndex;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    cardRefs.current.forEach((card, index) => {
+      if (!card) return;
+      const cardCenter = card.offsetLeft + card.clientWidth / 2;
+      const distance = Math.abs(cardCenter - centerX);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        nextIndex = index;
+      }
+    });
+    if (nextIndex !== selectedPetIndex) {
+      setSelectedPetIndex(nextIndex);
+    }
+  }, [selectedPetIndex]);
 
   // UAT: Next Event must pull from Supabase reminders table.
   useEffect(() => {
@@ -166,14 +235,14 @@ const Index = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-full bg-background flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
+    <div className="h-full min-h-0 overflow-y-auto touch-pan-y bg-background pb-nav">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
       />
@@ -185,7 +254,7 @@ const Index = () => {
             {firstName}
           </h1>
           <ProfileBadges
-            isVerified={profile?.is_verified}
+            isVerified={profile?.is_verified === true}
             hasCar={profile?.has_car}
             size="md"
           />
@@ -203,13 +272,19 @@ const Index = () => {
       ) : (
         <>
           {/* Pet Selector - Fixed border cropping */}
-          <section className="px-5 py-3">
-            <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 overflow-visible">
+          <section className="px-5 pt-3 pb-2">
+            <div className="flex items-center gap-3 overflow-x-auto overflow-y-visible scrollbar-hide pb-2 overflow-visible pt-1">
               {pets.map((pet) => (
                 <motion.button
                   key={pet.id}
                   onClick={() => {
-                    setSelectedPet(pet);
+                    const idx = pets.findIndex((candidate) => candidate.id === pet.id);
+                    if (idx >= 0) {
+                      setSelectedPetIndex(idx);
+                      scrollToPetIndex(idx);
+                    } else {
+                      setSelectedPet(pet);
+                    }
                   }}
                   whileTap={{ scale: 0.95 }}
                   className="relative flex-shrink-0 p-1" // Added padding to prevent border clipping
@@ -250,76 +325,206 @@ const Index = () => {
 
           {/* Selected Pet Card - SPRINT 3: Card navigates to Expanded Info */}
           {selectedPet && (
-            <section className="px-5 py-3">
-              <motion.div
-                layout
-                onClick={() => navigate(`/pet-details?id=${selectedPet.id}`)}
-                className="relative rounded-2xl overflow-hidden shadow-card cursor-pointer hover:shadow-lg transition-shadow"
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/edit-pet-profile?id=${selectedPet.id}`);
-                  }}
-                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center shadow-sm"
-                  aria-label={t("Edit Pet")}
+            <section className="pt-1 pb-3">
+              {pets.length > 1 ? (
+                <div
+                  ref={carouselRef}
+                  onScroll={handleCarouselScroll}
+                  className="flex snap-x snap-mandatory gap-[6px] overflow-x-auto overflow-y-visible touch-pan-x scrollbar-hide pt-1 pb-3"
                 >
-                  <Settings className="w-4 h-4 text-muted-foreground" />
-                </button>
-                <div className="absolute inset-0">
-                  {selectedPet.photo_url ? (
-                    <img
-                      src={selectedPet.photo_url}
-                      alt={selectedPet.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-primary to-accent" />
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-foreground/80 via-foreground/40 to-transparent" />
-                </div>
-                <div className="relative p-5 pt-24">
-                  <motion.div
-                    key={selectedPet.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <div className="text-left">
-                      {/*
-                        UAT: show age as computed, no duplicated per-page math.
-                        Keep existing label format.
-                      */}
-                      <h2 className="text-2xl font-bold text-primary-foreground">
-                        {selectedPet.name}
-                        {selectedPet.dob && `, ${computeAgeYears(selectedPet.dob)} Years Old`}
-                      </h2>
-                    </div>
-                    <div className="flex gap-4 mt-2 text-primary-foreground/80 text-sm flex-wrap">
-                      {selectedPet.weight && (
-                        <>
-                          <span>{t("Weight")}: {selectedPet.weight}{selectedPet.weight_unit}</span>
-                <span>{t("•")}</span>
-                        </>
-                      )}
-                      <span className="capitalize">{selectedPet.species}</span>
-                      {selectedPet.breed && (
-                        <>
-                <span>{t("•")}</span>
-                          <span>{selectedPet.breed}</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="mt-4 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
-                      <div className="flex items-center gap-2 text-primary-foreground">
-                        <Clock className="w-4 h-4" />
-                        <span className="text-sm font-medium">
-                          {t("home.next_event")}: {nextEventLabel}
-                        </span>
+                  <div className="shrink-0 w-[clamp(8px,2.8vw,14px)]" aria-hidden />
+                  {pets.map((pet, index) => (
+                    <motion.div
+                      key={pet.id}
+                      ref={(node) => {
+                        cardRefs.current[index] = node;
+                      }}
+                      layout
+                      onClick={() => navigate(`/pet-details?id=${pet.id}`)}
+                      className="relative snap-center shrink-0 overflow-hidden rounded-2xl shadow-card cursor-pointer transition-shadow"
+                      animate={
+                        index === selectedPetIndex
+                          ? {
+                              scale: 1,
+                              opacity: 1,
+                              y: [0, -1.5, 0],
+                              boxShadow: [
+                                "0 10px 22px rgba(66,73,101,0.12)",
+                                "0 12px 26px rgba(66,73,101,0.15)",
+                                "0 10px 22px rgba(66,73,101,0.12)",
+                              ],
+                            }
+                          : {
+                              scale: 0.85,
+                              opacity: 0.7,
+                              y: 0,
+                              boxShadow: "0 6px 14px rgba(66,73,101,0.08)",
+                            }
+                      }
+                      transition={
+                        index === selectedPetIndex
+                          ? {
+                              scale: { duration: 0.22, ease: "easeOut" },
+                              opacity: { duration: 0.22, ease: "easeOut" },
+                              y: { duration: 3.2, ease: "easeInOut", repeat: Infinity },
+                              boxShadow: { duration: 3.2, ease: "easeInOut", repeat: Infinity },
+                            }
+                          : { duration: 0.22, ease: "easeOut" }
+                      }
+                      style={{
+                        width: "clamp(248px, 80%, 332px)",
+                        minWidth: "clamp(248px, 80%, 332px)",
+                        aspectRatio: "4 / 5",
+                      }}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/edit-pet-profile?id=${pet.id}`);
+                        }}
+                        className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center shadow-sm"
+                        aria-label={t("Edit Pet")}
+                      >
+                        <Settings className="w-4 h-4 text-muted-foreground" />
+                      </button>
+                      <div className="absolute inset-0 bg-black/10">
+                        {pet.photo_url ? (
+                          <img
+                            src={pet.photo_url}
+                            alt={pet.name}
+                            className="w-full h-full object-cover object-center"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-primary to-accent" />
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-foreground/80 via-foreground/40 to-transparent" />
                       </div>
+                      <div className="relative h-full p-5 flex items-end">
+                        <motion.div
+                          key={pet.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="w-full"
+                        >
+                          <h2 className="text-2xl font-bold text-primary-foreground">{pet.name}</h2>
+                          <div className="flex flex-wrap gap-1.5 mt-2 mb-3">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold capitalize">
+                              {formatSpeciesLabel(pet.species)}{pet.breed ? ` · ${pet.breed}` : ""}
+                            </span>
+                            {pet.dob && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold">
+                                {formatPetAge(pet.dob)}
+                              </span>
+                            )}
+                            {pet.weight && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold">
+                                {pet.weight}{pet.weight_unit}
+                              </span>
+                            )}
+                          </div>
+                          {index === selectedPetIndex && (
+                            <div className="mt-3 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
+                              <div className="flex items-center gap-2 text-primary-foreground">
+                                <Clock className="w-4 h-4" strokeWidth={1.75} />
+                                <span className="text-sm font-medium">
+                                  {t("home.next_event")}: {nextEventLabel}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </motion.div>
+                      </div>
+                    </motion.div>
+                  ))}
+                  <div
+                    className="relative snap-center shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(248,248,255,0.96),rgba(255,255,255,0.98))] shadow-card"
+                    style={{
+                      width: "clamp(248px, 80%, 332px)",
+                      minWidth: "clamp(248px, 80%, 332px)",
+                      aspectRatio: "4 / 5",
+                    }}
+                  >
+                    <div className="h-full w-full flex items-center justify-center">
+                      <button
+                        type="button"
+                        onClick={() => navigate("/edit-pet-profile")}
+                        className="neu-icon w-16 h-16"
+                        aria-label="Add pet"
+                      >
+                        <Plus className="w-6 h-6 text-brandBlue" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="shrink-0 w-[clamp(8px,2.8vw,14px)]" aria-hidden />
+                </div>
+              ) : (
+                <div className="px-5 flex justify-center">
+                  <motion.div
+                    layout
+                    onClick={() => navigate(`/pet-details?id=${selectedPet.id}`)}
+                    className="relative w-full max-w-[var(--app-max-width,430px)] h-[clamp(320px,52svh,500px)] rounded-2xl overflow-hidden shadow-card cursor-pointer hover:shadow-lg transition-shadow"
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/edit-pet-profile?id=${selectedPet.id}`);
+                      }}
+                      className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center shadow-sm"
+                      aria-label={t("Edit Pet")}
+                    >
+                      <Settings className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                    <div className="absolute inset-0 bg-black/10">
+                      {selectedPet.photo_url ? (
+                        <img
+                          src={selectedPet.photo_url}
+                          alt={selectedPet.name}
+                          className="w-full h-full object-cover object-center"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-primary to-accent" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-foreground/80 via-foreground/40 to-transparent" />
+                    </div>
+                    <div className="relative h-full p-5 flex items-end">
+                      <motion.div
+                        key={selectedPet.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="w-full"
+                      >
+                        <h2 className="text-2xl font-bold text-primary-foreground">
+                          {selectedPet.name}
+                        </h2>
+                        <div className="flex flex-wrap gap-1.5 mt-2 mb-3">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold capitalize">
+                            {formatSpeciesLabel(selectedPet.species)}{selectedPet.breed ? ` · ${selectedPet.breed}` : ""}
+                          </span>
+                          {selectedPet.dob && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold">
+                              {formatPetAge(selectedPet.dob)}
+                            </span>
+                          )}
+                          {selectedPet.weight && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm text-white text-xs font-semibold">
+                              {selectedPet.weight}{selectedPet.weight_unit}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-3 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
+                          <div className="flex items-center gap-2 text-primary-foreground">
+                            <Clock className="w-4 h-4" strokeWidth={1.75} />
+                            <span className="text-sm font-medium">
+                              {t("home.next_event")}: {nextEventLabel}
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
                     </div>
                   </motion.div>
                 </div>
-              </motion.div>
+              )}
             </section>
           )}
 
@@ -335,7 +540,6 @@ const Index = () => {
                   <Lightbulb className="w-5 h-5 text-brandBlue" />
                 </div>
                 <div className="min-w-0">
-                  <h4 className="text-sm font-semibold text-brandText mb-1">{t("home.wisdom")}</h4>
                   <p className="text-sm text-brandSubtext/80 leading-relaxed">
                     {t(getRandomTip(selectedPet.species))}
                   </p>

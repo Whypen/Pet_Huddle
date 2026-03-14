@@ -1,9 +1,10 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { useEffect, useRef } from "react";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
@@ -59,6 +60,24 @@ const queryClient = new QueryClient({
   },
 });
 
+const AuthCacheIsolation = () => {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const previousUserRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentUserId = user?.id ?? null;
+    if (previousUserRef.current && previousUserRef.current !== currentUserId) {
+      queryClient.clear();
+    } else if (!currentUserId) {
+      queryClient.removeQueries();
+    }
+    previousUserRef.current = currentUserId;
+  }, [queryClient, user?.id]);
+
+  return null;
+};
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -75,6 +94,7 @@ const App = () => (
               }}
             >
               <AuthProvider>
+                <AuthCacheIsolation />
                 <SignupProvider>
                   <UpsellBannerProvider>
                   <OfflineBanner />

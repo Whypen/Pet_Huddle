@@ -24,6 +24,10 @@ serve(async (req: Request) => {
     if (!userId || !status) {
       return json({ error: "Missing required parameters" }, 400);
     }
+    const normalizedStatus = status;
+    if (!["verified", "unverified", "pending"].includes(normalizedStatus)) {
+      return json({ error: "Invalid verification status" }, 400);
+    }
 
     const { data: profile, error } = await supabase
       .from("profiles")
@@ -37,13 +41,19 @@ serve(async (req: Request) => {
     }
 
     const subject =
-      status === "approved" ? "Identity verification approved" : "Identity verification rejected";
+      normalizedStatus === "verified"
+        ? "Identity verification verified"
+        : normalizedStatus === "unverified"
+          ? "Identity verification unverified"
+          : "Identity verification update";
     const text = [
       `Hi ${profile.display_name || "there"},`,
       "",
-      status === "approved"
-        ? "Your identity verification has been approved. You now have full access to Social and Chat features."
-        : "Your identity verification was rejected. Please review the feedback below and resubmit your documents.",
+      normalizedStatus === "verified"
+        ? "Your identity verification is verified. You now have full access to Social and Chat features."
+        : normalizedStatus === "unverified"
+          ? "Your identity verification is currently unverified. Please review the feedback below and resubmit your documents."
+          : "Your identity verification is pending review.",
       comment ? `\nReviewer note: ${comment}` : "",
       "",
       "If you have questions, reply to this email.",

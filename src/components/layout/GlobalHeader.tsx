@@ -112,13 +112,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Re-open settings drawer when returning from Account Settings or Identity Verification
-  useEffect(() => {
-    if ((location.state as { openSettings?: boolean } | null)?.openSettings) {
-      setMenuOpen(true);
-      navigate(location.pathname, { replace: true, state: {} });
-    }
-  }, [location, navigate]);
 
   // ── Notification drawer state ──────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -126,8 +119,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
 
-  const verificationStatus = String(profile?.verification_status ?? "").toLowerCase();
-  const isVerified = verificationStatus === "verified";
+  const isVerified = profile?.is_verified === true;
   const tierLabel = membershipTierLabel(profile?.effective_tier ?? profile?.tier);
   const avatarUrl = profile?.avatar_url ? String(profile.avatar_url) : "";
   const isPlusOrAbove = tierLabel === "Plus" || tierLabel === "Gold";
@@ -136,6 +128,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
   }, [profile?.display_name]);
+
+  useEffect(() => {
+    const state = location.state as { openSettingsDrawer?: boolean } | null;
+    if (!state?.openSettingsDrawer) return;
+    setMenuOpen(true);
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
+  }, [location.pathname, location.search, location.state, navigate]);
 
   const fetchPets = useCallback(async () => {
     if (!user) return;
@@ -483,7 +482,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     className={cn(
                       "w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0",
                       "bg-[rgba(33,69,207,0.10)]",
-                      isVerified && "ring-2 ring-brandGold ring-offset-1"
+                      isVerified && "ring-2 ring-brandBlue ring-offset-1"
                     )}
                     aria-hidden
                   >
@@ -536,9 +535,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 <SheetClose asChild>
                   <InsetRow
                     label="Identity Verification"
-                    icon={<Shield size={16} strokeWidth={1.75} />}
+                    icon={(
+                      <span
+                        className={cn(
+                          "inline-flex h-5 w-5 items-center justify-center rounded-full",
+                          isVerified ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white",
+                        )}
+                      >
+                        <Shield size={12} strokeWidth={1.75} />
+                      </span>
+                    )}
                     variant="nav"
-                    value={verificationStatus || "unverified"}
                     onClick={() => navigate("/verify-identity", { state: { from: location.pathname } })}
                   />
                 </SheetClose>

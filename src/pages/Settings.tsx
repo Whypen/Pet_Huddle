@@ -77,6 +77,7 @@ const Settings: React.FC = () => {
     .slice(0, 2) || "U";
   const effectiveTier = (p.effective_tier as string) || (p.tier as string) || "free";
   const verificationStatus = String(p.verification_status ?? "unverified").toLowerCase();
+  const isVerified = p.is_verified === true;
   const dob = (p.dob as string | null) ?? null;
   const isAge18Plus = dob
     ? (() => {
@@ -87,8 +88,18 @@ const Settings: React.FC = () => {
         return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
       })()
     : false;
+  const isAge16Plus = dob
+    ? (() => {
+        const birth = new Date(dob);
+        const now = new Date();
+        let age = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age -= 1;
+        return age >= 16;
+      })()
+    : true;
   const handleCarerProfileRow = () => {
-    if (verificationStatus === "verified") {
+    if (isVerified) {
       navigate("/carerprofile");
     } else {
       setCarerGateOpen(true);
@@ -123,6 +134,45 @@ const Settings: React.FC = () => {
     setNonSocial(nonSocialValue);
     setHideFromMap(hideFromMapValue);
   }, [profile]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (isAge16Plus) return;
+
+    const enforceMinorSafety = async () => {
+      if (!nonSocial || prefs.chats) {
+        await Promise.all([
+          !nonSocial
+            ? supabase
+                .from("profiles")
+                .update({ non_social: true } as Record<string, unknown>)
+                .eq("id", user.id)
+            : Promise.resolve({ error: null }),
+          prefs.chats
+            ? supabase.from("notification_preferences").upsert(
+                {
+                  user_id: user.id,
+                  push_enabled: prefs.push_enabled,
+                  pause_all: false,
+                  social: prefs.social,
+                  chats: false,
+                  map: prefs.map,
+                  push_news: prefs.news,
+                  email_enabled: prefs.email,
+                  email: prefs.email,
+                } as Record<string, unknown>,
+                { onConflict: "user_id" },
+              )
+            : Promise.resolve({ error: null }),
+        ]);
+        setNonSocial(true);
+        setPrefs((prev) => ({ ...prev, chats: false }));
+        await refreshProfile();
+      }
+    };
+
+    void enforceMinorSafety();
+  }, [isAge16Plus, nonSocial, prefs.chats, prefs.email, prefs.map, prefs.news, prefs.push_enabled, prefs.social, refreshProfile, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -435,8 +485,12 @@ const Settings: React.FC = () => {
             icon={<Eye size={16} strokeWidth={1.75} />}
             trailingSlot={
               <NeuToggle
-                checked={!nonSocial}
-                onCheckedChange={(value) => void persistPrivacy({ nonSocial: !value, hideFromMap })}
+                disabled={!isAge16Plus}
+                checked={isAge16Plus ? !nonSocial : false}
+                onCheckedChange={(value) => {
+                  if (!isAge16Plus) return;
+                  void persistPrivacy({ nonSocial: !value, hideFromMap });
+                }}
               />
             }
           />
@@ -485,9 +539,12 @@ const Settings: React.FC = () => {
             icon={<MessagesSquare size={16} strokeWidth={1.75} />}
             trailingSlot={
               <NeuToggle
-                disabled={loadingPrefs || !prefs.push_enabled}
-                checked={prefs.chats}
-                onCheckedChange={(value) => void handleCategoryToggle("chats", value)}
+                disabled={loadingPrefs || !prefs.push_enabled || !isAge16Plus}
+                checked={isAge16Plus ? prefs.chats : false}
+                onCheckedChange={(value) => {
+                  if (!isAge16Plus) return;
+                  void handleCategoryToggle("chats", value);
+                }}
               />
             }
           />
@@ -535,13 +592,13 @@ const Settings: React.FC = () => {
           <InsetRow
             label="Identity Verification"
             icon={
-              <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${verificationStatus === "verified" ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white"}`}>
+              <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${isVerified ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white"}`}>
                 <Shield size={12} strokeWidth={1.75} />
               </span>
             }
             variant="nav"
             value={
-              verificationStatus === "verified" ? "Verified"
+              isVerified ? "Verified"
               : verificationStatus === "pending" ? "Pending"
               : undefined
             }

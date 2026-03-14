@@ -1,0 +1,558 @@
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { CakeSlice, Heart, Loader2, PawPrint, Ruler, Star, User, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { PublicProfileView } from "@/components/profile/PublicProfileView";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { areUsersBlocked } from "@/lib/blocking";
+import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
+import { toast } from "sonner";
+import { ensureDirectChatRoom } from "@/lib/chatRooms";
+import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
+import { startStripeCheckout } from "@/lib/stripeCheckout";
+
+type PublicProfileSheetData = {
+  display_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  availability_status?: string[] | null;
+  social_role?: string | null;
+  verification_status?: string | null;
+  is_verified?: boolean | null;
+  has_car?: boolean | null;
+  dob?: string | null;
+  gender_genre?: string | null;
+  orientation?: string | null;
+  height?: number | string | null;
+  pet_experience?: string[] | null;
+  pet_experience_years?: number | string | null;
+  experience_years?: number | string | null;
+  relationship_status?: string | null;
+  degree?: string | null;
+  school?: string | null;
+  major?: string | null;
+  occupation?: string | null;
+  affiliation?: string | null;
+  location_name?: string | null;
+  languages?: string[] | null;
+  social_album?: string[] | null;
+  pet_heads?: Array<{
+    id: string;
+    name?: string | null;
+    species?: string | null;
+    photo_url?: string | null;
+    photoUrl?: string | null;
+    is_public?: boolean | null;
+  }> | null;
+  show_age?: boolean | null;
+  show_gender?: boolean | null;
+  show_orientation?: boolean | null;
+  show_height?: boolean | null;
+  show_relationship_status?: boolean | null;
+  show_academic?: boolean | null;
+  show_occupation?: boolean | null;
+  show_affiliation?: boolean | null;
+  show_bio?: boolean | null;
+  non_social?: boolean | null;
+};
+
+type PublicProfileSheetProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  loading: boolean;
+  fallbackName?: string;
+  data: PublicProfileSheetData | null;
+  viewedUserId?: string | null;
+  onStarQuotaBlocked?: (tier: "plus" | "gold") => void;
+  hideStartChatAction?: boolean;
+};
+
+export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, data, viewedUserId, onStarQuotaBlocked, hideStartChatAction = false }: PublicProfileSheetProps) => {
+  const { profile } = useAuth();
+  const navigate = useNavigate();
+  const [resolvedData, setResolvedData] = useState<PublicProfileSheetData | null>(data);
+  const [resolvedLoading, setResolvedLoading] = useState(false);
+  const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
+  const [petViewOpen, setPetViewOpen] = useState(false);
+  const [petViewLoading, setPetViewLoading] = useState(false);
+  const [petViewData, setPetViewData] = useState<Record<string, unknown> | null>(null);
+  const [starUpgradeTier, setStarUpgradeTier] = useState<"plus" | "gold" | null>(null);
+  const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
+  const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
+
+  useEffect(() => {
+    setResolvedData(data);
+  }, [data]);
+
+  useEffect(() => {
+    if (!isOpen || !viewedUserId) return;
+    let cancelled = false;
+    const load = async () => {
+      setResolvedLoading(true);
+      try {
+        const { data: profileRow, error } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", viewedUserId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!profileRow) {
+          if (!cancelled) setResolvedData(null);
+          return;
+        }
+        const { data: pets } = await supabase
+          .from("pets")
+          .select("id, name, species, photo_url, is_active, is_public")
+          .eq("owner_id", viewedUserId);
+        const petHeads = (pets || []).filter((pet) => pet.is_active !== false);
+        if (!cancelled) {
+          setResolvedData({ ...(profileRow as Record<string, unknown>), pet_heads: petHeads });
+        }
+      } catch {
+        if (!cancelled) setResolvedData(data ?? null);
+      } finally {
+        if (!cancelled) setResolvedLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [data, isOpen, viewedUserId]);
+
+  const socialAlbum = useMemo(
+    () => canonicalizeSocialAlbumEntries(Array.isArray(resolvedData?.social_album) ? resolvedData.social_album : []),
+    [resolvedData?.social_album]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveAlbumUrls = async () => {
+      const next = await resolveSocialAlbumUrlMap(socialAlbum, 60 * 60);
+      if (!cancelled) {
+        setSocialAlbumUrls((prev) => {
+          const prevKeys = Object.keys(prev);
+          const nextKeys = Object.keys(next);
+          if (prevKeys.length === nextKeys.length && prevKeys.every((k) => prev[k] === next[k])) {
+            return prev;
+          }
+          return next;
+        });
+      }
+    };
+    void resolveAlbumUrls();
+    return () => {
+      cancelled = true;
+    };
+  }, [socialAlbum]);
+
+  const experienceYearsValue = resolvedData?.pet_experience_years ?? resolvedData?.experience_years ?? "";
+  const availabilityStatus = Array.isArray(resolvedData?.availability_status) && resolvedData?.availability_status.length > 0
+    ? resolvedData.availability_status
+    : resolvedData?.social_role
+    ? [resolvedData.social_role]
+    : [];
+  const petHeads = Array.isArray(resolvedData?.pet_heads)
+    ? resolvedData.pet_heads.map((pet) => ({
+        id: pet.id,
+        name: pet.name ?? null,
+        species: pet.species ?? null,
+        photoUrl: pet.photoUrl ?? pet.photo_url ?? null,
+        isPublic: pet.is_public ?? false,
+      }))
+    : [];
+
+  const canInteract = Boolean(viewedUserId && profile?.id && viewedUserId !== profile.id);
+  const viewerAge = useMemo(() => {
+    if (!profile?.dob) return null;
+    const birthDate = new Date(profile.dob);
+    if (Number.isNaN(birthDate.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age -= 1;
+    return age;
+  }, [profile?.dob]);
+  const starAllowedByAge = viewerAge == null || viewerAge >= 16;
+
+  const openStarUpsell = (tier: "plus" | "gold") => {
+    if (onStarQuotaBlocked) {
+      onStarQuotaBlocked(tier);
+      return;
+    }
+    setStarUpgradeTier(tier);
+    setStarUpgradeBilling("monthly");
+  };
+
+  const handleStar = async () => {
+    if (!viewedUserId || !profile?.id) return;
+    const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    if (tier === "free") {
+      openStarUpsell("plus");
+      return;
+    }
+    try {
+      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+      if (snapshot.error) throw snapshot.error;
+      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
+      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
+      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
+      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
+      const used = Number(typed.stars_used_cycle || 0);
+      const extra = Number(typed.extra_stars || 0);
+      const remaining = Math.max(0, cap - used) + Math.max(0, extra);
+      if (remaining <= 0) {
+        if (userTier === "plus") {
+          openStarUpsell("gold");
+        } else {
+          toast.info(quotaConfig.copy.stars.exhausted);
+        }
+        return;
+      }
+      const blocked = await areUsersBlocked(profile.id, viewedUserId);
+      if (blocked) {
+        toast.error("Cannot start chat with this user.");
+        return;
+      }
+      const roomId = await ensureDirectChatRoom(
+        supabase,
+        profile.id,
+        viewedUserId,
+        resolvedData?.display_name || fallbackName || "Conversation"
+      );
+      if (!roomId) throw new Error("room_not_created");
+      const quotaResult = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        "check_and_increment_quota",
+        { action_type: "star" }
+      );
+      if (quotaResult.error) {
+        if (tier === "plus") {
+          openStarUpsell("gold");
+        } else {
+          toast.info(quotaConfig.copy.stars.exhausted);
+        }
+        return;
+      }
+      void (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        "enqueue_notification",
+        {
+          p_user_id: viewedUserId,
+          p_category: "chats",
+          p_kind: "star",
+          p_title: "Star Chat Started✨",
+          p_body: `${profile.display_name || "Someone"} just sent you a Star!`,
+          p_href: `/chat-dialogue?room=${roomId}`,
+          p_data: { room_id: roomId, from_user_id: profile.id, type: "star" },
+        }
+      );
+      navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}`);
+      onClose();
+    } catch {
+      toast.error("Unable to open chat right now.");
+    }
+  };
+
+  const closeStarSheet = () => {
+    if (starCheckoutLoading) return;
+    setStarUpgradeTier(null);
+  };
+
+  const handleStarSheetUpgrade = async () => {
+    if (!starUpgradeTier || starCheckoutLoading) return;
+    setStarCheckoutLoading(true);
+    try {
+      const selectedPlan = quotaConfig.stripePlans[starUpgradeTier][starUpgradeBilling];
+      const url = await startStripeCheckout({
+        mode: "subscription",
+        type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
+        lookupKey: selectedPlan.lookupKey,
+        priceId: selectedPlan.priceId,
+        successUrl: `${window.location.origin}/premium`,
+        cancelUrl: window.location.href,
+      });
+      window.location.assign(url);
+    } catch {
+      toast.error("Unable to start checkout right now.");
+    } finally {
+      setStarCheckoutLoading(false);
+    }
+  };
+
+  const openPetView = async (petId: string, isPublic: boolean) => {
+    if (!isPublic || !petId) return;
+    setPetViewOpen(true);
+    setPetViewLoading(true);
+    try {
+      const { data: petRow, error } = await supabase
+        .from("pets")
+        .select("*")
+        .eq("id", petId)
+        .maybeSingle();
+      if (error) throw error;
+      setPetViewData((petRow as Record<string, unknown>) || null);
+    } catch {
+      setPetViewData(null);
+      toast.error("Unable to load pet details.");
+    } finally {
+      setPetViewLoading(false);
+    }
+  };
+
+  const closePetView = () => {
+    setPetViewOpen(false);
+    setPetViewData(null);
+    setPetViewLoading(false);
+  };
+
+  const petAge = (() => {
+    const dob = typeof petViewData?.dob === "string" ? petViewData.dob : "";
+    if (!dob) return null;
+    const birth = new Date(dob);
+    if (Number.isNaN(birth.getTime())) return null;
+    const now = new Date();
+    let years = now.getFullYear() - birth.getFullYear();
+    const monthDiff = now.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) years -= 1;
+    return years >= 0 ? years : null;
+  })();
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            className="fixed inset-0 z-[2500] bg-black/50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+          />
+          <motion.div
+            className="fixed inset-0 z-[2501] flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+          >
+            <div className="h-[80svh] max-h-[80svh] w-[min(calc(100vw-24px),560px)] rounded-3xl border border-border bg-card shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div className="text-sm font-semibold text-brandText truncate">
+                {resolvedData?.display_name || fallbackName || "Profile"}
+              </div>
+              <div className="flex items-center gap-2">
+                {canInteract && starAllowedByAge && !hideStartChatAction ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void handleStar()}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
+                      aria-label="Start chat"
+                    >
+                      <Star className="h-4 w-4 text-brandBlue" />
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
+                  aria-label="Close profile"
+                >
+                  <X className="h-4 w-4 text-brandText/70" />
+                </button>
+              </div>
+            </div>
+            <div className="h-[calc(80svh-57px)] overflow-y-auto px-4 py-4">
+              {(loading || resolvedLoading) ? (
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-brandBlue" />
+                </div>
+              ) : resolvedData?.non_social === true ? (
+                <div className="flex h-full items-center justify-center p-4">
+                  <div className="w-full max-w-sm rounded-2xl border border-border bg-white p-5 text-center">
+                    <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-muted/70">
+                      <User className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <p className="text-sm font-semibold text-brandText">{resolvedData?.display_name || fallbackName || "User"}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      This user has enabled Non-Social mode and is not available for discovery or chat.
+                    </p>
+                  </div>
+                </div>
+              ) : resolvedData ? (
+                <PublicProfileView
+                  displayName={resolvedData.display_name || fallbackName || ""}
+                  bio={resolvedData.bio || ""}
+                  availabilityStatus={availabilityStatus}
+                  isVerified={resolvedData.is_verified === true}
+                  hasCar={Boolean(resolvedData.has_car)}
+                  photoUrl={resolvedData.avatar_url || null}
+                  dob={resolvedData.dob || ""}
+                  gender={resolvedData.gender_genre || ""}
+                  orientation={resolvedData.orientation || ""}
+                  height={String(resolvedData.height ?? "")}
+                  petExperience={Array.isArray(resolvedData.pet_experience) ? resolvedData.pet_experience : []}
+                  experienceYears={String(experienceYearsValue ?? "")}
+                  relationshipStatus={resolvedData.relationship_status || ""}
+                  degree={resolvedData.degree || ""}
+                  school={resolvedData.school || ""}
+                  major={resolvedData.major || ""}
+                  occupation={resolvedData.occupation || ""}
+                  affiliation={resolvedData.affiliation || ""}
+                  locationName={resolvedData.location_name || ""}
+                  languages={Array.isArray(resolvedData.languages) ? resolvedData.languages : []}
+                  socialAlbum={socialAlbum}
+                  socialAlbumUrls={socialAlbumUrls}
+                  petHeads={petHeads}
+                  onPetClick={(petId, isPublic) => { void openPetView(petId, isPublic); }}
+                  visibility={{
+                    show_age: resolvedData.show_age !== false,
+                    show_gender: resolvedData.show_gender !== false,
+                    show_orientation: resolvedData.show_orientation !== false,
+                    show_height: resolvedData.show_height !== false,
+                    show_relationship_status: resolvedData.show_relationship_status !== false,
+                    show_academic: resolvedData.show_academic !== false,
+                    show_occupation: resolvedData.show_occupation !== false,
+                    show_affiliation: resolvedData.show_affiliation !== false,
+                    show_bio: resolvedData.show_bio !== false,
+                  }}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Profile not found
+                </div>
+              )}
+            </div>
+            </div>
+          </motion.div>
+          <AnimatePresence>
+            {petViewOpen && (
+              <>
+                <motion.div
+                  className="fixed inset-0 z-[2600] bg-black/45"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={closePetView}
+                />
+                <motion.div
+                  className="fixed inset-0 z-[2601] flex items-center justify-center px-4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <div className="max-h-[82svh] w-[min(calc(100vw-32px),460px)] overflow-hidden rounded-3xl border border-border bg-card shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                      <div className="truncate text-sm font-semibold text-brandText">
+                        {typeof petViewData?.name === "string" && petViewData.name.trim() ? petViewData.name : "Pet profile"}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closePetView}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
+                        aria-label="Close pet profile"
+                      >
+                        <X className="h-4 w-4 text-brandText/70" />
+                      </button>
+                    </div>
+                    <div className="max-h-[calc(82svh-57px)] overflow-y-auto p-4">
+                      {petViewLoading ? (
+                        <div className="flex h-48 items-center justify-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-brandBlue" />
+                        </div>
+                      ) : petViewData ? (
+                        <div className="space-y-4">
+                          <section className="overflow-hidden rounded-2xl border border-border bg-muted">
+                            {typeof petViewData.photo_url === "string" && petViewData.photo_url ? (
+                              <img src={petViewData.photo_url} alt={String(petViewData.name || "Pet")} className="aspect-[4/3] w-full object-cover" />
+                            ) : (
+                              <div className="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-b from-background to-muted">
+                                <PawPrint className="h-10 w-10 text-brandText/40" />
+                              </div>
+                            )}
+                            <div className="space-y-1 px-4 py-4">
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-semibold text-brandText">{String(petViewData.name || "Pet")}</h3>
+                                {typeof petViewData.species === "string" && petViewData.species ? (
+                                  <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-white">
+                                    {petViewData.species}
+                                  </span>
+                                ) : null}
+                              </div>
+                              {typeof petViewData.breed === "string" && petViewData.breed ? (
+                                <p className="text-sm text-muted-foreground">{petViewData.breed}</p>
+                              ) : null}
+                            </div>
+                          </section>
+                          <section className="grid grid-cols-2 gap-2 rounded-2xl border border-border bg-white p-4">
+                            {petAge != null ? (
+                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
+                                <CakeSlice className="h-4 w-4 text-brandText/70" />
+                                <span className="text-sm text-brandText">{petAge} {petAge === 1 ? "year" : "years"}</span>
+                              </div>
+                            ) : null}
+                            {typeof petViewData.gender === "string" && petViewData.gender ? (
+                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
+                                <Heart className="h-4 w-4 text-brandText/70" />
+                                <span className="text-sm text-brandText">{petViewData.gender}</span>
+                              </div>
+                            ) : null}
+                            {typeof petViewData.weight === "number" ? (
+                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
+                                <Ruler className="h-4 w-4 text-brandText/70" />
+                                <span className="text-sm text-brandText">{petViewData.weight} {String(petViewData.weight_unit || "kg")}</span>
+                              </div>
+                            ) : null}
+                            {typeof petViewData.microchip_id === "string" && petViewData.microchip_id ? (
+                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
+                                <PawPrint className="h-4 w-4 text-brandText/70" />
+                                <span className="truncate text-sm text-brandText">{petViewData.microchip_id}</span>
+                              </div>
+                            ) : null}
+                          </section>
+                          {typeof petViewData.bio === "string" && petViewData.bio.trim() ? (
+                            <section className="rounded-2xl border border-border bg-white p-4">
+                              <h4 className="text-sm font-semibold text-brandText">About</h4>
+                              <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{petViewData.bio}</p>
+                            </section>
+                          ) : null}
+                          {Array.isArray(petViewData.temperament) && petViewData.temperament.length > 0 ? (
+                            <section className="rounded-2xl border border-border bg-white p-4">
+                              <h4 className="text-sm font-semibold text-brandText">Temperament</h4>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(petViewData.temperament as string[]).map((item, idx) => (
+                                  <span key={`${String(item || "temperament")}-${idx}`} className="rounded-full border border-border bg-muted/60 px-3 py-1 text-xs text-brandText">
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            </section>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                          Pet profile not found
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </>
+      )}
+      <StarUpgradeSheet
+        isOpen={Boolean(starUpgradeTier)}
+        tier={starUpgradeTier || "plus"}
+        billing={starUpgradeBilling}
+        loading={starCheckoutLoading}
+        onClose={closeStarSheet}
+        onBillingChange={setStarUpgradeBilling}
+        onUpgrade={handleStarSheetUpgrade}
+      />
+    </AnimatePresence>
+  );
+};

@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { supabase } from "@/integrations/supabase/client";
+import { buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 
 interface NetworkContextType {
   isOnline: boolean;
@@ -33,11 +35,36 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
   const [lastOnlineTime, setLastOnlineTime] = useState<Date | null>(null);
   const [pendingActions, setPendingActions] = useState<OfflineAction[]>([]);
   const [hasShownOfflineToast, setHasShownOfflineToast] = useState(false);
+  const [storageOwner, setStorageOwner] = useState<string>("anon");
+  const offlineActionsKey = buildScopedStorageKey(OFFLINE_ACTIONS_KEY, storageOwner);
+
+  useEffect(() => {
+    let mounted = true;
+    const hydrateOwner = async () => {
+      const { data } = await supabase.auth.getSession();
+      const owner = normalizeStorageOwner(data.session?.user?.id || "anon");
+      if (mounted) setStorageOwner(owner || "anon");
+    };
+    void hydrateOwner();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const owner = normalizeStorageOwner(session?.user?.id || "anon");
+      setStorageOwner(owner || "anon");
+      if (!session?.user?.id) {
+        setPendingActions([]);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   // Load pending actions from localStorage on mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(OFFLINE_ACTIONS_KEY);
+      const stored = localStorage.getItem(offlineActionsKey);
       if (stored) {
         const parsed: unknown = JSON.parse(stored);
         if (Array.isArray(parsed)) {
@@ -60,31 +87,41 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
             };
           });
           setPendingActions(next);
+        } else {
+          setPendingActions([]);
         }
+      } else {
+        setPendingActions([]);
       }
     } catch (error) {
       console.error("Failed to load offline actions:", error);
+      setPendingActions([]);
     }
-  }, []);
+  }, [offlineActionsKey]);
 
   // Save pending actions to localStorage whenever they change
   useEffect(() => {
     try {
-      localStorage.setItem(OFFLINE_ACTIONS_KEY, JSON.stringify(pendingActions));
+      localStorage.setItem(offlineActionsKey, JSON.stringify(pendingActions));
     } catch (error) {
       console.error("Failed to save offline actions:", error);
     }
-  }, [pendingActions, t]);
+  }, [offlineActionsKey, pendingActions, t]);
 
-  // Health check: uses /health-check endpoint when API URL is set.
+  // Health check: prefer Supabase Functions client so anon/auth headers are attached consistently.
   const checkServerHealth = useCallback(async (): Promise<boolean> => {
     if (!API_URL) {
-      console.warn("[NetworkContext] Missing VITE_API_URL. Health check skipped.");
       return true;
     }
     try {
-      const res = await fetch(`${API_URL}/health-check`, { method: "GET" });
-      return res.ok;
+      const { error } = await supabase.functions.invoke("health-check", {
+        body: { ping: true },
+      });
+      if (!error) return true;
+      const status = Number((error as { context?: { status?: number } })?.context?.status || 0);
+      // 401 still means edge runtime is reachable.
+      if (status === 401) return true;
+      return false;
     } catch {
       return false;
     }
@@ -148,7 +185,8 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
         return false;
       }
 
-      const token = localStorage.getItem("auth_token");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || "";
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };

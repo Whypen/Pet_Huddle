@@ -1,8 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, HandMetal, Star, SlidersHorizontal, Lock, User, ChevronRight, ChevronDown, ChevronUp, Trash2, PawPrint, DollarSign } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { SettingsDrawer } from "@/components/layout/SettingsDrawer";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
@@ -10,21 +9,37 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { useWebSocket } from "@/hooks/useWebSocket";
-import { useApi } from "@/hooks/useApi";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { demoUsers } from "@/lib/demoData";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { NeuButton } from "@/components/ui/NeuButton";
+import { ensureDirectChatRoom } from "@/lib/chatRooms";
+import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import {
+  CANONICAL_GENDER_OPTIONS,
+  CANONICAL_ORIENTATION_OPTIONS,
+  CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS,
+  CANONICAL_SOCIAL_ROLE_OPTIONS,
+} from "@/lib/profileOptions";
+import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
+import { ProfileBadges } from "@/components/ui/ProfileBadges";
+import { GlassModal } from "@/components/ui/GlassModal";
+import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
+import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
+import waveHandCta from "@/assets/Wave Hand CTA.png";
+import matchPageImage from "@/assets/Match page.png";
+import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
+import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
+import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { MAP_PIN_STORAGE_KEY, buildScopedStorageKey } from "@/lib/signupOnboarding";
 
 /* ── Discovery Filter Types & Defaults ── */
-const ALL_GENDERS = ["Male", "Female", "Non-binary", "PNA"] as const;
-const ALL_SPECIES = ["dog", "cat", "bird", "rabbit", "reptile", "hamster", "others"] as const;
-const ALL_SOCIAL_ROLES = ["playdates", "nannies", "animal-lovers"] as const;
-const ALL_ORIENTATIONS = ["Straight", "Gay", "Lesbian", "Bisexual", "Pansexual", "Asexual", "PNA"] as const;
+const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
+const ALL_SPECIES = [...CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS] as const;
+const ALL_SOCIAL_ROLES = [...CANONICAL_SOCIAL_ROLE_OPTIONS] as const;
+const ALL_ORIENTATIONS = [...CANONICAL_ORIENTATION_OPTIONS] as const;
 const ALL_DEGREES = ["High School", "Bachelor", "Master", "PhD", "Other"] as const;
 const ALL_RELATIONSHIP_STATUSES = ["Single", "In relationship", "Married", "Open", "Divorced", "PNA"] as const;
 const ALL_LANGUAGES = ["English", "Cantonese", "Mandarin", "Japanese", "Korean", "French", "Spanish", "Other"] as const;
@@ -42,7 +57,8 @@ type DiscoveryFilters = {
   degrees: string[];
   relationshipStatuses: string[];
   hasCar: boolean;
-  hasPetExperience: boolean;
+  experienceYearsMin: number;
+  experienceYearsMax: number;
   languages: string[];
   verifiedOnly: boolean;
   whoWavedAtMe: boolean;
@@ -50,7 +66,7 @@ type DiscoveryFilters = {
 };
 
 const DEFAULT_FILTERS: DiscoveryFilters = {
-  ageMin: 18,
+  ageMin: 16,
   ageMax: 99,
   genders: [...ALL_GENDERS],
   maxDistanceKm: 150,
@@ -61,30 +77,31 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   orientations: [...ALL_ORIENTATIONS],
   degrees: [...ALL_DEGREES],
   relationshipStatuses: [...ALL_RELATIONSHIP_STATUSES],
-  hasCar: true,
-  hasPetExperience: true,
+  hasCar: false,
+  experienceYearsMin: 0,
+  experienceYearsMax: 99,
   languages: [...ALL_LANGUAGES],
-  verifiedOnly: true,
-  whoWavedAtMe: true,
-  activeOnly: true,
+  verifiedOnly: false,
+  whoWavedAtMe: false,
+  activeOnly: false,
 };
 
 type FilterKey = keyof DiscoveryFilters;
-type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "premium" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
+type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "plus" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
 
 const FILTER_ROWS: FilterRowDef[] = [
   { key: "ageMin", label: "Age Range", tier: "free", type: "range" },
   { key: "genders", label: "Gender", tier: "free", type: "multi" },
   { key: "maxDistanceKm", label: "Distance", tier: "free", type: "slider" },
   { key: "species", label: "Species", tier: "free", type: "multi" },
-  { key: "socialRoles", label: "Social Role", tier: "free", type: "multi" },
-  { key: "heightMin", label: "Height Range", tier: "premium", type: "range" },
-  { key: "orientations", label: "Sexual Orientation", tier: "premium", type: "multi" },
-  { key: "degrees", label: "Highest Degree", tier: "premium", type: "multi" },
-  { key: "relationshipStatuses", label: "Relationship Status", tier: "premium", type: "multi" },
-  { key: "hasCar", label: "Car Badge", tier: "premium", type: "toggle" },
-  { key: "hasPetExperience", label: "Pet Experience", tier: "premium", type: "toggle" },
-  { key: "languages", label: "Language", tier: "premium", type: "multi" },
+  { key: "socialRoles", label: "Community Role", tier: "free", type: "multi" },
+  { key: "heightMin", label: "Height Range", tier: "plus", type: "range" },
+  { key: "orientations", label: "Sexual Orientation", tier: "plus", type: "multi" },
+  { key: "degrees", label: "Highest Degree", tier: "plus", type: "multi" },
+  { key: "relationshipStatuses", label: "Relationship Status", tier: "plus", type: "multi" },
+  { key: "hasCar", label: "Car Badge", tier: "plus", type: "toggle" },
+  { key: "experienceYearsMin", label: "Pet Experience", tier: "plus", type: "range" },
+  { key: "languages", label: "Language", tier: "plus", type: "multi" },
   { key: "verifiedOnly", label: "Verified Users Only", tier: "gold", type: "toggle" },
   { key: "whoWavedAtMe", label: "Who waved at you", tier: "gold", type: "toggle" },
   { key: "activeOnly", label: "Active Users only", tier: "gold", type: "toggle" },
@@ -97,13 +114,13 @@ function filterSummary(filters: DiscoveryFilters, row: FilterRowDef): string {
     case "genders": return filters.genders.length === ALL_GENDERS.length ? "All" : filters.genders.join(", ");
     case "maxDistanceKm": return `${filters.maxDistanceKm} km`;
     case "species": return filters.species.length === ALL_SPECIES.length ? "All" : filters.species.join(", ");
-    case "socialRoles": return filters.socialRoles.length === ALL_SOCIAL_ROLES.length ? "All" : filters.socialRoles.map(r => r === "playdates" ? "Pet Parents" : r === "nannies" ? "Nannies" : "Animal Lovers").join(", ");
+    case "socialRoles": return filters.socialRoles.length === ALL_SOCIAL_ROLES.length ? "All" : filters.socialRoles.join(", ");
     case "heightMin": return `${filters.heightMin}–${filters.heightMax} cm`;
     case "orientations": return filters.orientations.length === ALL_ORIENTATIONS.length ? "All" : filters.orientations.slice(0, 2).join(", ") + (filters.orientations.length > 2 ? "…" : "");
     case "degrees": return filters.degrees.length === ALL_DEGREES.length ? "All" : filters.degrees.slice(0, 2).join(", ") + (filters.degrees.length > 2 ? "…" : "");
     case "relationshipStatuses": return filters.relationshipStatuses.length === ALL_RELATIONSHIP_STATUSES.length ? "All" : filters.relationshipStatuses.slice(0, 2).join(", ") + (filters.relationshipStatuses.length > 2 ? "…" : "");
     case "hasCar": return filters.hasCar ? "Y" : "N";
-    case "hasPetExperience": return filters.hasPetExperience ? "Y" : "N";
+    case "experienceYearsMin": return `${filters.experienceYearsMin}–${filters.experienceYearsMax} years`;
     case "languages": return filters.languages.length === ALL_LANGUAGES.length ? "All" : filters.languages.slice(0, 2).join(", ") + (filters.languages.length > 2 ? "…" : "");
     case "verifiedOnly": return filters.verifiedOnly ? "Y" : "N";
     case "whoWavedAtMe": return filters.whoWavedAtMe ? "Y" : "N";
@@ -121,15 +138,18 @@ type DiscoveryProfile = {
   id: string;
   display_name: string | null;
   avatar_url?: string | null;
-  is_verified?: boolean;
+  verification_status?: string | null;
+  is_verified?: boolean | null;
   has_car?: boolean;
   bio?: string | null;
   relationship_status?: string | null;
   dob?: string | null;
   location_name?: string | null;
+  location_district?: string | null;
   occupation?: string | null;
   school?: string | null;
   major?: string | null;
+  degree?: string | null;
   tier?: string | null;
   pets?: DiscoveryPet[] | null;
   pet_species?: string[] | null;
@@ -146,40 +166,235 @@ type DiscoveryProfile = {
   show_weight?: boolean | null;
   gender_genre?: string | null;
   orientation?: string | null;
+  languages?: string[] | null;
+  height?: number | null;
+  last_active_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  pet_experience?: string[] | null;
   social_role?: string | null;
+  availability_status?: string[] | null;
+  pet_experience_years?: number | null;
+  last_lat?: number | null;
+  last_lng?: number | null;
 };
 
-type MainTab = "nannies" | "playdates" | "animal-lovers" | "groups";
+const getDiscoverySocialRole = (profile: DiscoveryProfile) => {
+  if (Array.isArray(profile.availability_status) && profile.availability_status.length > 0) {
+    return profile.availability_status[0] || null;
+  }
+  return profile.social_role || null;
+};
+
+const normalizeAvailabilityLabel = (value: string) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (/^animal friend\s*\(no pet\)$/i.test(trimmed)) return "Animal Friend";
+  return trimmed;
+};
+
+const DISCOVER_MIN_AGE_MESSAGE = "User must be 16+ to access Discover feature on Chats.";
+const DISCOVER_AGE_GATE_BODY =
+  "Discover & Chat features are for 16+ only. For now, join the social conversation and help protect the pack by keeping an eye on the Map.";
+
+const extractDistrictToken = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const first = raw.split(",")[0]?.trim();
+  return first || raw || null;
+};
+
+const resolveDiscoveryLocationLabel = ({
+  liveLocationDistrict,
+  pinDistrict,
+  profileLocationDistrict,
+  profileLocationName,
+}: {
+  liveLocationDistrict?: string | null;
+  pinDistrict?: string | null;
+  profileLocationDistrict?: string | null;
+  profileLocationName?: string | null;
+}) =>
+  extractDistrictToken(liveLocationDistrict) ||
+  extractDistrictToken(pinDistrict) ||
+  extractDistrictToken(profileLocationDistrict) ||
+  String(profileLocationName || "").trim() ||
+  null;
+
+type MainTab = "friends" | "groups";
 const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
-  { id: "playdates", label: "Play Dates", icon: MessageSquare },
-  { id: "nannies", label: "Nannies", icon: MessageSquare },
-  { id: "animal-lovers", label: "Animal Lovers", icon: MessageSquare },
+  { id: "friends", label: "Friends", icon: MessageSquare },
   { id: "groups", label: "Groups", icon: Users },
 ];
-const discoverySpeciesOptions = [
-  { value: "Any", label: "Any Species" },
-  { value: "dog", label: "Dog" },
-  { value: "cat", label: "Cat" },
-  { value: "bird", label: "Bird" },
-  { value: "rabbit", label: "Rabbit" },
-  { value: "reptile", label: "Reptile" },
-  { value: "hamster", label: "Hamster" },
-  { value: "others", label: "Others" },
-];
+
+const applyExperienceYearsFilter = (profiles: DiscoveryProfile[], filters: DiscoveryFilters) => {
+  const minYears = Math.max(0, filters.experienceYearsMin);
+  const maxYears = Math.max(minYears, Math.min(99, filters.experienceYearsMax));
+  return profiles.filter((profile) => {
+    const years = Number(profile.pet_experience_years ?? 0);
+    if (!Number.isFinite(years)) return false;
+    return years >= minYears && years <= maxYears;
+  });
+};
+
+const applyDiscoveryClientFilters = (
+  profiles: DiscoveryProfile[],
+  filters: DiscoveryFilters,
+  options?: { enforceVerifiedOnly?: boolean; enforceActiveOnly?: boolean; wavedByUserIds?: Set<string>; anchor?: DiscoveryAnchor | null }
+) => {
+  const minAge = Math.max(16, filters.ageMin);
+  const maxAge = Math.max(minAge, filters.ageMax);
+  const speciesFilterActive = filters.species.length < ALL_SPECIES.length;
+  const genderFilterActive = filters.genders.length < ALL_GENDERS.length;
+  const socialRoleFilterActive = filters.socialRoles.length < ALL_SOCIAL_ROLES.length;
+  const orientationFilterActive = filters.orientations.length < ALL_ORIENTATIONS.length;
+  const relationshipFilterActive = filters.relationshipStatuses.length < ALL_RELATIONSHIP_STATUSES.length;
+  const languageFilterActive = filters.languages.length < ALL_LANGUAGES.length;
+  const heightFilterActive = filters.heightMin > 100 || filters.heightMax < 300;
+  const degreeFilterActive = filters.degrees.length < ALL_DEGREES.length;
+  const allowNoSpecies = filters.species.includes("None");
+
+  const distanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 6371 * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  };
+
+  return applyExperienceYearsFilter(profiles, filters).filter((profile) => {
+    if (profile.dob) {
+      const age = Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+      if (Number.isFinite(age) && (age < minAge || age > maxAge)) return false;
+    }
+
+    if (options?.enforceVerifiedOnly && filters.verifiedOnly && profile.is_verified !== true) {
+      return false;
+    }
+
+    const active30dThresholdMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const activityRaw = profile.last_active_at || profile.updated_at || profile.created_at || "";
+    const activityMs = activityRaw ? new Date(activityRaw).getTime() : NaN;
+    if (!Number.isFinite(activityMs) || activityMs < active30dThresholdMs) {
+      return false;
+    }
+
+    if (genderFilterActive) {
+      const profileGender = String(profile.gender_genre ?? "").trim();
+      if (!profileGender || !filters.genders.includes(profileGender)) return false;
+    }
+
+    if (socialRoleFilterActive) {
+      const profileRole = getDiscoverySocialRole(profile);
+      if (!profileRole || !filters.socialRoles.includes(profileRole)) return false;
+    }
+
+    if (orientationFilterActive) {
+      const profileOrientation = String(profile.orientation ?? "").trim();
+      if (!profileOrientation || !filters.orientations.includes(profileOrientation)) return false;
+    }
+
+    if (relationshipFilterActive) {
+      const profileRelationship = String(profile.relationship_status ?? "").trim();
+      if (!profileRelationship || !filters.relationshipStatuses.includes(profileRelationship)) return false;
+    }
+
+    if (degreeFilterActive) {
+      const profileDegree = String(profile.degree ?? "").trim();
+      if (!profileDegree || !filters.degrees.includes(profileDegree)) return false;
+    }
+
+    if (speciesFilterActive) {
+      const speciesPool = new Set(
+        (Array.isArray(profile.pet_experience) ? profile.pet_experience : [])
+          .concat(Array.isArray(profile.pet_species) ? profile.pet_species : [])
+          .concat(Array.isArray(profile.pets) ? profile.pets.map((pet) => pet.species || "") : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      );
+      if (speciesPool.size === 0) return allowNoSpecies;
+      let matched = false;
+      for (const species of filters.species) {
+        if (species === "None") {
+          if (speciesPool.size === 0) {
+            matched = true;
+            break;
+          }
+          continue;
+        }
+        if (speciesPool.has(species)) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) return false;
+    }
+
+    if (heightFilterActive) {
+      const height = Number(profile.height);
+      if (!Number.isFinite(height) || height < filters.heightMin || height > filters.heightMax) return false;
+    }
+
+    if (languageFilterActive) {
+      const profileLanguages = new Set(
+        (Array.isArray(profile.languages) ? profile.languages : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      );
+      if (profileLanguages.size === 0) return false;
+      let languageMatched = false;
+      for (const lang of filters.languages) {
+        if (profileLanguages.has(lang)) {
+          languageMatched = true;
+          break;
+        }
+      }
+      if (!languageMatched) return false;
+    }
+
+    if (filters.hasCar && !profile.has_car) return false;
+
+    if (options?.enforceActiveOnly && filters.activeOnly) {
+      const active7dThresholdMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      if (activityMs < active7dThresholdMs) return false;
+    }
+
+    if (filters.whoWavedAtMe) {
+      const wavedSet = options?.wavedByUserIds;
+      if (!wavedSet || !wavedSet.has(profile.id)) return false;
+    }
+
+    if (options?.anchor && Number.isFinite(profile.last_lat) && Number.isFinite(profile.last_lng)) {
+      const dKm = distanceKm(options.anchor.lat, options.anchor.lng, Number(profile.last_lat), Number(profile.last_lng));
+      if (Number.isFinite(dKm) && dKm > filters.maxDistanceKm) return false;
+    }
+
+    return true;
+  });
+};
 
 interface ChatUser {
   id: string;
+  peerUserId?: string | null;
   name: string;
   avatarUrl?: string | null;
+  socialAvailability?: string | null;
+  previewOverride?: string | null;
   isVerified: boolean;
   hasCar: boolean;
   isPremium: boolean;
   lastMessage: string;
+  lastMessageAt?: string | null;
   time: string;
+  lastMessageFromMe?: boolean;
+  lastMessageReadByOther?: boolean;
   unread: number;
-  type: "nannies" | "playdates" | "animal-lovers" | "group";
+  type: "friend" | "group";
   isOnline?: boolean;
   hasTransaction?: boolean;
+  matchedAt?: string | null;
 }
 
 interface Group {
@@ -193,143 +408,116 @@ interface Group {
   unread: number;
 }
 
-// Mock data - in production this would come from the backend
-const mockChats: ChatUser[] = [
-  {
-    id: "1",
-    name: "Marcus",
-    avatarUrl: null,
-    isVerified: true,
-    hasCar: true,
-    isPremium: false,
-    lastMessage: "Sure! Let's meet at Central Park around 3pm?",
-    time: "2m ago",
-    unread: 2,
-    type: "playdates",
-    isOnline: true,
-    hasTransaction: false
-  },
-  {
-    id: "2",
-    name: "Pet Care Pro",
-    avatarUrl: null,
-    isVerified: true,
-    hasCar: false,
-    isPremium: true,
-    lastMessage: "I can take care of Max this weekend!",
-    time: "1h ago",
-    unread: 0,
-    type: "nannies",
-    isOnline: true,
-    hasTransaction: false
-  },
-  {
-    id: "3",
-    name: "Sarah",
-    avatarUrl: null,
-    isVerified: false,
-    hasCar: true,
-    isPremium: false,
-    lastMessage: "Thanks for the playdate! Bella had so much fun 🐕",
-    time: "3h ago",
-    unread: 0,
-    type: "playdates",
-    isOnline: false,
-    hasTransaction: false
-  },
-  {
-    id: "4",
-    name: "Emily",
-    avatarUrl: null,
-    isVerified: true,
-    hasCar: false,
-    isPremium: true,
-    lastMessage: "New kittens just arrived! 🐱",
-    time: "2d ago",
-    unread: 3,
-    type: "animal-lovers",
-    isOnline: true,
-    hasTransaction: false
-  },
-  {
-    id: "5",
-    name: "James",
-    avatarUrl: null,
-    isVerified: true,
-    hasCar: true,
-    isPremium: false,
-    lastMessage: "I'll be available next Monday for pet sitting",
-    time: "3d ago",
-    unread: 0,
-    type: "nannies",
-    isOnline: false,
-    hasTransaction: false
-  }
-];
+interface GroupContactOption {
+  id: string;
+  name: string;
+  avatar?: string;
+  verified: boolean;
+}
 
-const mockGroups: Group[] = [
-  {
-    id: "g1",
-    name: "Golden Retriever Club",
-    avatarUrl: null,
-    memberCount: 24,
-    lastMessage: "Anyone going to the dog run today?",
-    lastMessageSender: "Emma",
-    time: "Yesterday",
-    unread: 5
-  },
-  {
-    id: "g2",
-    name: "NYC Cat Lovers",
-    avatarUrl: null,
-    memberCount: 156,
-    lastMessage: "Check out this new cat cafe!",
-    lastMessageSender: "Mike",
-    time: "2d ago",
-    unread: 12
-  },
-  {
-    id: "g3",
-    name: "Pet Sitting Network",
-    avatarUrl: null,
-    memberCount: 45,
-    lastMessage: "Looking for a sitter this weekend",
-    lastMessageSender: "Lisa",
-    time: "3d ago",
-    unread: 0
-  },
-  {
-    id: "g4",
-    name: "Puppy Training Tips",
-    avatarUrl: null,
-    memberCount: 89,
-    lastMessage: "Great progress today!",
-    lastMessageSender: "Dr. Wong",
-    time: "4d ago",
-    unread: 8
+type MatchOnlyAvatar = {
+  userId: string;
+  name: string;
+  avatarUrl?: string | null;
+  isVerified: boolean;
+  hasCar: boolean;
+};
+
+type DiscoveryAnchor = {
+  lat: number;
+  lng: number;
+  source: "device" | "pinned" | "profile";
+};
+
+type MatchModalState = {
+  userId: string;
+  name: string;
+  avatarUrl?: string | null;
+  roomId?: string | null;
+};
+
+type StarUpgradeTier = "plus" | "gold";
+
+type WaveSendStatus = "sent" | "duplicate" | "blocked" | "failed";
+
+type WaveSendResult = {
+  status: WaveSendStatus;
+  mutual: boolean;
+};
+
+type MatchRow = {
+  user1_id: string;
+  user2_id: string;
+  chat_id?: string | null;
+  matched_at?: string | null;
+  created_at?: string | null;
+};
+
+const isDuplicateWaveError = (err: unknown) => {
+  const payload = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const code = String(payload?.code || "");
+  const status = Number(payload?.status || 0);
+  const message = String(payload?.message || "");
+  const details = String(payload?.details || "");
+  const hint = String(payload?.hint || "");
+  const blob = `${message} ${details} ${hint}`.toLowerCase();
+  return code === "23505" || status === 409 || blob.includes("duplicate key");
+};
+
+const isWaveSchemaFallbackError = (err: unknown) => {
+  const payload = typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const code = String(payload?.code || "");
+  const message = String(payload?.message || "").toLowerCase();
+  return code === "42703" || code === "PGRST204" || message.includes("column");
+};
+
+const parseChatPreviewText = (rawContent: string | null | undefined) => {
+  const raw = String(rawContent || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw) as { text?: unknown; attachments?: Array<{ mime?: unknown }> };
+    if (parsed && typeof parsed === "object") {
+      const text = String(parsed.text || "").replace(/\s+/g, " ").trim();
+      if (text) return text;
+      if (Array.isArray(parsed.attachments) && parsed.attachments.length > 0) {
+        const hasVideo = parsed.attachments.some((attachment) => String(attachment?.mime || "").startsWith("video/"));
+        return hasVideo ? "🎥 Video" : "🖼️ Photo";
+      }
+    }
+  } catch {
+    // plain text fallback
   }
-];
+  return raw.replace(/\s+/g, " ").trim();
+};
 
 const Chats = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const { t } = useLanguage();
-  const { isConnected, onNewMessage, onOnlineStatus } = useWebSocket();
-  const { getConversations } = useApi();
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("playdates");
-  const [chats, setChats] = useState<ChatUser[]>(mockChats);
-  const [groups, setGroups] = useState<Group[]>(mockGroups);
+  const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
+  const [mainTab, setMainTab] = useState<MainTab>("friends");
+  const [chats, setChats] = useState<ChatUser[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
   const [groupVisibleCount, setGroupVisibleCount] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+  const [topTab, setTopTab] = useState<"discover" | "chats">(() => {
+    const tab = searchParams.get("tab");
+    return tab === "chats" ? "chats" : "discover";
+  });
+  const [swipeDir, setSwipeDir] = useState<"up" | "down" | null>(null);
+  const [discoveryRefreshTick, setDiscoveryRefreshTick] = useState(0);
+  const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
   const [activeFilterRow, setActiveFilterRow] = useState<FilterRowDef | null>(null);
   const [filters, setFilters] = useState<DiscoveryFilters>({ ...DEFAULT_FILTERS });
+  const [ageMinDraft, setAgeMinDraft] = useState(String(DEFAULT_FILTERS.ageMin));
+  const [ageMaxDraft, setAgeMaxDraft] = useState(String(DEFAULT_FILTERS.ageMax));
   const [profileSheetUser, setProfileSheetUser] = useState<{ id: string; name: string; avatarUrl?: string | null } | null>(null);
   const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
   const [profileSheetLoading, setProfileSheetLoading] = useState(false);
@@ -342,17 +530,36 @@ const Chats = () => {
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryAnchor, setDiscoveryAnchor] = useState<DiscoveryAnchor | null>(null);
+  const [discoveryLocationBlocked, setDiscoveryLocationBlocked] = useState(false);
+  const [groupContactPool, setGroupContactPool] = useState<GroupContactOption[]>([]);
   const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
-  const [selectedDiscovery, setSelectedDiscovery] = useState<DiscoveryProfile | null>(null);
-  const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
-  const [activeAlbumIndex, setActiveAlbumIndex] = useState(0);
+  const [handledDiscoveryIds, setHandledDiscoveryIds] = useState<Set<string>>(new Set());
+  const [passedDiscoveryIds, setPassedDiscoveryIds] = useState<Set<string>>(new Set());
+  const [carryoverPassedIds, setCarryoverPassedIds] = useState<Set<string>>(new Set());
+  const [discoveryHistoryHydrated, setDiscoveryHistoryHydrated] = useState(false);
   const [albumUrls, setAlbumUrls] = useState<Record<string, string[]>>({});
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [matchModal, setMatchModal] = useState<MatchModalState | null>(null);
+  const [openingMatchChat, setOpeningMatchChat] = useState(false);
+  const [matchQuickHello, setMatchQuickHello] = useState("");
 
-  // Collapsible sections
-  const [discoveryExpanded, setDiscoveryExpanded] = useState(true);
-  const [chatsExpanded, setChatsExpanded] = useState(false);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [activeRoomName, setActiveRoomName] = useState<string>("");
+  const [activeRoomMessages, setActiveRoomMessages] = useState<{ id: string; sender_id: string; content: string; created_at: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [showChatsToggleDot, setShowChatsToggleDot] = useState(false);
+  const [lastClearedUnreadCount, setLastClearedUnreadCount] = useState(0);
+  const [starUpgradeTier, setStarUpgradeTier] = useState<StarUpgradeTier | null>(null);
+  const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
+  const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
+  const [matchOnlyAvatars, setMatchOnlyAvatars] = useState<MatchOnlyAvatar[]>([]);
+  const [matchesFeedTick, setMatchesFeedTick] = useState(0);
+  const roomSeenRef = useRef<Record<string, string>>({});
+  const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
+  const directPeerByRoomRef = useRef<Record<string, string>>({});
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -371,22 +578,181 @@ const Chats = () => {
   const [sitterHourlyRate, setSitterHourlyRate] = useState<number | null>(null);
   const [bookingLocation, setBookingLocation] = useState("");
 
-  const isVerified = profile?.is_verified;
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "chats") {
+      setTopTab("chats");
+      return;
+    }
+    if (tab === "discover") {
+      setTopTab("discover");
+    }
+  }, [searchParams]);
+
+  const isVerified = profile?.is_verified === true;
   const userAge = profile?.dob
     ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
     : null;
-  const isMinor = userAge !== null && userAge >= 13 && userAge < 16;
+  const isMinor = userAge !== null && userAge < 13;
+  const discoverChatAgeBlocked = userAge !== null && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const normalizedTier = String(effectiveTier || "free").toLowerCase();
+  const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
 
   // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
+  const dragY = useMotionValue(0);
+  const dragRotate = useTransform(dragY, [-260, 0, 260], [15, 0, 15]);
+  const dragScale = useTransform(dragY, [-260, 0, 260], [0.95, 1, 0.95]);
+  const dragUpProgress = useTransform(dragY, [-220, 0], [1, 0]);
+  const dragDownProgress = useTransform(dragY, [0, 220], [0, 1]);
+  const waveIndicatorOpacity = useTransform(dragUpProgress, [0, 0.2, 0.5, 0.7, 1], [0, 0.18, 0.9, 1, 1]);
+  const passIndicatorOpacity = useTransform(dragDownProgress, [0, 0.2, 0.5, 0.7, 1], [0, 0.18, 0.9, 1, 1]);
+  const waveIndicatorScale = useTransform(dragUpProgress, [0, 0.2, 0.5, 0.7, 1], [0.72, 0.82, 0.94, 1, 1]);
+  const passIndicatorScale = useTransform(dragDownProgress, [0, 0.2, 0.5, 0.7, 1], [0.72, 0.82, 0.94, 1, 1]);
+  const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
+  const discoverImageInteractingRef = useRef(false);
+  const discoveryPrefetchingRef = useRef(false);
   const discoveryKey = useMemo(() => {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
-    return `discovery_seen_${y}-${m}-${day}`;
+    return `discovery_seen_${y}-${m}-${day}_${profile?.id || "anon"}`;
+  }, [profile?.id]);
+  const handledDiscoveryKey = useMemo(
+    () => `discovery_handled_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const passedDiscoveryKey = useMemo(
+    () => `discovery_passed_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const passedDiscoverySessionKey = useMemo(
+    () => `discovery_passed_session_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const discoverySessionId = useMemo(() => {
+    if (!profile?.id) return "anon";
+    const key = `discovery_session_${profile.id}`;
+    try {
+      const existing = sessionStorage.getItem(key);
+      if (existing) return existing;
+      const generated = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      sessionStorage.setItem(key, generated);
+      return generated;
+    } catch {
+      return `volatile_${profile.id}`;
+    }
+  }, [profile?.id]);
+  const roomSeenKey = useMemo(
+    () => `chat_room_seen_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const seenMatchesKey = useMemo(
+    () => `seen_match_modal_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const discoveryFiltersKey = useMemo(
+    () => `discovery_filters_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const directPeerByRoomKey = useMemo(
+    () => `chat_direct_peer_by_room_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const matchedDiscoveryKey = useMemo(
+    () => `discovery_matched_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const pinStorageKey = useMemo(
+    () => buildScopedStorageKey(MAP_PIN_STORAGE_KEY, profile?.id || ""),
+    [profile?.id]
+  );
+
+  const resolveDiscoveryAnchor = useCallback(async (): Promise<DiscoveryAnchor | null> => {
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      try {
+        const deviceAnchor = await new Promise<DiscoveryAnchor>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            (position) =>
+              resolve({
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
+                source: "device",
+              }),
+            (error) => reject(error),
+            { enableHighAccuracy: true, timeout: 6000, maximumAge: 60_000 }
+          );
+        });
+        if (Number.isFinite(deviceAnchor.lat) && Number.isFinite(deviceAnchor.lng)) {
+          return deviceAnchor;
+        }
+      } catch {
+        // fall through to pinned/profile fallback
+      }
+    }
+
+    try {
+      const raw = localStorage.getItem(pinStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
+        if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
+          return { lat: parsed.lat, lng: parsed.lng, source: "pinned" };
+        }
+      }
+    } catch {
+      // ignore malformed localStorage
+    }
+
+    if (profile?.id) {
+      const { data: latestPin } = await supabase
+        .from("pins")
+        .select("lat, lng")
+        .eq("user_id", profile.id)
+        .is("thread_id", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (typeof latestPin?.lat === "number" && typeof latestPin?.lng === "number") {
+        return { lat: latestPin.lat, lng: latestPin.lng, source: "pinned" };
+      }
+    }
+
+    if (profile?.id) {
+      const { data } = await supabase
+        .from("user_locations")
+        .select("location")
+        .eq("user_id", profile.id)
+        .eq("is_public", true)
+        .maybeSingle();
+      const point = (data?.location || null) as unknown as { coordinates?: unknown } | null;
+      const coords = Array.isArray(point?.coordinates) ? point?.coordinates : null;
+      if (coords && typeof coords[0] === "number" && typeof coords[1] === "number") {
+        return { lat: Number(coords[1]), lng: Number(coords[0]), source: "pinned" };
+      }
+    }
+
+    if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
+      return { lat: profile.last_lat, lng: profile.last_lng, source: "profile" };
+    }
+
+    return null;
+  }, [pinStorageKey, profile?.id, profile?.last_lat, profile?.last_lng]);
+
+  const openLocationSettings = useCallback(() => {
+    const ua = navigator.userAgent || "";
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      window.location.href = "App-Prefs:Privacy&path=LOCATION";
+      toast.info("If settings did not open, use iOS Settings > Privacy & Security > Location Services > Browser.");
+      return;
+    }
+    if (/Android/i.test(ua)) {
+      window.location.href = "intent://settings/location#Intent;scheme=android-app;end";
+      toast.info("If settings did not open, use Android Settings > Location > App permissions.");
+      return;
+    }
+    toast.info("Open your browser site settings and allow Location for this app.");
   }, []);
 
   useEffect(() => {
@@ -399,8 +765,260 @@ const Chats = () => {
     }
   }, [discoveryKey]);
 
-  // Quota removed — all tiers unlimited
+  useEffect(() => {
+    if (activeFilterRow?.key === "ageMin") {
+      setAgeMinDraft(String(filters.ageMin));
+      setAgeMaxDraft(String(filters.ageMax));
+    }
+  }, [activeFilterRow, filters.ageMax, filters.ageMin]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const raw = localStorage.getItem(discoveryFiltersKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<DiscoveryFilters>;
+      if (!parsed || typeof parsed !== "object") return;
+      setFilters((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // ignore malformed cache
+    }
+  }, [discoveryFiltersKey, profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      localStorage.setItem(discoveryFiltersKey, JSON.stringify(filters));
+    } catch {
+      // ignore cache write failure
+    }
+  }, [discoveryFiltersKey, filters, profile?.id]);
+
+  useEffect(() => {
+    setHiddenDiscoveryIds(new Set());
+    setHandledDiscoveryIds(new Set());
+    setPassedDiscoveryIds(new Set());
+    setCarryoverPassedIds(new Set());
+    setDiscoveryHistoryHydrated(false);
+    setDiscoveryVisibleCount(20);
+    setSwipeDir(null);
+    dragY.set(0);
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const handledRaw = localStorage.getItem(handledDiscoveryKey);
+      const handled = handledRaw ? (JSON.parse(handledRaw) as string[]) : [];
+      if (Array.isArray(handled) && handled.length > 0) {
+        setHandledDiscoveryIds(new Set(handled.filter((id) => typeof id === "string" && id)));
+      }
+      const passedSessionRaw = sessionStorage.getItem(passedDiscoverySessionKey);
+      const passedSession = passedSessionRaw ? (JSON.parse(passedSessionRaw) as string[]) : [];
+      const parsedSessionPassed = Array.isArray(passedSession)
+        ? new Set(passedSession.filter((id) => typeof id === "string" && id))
+        : new Set<string>();
+      setPassedDiscoveryIds(parsedSessionPassed);
+      const passedRaw = localStorage.getItem(passedDiscoveryKey);
+      if (passedRaw) {
+        const parsed = JSON.parse(passedRaw) as
+          | string[]
+          | { ids?: unknown; sessionId?: unknown };
+        const ids = Array.isArray(parsed)
+          ? parsed
+          : Array.isArray(parsed?.ids)
+            ? (parsed.ids as unknown[])
+            : [];
+        const parsedPassed = new Set(ids.filter((id): id is string => typeof id === "string" && Boolean(id)));
+        const ownerSessionId = typeof parsed === "object" && parsed !== null ? String(parsed.sessionId || "") : "";
+          if (parsedPassed.size > 0) {
+            if (ownerSessionId && ownerSessionId === discoverySessionId) {
+              setCarryoverPassedIds(new Set());
+              setPassedDiscoveryIds((prev) => new Set([...prev, ...parsedPassed]));
+            } else {
+              setCarryoverPassedIds(parsedPassed);
+            }
+          }
+      }
+      const matchedRaw = localStorage.getItem(matchedDiscoveryKey);
+      const matched = matchedRaw ? (JSON.parse(matchedRaw) as string[]) : [];
+      if (Array.isArray(matched) && matched.length > 0) {
+        setHandledDiscoveryIds((prev) => {
+          const next = new Set(prev);
+          matched
+            .filter((id): id is string => typeof id === "string" && Boolean(id))
+            .forEach((id) => next.add(id));
+          return next;
+        });
+      }
+    } catch {
+      // ignore malformed cache
+    } finally {
+      setDiscoveryHistoryHydrated(true);
+    }
+  }, [discoverySessionId, handledDiscoveryKey, matchedDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey, profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const raw = localStorage.getItem(directPeerByRoomKey);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      directPeerByRoomRef.current = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      directPeerByRoomRef.current = {};
+    }
+  }, [directPeerByRoomKey, profile?.id]);
+
+  const rememberDirectPeer = useCallback((roomId: string, peerUserId: string) => {
+    const nextRoomId = String(roomId || "").trim();
+    const nextPeerId = String(peerUserId || "").trim();
+    if (!nextRoomId || !nextPeerId) return;
+    const next = { ...directPeerByRoomRef.current, [nextRoomId]: nextPeerId };
+    directPeerByRoomRef.current = next;
+    try {
+      localStorage.setItem(directPeerByRoomKey, JSON.stringify(next));
+    } catch {
+      // ignore cache write failures
+    }
+  }, [directPeerByRoomKey]);
+
+  const persistRoomSeen = useCallback((next: Record<string, string>) => {
+    roomSeenRef.current = next;
+    try {
+      localStorage.setItem(roomSeenKey, JSON.stringify(next));
+    } catch {
+      // ignore cache write failures
+    }
+  }, [roomSeenKey]);
+
+  const markRoomSeen = useCallback((roomId: string) => {
+    if (!roomId) return;
+    persistRoomSeen({ ...roomSeenRef.current, [roomId]: new Date().toISOString() });
+  }, [persistRoomSeen]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const raw = localStorage.getItem(roomSeenKey);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+      roomSeenRef.current = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      roomSeenRef.current = {};
+    }
+  }, [profile?.id, roomSeenKey]);
+
+  const persistSeenMatches = useCallback((next: Set<string>) => {
+    seenMatchUserIdsRef.current = next;
+    try {
+      localStorage.setItem(seenMatchesKey, JSON.stringify(Array.from(next)));
+    } catch {
+      // ignore cache write failures
+    }
+  }, [seenMatchesKey]);
+
+  const markMatchSeen = useCallback((userId?: string | null) => {
+    const normalized = String(userId || "").trim();
+    if (!normalized) return;
+    const next = new Set(seenMatchUserIdsRef.current);
+    next.add(normalized);
+    persistSeenMatches(next);
+  }, [persistSeenMatches]);
+
+  const fetchUserMatches = useCallback(async (): Promise<MatchRow[]> => {
+    if (!profile?.id) return [];
+    const attempts: Array<{ select: string; activeOnly: boolean }> = [
+      { select: "chat_id,user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
+      { select: "user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
+      { select: "chat_id,user1_id,user2_id,matched_at,last_interaction_at", activeOnly: false },
+      { select: "user1_id,user2_id,matched_at,last_interaction_at", activeOnly: false },
+      { select: "chat_id,user1_id,user2_id", activeOnly: false },
+      { select: "user1_id,user2_id", activeOnly: false },
+    ];
+
+    let lastErrorMessage = "";
+    for (const attempt of attempts) {
+      let query = supabase
+        .from("matches")
+        .select(attempt.select)
+        .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+        .limit(500);
+      if (attempt.select.includes("matched_at")) {
+        query = query.order("matched_at", { ascending: false, nullsFirst: false });
+      }
+      if (attempt.activeOnly) {
+        query = query.eq("is_active", true);
+      }
+      const result = await query;
+      if (result.error) {
+        lastErrorMessage = result.error.message || lastErrorMessage;
+        continue;
+      }
+      return ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
+        user1_id: String(row.user1_id || ""),
+        user2_id: String(row.user2_id || ""),
+        chat_id: typeof row.chat_id === "string" ? row.chat_id : null,
+        matched_at:
+          typeof row.matched_at === "string"
+            ? row.matched_at
+            : typeof row.last_interaction_at === "string"
+              ? row.last_interaction_at
+              : null,
+        created_at:
+          typeof row.matched_at === "string"
+            ? row.matched_at
+            : typeof row.last_interaction_at === "string"
+              ? row.last_interaction_at
+              : null,
+      }));
+    }
+
+    console.warn("[chats.matches] failed to fetch matches", { error: lastErrorMessage || "unknown_error" });
+    return [];
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const raw = localStorage.getItem(seenMatchesKey);
+      const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+      if (Array.isArray(parsed)) {
+        seenMatchUserIdsRef.current = new Set(parsed.filter((value) => typeof value === "string" && value));
+      } else {
+        seenMatchUserIdsRef.current = new Set();
+      }
+    } catch {
+      seenMatchUserIdsRef.current = new Set();
+    }
+  }, [profile?.id, seenMatchesKey]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const rows = await fetchUserMatches();
+      if (cancelled) return;
+      const activeCounterparts = new Set(
+        rows
+          .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+          .filter((id) => Boolean(id))
+      );
+      const nextSeen = new Set(
+        Array.from(seenMatchUserIdsRef.current).filter((id) => activeCounterparts.has(id))
+      );
+      if (nextSeen.size !== seenMatchUserIdsRef.current.size) {
+        persistSeenMatches(nextSeen);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUserMatches, matchesFeedTick, persistSeenMatches, profile?.id]);
+
+  const discoveryDailyCap = getQuotaCapsForTier(profile?.effective_tier || profile?.tier || "free").discoveryViewsPerDay;
+  const discoveryQuotaReached = Number.isFinite(discoveryDailyCap) && discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
+
   const bumpDiscoverySeen = async (): Promise<boolean> => {
+    if (discoveryQuotaReached) return false;
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
       try {
@@ -412,6 +1030,260 @@ const Chats = () => {
     });
     return true;
   };
+
+  const checkReciprocalWave = useCallback(
+    async (targetUserId: string) => {
+      if (!profile?.id) return false;
+      try {
+        const attempts: Array<{ fromCol: "from_user_id" | "sender_id"; toCol: "to_user_id" | "receiver_id" }> = [
+          { fromCol: "sender_id", toCol: "receiver_id" },
+          { fromCol: "from_user_id", toCol: "to_user_id" },
+        ];
+        for (const attempt of attempts) {
+          const { data, error } = await supabase
+            .from("waves")
+            .select("id")
+            .eq(attempt.fromCol, targetUserId)
+            .eq(attempt.toCol, profile.id)
+            .limit(1)
+            .maybeSingle();
+          if (error) {
+            if (isWaveSchemaFallbackError(error)) continue;
+            return false;
+          }
+          if ((data as { id?: string } | null)?.id) return true;
+          // Schema exists and no reciprocal row; no need to query alias columns.
+          break;
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    },
+    [profile?.id]
+  );
+
+  const finalizeMutualWave = useCallback(
+    async (targetUserId: string) => {
+      if (!profile?.id) return;
+      try {
+        const { error } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("accept_mutual_wave", {
+          p_target_user_id: targetUserId,
+        });
+        if (error) {
+          const message = String(error.message || "");
+          // Backward compatibility for environments that have not run the new migration yet.
+          if (!/accept_mutual_wave/i.test(message) && !/does not exist/i.test(message)) {
+            throw error;
+          }
+        }
+      } catch {
+        // non-blocking: UI should still continue.
+      }
+    },
+    [profile?.id]
+  );
+
+  const sendDiscoveryWave = useCallback(
+    async (targetUserId: string, options?: { showToast?: boolean }): Promise<WaveSendResult> => {
+      if (!profile?.id) return { status: "failed", mutual: false };
+      const showToast = options?.showToast ?? true;
+      try {
+        const isBlocked = await areUsersBlocked(profile.id, targetUserId);
+        if (isBlocked) {
+          if (showToast) toast.error(t("Cannot wave this user"));
+          return { status: "blocked", mutual: false };
+        }
+
+        const outgoingChecks: Array<{ fromCol: "sender_id" | "from_user_id"; toCol: "receiver_id" | "to_user_id" }> = [
+          { fromCol: "sender_id", toCol: "receiver_id" },
+          { fromCol: "from_user_id", toCol: "to_user_id" },
+        ];
+        for (const check of outgoingChecks) {
+          const { data: existingRow, error: existingError } = await supabase
+            .from("waves")
+            .select("id")
+            .eq(check.fromCol, profile.id)
+            .eq(check.toCol, targetUserId)
+            .limit(1)
+            .maybeSingle();
+          if (existingError) {
+            if (isWaveSchemaFallbackError(existingError)) continue;
+            break;
+          }
+          if ((existingRow as { id?: string } | null)?.id) {
+            const mutual = await checkReciprocalWave(targetUserId);
+            if (mutual) await finalizeMutualWave(targetUserId);
+            if (showToast) {
+              toast.info(mutual ? "It’s a pawfect match!" : t("Wave already sent"));
+            }
+            return { status: "duplicate", mutual };
+          }
+          break;
+        }
+
+        const senderReceiverPayload = {
+          sender_id: profile.id,
+          receiver_id: targetUserId,
+          status: "pending",
+          wave_type: "standard",
+        } as Record<string, unknown>;
+        const fromToPayload = {
+          from_user_id: profile.id,
+          to_user_id: targetUserId,
+          status: "pending",
+          wave_type: "standard",
+        } as Record<string, unknown>;
+
+        // Use insert-first instead of upsert to avoid schema-specific ON CONFLICT failures.
+        const canonicalInsert = await supabase.from("waves" as "profiles").insert(senderReceiverPayload);
+        if (canonicalInsert.error) {
+          if (isDuplicateWaveError(canonicalInsert.error)) throw canonicalInsert.error;
+          if (!isWaveSchemaFallbackError(canonicalInsert.error)) throw canonicalInsert.error;
+          const legacyInsert = await supabase.from("waves" as "profiles").insert(fromToPayload);
+          if (legacyInsert.error) {
+            if (isDuplicateWaveError(legacyInsert.error)) throw legacyInsert.error;
+            throw legacyInsert.error;
+          }
+        }
+        const mutual = await checkReciprocalWave(targetUserId);
+        if (mutual) {
+          await finalizeMutualWave(targetUserId);
+        }
+        if (showToast) {
+          toast.success(mutual ? "It’s a pawfect match!" : t("Wave sent"));
+        }
+        return { status: "sent", mutual };
+      } catch (err: unknown) {
+        if (isDuplicateWaveError(err)) {
+          const mutual = await checkReciprocalWave(targetUserId);
+          if (mutual) {
+            await finalizeMutualWave(targetUserId);
+          }
+          if (showToast) {
+            toast.info(mutual ? "It’s a pawfect match!" : t("Wave already sent"));
+          }
+          return { status: "duplicate", mutual };
+        }
+        if (showToast) toast.error(t("Failed to send wave"));
+        return { status: "failed", mutual: false };
+      }
+    },
+    [checkReciprocalWave, finalizeMutualWave, profile?.id, t]
+  );
+
+  const openStarUpgradeSheet = useCallback((tier: StarUpgradeTier) => {
+    setStarUpgradeTier(tier);
+    setStarUpgradeBilling("monthly");
+  }, []);
+
+  const closeStarUpgradeSheet = useCallback(() => {
+    if (starCheckoutLoading) return;
+    setStarUpgradeTier(null);
+  }, [starCheckoutLoading]);
+
+  const getStarRemaining = useCallback(async () => {
+    const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+    if (snapshot.error) throw snapshot.error;
+    const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
+    const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
+    const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
+    const cap = getQuotaCapsForTier(userTier).starsPerMonth;
+    const used = Number(typed.stars_used_cycle || 0);
+    const extra = Number(typed.extra_stars || 0);
+    return Math.max(0, cap - used) + Math.max(0, extra);
+  }, [profile?.effective_tier, profile?.tier]);
+
+  async function runStarAction(target: DiscoveryProfile) {
+    if (!profile?.id) return false;
+    const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    if (tier === "free") {
+      openStarUpgradeSheet("plus");
+      return false;
+    }
+    let remaining = 0;
+    try {
+      remaining = await getStarRemaining();
+    } catch {
+      toast.error("Unable to verify Star quota right now.");
+      return false;
+    }
+    if (remaining <= 0) {
+      if (tier === "plus") {
+        openStarUpgradeSheet("gold");
+      } else {
+        toast.info(quotaConfig.copy.stars.exhausted);
+      }
+      return false;
+    }
+    try {
+      const roomId = await ensureDirectChatRoom(supabase, profile.id, target.id, target.display_name || "Conversation");
+      if (!roomId) throw new Error("room_not_created");
+      const quotaResult = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+        "check_and_increment_quota",
+        { action_type: "star" }
+      );
+      if (quotaResult.error) {
+        if (tier === "plus") {
+          openStarUpgradeSheet("gold");
+        } else {
+          toast.info(quotaConfig.copy.stars.exhausted);
+        }
+        return false;
+      }
+      try {
+        const key = `discovery_starred_${profile?.id || "anon"}`;
+        const raw = localStorage.getItem(key);
+        const prev = raw ? (JSON.parse(raw) as string[]) : [];
+        const next = Array.from(new Set([...(Array.isArray(prev) ? prev : []), target.id]));
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // ignore local persistence failures
+      }
+      void enqueueChatNotification({
+        userId: target.id,
+        kind: "star",
+        title: "Star Chat Started✨",
+        body: `${profile.display_name || "Someone"} just sent you a Star!`,
+        href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
+        data: { room_id: roomId, from_user_id: profile.id, type: "star" },
+      });
+      commitDiscoverySwipe("up", target.id, "star");
+      navigate(
+        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
+          target.display_name || "Conversation"
+        )}&with=${encodeURIComponent(target.id)}`
+      );
+      return true;
+    } catch {
+      toast.error("Unable to open chat right now.");
+      return false;
+    }
+  }
+
+  const handleStarUpgradeCheckout = useCallback(async () => {
+    if (!starUpgradeTier || starCheckoutLoading) return;
+    setStarCheckoutLoading(true);
+    try {
+      const selectedPlan = quotaConfig.stripePlans[starUpgradeTier][starUpgradeBilling];
+      const url = await startStripeCheckout({
+        mode: "subscription",
+        type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
+        lookupKey: selectedPlan.lookupKey,
+        priceId: selectedPlan.priceId,
+        successUrl: `${window.location.origin}/premium`,
+        cancelUrl: `${window.location.origin}/chats`,
+      });
+      window.location.assign(url);
+    } catch {
+      toast.error("Unable to start checkout right now.");
+    } finally {
+      setStarCheckoutLoading(false);
+    }
+  }, [starCheckoutLoading, starUpgradeBilling, starUpgradeTier]);
 
   // Filters are now managed in the filters state object with sensible defaults
 
@@ -494,7 +1366,7 @@ const Chats = () => {
         const { data: members } = await supabase
           .from("chat_room_members")
           .select("user_id, profiles!inner(id, display_name, avatar_url)")
-          .eq("room_id", groupManageId);
+          .eq("chat_id", groupManageId);
         if (members) {
           setGroupMembers(
             members.map((m: { user_id: string; profiles: { id: string; display_name: string | null; avatar_url: string | null } }) => ({
@@ -538,17 +1410,443 @@ const Chats = () => {
     load();
   }, [groupManageId, profile?.id, profile?.display_name, profile?.avatar_url]);
 
-  const loadConversations = useCallback(async () => {
-    try {
-      const data = await getConversations() as Record<string, unknown>;
-      if (data && data.chats) {
-        // Map backend data to our format
-        // For now, we'll use mock data
-      }
-    } catch (error) {
-      console.error("Failed to load conversations:", error);
+  useEffect(() => {
+    if (!profile?.id) {
+      setBlockedUserIds(new Set());
+      return;
     }
-  }, [getConversations]);
+    void (async () => {
+      const ids = await loadBlockedUserIdsFor(profile.id);
+      setBlockedUserIds(ids);
+    })();
+  }, [profile?.id]);
+
+  const loadConversations = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      const { data: memberships, error: membershipsError } = await supabase
+        .from("chat_room_members")
+        .select("chat_id")
+        .eq("user_id", profile.id);
+      if (membershipsError) throw membershipsError;
+
+      let roomIds = [...new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
+      if (!roomIds.length) {
+        const { data: ownedChats } = await supabase
+          .from("chats")
+          .select("id")
+          .eq("created_by", profile.id)
+          .eq("type", "direct")
+          .order("created_at", { ascending: false })
+          .limit(40);
+        roomIds = [...new Set((ownedChats || []).map((row: { id: string }) => row.id).filter(Boolean))];
+      }
+      if (!roomIds.length) {
+        setChats([]);
+        setGroups([]);
+        const matchesRows = await fetchUserMatches();
+        const counterpartIds = Array.from(
+          new Set(
+            ((matchesRows || []) as Array<{ user1_id: string; user2_id: string }>)
+              .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+              .filter((id) => Boolean(id) && id !== profile.id)
+          )
+        );
+        if (counterpartIds.length === 0) {
+          setMatchOnlyAvatars([]);
+          return;
+        }
+        const profileById = new Map<string, Record<string, unknown>>();
+        const profileSelect = "id, display_name, avatar_url, verification_status, is_verified, has_car, availability_status, social_album";
+        const { data: profileRows } = await supabase
+          .from("profiles")
+          .select(profileSelect)
+          .in("id", counterpartIds);
+        if (Array.isArray(profileRows)) {
+          for (const row of profileRows as Array<Record<string, unknown>>) {
+            const rowId = String(row.id || "");
+            if (rowId) profileById.set(rowId, row);
+          }
+        }
+        const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
+        if (unresolvedIds.length > 0) {
+          const { data: publicRows } = await supabase
+            .from("profiles_public")
+            .select("id, display_name, avatar_url, has_car, availability_status, user_role")
+            .in("id", unresolvedIds);
+          if (Array.isArray(publicRows)) {
+            for (const row of publicRows as Array<Record<string, unknown>>) {
+              const rowId = String(row.id || "");
+              if (rowId) profileById.set(rowId, row);
+            }
+          }
+        }
+        const nextAvatars: MatchOnlyAvatar[] = counterpartIds
+          .map((counterpart) => {
+            const row = (profileById.get(counterpart) || {}) as Record<string, unknown>;
+            const socialAlbumFallback = Array.isArray(row.social_album)
+              ? String((row.social_album as unknown[])[0] || "").trim()
+              : "";
+            return {
+              userId: counterpart,
+              name: String(row.display_name || "User"),
+              avatarUrl: (row.avatar_url as string | null) || socialAlbumFallback || null,
+              isVerified: row.is_verified === true,
+              hasCar: Boolean(row.has_car),
+              matchedAt:
+                ((matchesRows || []) as Array<{ user1_id: string; user2_id: string; matched_at?: string | null }>)
+              .find((r) => (r.user1_id === profile.id ? r.user2_id : r.user1_id) === counterpart)?.matched_at || null,
+            };
+          })
+          .slice(0, 12);
+        setMatchOnlyAvatars(nextAvatars);
+        return;
+      }
+
+      const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, matchesRows] = await Promise.all([
+        supabase.from("chats").select("id, name, avatar_url, type").in("id", roomIds),
+        supabase
+          .from("chat_room_members")
+          .select("chat_id, user_id")
+          .in("chat_id", roomIds),
+        supabase
+          .from("chat_messages")
+          .select("id, chat_id, sender_id, content, created_at")
+          .in("chat_id", roomIds)
+          .order("created_at", { ascending: false }),
+        fetchUserMatches(),
+      ]);
+
+      if (roomsError) throw roomsError;
+      if (membersError) console.warn("[chats] members query failed", membersError);
+      if (messagesError) console.warn("[chats] messages query failed", messagesError);
+
+      const memberRows = (members || []) as { chat_id: string; user_id: string }[];
+      const matchByChatId = new Map<string, string>();
+      const matchedAtByCounterpart = new Map<string, string>();
+      for (const row of matchesRows) {
+        const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
+        if (!counterpart) continue;
+        if (row.chat_id) matchByChatId.set(String(row.chat_id), counterpart);
+        if (row.matched_at && !matchedAtByCounterpart.has(counterpart)) matchedAtByCounterpart.set(counterpart, row.matched_at);
+        if (row.chat_id) rememberDirectPeer(String(row.chat_id), counterpart);
+      }
+      const counterpartByLastSender = new Map<string, string>();
+      for (const msg of (messages || []) as { chat_id: string; sender_id: string }[]) {
+        if (!msg?.chat_id || !msg?.sender_id || msg.sender_id === profile.id) continue;
+        if (!counterpartByLastSender.has(msg.chat_id)) {
+          counterpartByLastSender.set(msg.chat_id, msg.sender_id);
+        }
+      }
+      const counterpartIds = Array.from(
+        new Set(
+          [
+            ...memberRows.map((member) => member.user_id),
+            ...Array.from(matchByChatId.values()),
+            ...Object.values(directPeerByRoomRef.current),
+            ...Array.from(counterpartByLastSender.values()),
+          ].filter((userId) => userId && userId !== profile.id)
+        )
+      );
+      const profileById = new Map<string, Record<string, unknown>>();
+      const blockedByMe = new Set<string>();
+      const blockedByThem = new Set<string>();
+      const unmatchedByThem = new Set<string>();
+      if (counterpartIds.length > 0) {
+        const profileSelect = "id, display_name, avatar_url, verification_status, is_verified, has_car, availability_status, social_album";
+        let profileRows: unknown[] | null = null;
+        const { data: primaryRows, error: profileRowsError } = await supabase
+          .from("profiles")
+          .select(profileSelect)
+          .in("id", counterpartIds);
+        if (profileRowsError) {
+          profileRows = [];
+        } else {
+          profileRows = (primaryRows || []) as unknown[];
+        }
+        if (Array.isArray(profileRows)) {
+          for (const row of profileRows as Array<Record<string, unknown>>) {
+            const rowId = String(row.id || "");
+            if (rowId) profileById.set(rowId, row);
+          }
+        }
+        const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
+        if (unresolvedIds.length > 0) {
+          const { data: publicRows, error: publicRowsError } = await supabase
+            .from("profiles_public")
+            .select("id, display_name, avatar_url, has_car, availability_status, user_role")
+            .in("id", unresolvedIds);
+          if (!publicRowsError && Array.isArray(publicRows)) {
+            for (const row of publicRows as Array<Record<string, unknown>>) {
+              const rowId = String(row.id || "");
+              if (rowId) profileById.set(rowId, row);
+            }
+          }
+        }
+
+        const [{ data: blocksFromMe }, { data: blocksToMe }, { data: unmatchesToMe }] = await Promise.all([
+          supabase
+            .from("user_blocks")
+            .select("blocked_id")
+            .eq("blocker_id", profile.id)
+            .in("blocked_id", counterpartIds),
+          supabase
+            .from("user_blocks")
+            .select("blocker_id")
+            .eq("blocked_id", profile.id)
+            .in("blocker_id", counterpartIds),
+          supabase
+            .from("user_unmatches")
+            .select("actor_id")
+            .eq("target_id", profile.id)
+            .in("actor_id", counterpartIds),
+        ]);
+        for (const row of (blocksFromMe || []) as Array<{ blocked_id?: string | null }>) {
+          const id = String(row.blocked_id || "").trim();
+          if (id) blockedByMe.add(id);
+        }
+        for (const row of (blocksToMe || []) as Array<{ blocker_id?: string | null }>) {
+          const id = String(row.blocker_id || "").trim();
+          if (id) blockedByThem.add(id);
+        }
+        for (const row of (unmatchesToMe || []) as Array<{ actor_id?: string | null }>) {
+          const id = String(row.actor_id || "").trim();
+          if (id) unmatchedByThem.add(id);
+        }
+      }
+
+      const lastByRoom = new Map<string, { id: string; sender_id: string; content: string; created_at: string }>();
+      const unreadByRoom = new Map<string, number>();
+      const seenSnapshot = roomSeenRef.current;
+      const seededSeen: Record<string, string> = { ...seenSnapshot };
+      for (const msg of (messages || []) as { id: string; chat_id: string; sender_id: string; content: string; created_at: string }[]) {
+        if (!lastByRoom.has(msg.chat_id)) lastByRoom.set(msg.chat_id, msg);
+        if (!seededSeen[msg.chat_id] && msg.created_at) {
+          seededSeen[msg.chat_id] = msg.created_at;
+        }
+        if (msg.sender_id === profile.id) continue;
+        const seenAtRaw = seenSnapshot[msg.chat_id];
+        const seenAtMs = seenAtRaw ? new Date(seenAtRaw).getTime() : Number.NaN;
+        const msgMs = msg.created_at ? new Date(msg.created_at).getTime() : Number.NaN;
+        if (!Number.isFinite(msgMs)) continue;
+        if (!Number.isFinite(seenAtMs) || msgMs > seenAtMs) {
+          unreadByRoom.set(msg.chat_id, (unreadByRoom.get(msg.chat_id) || 0) + 1);
+        }
+      }
+      if (Object.keys(seededSeen).length !== Object.keys(seenSnapshot).length) {
+        persistRoomSeen(seededSeen);
+      }
+      const lastMessageIds = Array.from(new Set(Array.from(lastByRoom.values()).map((message) => message.id).filter(Boolean)));
+      const lastMessageReadByOther = new Map<string, boolean>();
+      if (lastMessageIds.length > 0) {
+        const { data: readRows } = await supabase
+          .from("message_reads")
+          .select("message_id, user_id")
+          .in("message_id", lastMessageIds);
+        for (const row of (readRows || []) as Array<{ message_id: string; user_id: string }>) {
+          if (!row?.message_id || !row?.user_id) continue;
+          if (row.user_id === profile.id) continue;
+          lastMessageReadByOther.set(row.message_id, true);
+        }
+      }
+
+      const membersByRoom = new Map<string, { user_id: string; profiles?: Record<string, unknown> }[]>();
+      for (const member of memberRows) {
+        const arr = membersByRoom.get(member.chat_id) || [];
+        arr.push({ ...member, profiles: profileById.get(member.user_id) });
+        membersByRoom.set(member.chat_id, arr);
+      }
+
+      const nextChats: ChatUser[] = [];
+      const nextGroups: Group[] = [];
+
+      const formatChatTimestamp = (iso?: string | null) => {
+        if (!iso) return "";
+        const stamp = new Date(iso);
+        if (Number.isNaN(stamp.getTime())) return "";
+        const now = new Date();
+        const sameDay =
+          stamp.getFullYear() === now.getFullYear() &&
+          stamp.getMonth() === now.getMonth() &&
+          stamp.getDate() === now.getDate();
+        if (sameDay) {
+          return new Intl.DateTimeFormat("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).format(stamp);
+        }
+        const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+        if (now.getTime() - stamp.getTime() <= oneWeekMs) {
+          return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(stamp);
+        }
+        const day = String(stamp.getDate()).padStart(2, "0");
+        const month = String(stamp.getMonth() + 1);
+        return `${day}/${month}/${stamp.getFullYear()}`;
+      };
+
+      for (const room of (rooms || []) as Record<string, unknown>[]) {
+        const roomId = String(room.id || "");
+        if (!roomId) continue;
+        const roomMembers = membersByRoom.get(roomId) || [];
+        const isGroup = String(room.type || "direct") === "group" || roomMembers.length > 2;
+        const last = lastByRoom.get(roomId);
+
+        if (isGroup) {
+          nextGroups.push({
+            id: roomId,
+            name: String(room.name || "Group"),
+            avatarUrl: (room.avatar_url as string | null) ?? null,
+            memberCount: roomMembers.length,
+            lastMessage: last?.content || "",
+            lastMessageSender: "",
+            time: formatChatTimestamp(last?.created_at),
+            unread: unreadByRoom.get(roomId) || 0,
+          });
+          continue;
+        }
+
+        const other = roomMembers.find((m) => m.user_id !== profile.id);
+      const counterpartUserId =
+          other?.user_id ||
+          matchByChatId.get(roomId) ||
+          directPeerByRoomRef.current[roomId] ||
+          counterpartByLastSender.get(roomId) ||
+          null;
+        if (!counterpartUserId) continue;
+        if (counterpartUserId && counterpartUserId === profile.id) continue;
+        if (counterpartUserId) rememberDirectPeer(roomId, counterpartUserId);
+        const otherProfile = (other?.profiles || (counterpartUserId ? profileById.get(counterpartUserId) : {}) || {}) as Record<string, unknown>;
+        const tier = "free";
+        const fallbackName = String(room.name || "").trim() || "Conversation";
+        const counterpartName = String(otherProfile.display_name || "").trim() || fallbackName;
+        const socialAlbumFallback = Array.isArray(otherProfile.social_album)
+          ? String((otherProfile.social_album as unknown[])[0] || "").trim()
+          : "";
+        const counterpartAvatar = (otherProfile.avatar_url as string | null) || socialAlbumFallback || ((room.avatar_url as string | null) ?? null);
+        const availabilityList = Array.isArray(otherProfile.availability_status)
+          ? (otherProfile.availability_status as unknown[]).map((entry) => String(entry || "").trim()).filter(Boolean)
+          : [];
+        const socialAvailability =
+          availabilityList.length > 0
+            ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
+            : normalizeAvailabilityLabel(String(otherProfile.social_role || otherProfile.user_role || "Friend"));
+        const preview = parseChatPreviewText(last?.content);
+        const previewOverride = counterpartUserId
+          ? (
+              blockedByMe.has(counterpartUserId)
+                ? `You've blocked ${counterpartName}`
+                : blockedByThem.has(counterpartUserId)
+                  ? `You're blocked by ${counterpartName}.`
+                  : unmatchedByThem.has(counterpartUserId)
+                    ? "You've been unmatched."
+                    : ""
+            )
+          : "";
+        nextChats.push({
+          id: roomId,
+          peerUserId: counterpartUserId || null,
+          name: counterpartName,
+          avatarUrl: counterpartAvatar,
+          socialAvailability,
+          previewOverride: previewOverride || null,
+          isVerified: otherProfile.is_verified === true,
+          hasCar: Boolean(otherProfile.has_car),
+          isPremium: tier !== "free",
+          lastMessage: preview,
+          lastMessageAt: last?.created_at || null,
+          time: formatChatTimestamp(last?.created_at),
+          lastMessageFromMe: last?.sender_id === profile.id,
+          lastMessageReadByOther: Boolean(last?.id && lastMessageReadByOther.get(last.id)),
+          unread: unreadByRoom.get(roomId) || 0,
+          type: "friend",
+          isOnline: false,
+          hasTransaction: false,
+          matchedAt: (counterpartUserId && matchedAtByCounterpart.get(counterpartUserId)) || null,
+        });
+      }
+
+      const uniqueChats: ChatUser[] = [];
+      for (const chat of nextChats) {
+        const nextScore = new Date(chat.lastMessageAt || chat.matchedAt || 0).getTime();
+        const foundIndex = uniqueChats.findIndex((existing) => {
+          if (chat.peerUserId && existing.peerUserId) return chat.peerUserId === existing.peerUserId;
+          return chat.id === existing.id;
+        });
+
+        if (foundIndex < 0) {
+          uniqueChats.push(chat);
+          continue;
+        }
+
+        const existing = uniqueChats[foundIndex];
+        const existingScore = new Date(existing.lastMessageAt || existing.matchedAt || 0).getTime();
+        const preferred = (chat.peerUserId && !existing.peerUserId) || (chat.avatarUrl && !existing.avatarUrl) || nextScore > existingScore;
+        if (preferred) {
+          uniqueChats[foundIndex] = { ...existing, ...chat };
+        } else if (!existing.socialAvailability && chat.socialAvailability) {
+          uniqueChats[foundIndex] = { ...existing, socialAvailability: chat.socialAvailability };
+        }
+      }
+
+      uniqueChats.sort((a, b) => {
+        const aMatch = a.matchedAt ? new Date(a.matchedAt).getTime() : Number.NaN;
+        const bMatch = b.matchedAt ? new Date(b.matchedAt).getTime() : Number.NaN;
+        if (Number.isFinite(aMatch) || Number.isFinite(bMatch)) {
+          const safeA = Number.isFinite(aMatch) ? aMatch : -Infinity;
+          const safeB = Number.isFinite(bMatch) ? bMatch : -Infinity;
+          if (safeA !== safeB) return safeB - safeA;
+        }
+        const aMsg = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : Number.NaN;
+        const bMsg = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : Number.NaN;
+        const safeA = Number.isFinite(aMsg) ? aMsg : -Infinity;
+        const safeB = Number.isFinite(bMsg) ? bMsg : -Infinity;
+        return safeB - safeA;
+      });
+
+      setChats(uniqueChats);
+      setGroups(nextGroups);
+      const counterpartInActiveConversations = new Set(
+        uniqueChats
+          .filter((chat) => Boolean(chat.lastMessageAt) || parseChatPreviewText(chat.lastMessage).length > 0)
+          .map((chat) => String(chat.peerUserId || "").trim())
+          .filter(Boolean)
+      );
+      const avatarCandidates = new Map<string, MatchOnlyAvatar>();
+      for (const row of matchesRows) {
+        const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
+        if (!counterpart || counterpart === profile.id) continue;
+        if (counterpartInActiveConversations.has(counterpart)) continue;
+        const profileRow = (profileById.get(counterpart) || {}) as Record<string, unknown>;
+        const socialAlbumFallback = Array.isArray(profileRow.social_album)
+          ? String((profileRow.social_album as unknown[])[0] || "").trim()
+          : "";
+        avatarCandidates.set(counterpart, {
+          userId: counterpart,
+          name: String(profileRow.display_name || "User"),
+          avatarUrl: (profileRow.avatar_url as string | null) || socialAlbumFallback || null,
+          isVerified: profileRow.is_verified === true,
+          hasCar: Boolean(profileRow.has_car),
+        });
+      }
+      setMatchOnlyAvatars((prev) => {
+        const merged = new Map<string, MatchOnlyAvatar>();
+        for (const candidate of avatarCandidates.values()) {
+          merged.set(candidate.userId, candidate);
+        }
+        for (const existing of prev) {
+          if (!existing?.userId) continue;
+          if (counterpartInActiveConversations.has(existing.userId)) continue;
+          if (!merged.has(existing.userId)) {
+            merged.set(existing.userId, existing);
+          }
+        }
+        return Array.from(merged.values()).slice(0, 12);
+      });
+    } catch {
+      toast.error("Failed to load conversations");
+    }
+  }, [blockedUserIds, fetchUserMatches, persistRoomSeen, profile?.id, rememberDirectPeer]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -558,50 +1856,427 @@ const Chats = () => {
   // Discovery cards (embedded in Chats) — send full filter payload
   useEffect(() => {
     const runDiscovery = async () => {
-      if (!profile?.id || profile.last_lat == null || profile.last_lng == null) return;
+      if (!profile?.id || !discoveryHistoryHydrated) return;
+      const anchor = await resolveDiscoveryAnchor();
+      setDiscoveryAnchor(anchor);
+      if (!anchor) {
+        setDiscoveryProfiles([]);
+        setDiscoveryLocationBlocked(true);
+        return;
+      }
+      setDiscoveryLocationBlocked(false);
       setDiscoveryLoading(true);
       try {
-        const payload = {
-          userId: profile.id,
-          lat: profile.last_lat,
-          lng: profile.last_lng,
-          // Full filter payload — backend validates tier gating
-          age_min: filters.ageMin,
-          age_max: filters.ageMax,
-          genders: filters.genders,
-          max_distance_km: filters.maxDistanceKm,
-          species: filters.species,
-          social_roles: filters.socialRoles,
-          height_min_cm: isPremium ? filters.heightMin : undefined,
-          height_max_cm: isPremium ? filters.heightMax : undefined,
-          orientations: isPremium ? filters.orientations : undefined,
-          degrees: isPremium ? filters.degrees : undefined,
-          relationship_statuses: isPremium ? filters.relationshipStatuses : undefined,
-          has_car: isPremium ? filters.hasCar : undefined,
-          has_pet_experience: isPremium ? filters.hasPetExperience : undefined,
-          languages: isPremium ? filters.languages : undefined,
-          verified_only: effectiveTier === "gold" ? filters.verifiedOnly : undefined,
-          who_waved_at_me: effectiveTier === "gold" ? filters.whoWavedAtMe : undefined,
-          active_only: effectiveTier === "gold" ? filters.activeOnly : undefined,
-          advanced: isPremium,
-        };
-        const { data, error } = await supabase.functions.invoke("social-discovery", { body: payload });
-        if (error) throw error;
-        setDiscoveryProfiles(data?.profiles || []);
+        setDiscoveryVisibleCount(20);
+        const wavedByUserIds = new Set<string>();
+        if (filters.whoWavedAtMe) {
+          const waveSelectAttempts = [
+            "from_user_id, sender_id",
+            "from_user_id",
+            "sender_id",
+          ];
+          const incomingToAttempts: Array<"to_user_id" | "receiver_id"> = ["to_user_id", "receiver_id"];
+          let incomingLoaded = false;
+          for (const selectCols of waveSelectAttempts) {
+            for (const toCol of incomingToAttempts) {
+              const { data: waveRows, error: waveErr } = await supabase
+                .from("waves")
+                .select(selectCols)
+                .eq(toCol, profile.id);
+              if (waveErr) {
+                continue;
+              }
+              for (const row of (waveRows || []) as Array<Record<string, unknown>>) {
+                const senderId = String(row.from_user_id || row.sender_id || "");
+                if (senderId) wavedByUserIds.add(senderId);
+              }
+              incomingLoaded = true;
+              break;
+            }
+            if (incomingLoaded) break;
+          }
+        }
+        const handledIds = new Set<string>();
+        try {
+          const handledRaw = localStorage.getItem(handledDiscoveryKey);
+          const handledCached = handledRaw ? (JSON.parse(handledRaw) as string[]) : [];
+          if (Array.isArray(handledCached)) {
+            handledCached.forEach((id) => {
+              if (typeof id === "string" && id) handledIds.add(id);
+            });
+          }
+        } catch {
+          // ignore malformed local handled cache
+        }
+        const outgoingWaveTargetIds = new Set<string>();
+        const waveSentAttempts = ["to_user_id, receiver_id", "to_user_id", "receiver_id"];
+        const outgoingFromAttempts: Array<"from_user_id" | "sender_id"> = ["from_user_id", "sender_id"];
+        let outgoingLoaded = false;
+        for (const selectCols of waveSentAttempts) {
+          for (const fromCol of outgoingFromAttempts) {
+            const { data: sentRows, error: sentErr } = await supabase
+              .from("waves")
+              .select(selectCols)
+              .eq(fromCol, profile.id);
+            if (sentErr) continue;
+            for (const row of (sentRows || []) as Array<Record<string, unknown>>) {
+              const targetId = String(row.to_user_id || row.receiver_id || "");
+              if (targetId) {
+                handledIds.add(targetId);
+                outgoingWaveTargetIds.add(targetId);
+              }
+            }
+            outgoingLoaded = true;
+            break;
+          }
+          if (outgoingLoaded) break;
+        }
+        // Mutual-wave guard: if both directions exist, always treat as handled even when matches sync lags.
+        if (outgoingWaveTargetIds.size > 0) {
+          const waveReceivedAttempts = ["from_user_id, sender_id", "from_user_id", "sender_id"];
+          for (const selectCols of waveReceivedAttempts) {
+            const receivedQuery = supabase
+              .from("waves")
+              .select(selectCols)
+              .limit(500) as unknown as {
+                eq: (column: "to_user_id" | "receiver_id", value: string) => Promise<{ data: unknown; error: unknown }>;
+              };
+            const receivedResultPrimary = await receivedQuery.eq("to_user_id", profile.id);
+            let data = receivedResultPrimary.data;
+            let error = receivedResultPrimary.error;
+            if (error) {
+              const receivedResultFallback = await receivedQuery.eq("receiver_id", profile.id);
+              data = receivedResultFallback.data;
+              error = receivedResultFallback.error;
+            }
+            if (error) continue;
+            for (const row of (Array.isArray(data) ? data : []) as Array<Record<string, unknown>>) {
+              const sourceId = String(row.from_user_id || row.sender_id || "");
+              if (sourceId && outgoingWaveTargetIds.has(sourceId)) {
+                handledIds.add(sourceId);
+              }
+            }
+            break;
+          }
+        }
+        // Hard guard: accepted wave counterparts are always hidden from discovery
+        // even when matches table replication is delayed.
+        const acceptedWaveSelectAttempts = [
+          "from_user_id,to_user_id,sender_id,receiver_id,status",
+          "sender_id,receiver_id,status",
+          "from_user_id,to_user_id,status",
+        ];
+        for (const selectCols of acceptedWaveSelectAttempts) {
+          const fromAttempts: Array<"sender_id" | "from_user_id"> = ["sender_id", "from_user_id"];
+          let acceptedLoaded = false;
+          for (const fromCol of fromAttempts) {
+            const { data: acceptedRows, error: acceptedError } = await supabase
+              .from("waves")
+              .select(selectCols)
+              .eq(fromCol, profile.id)
+              .eq("status", "accepted")
+              .limit(500);
+            if (acceptedError) continue;
+            for (const row of (acceptedRows || []) as Array<Record<string, unknown>>) {
+              const counterpart = String(row.receiver_id || row.to_user_id || "");
+              if (counterpart) handledIds.add(counterpart);
+            }
+            acceptedLoaded = true;
+            break;
+          }
+          if (acceptedLoaded) break;
+        }
+        for (const selectCols of acceptedWaveSelectAttempts) {
+          const toAttempts: Array<"receiver_id" | "to_user_id"> = ["receiver_id", "to_user_id"];
+          let acceptedLoaded = false;
+          for (const toCol of toAttempts) {
+            const { data: acceptedRows, error: acceptedError } = await supabase
+              .from("waves")
+              .select(selectCols)
+              .eq(toCol, profile.id)
+              .eq("status", "accepted")
+              .limit(500);
+            if (acceptedError) continue;
+            for (const row of (acceptedRows || []) as Array<Record<string, unknown>>) {
+              const counterpart = String(row.sender_id || row.from_user_id || "");
+              if (counterpart) handledIds.add(counterpart);
+            }
+            acceptedLoaded = true;
+            break;
+          }
+          if (acceptedLoaded) break;
+        }
+        const matchesRows = await fetchUserMatches();
+        if (matchesRows.length > 0) {
+          const matchedIds = new Set<string>();
+          for (const row of matchesRows) {
+            const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
+            if (counterpart) {
+              handledIds.add(counterpart);
+              matchedIds.add(counterpart);
+            }
+          }
+          try {
+            localStorage.setItem(matchedDiscoveryKey, JSON.stringify(Array.from(matchedIds)));
+          } catch {
+            // ignore cache write failure
+          }
+        }
+        try {
+          const matchedRaw = localStorage.getItem(matchedDiscoveryKey);
+          const matchedCached = matchedRaw ? (JSON.parse(matchedRaw) as string[]) : [];
+          if (Array.isArray(matchedCached)) {
+            matchedCached.forEach((id) => {
+              if (typeof id === "string" && id) handledIds.add(id);
+            });
+          }
+        } catch {
+          // ignore malformed local matched cache
+        }
+        try {
+          const starredRaw = localStorage.getItem(`discovery_starred_${profile.id}`);
+          if (starredRaw) {
+            const starred = JSON.parse(starredRaw) as string[];
+            if (Array.isArray(starred)) {
+              starred.forEach((id) => {
+                if (typeof id === "string" && id) handledIds.add(id);
+              });
+            }
+          }
+        } catch {
+          // ignore local cache parse failures
+        }
+        setHandledDiscoveryIds((prev) => {
+          const next = new Set([...prev, ...handledIds]);
+          try {
+            localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+          } catch {
+            // ignore cache write failure
+          }
+          return next;
+        });
+        const mergedProfiles = new Map<string, DiscoveryProfile>();
+        const pinDistrictByUserId = new Map<string, string | null>();
+        const liveLocationDistrictByUserId = new Map<string, string | null>();
+        const pinRadiusM = Math.max(1000, Math.round((filters.maxDistanceKm || 5) * 1000));
+        const { data: fallbackPins, error: fallbackPinsError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+          "get_friend_pins_nearby",
+          {
+            p_lat: anchor.lat,
+            p_lng: anchor.lng,
+            p_radius_m: pinRadiusM,
+          }
+        );
+        if (!fallbackPinsError && Array.isArray(fallbackPins) && fallbackPins.length > 0) {
+          const fallbackMeta = new Map(
+            (fallbackPins as Array<Record<string, unknown>>).map((row) => [
+              String(row.id),
+              {
+                location_name: typeof row.location_name === "string" ? row.location_name : null,
+                avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
+                display_name: typeof row.display_name === "string" ? row.display_name : "User",
+              },
+            ])
+          );
+          for (const [userId, meta] of fallbackMeta.entries()) {
+            pinDistrictByUserId.set(userId, extractDistrictToken(meta.location_name || null));
+          }
+          const fallbackIds = Array.from(fallbackMeta.keys());
+          const { data: fallbackProfilesByPins, error: fallbackProfilesByPinsError } = await supabase
+            .from("profiles")
+            .select("id, display_name, avatar_url, verification_status, is_verified, availability_status, pet_experience, pet_experience_years:experience_years, social_album, dob, gender_genre, orientation, relationship_status, degree, languages, height, has_car, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district, pets(species,name,is_active,is_public)")
+            .in("id", fallbackIds)
+            .or("non_social.is.null,non_social.eq.false");
+
+          if (fallbackProfilesByPinsError) throw fallbackProfilesByPinsError;
+
+          const normalizedByPins = (((fallbackProfilesByPins || []) as unknown) as DiscoveryProfile[]).map((row) => {
+            const meta = fallbackMeta.get(row.id);
+            const profileDistrict = String((row as DiscoveryProfile & { location_district?: string | null }).location_district || "").trim() || null;
+            const profileLocation = String(row.location_name || "").trim() || null;
+            const pinDistrict = pinDistrictByUserId.get(row.id) || extractDistrictToken(meta?.location_name || null);
+            return {
+              ...row,
+              display_name: row.display_name || meta?.display_name || "User",
+              avatar_url: row.avatar_url || meta?.avatar_url || null,
+              location_name: resolveDiscoveryLocationLabel({
+                pinDistrict,
+                profileLocationDistrict: profileDistrict,
+                profileLocationName: profileLocation || meta?.location_name || null,
+              }),
+              social_role: Array.isArray((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status)
+                ? (((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status || [])[0] ?? null)
+                : row.social_role ?? null,
+            };
+          });
+          for (const row of normalizedByPins) mergedProfiles.set(row.id, row);
+        }
+        try {
+          const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+            "social_discovery",
+            {
+              p_user_id: profile.id,
+              p_lat: anchor.lat,
+              p_lng: anchor.lng,
+              p_radius_m: pinRadiusM,
+              p_min_age: Math.max(16, filters.ageMin || 16),
+              p_max_age: Math.max(Math.max(16, filters.ageMin || 16), filters.ageMax || 99),
+              p_role: null,
+              p_gender: filters.genders.length === 1 ? filters.genders[0] ?? null : null,
+              p_species: filters.species.length === ALL_SPECIES.length ? null : filters.species,
+              p_pet_size: null,
+              p_advanced: isPremium,
+              p_height_min: isPremium ? filters.heightMin : null,
+              p_height_max: isPremium ? filters.heightMax : null,
+              p_only_waved: filters.whoWavedAtMe,
+              p_active_only: filters.activeOnly,
+            }
+          );
+          if (error) throw error;
+          const fromEdge = ((data || []) as DiscoveryProfile[]).map((row) => ({
+            ...row,
+            social_role: Array.isArray((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status)
+              ? (((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status || [])[0] ?? null)
+              : row.social_role ?? null,
+          }));
+          for (const row of fromEdge) {
+            const existing = mergedProfiles.get(row.id);
+            mergedProfiles.set(row.id, {
+              ...existing,
+              ...row,
+              display_name: row.display_name || existing?.display_name || "User",
+              avatar_url: row.avatar_url || existing?.avatar_url || null,
+              location_name: row.location_name || existing?.location_name || null,
+            });
+          }
+
+          const mergedIds = Array.from(mergedProfiles.keys());
+          if (mergedIds.length > 0) {
+            const { data: pinRows } = await supabase
+              .from("pins")
+              .select("user_id, address, created_at")
+              .in("user_id", mergedIds)
+              .is("thread_id", null)
+              .order("created_at", { ascending: false });
+            for (const row of (pinRows || []) as Array<{ user_id?: string | null; address?: string | null }>) {
+              const userId = String(row.user_id || "").trim();
+              if (!userId || pinDistrictByUserId.has(userId)) continue;
+              pinDistrictByUserId.set(userId, extractDistrictToken(row.address || null));
+            }
+
+            const { data: liveLocations } = await supabase
+              .from("user_locations")
+              .select("user_id, location_name, updated_at")
+              .in("user_id", mergedIds)
+              .order("updated_at", { ascending: false });
+
+            for (const row of (liveLocations || []) as Array<{ user_id?: string | null; location_name?: string | null }>) {
+              const userId = String(row.user_id || "").trim();
+              if (!userId || liveLocationDistrictByUserId.has(userId)) continue;
+              liveLocationDistrictByUserId.set(userId, extractDistrictToken(row.location_name || null));
+            }
+
+            const { data: profileEnrichment } = await supabase
+              .from("profiles")
+              .select("id, pet_experience, degree, languages, height, has_car, verification_status, is_verified, relationship_status, orientation, gender_genre, availability_status, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district")
+              .in("id", mergedIds);
+            for (const row of (profileEnrichment || []) as DiscoveryProfile[]) {
+              const existing = mergedProfiles.get(row.id);
+              if (!existing) continue;
+              const profileDistrict = String(row.location_district || "").trim() || null;
+              const profileLocation = String(row.location_name || "").trim() || null;
+              const liveDistrict = liveLocationDistrictByUserId.get(row.id) || null;
+              const pinDistrict = pinDistrictByUserId.get(row.id) || null;
+              mergedProfiles.set(row.id, {
+                ...existing,
+                ...row,
+                location_name: resolveDiscoveryLocationLabel({
+                  liveLocationDistrict: liveDistrict,
+                  pinDistrict,
+                  profileLocationDistrict: profileDistrict,
+                  profileLocationName: profileLocation || existing.location_name || null,
+                }),
+              });
+            }
+          }
+        } catch (edgeErr) {
+          console.warn("[Chats] social_discovery rpc unavailable, using local nearby candidates", edgeErr);
+        }
+        const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), filters, {
+          enforceVerifiedOnly: filters.verifiedOnly,
+          enforceActiveOnly: filters.activeOnly,
+          wavedByUserIds,
+          anchor,
+        }).filter((row) => !handledIds.has(row.id));
+        if (mergedList.length > 0) {
+          setDiscoveryProfiles(mergedList);
+          return;
+        }
+
+        const { data: fallbackProfiles } = await supabase
+          .from("profiles")
+          .select("id, display_name, avatar_url, verification_status, is_verified, availability_status, pet_experience, pet_experience_years:experience_years, social_album, dob, gender_genre, orientation, relationship_status, degree, languages, height, has_car, last_active_at, updated_at, created_at, last_lat, last_lng, pets(species,name,is_active,is_public)")
+          .or("non_social.is.null,non_social.eq.false")
+          .neq("id", profile.id)
+          .limit(80);
+
+        const normalizedFallback = (((fallbackProfiles || []) as unknown) as DiscoveryProfile[]).map((row) => ({
+          ...row,
+          social_role: Array.isArray((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status)
+            ? (((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status || [])[0] ?? null)
+            : row.social_role ?? null,
+        }));
+
+        setDiscoveryProfiles(applyDiscoveryClientFilters(normalizedFallback, filters, {
+          enforceVerifiedOnly: filters.verifiedOnly,
+          enforceActiveOnly: filters.activeOnly,
+          wavedByUserIds,
+          anchor,
+        }).filter((row) => !handledIds.has(row.id)));
       } catch (err) {
         console.warn("[Chats] Discovery failed", err);
+        setDiscoveryProfiles([]);
       } finally {
         setDiscoveryLoading(false);
       }
     };
     runDiscovery();
   }, [
+    discoveryHistoryHydrated,
     profile?.id,
-    profile?.last_lat,
-    profile?.last_lng,
     filters,
     isPremium,
     effectiveTier,
+    resolveDiscoveryAnchor,
+    discoveryRefreshTick,
+    handledDiscoveryKey,
+    matchedDiscoveryKey,
+  ]);
+
+  useEffect(() => {
+    if (discoveryLoading) return;
+    if (discoveryProfiles.length === 0) return;
+    const visibleCount = discoveryProfiles.filter((p) => {
+      if (hiddenDiscoveryIds.has(p.id)) return false;
+      if (blockedUserIds.has(p.id)) return false;
+      if (handledDiscoveryIds.has(p.id)) return false;
+      return true;
+    }).length;
+    if (visibleCount === 0) {
+      if (hiddenDiscoveryIds.size > 0) {
+        setHiddenDiscoveryIds(new Set());
+      }
+      if (discoveryVisibleCount !== 20) {
+        setDiscoveryVisibleCount(20);
+      }
+    }
+  }, [
+    blockedUserIds,
+    discoveryVisibleCount,
+    discoveryLoading,
+    discoveryProfiles,
+    handledDiscoveryIds,
+    hiddenDiscoveryIds,
   ]);
 
   useEffect(() => {
@@ -609,17 +2284,9 @@ const Chats = () => {
       if (discoveryProfiles.length === 0) return;
       const next: Record<string, string[]> = {};
       for (const p of discoveryProfiles) {
-        const album = Array.isArray(p?.social_album) ? p.social_album : [];
+        const album = canonicalizeSocialAlbumEntries(Array.isArray(p?.social_album) ? p.social_album : []);
         if (!album.length) continue;
-        const resolved = await Promise.all(
-          album.map(async (path: string) => {
-            if (!path) return "";
-            if (path.startsWith("http")) return path;
-            const { data } = await supabase.storage.from("social_album").createSignedUrl(path, 60 * 60);
-            return data?.signedUrl || "";
-          })
-        );
-        next[p.id] = resolved.filter(Boolean);
+        next[p.id] = await resolveSocialAlbumUrlList(album, 60 * 60);
       }
       if (Object.keys(next).length > 0) {
         setAlbumUrls((prev) => ({ ...prev, ...next }));
@@ -628,45 +2295,81 @@ const Chats = () => {
     loadAlbums();
   }, [discoveryProfiles]);
 
-  // Listen for new messages
-  useEffect(() => {
-    onNewMessage((message) => {
-      setChats(prev => prev.map(chat => {
-        if (chat.id === message.senderId) {
-          return {
-            ...chat,
-            lastMessage: message.content,
-            time: "Just now",
-            unread: chat.unread + 1
-          };
-        }
-        return chat;
-      }));
-    });
-  }, [onNewMessage]);
+  const loadRoomMessages = useCallback(async (roomId: string) => {
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, sender_id, content, created_at")
+      .eq("chat_id", roomId)
+      .order("created_at", { ascending: true })
+      .limit(150);
+    if (error) {
+      toast.error("Failed to load chat messages");
+      return;
+    }
+    setActiveRoomMessages((data || []) as { id: string; sender_id: string; content: string; created_at: string }[]);
+  }, []);
 
-  // Listen for online status updates
   useEffect(() => {
-    onOnlineStatus((userId, isOnline) => {
-      setOnlineUsers(prev => {
-        const newSet = new Set(prev);
-        if (isOnline) {
-          newSet.add(userId);
-        } else {
-          newSet.delete(userId);
+    if (!profile?.id) return;
+    const channel = supabase
+      .channel(`chats_messages_${profile.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
+        void loadConversations();
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [loadConversations, profile?.id]);
+
+  useEffect(() => {
+    if (!activeRoomId) return;
+    const roomChannel = supabase
+      .channel(`active_room_${activeRoomId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${activeRoomId}` },
+        () => {
+          void loadRoomMessages(activeRoomId);
         }
-        return newSet;
-      });
-    });
-  }, [onOnlineStatus]);
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(roomChannel);
+    };
+  }, [activeRoomId, loadRoomMessages]);
+
+  const getChatPreview = (chat: ChatUser) => {
+    const override = String(chat.previewOverride || "").trim();
+    if (override) return override;
+    return parseChatPreviewText(chat.lastMessage);
+  };
 
   // Filter chats based on active tab and search (unified tab system)
   const filteredChats = chats.filter(chat => {
-    const matchesTab = mainTab === "groups" ? false : chat.type === mainTab;
+    if (chat.peerUserId && chat.peerUserId === profile?.id) return false;
+    const matchesTab = mainTab === "groups" ? false : chat.type === "friend";
     const matchesSearch = !searchQuery ||
       chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
+      getChatPreview(chat).toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTab && matchesSearch;
+  });
+  const avatarOnlyMatchedChats = filteredChats.filter(
+    (chat) =>
+      Boolean(chat.peerUserId) &&
+      chat.peerUserId !== profile?.id &&
+      !chat.lastMessageAt &&
+      getChatPreview(chat).length === 0
+  );
+  const avatarOnlyMatchOnlyAvatars = matchOnlyAvatars.filter(
+    (entry) => !avatarOnlyMatchedChats.some((chat) => chat.peerUserId === entry.userId)
+  );
+  const visibleConversationChats = filteredChats.filter((chat) => {
+    const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
+    if (!hasConversationActivity) return false;
+    return !avatarOnlyMatchedChats.some((avatarOnly) => avatarOnly.id === chat.id);
   });
 
   // Filter groups based on search
@@ -676,93 +2379,640 @@ const Chats = () => {
       group.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
-  const demoProfiles = demoUsers.map((u) => ({
-    id: u.id,
-    display_name: u.name,
-    avatar_url: u.avatarUrl || null,
-    is_verified: u.isVerified,
-    has_car: u.hasCar,
-    bio: u.bio,
-    relationship_status: u.relationshipStatus || null,
-    dob: u.age ? new Date(Date.now() - u.age * 365.25 * 24 * 60 * 60 * 1000).toISOString() : null,
-    location_name: u.locationName,
-    occupation: u.occupation || null,
-    school: u.education || null,
-    major: u.degree || null,
-    tier: u.isPremium ? "premium" : "free",
-    pets: u.pets || [],
-    pet_species: (u.pets || []).map((p) => p.species),
-    pet_size: null,
-    height: u.height || null,
-    social_album: u.avatarUrl ? [u.avatarUrl] : [],
-    show_occupation: true,
-    show_academic: true,
-    show_bio: true,
-    show_relationship_status: true,
-    show_age: true,
-    show_gender: true,
-    show_orientation: true,
-    show_height: true,
-    show_weight: true,
-    social_role: u.role,
-    gender_genre: u.gender || null,
-    orientation: u.orientation || null,
-  }));
-
-  const resolveDemoPetSize = (profileRow: { pet_size?: string | null; pet_species?: string[] | null }) => {
-    if (profileRow?.pet_size) return profileRow.pet_size;
-    const species = (profileRow?.pet_species || []).map((s: string) => s.toLowerCase());
-    if (species.includes("dog")) return "Medium";
-    if (species.includes("cat") || species.includes("rabbit") || species.includes("hamster") || species.includes("bird")) {
-      return "Small";
-    }
-    return null;
-  };
-
-  const filteredDemoProfiles = demoProfiles.filter((p) => {
-    // Apply filter state
-    if (filters.socialRoles.length > 0 && p.social_role && !filters.socialRoles.includes(p.social_role)) return false;
-    if (filters.species.length > 0 && filters.species.length < ALL_SPECIES.length) {
-      const species = (p.pet_species || []).map((s: string) => s.toLowerCase());
-      if (!species.some(s => filters.species.includes(s))) return false;
-    }
-    if (filters.genders.length > 0 && filters.genders.length < ALL_GENDERS.length && p.gender_genre) {
-      if (!filters.genders.includes(p.gender_genre)) return false;
-    }
-    const age = p.dob
-      ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-      : null;
-    if (age !== null && (age < filters.ageMin || age > filters.ageMax)) return false;
-    return true;
-  });
-
-  const discoverySource = (discoveryProfiles.length > 0 ? discoveryProfiles : filteredDemoProfiles).filter(
-    (p) => !hiddenDiscoveryIds.has(p.id)
+  const totalUnreadMessages = useMemo(
+    () => chats.reduce((sum, chat) => sum + Math.max(0, chat.unread || 0), 0) + groups.reduce((sum, group) => sum + Math.max(0, group.unread || 0), 0),
+    [chats, groups]
   );
 
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      localStorage.setItem(`chats_unread_${profile.id}`, String(totalUnreadMessages));
+      window.dispatchEvent(new CustomEvent("huddle:chats-unread", { detail: { count: totalUnreadMessages } }));
+    } catch {
+      // ignore storage dispatch failure
+    }
+  }, [profile?.id, totalUnreadMessages]);
+
+  useEffect(() => {
+    if (topTab === "chats") {
+      setShowChatsToggleDot(false);
+      setLastClearedUnreadCount(totalUnreadMessages);
+      return;
+    }
+    if (totalUnreadMessages <= 0) {
+      setShowChatsToggleDot(false);
+      return;
+    }
+    if (totalUnreadMessages > lastClearedUnreadCount) {
+      setShowChatsToggleDot(true);
+    }
+  }, [lastClearedUnreadCount, topTab, totalUnreadMessages]);
+
+  const baseDiscoverySource = discoveryProfiles.filter(
+    (p) =>
+      !hiddenDiscoveryIds.has(p.id) &&
+      !blockedUserIds.has(p.id) &&
+      !handledDiscoveryIds.has(p.id)
+  );
+  const visibleDiscoverySource = baseDiscoverySource.filter((p) => !passedDiscoveryIds.has(p.id));
+  const carryoverQueue = visibleDiscoverySource.filter((p) => carryoverPassedIds.has(p.id));
+  const primaryQueue = visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id));
+  const discoverySource = [...primaryQueue, ...carryoverQueue];
+  const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
+  const currentDiscovery = discoveryDeck[0] ?? null;
+  const nextDiscovery = discoveryDeck[1] ?? null;
+  const thirdDiscovery = discoveryDeck[2] ?? null;
+  const fourthDiscovery = discoveryDeck[3] ?? null;
+  const fifthDiscovery = discoveryDeck[4] ?? null;
+  const showDiscoverEmpty = !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
+  const discoveryStackHasRealNext = Boolean(currentDiscovery && nextDiscovery);
+
+  const getDiscoveryAlbum = useCallback((profileRow?: DiscoveryProfile | null) => {
+    if (!profileRow) return [] as string[];
+    const normalizedSocialAlbum = canonicalizeSocialAlbumEntries(
+      Array.isArray(profileRow.social_album) ? profileRow.social_album : []
+    );
+    const resolvedSocialAlbum = Array.isArray(albumUrls[profileRow.id]) ? albumUrls[profileRow.id] : [];
+    const album = resolvedSocialAlbum.length > 0 ? resolvedSocialAlbum : normalizedSocialAlbum;
+    return Array.from(
+      new Set(
+        [profileRow.avatar_url || "", ...album]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+      )
+    );
+  }, [albumUrls]);
+
+  useEffect(() => {
+    setDiscoverImageIndex(0);
+  }, [currentDiscovery?.id]);
+
+  const refreshDiscovery = useCallback(() => {
+    setSwipeDir(null);
+    dragY.set(0);
+    setDiscoveryRefreshTick((tick) => tick + 1);
+  }, [dragY]);
+
+  const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
+    dragY.set(0);
+    setSwipeDir(null);
+    if (currentId) {
+      if (action === "pass") {
+        setHiddenDiscoveryIds((prev) => {
+          if (!prev.has(currentId)) return prev;
+          const next = new Set(prev);
+          next.delete(currentId);
+          return next;
+        });
+        setDiscoveryProfiles((prev) => {
+          const index = prev.findIndex((item) => item.id === currentId);
+          if (index < 0) return prev;
+          const item = prev[index];
+          return [...prev.slice(0, index), ...prev.slice(index + 1), item];
+        });
+        setPassedDiscoveryIds((prev) => {
+          const next = new Set(prev);
+          next.add(currentId);
+          try {
+            const ids = Array.from(next);
+            sessionStorage.setItem(passedDiscoverySessionKey, JSON.stringify(ids));
+            localStorage.setItem(
+              passedDiscoveryKey,
+              JSON.stringify({ ids, sessionId: discoverySessionId })
+            );
+          } catch {
+            // ignore cache write failure
+          }
+          return next;
+        });
+      } else {
+        setHandledDiscoveryIds((prev) => {
+          const next = new Set(prev);
+          next.add(currentId);
+          try {
+            localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+          } catch {
+            // ignore cache write failure
+          }
+          return next;
+        });
+      }
+    }
+  }, [discoverySessionId, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
+
+  const commitDiscoverySwipe = useCallback((direction: "up" | "down", currentId?: string, action?: "wave" | "star" | "pass") => {
+    setSwipeDir(direction);
+    advanceDiscoveryCard(currentId, action);
+  }, [advanceDiscoveryCard]);
+
+  const persistMatchedDiscoveryUser = useCallback((userId?: string | null) => {
+    const normalized = String(userId || "").trim();
+    if (!normalized) return;
+
+    setHandledDiscoveryIds((prev) => {
+      const next = new Set(prev);
+      next.add(normalized);
+      try {
+        localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore cache write failure
+      }
+      return next;
+    });
+
+    try {
+      const raw = localStorage.getItem(matchedDiscoveryKey);
+      const current = raw ? (JSON.parse(raw) as string[]) : [];
+      const next = Array.from(
+        new Set([...(Array.isArray(current) ? current : []), normalized]),
+      );
+      localStorage.setItem(matchedDiscoveryKey, JSON.stringify(next));
+    } catch {
+      // ignore cache write failure
+    }
+  }, [handledDiscoveryKey, matchedDiscoveryKey]);
+
+  useEffect(() => {
+    if (discoverySource.length === 0) {
+      return;
+    }
+    // Keep pass queue behavior deterministic:
+    // when there are passed profiles, do not prefetch new profiles into this session queue.
+    if (passedDiscoveryIds.size > 0) {
+      return;
+    }
+    if (discoveryDeck.length < 5 && discoverySource.length > discoveryVisibleCount) {
+      setDiscoveryVisibleCount((prev) => Math.min(prev + 20, discoverySource.length));
+      return;
+    }
+    if (
+      discoveryDeck.length < 5 &&
+      !discoveryLoading &&
+      !discoveryPrefetchingRef.current
+    ) {
+      discoveryPrefetchingRef.current = true;
+      setDiscoveryRefreshTick((tick) => tick + 1);
+      window.setTimeout(() => {
+        discoveryPrefetchingRef.current = false;
+      }, 1200);
+    }
+  }, [discoveryDeck.length, discoveryLoading, discoverySource.length, discoveryVisibleCount, passedDiscoveryIds.size]);
+  const groupSelectableUsers = useMemo(() => {
+    const nextById = new Map<string, GroupContactOption>();
+    const add = (entry: GroupContactOption | null | undefined) => {
+      if (!entry?.id) return;
+      if (entry.id === profile?.id) return;
+      if (blockedUserIds.has(entry.id)) return;
+      if (nextById.has(entry.id)) return;
+      nextById.set(entry.id, entry);
+    };
+
+    groupContactPool.forEach((entry) => add(entry));
+    chats
+      .filter((chat) => chat.type === "friend" && chat.peerUserId)
+      .forEach((chat) =>
+        add({
+          id: String(chat.peerUserId),
+          name: chat.name || "User",
+          avatar: chat.avatarUrl || undefined,
+          verified: Boolean(chat.isVerified),
+        })
+      );
+    matchOnlyAvatars.forEach((entry) =>
+      add({
+        id: entry.userId,
+        name: entry.name || "User",
+        avatar: entry.avatarUrl || undefined,
+        verified: Boolean(entry.isVerified),
+      })
+    );
+
+    return Array.from(nextById.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [blockedUserIds, chats, groupContactPool, matchOnlyAvatars, profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    void (async () => {
+      const matchesRows = await fetchUserMatches();
+      const counterpartIds = Array.from(
+        new Set(
+          matchesRows
+            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+            .filter((id) => Boolean(id) && id !== profile.id && !blockedUserIds.has(id))
+        )
+      );
+
+      if (counterpartIds.length === 0) {
+        setGroupContactPool([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url, verification_status, is_verified")
+        .in("id", counterpartIds)
+        .limit(250);
+      if (error) {
+        const fallback = counterpartIds.map((id) => ({
+          id,
+          name: "User",
+          avatar: undefined,
+          verified: false,
+        }));
+        setGroupContactPool(fallback);
+        return;
+      }
+
+      const byId = new Map(
+        (((data || []) as unknown) as DiscoveryProfile[]).map((row) => [row.id, row] as const)
+      );
+      const next = counterpartIds
+        .map((id) => byId.get(id))
+        .filter((row): row is DiscoveryProfile => Boolean(row))
+        .map((row) => ({
+          id: row.id,
+          name: row.display_name || "User",
+          avatar: row.avatar_url || undefined,
+          verified: row.is_verified === true,
+        }));
+      if (next.length > 0) {
+        setGroupContactPool(next);
+      } else {
+        const fallback = counterpartIds.map((id) => ({
+          id,
+          name: "User",
+          avatar: undefined,
+          verified: false,
+        }));
+        setGroupContactPool(fallback);
+      }
+    })();
+  }, [blockedUserIds, fetchUserMatches, matchesFeedTick, profile?.id]);
+
+  const ensureDirectRoom = useCallback(async (targetUserId: string, targetName: string) => {
+    if (!profile?.id) return null;
+    const roomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
+    if (roomId) rememberDirectPeer(roomId, targetUserId);
+    return roomId;
+  }, [profile?.id, rememberDirectPeer]);
+
+  const enqueueChatNotification = useCallback(
+    async (args: { userId: string; kind: string; title: string; body: string; href: string; data?: Record<string, unknown> }) => {
+      try {
+        let normalizedHref = args.href;
+        if (normalizedHref === "/chats") normalizedHref = "/chats?tab=discover";
+        if (!normalizedHref.startsWith("/")) normalizedHref = "/chats?tab=discover";
+        const { error } = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+          "enqueue_notification",
+          {
+            p_user_id: args.userId,
+            p_category: "chats",
+            p_kind: args.kind,
+            p_title: args.title,
+            p_body: args.body,
+            p_href: normalizedHref,
+            p_data: args.data ?? {},
+          }
+        );
+        if (error) {
+          console.warn("[chats.notification] enqueue_notification failed", {
+            kind: args.kind,
+            href: normalizedHref,
+            message: error.message || "unknown_error",
+          });
+        }
+      } catch {
+        // Keep UX non-blocking; notification failures should not block primary action.
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!matchModal) {
+      setMatchQuickHello("");
+    }
+  }, [matchModal]);
+
+  const sendMatchQuickHello = useCallback(async () => {
+    if (!matchModal || !profile?.id || openingMatchChat) return;
+    const targetName = matchModal.name || "Conversation";
+    const text = matchQuickHello.trim();
+    setOpeningMatchChat(true);
+    try {
+      const roomId =
+        matchModal.roomId ||
+        (await ensureDirectChatRoom(supabase, profile.id, matchModal.userId, targetName));
+      if (!roomId) throw new Error("room_not_created");
+      rememberDirectPeer(roomId, matchModal.userId);
+      if (text) {
+        const { error: messageErr } = await supabase
+          .from("chat_messages")
+          .insert({ chat_id: roomId, sender_id: profile.id, content: text });
+        if (messageErr) throw messageErr;
+      }
+      void enqueueChatNotification({
+        userId: matchModal.userId,
+        kind: "match",
+        title: "It’s a pawfect match!",
+        body: `${profile.display_name || "Someone"} matched with you.`,
+        href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
+        data: { room_id: roomId, from_user_id: profile.id, type: "match" },
+      });
+      setMatchModal(null);
+      setMatchQuickHello("");
+      markRoomSeen(roomId);
+      markMatchSeen(matchModal.userId);
+      navigate(
+        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(
+          matchModal.userId
+        )}`
+      );
+    } catch (err: unknown) {
+      const detail =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message || "")
+          : String(err || "");
+      console.error("[chats.match.quick_hello_failed]", detail || err);
+      toast.error(detail ? `Unable to open chat right now: ${detail}` : "Unable to open chat right now.");
+    } finally {
+      setOpeningMatchChat(false);
+    }
+  }, [enqueueChatNotification, markMatchSeen, markRoomSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.display_name, profile?.id, rememberDirectPeer]);
+
+  const closeMatchModal = useCallback(() => {
+    if (matchModal?.userId) {
+      markMatchSeen(matchModal.userId);
+      setMatchOnlyAvatars((prev) => {
+        const exists = prev.some((entry) => entry.userId === matchModal.userId);
+        if (exists) return prev;
+        return [
+          {
+            userId: matchModal.userId,
+            name: matchModal.name || "Conversation",
+            avatarUrl: matchModal.avatarUrl || null,
+            isVerified: false,
+            hasCar: false,
+            matchedAt: new Date().toISOString(),
+          },
+          ...prev,
+        ].slice(0, 12);
+      });
+    }
+    setMatchModal(null);
+  }, [markMatchSeen, matchModal]);
+
+  const openMatchModalFor = useCallback(
+    async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
+      if (!profile?.id || !target.userId) return null;
+      persistMatchedDiscoveryUser(target.userId);
+      const nextModal: MatchModalState = {
+        userId: target.userId,
+        name: target.name || "Conversation",
+        avatarUrl: target.avatarUrl || null,
+        roomId: null,
+      };
+      setMatchModal(nextModal);
+      void loadConversations();
+      try {
+        const roomId = await ensureDirectChatRoom(
+          supabase,
+          profile.id,
+          target.userId,
+          target.name || "Conversation"
+        );
+        if (roomId) {
+          rememberDirectPeer(roomId, target.userId);
+          setMatchModal((prev) => {
+            if (!prev || prev.userId !== target.userId) return prev;
+            return { ...prev, roomId };
+          });
+        }
+        return roomId;
+      } catch (err: unknown) {
+        console.error("[chats.match.open_modal_room_failed]", err);
+        // Keep modal visible; chat room can still be retried from send/start action.
+        return null;
+      }
+    },
+    [loadConversations, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
+  );
+
+  useEffect(() => {
+    if (!profile?.id || matchModal) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const matchesRows = await fetchUserMatches();
+        if (cancelled || matchesRows.length === 0) return;
+        const candidateIds: string[] = [];
+        for (const row of matchesRows) {
+          const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
+          if (!counterpart) continue;
+          if (seenMatchUserIdsRef.current.has(counterpart)) continue;
+          if (blockedUserIds.has(counterpart)) continue;
+          candidateIds.push(counterpart);
+        }
+        if (!candidateIds.length || cancelled) return;
+        const { data: targetProfiles, error: targetProfilesError } = await supabase
+          .from("profiles")
+          .select("id, display_name, avatar_url")
+          .in("id", candidateIds.slice(0, 20));
+        if (targetProfilesError || cancelled || !Array.isArray(targetProfiles) || targetProfiles.length === 0) return;
+        const targetProfileById = new Map<string, { id: string; display_name: string | null; avatar_url: string | null }>();
+        for (const row of targetProfiles as Array<{ id: string; display_name: string | null; avatar_url: string | null }>) {
+          targetProfileById.set(row.id, row);
+        }
+        const targetUserId = candidateIds.find((id) => targetProfileById.has(id)) || null;
+        if (!targetUserId) return;
+        const targetProfile = targetProfileById.get(targetUserId);
+        if (!targetProfile) return;
+        const names = candidateIds
+          .slice(0, 3)
+          .map((id) => (targetProfileById.get(id)?.display_name || "").trim())
+          .filter(Boolean);
+        if (candidateIds.length > 3) {
+          toast.info(`You have matched with ${candidateIds.length} new friends!`);
+        } else if (names.length > 1) {
+          toast.info(`You're now friends with ${names.join(", ")}!`);
+        }
+        await openMatchModalFor({
+          userId: targetUserId,
+          name: String(targetProfile.display_name || "Conversation"),
+          avatarUrl: (targetProfile.avatar_url as string | null) ?? null,
+        });
+      } catch {
+        // non-blocking
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blockedUserIds, fetchUserMatches, matchModal, matchesFeedTick, openMatchModalFor, profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const onMatchChange = (payload: { new?: Record<string, unknown> | null; old?: Record<string, unknown> | null }) => {
+      const row = (payload.new || payload.old || null) as Record<string, unknown> | null;
+      if (!row) return;
+      const user1 = String(row.user1_id || "");
+      const user2 = String(row.user2_id || "");
+      if (user1 !== profile.id && user2 !== profile.id) return;
+      setMatchesFeedTick((prev) => prev + 1);
+      void loadConversations();
+    };
+
+    const channel = supabase
+      .channel(`matches_feed_${profile.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches" }, onMatchChange)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches" }, onMatchChange)
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [loadConversations, profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    const openUserId = searchParams.get("with");
+    const openUserName = searchParams.get("name") || "Conversation";
+    const openRoomId = searchParams.get("room");
+
+    if (openRoomId) {
+      markRoomSeen(openRoomId);
+      navigate(
+        `/chat-dialogue?room=${encodeURIComponent(openRoomId)}&name=${encodeURIComponent(openUserName)}${
+          openUserId ? `&with=${encodeURIComponent(openUserId)}` : ""
+        }`,
+        { replace: true }
+      );
+      return;
+    }
+
+    if (!openUserId || openUserId === profile.id) return;
+    void (async () => {
+      try {
+        const roomId = await ensureDirectRoom(openUserId, openUserName);
+        if (!roomId) return;
+        markRoomSeen(roomId);
+        navigate(
+          `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(openUserName)}&with=${encodeURIComponent(
+            openUserId
+          )}`,
+          { replace: true }
+        );
+      } catch {
+        toast.error("Unable to open chat right now.");
+      }
+    })();
+  }, [ensureDirectRoom, markRoomSeen, navigate, profile?.id, searchParams]);
+
+  const sendInlineMessage = useCallback(async () => {
+    if (!activeRoomId || !profile?.id || !chatInput.trim() || chatSending) return;
+    setChatSending(true);
+    const text = chatInput.trim();
+    setChatInput("");
+    try {
+      const { data: recipients } = await supabase
+        .from("chat_room_members")
+        .select("user_id")
+        .eq("chat_id", activeRoomId)
+        .neq("user_id", profile.id);
+      const recipientIds = (((recipients || []) as unknown) as Array<{ user_id: string }>).map((item) => item.user_id);
+      for (const recipientId of recipientIds) {
+        const blocked = await areUsersBlocked(profile.id, recipientId);
+        if (blocked) {
+          toast.error("Messaging blocked for this user.");
+          setChatInput(text);
+          setChatSending(false);
+          return;
+        }
+      }
+      const { error } = await supabase
+        .from("chat_messages")
+        .insert({ chat_id: activeRoomId, sender_id: profile.id, content: text });
+      if (error) throw error;
+      await loadRoomMessages(activeRoomId);
+      await loadConversations();
+    } catch {
+      toast.error("Failed to send message");
+      setChatInput(text);
+    } finally {
+      setChatSending(false);
+    }
+  }, [activeRoomId, chatInput, chatSending, loadConversations, loadRoomMessages, profile?.id]);
+
   const handleCreateGroup = () => {
-    if (!isVerified || !isPremium) {
-      toast.error(t("Only verified premium users can create groups"));
+    if (!isVerified) {
+      setGroupVerifyGateOpen(true);
       return;
     }
     setIsCreateGroupOpen(true);
   };
 
-  const handleGroupCreated = (groupData: { name: string; members: unknown[]; allowMemberControl: boolean }) => {
-    console.log("Group created:", groupData);
-    // Add to groups list
-    const newGroup: Group = {
-      id: `g${Date.now()}`,
-      name: groupData.name,
-      avatarUrl: null,
-      memberCount: groupData.members.length + 1, // +1 for creator
-      lastMessage: "Group created",
-      lastMessageSender: "You",
-      time: "Just now",
-      unread: 0
-    };
-    setGroups(prev => [newGroup, ...prev]);
-    toast.success(`Group "${groupData.name}" created!`);
+  const handleGroupCreated = async (groupData: { name: string; members: unknown[]; allowMemberControl: boolean; avatarFile?: File | null }) => {
+    if (!profile?.id) {
+      toast.error("Sign in required.");
+      return;
+    }
+
+    try {
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const memberIds = Array.from(
+        new Set(
+          groupData.members
+            .map((member) => (member as { id?: string })?.id)
+            .filter((id): id is string => Boolean(id) && uuidPattern.test(id) && id !== profile.id)
+        )
+      );
+      if (memberIds.length === 0) {
+        toast.error("Select at least one real member before creating a group.");
+        return;
+      }
+
+      const roomId = crypto.randomUUID();
+      let groupAvatarUrl: string | null = null;
+      if (groupData.avatarFile) {
+        const ext = groupData.avatarFile.name.split(".").pop() || "jpg";
+        const path = `groups/${roomId}/avatar.${ext}`;
+        const upload = await supabase.storage.from("avatars").upload(path, groupData.avatarFile, { upsert: true });
+        if (!upload.error) {
+          groupAvatarUrl = supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+        }
+      }
+
+      const { error: chatError } = await supabase
+        .from("chats")
+        .insert({
+          id: roomId,
+          name: groupData.name,
+          type: "group",
+          created_by: profile.id,
+          avatar_url: groupAvatarUrl,
+        } as Record<string, unknown>);
+
+      if (chatError) {
+        toast.error("Failed to create group. Please retry.");
+        return;
+      }
+
+      const membersPayload = [{ chat_id: roomId, user_id: profile.id }, ...memberIds.map((id) => ({ chat_id: roomId, user_id: id }))];
+      const { error: membersError } = await supabase.from("chat_room_members").insert(membersPayload as Record<string, unknown>[]);
+      if (membersError) {
+        await supabase.from("chats").delete().eq("id", roomId);
+        toast.error("Failed to add members. Group was not created.");
+        return;
+      }
+
+      await loadConversations();
+      markRoomSeen(roomId);
+      toast.success(`Group "${groupData.name}" created!`);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(groupData.name)}`);
+    } catch {
+      toast.error("Failed to create group. Please retry.");
+    }
   };
 
   const handleChatClick = (chat: ChatUser) => {
@@ -770,9 +3020,32 @@ const Chats = () => {
     setChats(prev => prev.map(c =>
       c.id === chat.id ? { ...c, unread: 0 } : c
     ));
-    // Navigate to ChatDialogue with id + name + type params
-    navigate(`/chat-dialogue?id=${chat.id}&name=${encodeURIComponent(chat.name)}&type=${chat.type}`);
+    if (chat.peerUserId) {
+      setMatchOnlyAvatars((prev) => prev.filter((entry) => entry.userId !== chat.peerUserId));
+    }
+    markRoomSeen(chat.id);
+    navigate(
+      `/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}${
+        chat.peerUserId ? `&with=${encodeURIComponent(chat.peerUserId)}` : ""
+      }`
+    );
   };
+
+  const handleMatchAvatarClick = useCallback((entry: MatchOnlyAvatar) => {
+    if (!entry.userId) return;
+    void (async () => {
+      const roomId = await ensureDirectRoom(entry.userId, entry.name || "Conversation");
+      if (!roomId) return;
+      setMatchOnlyAvatars((prev) => prev.filter((item) => item.userId !== entry.userId));
+      markMatchSeen(entry.userId);
+      markRoomSeen(roomId);
+      navigate(
+        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(entry.name || "Conversation")}&with=${encodeURIComponent(
+          entry.userId
+        )}`
+      );
+    })();
+  }, [ensureDirectRoom, markMatchSeen, markRoomSeen, navigate]);
 
   const handleRemoveChat = (chat: ChatUser) => {
     if (chat.hasTransaction) {
@@ -788,8 +3061,8 @@ const Chats = () => {
     setGroups(prev => prev.map(g =>
       g.id === group.id ? { ...g, unread: 0 } : g
     ));
-    // Navigate to ChatDialogue for group
-    navigate(`/chat-dialogue?id=${group.id}&name=${encodeURIComponent(group.name)}&type=group`);
+    markRoomSeen(group.id);
+    navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
   };
 
   // Tap user profile — open right-side sheet showing public fields; block if non_social
@@ -800,11 +3073,20 @@ const Chats = () => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, pet_species, pet_experience_years, languages, social_role" as "*")
+        .select("id, display_name, avatar_url, bio, relationship_status, dob, location_name, occupation, school, major, degree, affiliation, verification_status, is_verified, has_car, tier, effective_tier, non_social, hide_from_map, social_album, availability_status, show_affiliation, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, experience_years, languages" as "*")
         .eq("id", userId)
         .maybeSingle();
       if (error) throw error;
-      setProfileSheetData(data as Record<string, unknown> | null);
+      if (!data) {
+        setProfileSheetData(null);
+        return;
+      }
+      const { data: pets } = await supabase
+        .from("pets")
+        .select("id, name, species, photo_url, is_active")
+        .eq("owner_id", userId);
+      const petHeads = (pets || []).filter((pet) => pet.is_active !== false);
+      setProfileSheetData({ ...(data as Record<string, unknown>), pet_heads: petHeads });
     } catch {
       setProfileSheetData(null);
     } finally {
@@ -871,514 +3153,1058 @@ const Chats = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-nav relative">
+    <div className="h-full min-h-0 bg-background relative overflow-x-hidden flex flex-col">
       <GlobalHeader
         onUpgradeClick={() => setIsPremiumOpen(true)}
-        onMenuClick={() => setIsSettingsOpen(true)}
       />
 
       {isMinor && (
         <div className="absolute inset-x-4 top-24 z-[60] pointer-events-none">
-          <div className="rounded-xl border border-[#3283ff]/30 bg-background/90 backdrop-blur px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
-            {t("Social features restricted for users under 16.")}
+          <div className="rounded-xl border border-[#3283ff]/30 bg-background/95 px-4 py-3 text-sm font-medium text-[#3283ff] shadow-card">
+            {t("Social features restricted for users under 13.")}
           </div>
         </div>
       )}
 
-      <div className={cn(isMinor && "pointer-events-none opacity-70")}>
+      <div className={cn("flex-1 min-h-0 flex flex-col", isMinor && "pointer-events-none opacity-70")}>
 
-      {/* Header */}
-      <header className="flex items-center justify-between px-5 pt-4 pb-2">
-        <h1 className="text-2xl font-bold">{t("chats.title")}</h1>
-        <div className="flex items-center gap-2">
-          {/* Filter Button */}
-          <button
-            onClick={() => setIsFilterModalOpen(true)}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-            aria-label="Filter"
-          >
-            <SlidersHorizontal className="w-5 h-5 text-muted-foreground" />
-          </button>
-          {/* Search Button */}
-          <button
-            onClick={() => setIsSearchOpen(!isSearchOpen)}
-            className="p-2 rounded-full hover:bg-muted transition-colors"
-          >
-            <Search className="w-5 h-5 text-muted-foreground" />
-          </button>
-          {/* Create Group Button */}
-          <motion.button
-            whileTap={{ scale: 0.95 }}
-            onClick={handleCreateGroup}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-              isVerified
-                ? "bg-accent text-accent-foreground"
-                : "bg-muted text-muted-foreground"
-            )}
-          >
-            <Users className="w-3.5 h-3.5" />
-            Create Group
-          </motion.button>
-        </div>
-      </header>
-
-        {/* ── Collapsible Discovery Section ── */}
-      <section className="px-5 pb-2">
-        <button
-          onClick={() => setDiscoveryExpanded((v) => !v)}
-          className="w-full flex items-center justify-between py-2"
-          style={{ borderBottom: "1px solid #E0E0E0", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
-        >
-          <span className="text-sm font-bold text-brandText">Discovery</span>
-          {discoveryExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </button>
-
-        <AnimatePresence initial={false}>
-          {discoveryExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-              className="overflow-hidden"
-            >
-              {/* Discovery cards — single card visible, horizontal scroll with paging */}
-              <div className="flex gap-3 overflow-x-auto scrollbar-hide py-2 snap-x snap-mandatory px-4 -mx-4" style={{ scrollSnapType: "x mandatory" }}>
-                {discoveryLoading && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    {t("Loading discovery...")}
-                  </div>
-                )}
-                {discoverySource.map((p, idx) => {
-                  const blocked = !isPremium && discoverySeenToday >= 40 && idx >= 40;
-                  const age = p?.dob
-                    ? Math.floor((Date.now() - new Date(p.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-                    : "";
-                  const petSpeciesList = Array.isArray(p?.pet_species)
-                    ? p.pet_species
-                    : Array.isArray(p?.pets) && p.pets.length > 0
-                    ? p.pets.map((pet: { species?: string | null }) => pet.species || "")
-                    : [];
-                  const petSpecies = petSpeciesList.length > 0 ? petSpeciesList.join(", ") : "—";
-                  const roleBadge = p.social_role === "nannies" ? "Nannies" : p.social_role === "animal-lovers" ? "Animal Lovers" : "Playdates";
-                  const album = (albumUrls[p.id] && albumUrls[p.id].length > 0)
-                    ? albumUrls[p.id]
-                    : Array.isArray(p?.social_album) && p.social_album.length > 0
-                    ? p.social_album
-                    : p.avatar_url
-                    ? [p.avatar_url]
-                    : [];
-                  const cover = album[0];
-
-                  return (
-                    <div
-                      key={p.id}
-                      className={cn(
-                        "w-[calc(100vw-40px)] max-w-[380px] flex-shrink-0 rounded-2xl border border-border bg-card shadow-card overflow-hidden relative cursor-pointer",
-                        blocked && "cursor-not-allowed"
-                      )}
-                      style={{ scrollSnapAlign: "center" }}
-                      onClick={async () => {
-                        if (blocked) return;
-                        const ok = await bumpDiscoverySeen();
-                        if (!ok) return;
-                        setSelectedDiscovery(p);
-                        setActiveAlbumIndex(0);
-                        setShowDiscoveryModal(true);
-                      }}
-                    >
-                      {cover ? (
-                        <img src={cover} alt={p.display_name || ""} className="w-full object-contain bg-muted" style={{ aspectRatio: "3/4" }} loading="lazy" />
-                      ) : (
-                        <div className="w-full bg-muted" style={{ aspectRatio: "3/4" }} />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
-
-                      {/* Badge overlays on card image — Verified + Car */}
-                      <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                        {p.is_verified && (
-                          <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
-                        )}
-                        {p.has_car && (
-                          <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
-                        )}
-                      </div>
-
-                      {/* Action icons overlay — Wave / Star / X */}
-                      <div className="absolute top-3 right-3 flex gap-1">
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (blocked) return;
-                            const ok = await bumpDiscoverySeen();
-                            if (!ok) return;
-                            try {
-                              if (profile?.id) {
-                                await supabase
-                                  .from("waves" as "profiles")
-                                  .insert({ from_user_id: profile.id, to_user_id: p.id } as Record<string, unknown>)
-                                  .throwOnError();
-                              }
-                              toast.success(t("Wave sent"));
-                            } catch (err: unknown) {
-                              const msg = err instanceof Error ? err.message : String(err);
-                              if (msg.includes("duplicate") || msg.includes("23505")) {
-                                toast.info(t("Wave already sent"));
-                              } else {
-                                toast.error(t("Failed to send wave"));
-                              }
-                            }
-                          }}
-                          className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center"
-                        >
-                          <HandMetal className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (blocked) return;
-                            const okSeen = await bumpDiscoverySeen();
-                            if (!okSeen) return;
-                            // Quota removed — stars unlimited for all tiers
-                            navigate(`/chat-dialogue?id=${p.id}&name=${encodeURIComponent(p.display_name || "")}`);
-                          }}
-                          className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
-                        >
-                          <Star className="w-4 h-4 text-brandBlue" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (blocked) return;
-                            setHiddenDiscoveryIds((prev) => new Set(prev).add(p.id));
-                          }}
-                          className="w-8 h-8 rounded-full bg-card border border-border flex items-center justify-center"
-                        >
-                          <X className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      </div>
-
-                      {/* Bottom info: Name, Age, Social Role, Pet Species */}
-                      <div className="absolute bottom-3 left-3 right-3 text-white">
-                        <div className="flex items-center gap-2">
-                          <span className="text-base font-bold">{p.display_name}</span>
-                          {age && <span className="text-sm font-medium">{String(age)}</span>}
-                        </div>
-                        <div className="text-xs text-white/80 mt-0.5">{roleBadge} • {petSpecies}</div>
-                      </div>
-
-                      {blocked ? (
-                        <div className="absolute inset-0 backdrop-blur-sm bg-white/80 flex items-center justify-center">
-                          <div className="px-4 text-center">
-                            <div className="text-sm font-bold text-brandText">Plus includes more connections</div>
-                            <div className="text-xs text-brandText/70 mt-2">Free includes up to 40 profiles per day.</div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setIsPremiumOpen(true);
-                              }}
-                              className="mt-3 inline-flex items-center justify-center rounded-lg bg-brandBlue text-white font-bold px-4 py-2"
-                            >
-                              Explore Plus
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {discoveryProfiles.length > 0 && discoverySource.length === 0 && (
-                <div className="mt-2">
-                  <button
-                    onClick={() => {
-                      setFilters((f) => ({ ...f, maxDistanceKm: Math.min(150, f.maxDistanceKm + 15) }));
-                      setHiddenDiscoveryIds(new Set());
-                    }}
-                    className="text-xs font-medium text-[#3283ff] underline"
-                  >
-                    {t("Run out of huddlers? Expand search.")}
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </section>
-
-      {/* Search Bar */}
-      <AnimatePresence>
-        {isSearchOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="px-5 pb-2 overflow-hidden"
-          >
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("Search conversations...")}
-                className="pl-10 pr-10 h-10 rounded-full"
-                autoFocus
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
-                >
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── Collapsible Chats Section (default collapsed) ── */}
-      <section className="px-5">
-        <button
-          onClick={() => setChatsExpanded((v) => !v)}
-          className="w-full flex items-center justify-between py-2"
-          style={{ borderBottom: "1px solid #E0E0E0", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}
-        >
-          <span className="text-sm font-bold text-brandText">Chats</span>
-          {chatsExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-        </button>
-
-        <AnimatePresence initial={false}>
-          {chatsExpanded && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-              className="overflow-hidden"
-            >
-
-      {/* Unified Tabs: Play Dates / Nannies / Animal Lovers / Groups */}
-      <div className="py-2">
-        <div className="flex gap-1 overflow-x-auto scrollbar-hide border-b border-border">
-          {mainTabs.map((tab) => (
+      {/* ── Discover | Chats top-tab toggle + filter icon ──────────────────── */}
+      <div className="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
+        {/* Left spacer — mirrors filter button for visual balance */}
+        <div className="w-9 flex-shrink-0" />
+        {/* Toggle pill — centered */}
+        <div className="flex-1 flex justify-center">
+          <div className="flex items-center bg-muted rounded-full p-1 gap-1">
             <button
-              key={tab.id}
-              onClick={() => setMainTab(tab.id)}
+              onClick={() => setTopTab("discover")}
               className={cn(
-                "px-3.5 py-2 text-xs font-medium transition-colors whitespace-nowrap relative",
-                mainTab === tab.id
-                  ? "text-brandBlue"
+                "px-5 py-1.5 rounded-full text-sm font-semibold transition-all",
+                topTab === "discover"
+                  ? "bg-primary text-primary-foreground shadow-sm"
                   : "text-muted-foreground hover:text-brandText"
               )}
             >
-              {t(tab.label)}
-              {mainTab === tab.id && (
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-brandBlue rounded-t" />
+              {t("Discover")}
+            </button>
+            <button
+              onClick={() => setTopTab("chats")}
+              className={cn(
+                "relative px-5 py-1.5 rounded-full text-sm font-semibold transition-all",
+                topTab === "chats"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-brandText"
+              )}
+            >
+              {t("Chats")}
+              {showChatsToggleDot && topTab !== "chats" && totalUnreadMessages > 0 && (
+                <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[rgba(33,69,207,0.14)] px-1.5 py-[1px] text-[10px] font-semibold leading-none text-[#2145CF] ring-2 ring-white">
+                  {totalUnreadMessages > 99 ? "99+" : totalUnreadMessages}
+                </span>
               )}
             </button>
-          ))}
+          </div>
         </div>
+        {/* Filter button — right, only in discover tab */}
+        {topTab === "discover" && !discoverChatAgeBlocked ? (
+          <button
+            onClick={() => setIsFilterModalOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-muted transition-colors flex-shrink-0"
+            aria-label="Filter"
+          >
+            <SlidersHorizontal className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
+          </button>
+        ) : (
+          <div className="w-9 flex-shrink-0" />
+        )}
       </div>
 
-      {/* Chats View (Nannies / Playdates / Animal Lovers) */}
-      {mainTab !== "groups" && (
-        <>
-          {/* Chat List — Nanny disclaimer moved inside ChatDialogue */}
-          <div>
-            <div className="space-y-2">
-              {filteredChats.length === 0 ? (
-                <div className="text-center py-8">
-                  <MessageSquare className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                  <p className="text-muted-foreground">{t("No conversations found")}</p>
-                </div>
-              ) : (
-                filteredChats.slice(0, chatVisibleCount).map((chat, index) => (
-                  <div key={chat.id} className="relative overflow-hidden rounded-xl">
-                    <motion.div
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      onClick={() => handleChatClick(chat)}
-                      drag="x"
-                      dragConstraints={{ left: -80, right: 0 }}
-                      dragElastic={0.1}
-                      onDrag={(_, info) => {
-                        setSwipeDeleteId(info.offset.x < -30 ? chat.id : null);
-                      }}
-                      onDragEnd={(_, info) => {
-                        setSwipeDeleteId(null);
-                        if (info.offset.x < -60) {
-                          if (chat.hasTransaction) {
-                            toast.error(t("Cannot remove conversations with active transactions"));
-                          } else {
-                            setDeleteConfirmId(chat.id);
-                          }
-                        }
-                      }}
-                      className="relative flex items-center gap-4 p-4 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
-                    >
-                      <div
-                        className="relative cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleProfileTap(chat.id, chat.name, chat.avatarUrl);
-                        }}
-                      >
-                        <UserAvatar
-                          avatarUrl={chat.avatarUrl}
-                          name={chat.name}
-                          isVerified={chat.isVerified}
-                          hasCar={chat.hasCar}
-                          size="lg"
-                          showBadges={true}
-                        />
-                        {/* Online indicator */}
-                        {(chat.isOnline || onlineUsers.has(chat.id)) && (
-                          <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold">{t(chat.name)}</h4>
-                          <span className="text-xs text-muted-foreground">{t(chat.time)}</span>
-                        </div>
-                        <p className="text-sm text-muted-foreground truncate mt-0.5">{t(chat.lastMessage)}</p>
-                        {/* Grey bold subtext closer to bottom border */}
-                        <p className="text-xs font-bold text-[#6B7280] mt-1.5">
-                          {chat.type === "nannies" ? "Pet Nanny" : chat.type === "playdates" ? "Playdate" : "Animal Lover"}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {/* Outlined red bin — only visible during swipe */}
-                        {swipeDeleteId === chat.id && (
-                          <div className="w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center">
-                            <Trash2 className="w-4 h-4 text-red-500" />
-                          </div>
-                        )}
-                        {/* Grey unread badge for chats */}
-                        {chat.unread > 0 && (
-                          <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
-                            {chat.unread}
-                          </span>
-                        )}
-                      </div>
-                    </motion.div>
-                  </div>
-                ))
-              )}
-            </div>
-            {filteredChats.length > chatVisibleCount && (
-              <div className="flex justify-center pt-2">
-                <button
-                  className="text-sm text-primary hover:underline"
-                  onClick={() => setChatVisibleCount((c) => c + 10)}
-                >
-                  {t("Load more")}
-                </button>
-              </div>
-            )}
+      {discoverChatAgeBlocked && (
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] pt-3">
+          <div className="mx-auto flex w-full max-w-md flex-col items-center">
+            <img
+              src={discoverAgeGateImage}
+              alt="Discover age gate"
+              className="w-full max-w-[360px] object-contain"
+            />
+            <p className="mt-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+              {DISCOVER_AGE_GATE_BODY}
+            </p>
           </div>
-        </>
-      )}
-
-      {/* Groups View */}
-      {mainTab === "groups" && (
-        <div className="pt-2">
-          <div className="space-y-2">
-            {filteredGroups.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                <p className="text-muted-foreground">{t("No groups found")}</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {isVerified ? t("chats.create_group_prompt") : t("chats.verify_to_create")}
-                </p>
-              </div>
-            ) : (
-              filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
-                <motion.div
-                  key={group.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  onClick={() => handleGroupClick(group)}
-                  className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
-                >
-                  {/* Group Avatar — no badge */}
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                    <Users className="w-6 h-6 text-primary" />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-semibold">{t(group.name)}</h4>
-                        {/* Group creator only: Manage pill */}
-                        {profile?.id && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setGroupManageId(group.id);
-                            }}
-                            className="px-2 py-0.5 rounded-full bg-brandBlue text-white text-[10px] font-bold"
-                          >
-                            Manage
-                          </button>
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground">{t(group.time)}</span>
-                    </div>
-                    {/* Static member count under group name */}
-                    <p className="text-[10px] text-muted-foreground">{group.memberCount} members</p>
-                    <p className="text-sm text-muted-foreground truncate mt-0.5">
-                      <span className="font-medium">{t(group.lastMessageSender)}:</span> {t(group.lastMessage)}
-                    </p>
-                  </div>
-
-                  {group.unread > 0 && (
-                    <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium flex-shrink-0">
-                      {group.unread > 9 ? "9+" : group.unread}
-                    </span>
-                  )}
-                </motion.div>
-              ))
-            )}
-          </div>
-          {filteredGroups.length > groupVisibleCount && (
-            <div className="flex justify-center pt-2">
-              <button
-                className="text-sm text-primary hover:underline"
-                onClick={() => setGroupVisibleCount((c) => c + 10)}
-              >
-                {t("Load more")}
-              </button>
-            </div>
-          )}
         </div>
       )}
 
-            </motion.div>
+      {/* ── DISCOVER view ────────────────────────────────────────────────────── */}
+      {!discoverChatAgeBlocked && topTab === "discover" && (
+        <div
+          className={cn(
+            "flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] transition-all duration-300",
+            matchModal && "scale-[0.985] blur-[2px]"
           )}
-        </AnimatePresence>
-      </section>
+        >
+
+
+          {/* Portrait card stack */}
+          <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
+            <div className="relative w-full max-w-[372px] pb-[10%] sm:pb-[16%] md:pb-[24%]">
+              <div className="relative h-[clamp(340px,50vh,480px)] w-full overflow-visible">
+                {discoveryStackHasRealNext && (() => {
+                  const nextAlbum = getDiscoveryAlbum(nextDiscovery);
+                  const nextCover = nextAlbum[0];
+                  return (
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 z-[5] overflow-hidden rounded-[28px] bg-[#D6DCF6] shadow-[0_10px_24px_rgba(33,71,201,0.12)]"
+                      style={{ transform: "translateY(7%) scale(0.92)" }}
+                    >
+                      {nextCover ? (
+                        <img
+                          src={nextCover}
+                          alt=""
+                          className="h-full w-full object-cover object-center"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-full w-full bg-[linear-gradient(180deg,#93A1F7_0%,#4765E2_54%,#09155F_100%)]" />
+                      )}
+                      <div className="absolute inset-0 bg-[rgba(17,37,126,0.34)]" />
+                    </div>
+                  );
+                })()}
+                {currentDiscovery && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute z-0 left-1/2 bottom-[-9%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.10)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.73)" }}
+                  />
+                )}
+                {currentDiscovery && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute z-[1] left-1/2 bottom-[-6%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.30)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.81)" }}
+                  />
+                )}
+                {currentDiscovery && (
+                  <div
+                    aria-hidden="true"
+                    className="absolute z-[2] left-1/2 bottom-[-3%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.9)" }}
+                  />
+                )}
+
+                {discoveryLoading && (
+                  <>
+                    <div
+                      aria-hidden="true"
+                      className="absolute left-1/2 bottom-[-9%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/20 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
+                      style={{ transform: "translateX(-50%) scaleX(0.73)" }}
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute left-1/2 bottom-[-6%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/30 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
+                      style={{ transform: "translateX(-50%) scaleX(0.81)" }}
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute left-1/2 bottom-[-3%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/40 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
+                      style={{ transform: "translateX(-50%) scaleX(0.9)" }}
+                    />
+                    <div className="absolute inset-0 z-10 animate-pulse rounded-[28px] bg-slate-300/45 shadow-[0_16px_36px_rgba(33,71,201,0.08)]" />
+                    <div className="absolute inset-0 animate-pulse rounded-[28px] bg-slate-300/55" />
+                    <div className="absolute inset-x-8 bottom-10 h-28 animate-pulse rounded-[30px] bg-white/40 backdrop-blur-[18px]" />
+                  </>
+                )}
+
+                {discoveryLocationBlocked && (
+                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                    <div className="glass-nav w-full rounded-[28px] border border-white/55 bg-white/24 px-6 py-6 shadow-[0_16px_32px_rgba(33,71,201,0.12)]">
+                      <p className="text-sm text-muted-foreground">{t("Enable location to discover people nearby.")}</p>
+                      <button
+                        onClick={openLocationSettings}
+                        className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(33,71,201,0.24)]"
+                      >
+                        {t("Open Location Settings")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {showDiscoverEmpty && (
+                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                    <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
+                      <p className="text-base font-semibold text-[#4F5677]">No more profiles</p>
+                      <p className="mt-2 text-sm text-[#4F5677]/75">Refresh to load more nearby users.</p>
+                      <button
+                        className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]"
+                        onClick={refreshDiscovery}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {currentDiscovery && (
+                  <>
+                    <motion.div
+                      className="pointer-events-none absolute right-2 top-2 z-[28] flex h-14 w-14 items-center justify-center rounded-full bg-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.30)]"
+                      style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: 15 }}
+                    >
+                      <img
+                        src={waveHandCta}
+                        alt=""
+                        aria-hidden="true"
+                        width={40}
+                        height={40}
+                        className="h-10 w-10 shrink-0 select-none object-contain"
+                        draggable={false}
+                      />
+                    </motion.div>
+                    <motion.div
+                      className="pointer-events-none absolute bottom-[-30px] left-1/2 z-[28] flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-[rgba(255,255,255,0.92)] shadow-[0_10px_24px_rgba(33,71,201,0.18)]"
+                      style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale }}
+                    >
+                      <X size={22} strokeWidth={1.9} className="text-[#4F5677]" />
+                    </motion.div>
+                  </>
+                )}
+
+                {currentDiscovery && (() => {
+                  const p = currentDiscovery;
+                  const normalizeSpeciesKey = (raw: string) => {
+                    const token = raw.trim().toLowerCase();
+                    if (!token || token === "none") return "";
+                    if (token.endsWith("ies") && token.length > 3) return `${token.slice(0, -3)}y`;
+                    if (token.endsWith("s") && !token.endsWith("ss") && token.length > 2) return token.slice(0, -1);
+                    return token;
+                  };
+                  const toDisplaySpecies = (normalized: string) =>
+                    normalized
+                      .split(/[\s_-]+/)
+                      .filter(Boolean)
+                      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+                      .join(" ");
+                  const availabilityPills: string[] = Array.isArray(p?.availability_status)
+                    ? p.availability_status
+                        .map((value) => normalizeAvailabilityLabel(String(value || "").trim()))
+                        .filter(Boolean)
+                    : [];
+                  const speciesMap = new Map<string, string>();
+                  for (const raw of (Array.isArray(p?.pets) ? p.pets.map((pet: { species?: string | null }) => String(pet.species || "").trim()) : [])
+                    .concat(Array.isArray(p?.pet_species) ? p.pet_species.map((value) => String(value || "").trim()) : [])
+                    .concat(Array.isArray(p?.pet_experience) ? p.pet_experience.map((value) => String(value || "").trim()) : [])) {
+                    const key = normalizeSpeciesKey(raw);
+                    if (!key || speciesMap.has(key)) continue;
+                    speciesMap.set(key, toDisplaySpecies(key));
+                  }
+                  const speciesSummary = Array.from(speciesMap.values()).join(" • ");
+                  const album = getDiscoveryAlbum(p);
+                  const cover = album[0];
+
+                  return (
+                    <motion.div
+                      key={p.id}
+                      drag="y"
+                      dragConstraints={{ top: 0, bottom: 0 }}
+                      dragElastic={0.2}
+                      dragMomentum={false}
+                      style={{ y: dragY, rotate: dragRotate, scale: dragScale }}
+                      className="absolute inset-0 z-20 rounded-[28px] overflow-visible bg-white shadow-[0_26px_56px_rgba(33,71,201,0.16)]"
+                      onDragEnd={(_, info) => {
+                        if (info.offset.y <= -85) {
+                          void (async () => {
+                            const ok = await bumpDiscoverySeen();
+                            if (!ok) {
+                              toast.info(quotaConfig.copy.discovery.exhausted.free);
+                              return;
+                            }
+                            const result = await sendDiscoveryWave(p.id, { showToast: false });
+                            if (result.status === "sent" || result.status === "duplicate") {
+                              commitDiscoverySwipe("up", p.id, "wave");
+                              if (result.status === "sent") {
+                                void enqueueChatNotification({
+                                  userId: p.id,
+                                  kind: "wave",
+                                  title: "Someone just waved at you - Open Discover to find out.",
+                                  body: "Someone just waved at you - Open Discover to find out.",
+                                  href: "/chats?tab=discover",
+                                  data: { from_user_id: profile?.id, type: "wave" },
+                                });
+                              }
+                              if (result.mutual) {
+                                persistMatchedDiscoveryUser(p.id);
+                                if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+                                  navigator.vibrate(18);
+                                }
+                                window.setTimeout(() => {
+                                  void (async () => {
+                                    const roomId = await openMatchModalFor({
+                                      userId: p.id,
+                                      name: p.display_name || "Conversation",
+                                      avatarUrl: p.avatar_url || null,
+                                    });
+                                    if (roomId) {
+                                      const currentName = profile?.display_name || "Someone";
+                                      const targetName = p.display_name || "Someone";
+                                      void enqueueChatNotification({
+                                        userId: p.id,
+                                        kind: "match",
+                                        title: `You're now friends with ${currentName}!`,
+                                        body: "It's a pawfect match!",
+                                        href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
+                                        data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
+                                      });
+                                      void enqueueChatNotification({
+                                        userId: profile?.id || "",
+                                        kind: "match",
+                                        title: `You're now friends with ${targetName}!`,
+                                        body: "It's a pawfect match!",
+                                        href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
+                                        data: { room_id: roomId, from_user_id: p.id, type: "match" },
+                                      });
+                                    }
+                                  })();
+                                }, 180);
+                              }
+                              return;
+                            }
+                            void animate(dragY, 0, {
+                              type: "spring",
+                              stiffness: 240,
+                              damping: 24,
+                            });
+                            toast.error("Failed to send wave");
+                          })();
+                          return;
+                        }
+                        if (info.offset.y >= 110) {
+                          commitDiscoverySwipe("down", p.id, "pass");
+                          return;
+                        }
+                        void animate(dragY, 0, {
+                          type: "spring",
+                          stiffness: 240,
+                          damping: 24,
+                        });
+                      }}
+                      whileDrag={{ scale: 0.95 }}
+                      onClick={() => {
+                        if (Math.abs(dragY.get()) > 8) return;
+                        if (discoverImageInteractingRef.current) return;
+                        void handleProfileTap(p.id, p.display_name || "User", p.avatar_url || null);
+                      }}
+                    >
+                      {discoveryQuotaReached && (
+                        <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
+                          <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
+                            <p className="text-sm font-semibold text-white">{quotaConfig.copy.discovery.exhausted.free}</p>
+                            <button
+                              type="button"
+                              onClick={() => setIsPremiumOpen(true)}
+                              className="mt-2 inline-flex h-9 items-center justify-center rounded-full bg-[rgba(33,71,201,0.95)] px-4 text-xs font-semibold text-white"
+                            >
+                              {t("See plans")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="h-full w-full overflow-hidden rounded-[28px] [clip-path:inset(0_round_28px)]">
+                        {album.length > 0 ? (
+                          <>
+                          <div
+                            className="flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                            onPointerDown={() => {
+                              discoverImageInteractingRef.current = false;
+                            }}
+                            onPointerMove={() => {
+                              discoverImageInteractingRef.current = true;
+                            }}
+                            onPointerUp={() => {
+                              window.setTimeout(() => {
+                                discoverImageInteractingRef.current = false;
+                              }, 100);
+                            }}
+                            onPointerCancel={() => {
+                              discoverImageInteractingRef.current = false;
+                            }}
+                            onScroll={(event) => {
+                              const node = event.currentTarget;
+                              if (!node.clientWidth) return;
+                              const idx = Math.round(node.scrollLeft / node.clientWidth);
+                              setDiscoverImageIndex(Math.max(0, Math.min(album.length - 1, idx)));
+                            }}
+                          >
+                            {album.map((src, index) => (
+                              <div key={`${p.id}-album-${index}`} className="h-full w-full shrink-0 snap-start">
+                                <img
+                                  src={src}
+                                  alt={`${p.display_name || "User"} ${index + 1}`}
+                                  className="h-full w-full object-cover object-center"
+                                  style={{ objectPosition: "center center" }}
+                                  loading="lazy"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          {album.length > 1 && (
+                            <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-center gap-1.5">
+                              {album.map((_, idx) => (
+                                <span
+                                  key={`${p.id}-img-dot-${idx}`}
+                                  className={cn(
+                                    "h-1.5 rounded-full transition-all",
+                                    idx === discoverImageIndex ? "w-4 bg-[#7D86A6]" : "w-1.5 bg-[#B8BED2]/85"
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </>
+                        ) : cover ? (
+                          <img
+                            src={cover}
+                            alt={p.display_name || ""}
+                            className="w-full h-full object-cover object-center"
+                            style={{ objectPosition: "center center" }}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-[linear-gradient(180deg,#93A1F7_0%,#4765E2_54%,#09155F_100%)]" />
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)] pointer-events-none" />
+                        <div className="absolute top-4 left-4">
+                          <ProfileBadges
+                            isVerified={p.is_verified === true}
+                            hasCar={!!p.has_car}
+                            size="sm"
+                          />
+                        </div>
+                        <div className="absolute inset-x-4 bottom-5 pointer-events-none">
+                          <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] backdrop-blur-[22px] shadow-[0_14px_48px_rgba(0,0,0,0.16)]">
+                          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
+                          {availabilityPills.length > 0 && (
+                            <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
+                              <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
+                                {availabilityPills.join(" • ")}
+                              </span>
+                            </div>
+                          )}
+                          <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1.5 flex items-center gap-2">
+                                <span className="truncate text-[25px] font-[700] leading-tight text-white">{p.display_name}</span>
+                              </div>
+                              {p.location_name && (
+                                <div className="flex items-center gap-1.5 mb-2 py-[1px]">
+                                  <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                                  <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{p.location_name}</span>
+                                </div>
+                              )}
+                              {speciesSummary && (
+                                <div className="mt-0.5 flex items-center gap-1.5 py-0">
+                                  <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                                  <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]">
+                              <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
+                            </div>
+                          </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Action bar: Star | Wave | Skip */}
+          <div className="px-4 mt-6 pb-[calc(8px+env(safe-area-inset-bottom,0px))] flex-shrink-0">
+            {showDiscoverEmpty ? (
+              <div />
+            ) : (
+              <div className="mx-auto flex w-fit items-center gap-4 rounded-full border border-white/55 bg-[rgba(255,255,255,0.72)] px-4 py-3 shadow-[0_16px_34px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
+            {/* Star — brandGold */}
+            <button
+              className={cn(
+                "flex h-14 w-14 items-center justify-center rounded-full bg-white/88 text-brandBlue shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+                discoveryQuotaReached && "cursor-not-allowed opacity-45"
+              )}
+              aria-label="Star"
+              disabled={discoveryQuotaReached}
+              onClick={async (e) => {
+                e.stopPropagation();
+                const p = currentDiscovery;
+                if (!p) return;
+                if (!profile?.id) return;
+                if (blockedUserIds.has(p.id)) return;
+                const ok = await bumpDiscoverySeen();
+                if (!ok) {
+                  toast.info(quotaConfig.copy.discovery.exhausted.free);
+                  return;
+                }
+                await runStarAction(p);
+              }}
+            >
+              <Star size={22} strokeWidth={1.9} />
+            </button>
+
+            {/* Wave — primary (larger center) */}
+            <button
+              className={cn(
+                "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.96)] shadow-[0_12px_24px_rgba(33,71,201,0.26)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+                discoveryQuotaReached && "cursor-not-allowed opacity-45"
+              )}
+              aria-label="Wave"
+              disabled={discoveryQuotaReached}
+              onClick={async (e) => {
+                e.stopPropagation();
+                const p = currentDiscovery;
+                if (!p) return;
+                if (blockedUserIds.has(p.id)) return;
+                const ok = await bumpDiscoverySeen();
+                if (!ok) return;
+                const result = await sendDiscoveryWave(p.id, { showToast: true });
+                if (result.status === "sent") {
+                  void enqueueChatNotification({
+                    userId: p.id,
+                    kind: "wave",
+                    title: "Someone just waved at you - Open Discover to find out.",
+                    body: "Someone just waved at you - Open Discover to find out.",
+                    href: "/chats?tab=discover",
+                    data: { from_user_id: profile?.id, type: "wave" },
+                  });
+                }
+                if (result.status === "sent" || result.status === "duplicate") {
+                  commitDiscoverySwipe("up", p.id, "wave");
+                  if (result.mutual) {
+                    persistMatchedDiscoveryUser(p.id);
+                    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+                      navigator.vibrate(18);
+                    }
+                    window.setTimeout(() => {
+                      void (async () => {
+                        const roomId = await openMatchModalFor({
+                          userId: p.id,
+                          name: p.display_name || "Conversation",
+                          avatarUrl: p.avatar_url || null,
+                        });
+                        if (roomId) {
+                          const currentName = profile?.display_name || "Someone";
+                          const targetName = p.display_name || "Someone";
+                          void enqueueChatNotification({
+                            userId: p.id,
+                            kind: "match",
+                            title: `You're now friends with ${currentName}!`,
+                            body: "It's a pawfect match!",
+                            href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
+                            data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
+                          });
+                          void enqueueChatNotification({
+                            userId: profile?.id || "",
+                            kind: "match",
+                            title: `You're now friends with ${targetName}!`,
+                            body: "It's a pawfect match!",
+                            href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
+                            data: { room_id: roomId, from_user_id: p.id, type: "match" },
+                          });
+                        }
+                      })();
+                    }, 180);
+                  }
+                }
+              }}
+            >
+              <WaveHandIcon size={40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
+            </button>
+
+            {/* Skip — muted */}
+            <button
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-white/88 text-brandBlue shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
+              aria-label="Skip"
+              onClick={(e) => {
+                e.stopPropagation();
+                const p = currentDiscovery;
+                if (!p) return;
+                commitDiscoverySwipe("down", p.id, "pass");
+              }}
+            >
+              <X size={22} strokeWidth={1.9} />
+            </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <AnimatePresence>
+        {matchModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[1800] overflow-hidden"
+            >
+              <img
+                src={matchPageImage}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-cover object-center"
+              />
+              <button
+                type="button"
+                className="absolute right-4 top-4 z-20 rounded-full bg-white/55 p-2 text-[#3653BE] shadow-[0_6px_20px_rgba(21,48,153,0.18)] backdrop-blur-md"
+                onClick={closeMatchModal}
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="relative z-10 flex h-full flex-col items-center px-6 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] pt-16">
+                <div className="absolute left-1/2 top-[calc(42%+clamp(38px,5vw,48px))] z-20 -translate-x-1/2 -translate-y-1/2">
+                  <motion.div
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1, transition: { delay: 0.14, duration: 0.24 } }}
+                    className="relative h-[clamp(96px,14vw,124px)] w-[clamp(172px,25vw,216px)]"
+                  >
+                    <div className="absolute left-0 top-1/2 h-[clamp(96px,14vw,124px)] w-[clamp(96px,14vw,124px)] -translate-y-1/2 overflow-hidden rounded-full bg-transparent">
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt={profile?.display_name || "You"} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-transparent text-xl font-semibold text-[#3653BE]">
+                          {(profile?.display_name || "Y").charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    <div className="absolute right-0 top-1/2 h-[clamp(96px,14vw,124px)] w-[clamp(96px,14vw,124px)] -translate-y-1/2 overflow-hidden rounded-full bg-transparent">
+                      {matchModal.avatarUrl ? (
+                        <img src={matchModal.avatarUrl} alt={matchModal.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-transparent text-xl font-semibold text-[#3653BE]">
+                          {(matchModal.name || "U").charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </div>
+
+                <motion.form
+                  initial={{ y: 16, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1, transition: { delay: 0.2, duration: 0.24 } }}
+                  className="absolute bottom-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] left-4 right-4 z-20"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void sendMatchQuickHello();
+                  }}
+                >
+                  <div className="flex items-center gap-2 rounded-[20px] border border-white/55 bg-white/82 p-2 shadow-[0_14px_36px_rgba(21,48,153,0.16)] backdrop-blur-[14px]">
+                    <input
+                      value={matchQuickHello}
+                      onChange={(event) => setMatchQuickHello(event.target.value)}
+                      placeholder="Drop a friendly hello"
+                      className="h-11 flex-1 rounded-[14px] bg-white/70 px-4 text-sm text-[#23326B] outline-none placeholder:text-[#90A0C1]"
+                      maxLength={500}
+                    />
+                    <button
+                      type="submit"
+                      disabled={openingMatchChat || !matchQuickHello.trim()}
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.95)] text-white shadow-[0_10px_22px_rgba(33,71,201,0.28)] disabled:cursor-not-allowed disabled:opacity-45"
+                      aria-label="Send"
+                    >
+                      {openingMatchChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <SendHorizontal className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </motion.form>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── CHATS view ───────────────────────────────────────────────────────── */}
+      {!discoverChatAgeBlocked && topTab === "chats" && (
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+
+          {/* Inline room chat (if active) */}
+          {activeRoomId && (
+            <section className="px-5 pb-3">
+              <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                  <div className="text-sm font-semibold truncate">{activeRoomName || "Chat"}</div>
+                  <button className="text-xs underline" onClick={() => setActiveRoomId(null)}>Close</button>
+                </div>
+                <div className="max-h-64 overflow-y-auto px-4 py-3 space-y-2">
+                  {activeRoomMessages.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No messages yet.</p>
+                  ) : activeRoomMessages.map((m) => {
+                    const mine = m.sender_id === profile?.id;
+                    return (
+                      <div key={m.id} className={cn("max-w-[85%] rounded-lg px-3 py-2 text-sm", mine ? "ml-auto bg-brandBlue text-white" : "bg-muted text-brandText")}>{m.content}</div>
+                    );
+                  })}
+                </div>
+                <div className="px-3 py-3 border-t border-border flex items-center gap-2">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Type a message..."
+                    style={{ fontSize: "16px" }}
+                    className="flex-1 h-10 rounded-[10px] bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)] border-0 outline-none px-3 text-sm text-[var(--text-primary,#424965)]"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void sendInlineMessage();
+                      }
+                    }}
+                  />
+                  <NeuButton className="h-10 px-3" onClick={() => void sendInlineMessage()} disabled={chatSending || !chatInput.trim()}>
+                    {chatSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Send</span>}
+                  </NeuButton>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Search bar */}
+          {isSearchOpen && (
+            <div className="px-5 pt-1 pb-2">
+              <div className="relative w-full max-w-full min-w-0">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("Search")}
+                  autoFocus
+                  style={{ fontSize: "16px" }}
+                  className="w-full max-w-full min-w-0 pl-10 pr-10 h-10 rounded-full bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)] border border-border outline-none text-sm text-[var(--text-primary,#424965)]"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                  >
+                    <X className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Friends | Groups tabs + action row */}
+          <div className="flex items-center justify-between px-4 py-2 flex-shrink-0">
+            <div className="flex gap-2">
+              {mainTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setMainTab(tab.id)}
+                  className={cn(
+                    "px-3.5 py-2 text-xs font-medium transition-colors relative text-center",
+                    mainTab === tab.id
+                      ? "text-brandBlue"
+                      : "text-muted-foreground hover:text-brandText"
+                  )}
+                >
+                  {t(tab.label)}
+                  {mainTab === tab.id && (
+                    <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-brandBlue rounded-t" />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsSearchOpen(!isSearchOpen)}
+                className="p-2 rounded-full hover:bg-muted transition-colors"
+              >
+                <Search className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
+              </button>
+              <button
+                onClick={handleCreateGroup}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+                  isVerified
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <Users className="w-3.5 h-3.5" strokeWidth={1.75} />
+                {t("Create Group")}
+              </button>
+            </div>
+          </div>
+
+          {/* Chat list */}
+          <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y pb-[calc(64px+env(safe-area-inset-bottom)+20px)]">
+
+            {/* Chats View (Friends) */}
+            {mainTab !== "groups" && (
+              <>
+                {/* Chat List */}
+                <div className="px-5">
+                  <div className="space-y-0.5">
+                    {visibleConversationChats.length === 0 && avatarOnlyMatchedChats.length === 0 && avatarOnlyMatchOnlyAvatars.length === 0 ? (
+                      <div className="text-center py-8">
+                        <MessageSquare className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
+                        <p className="text-muted-foreground">{t("No conversations found")}</p>
+                      </div>
+                    ) : (
+                      <>
+                        {(avatarOnlyMatchedChats.length > 0 || avatarOnlyMatchOnlyAvatars.length > 0) && (
+                          <div className="flex items-center gap-2 overflow-x-auto overflow-y-visible px-2 pb-2 pt-2">
+                            {avatarOnlyMatchedChats.slice(0, 10).map((chat) => (
+                              <button
+                                key={`avatar-only-${chat.id}`}
+                                type="button"
+                                onClick={() => handleChatClick(chat)}
+                                className="relative shrink-0 overflow-visible rounded-full p-0.5"
+                                aria-label={chat.name}
+                              >
+                                <UserAvatar
+                                  avatarUrl={chat.avatarUrl}
+                                  name={chat.name}
+                                  isVerified={chat.isVerified}
+                                  hasCar={chat.hasCar}
+                                  size="md"
+                                  showBadges={true}
+                                />
+                              </button>
+                            ))}
+                            {avatarOnlyMatchOnlyAvatars.slice(0, 10).map((entry) => (
+                              <button
+                                key={`avatar-only-match-${entry.userId}`}
+                                type="button"
+                                onClick={() => handleMatchAvatarClick(entry)}
+                                className="relative shrink-0 overflow-visible rounded-full p-0.5"
+                                aria-label={entry.name}
+                              >
+                                <UserAvatar
+                                  avatarUrl={entry.avatarUrl}
+                                  name={entry.name}
+                                  isVerified={entry.isVerified}
+                                  hasCar={entry.hasCar}
+                                  size="md"
+                                  showBadges={true}
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {visibleConversationChats.slice(0, chatVisibleCount).map((chat, index) => (
+                        <div key={chat.id} className="relative overflow-visible rounded-xl">
+                          <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            onClick={() => handleChatClick(chat)}
+                            drag="x"
+                            dragConstraints={{ left: -80, right: 0 }}
+                            dragElastic={0.1}
+                            onDrag={(_, info) => {
+                              setSwipeDeleteId(info.offset.x < -30 ? chat.id : null);
+                            }}
+                            onDragEnd={(_, info) => {
+                              setSwipeDeleteId(null);
+                              if (info.offset.x < -60) {
+                                if (chat.hasTransaction) {
+                                  toast.error(t("Cannot remove conversations with active transactions"));
+                                } else {
+                                  setDeleteConfirmId(chat.id);
+                                }
+                              }
+                            }}
+                            className="relative flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                          >
+                            <div
+                              className="relative cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!chat.peerUserId) return;
+                                handleProfileTap(chat.peerUserId, chat.name, chat.avatarUrl);
+                              }}
+                            >
+                              <UserAvatar
+                                avatarUrl={chat.avatarUrl}
+                                name={chat.name}
+                                isVerified={chat.isVerified}
+                                hasCar={chat.hasCar}
+                                size="lg"
+                                showBadges={true}
+                              />
+                              {/* Online indicator */}
+                              {(chat.isOnline || onlineUsers.has(chat.id)) && (
+                                <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
+                              <div className="min-w-0">
+                                <h4 className="m-0 truncate font-semibold leading-[1.2]">{chat.name}</h4>
+                                {getChatPreview(chat) ? (
+                                  <p className="m-0 mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
+                                    {getChatPreview(chat)}
+                                  </p>
+                                ) : null}
+                                {chat.socialAvailability ? (
+                                  <p className="m-0 mt-2 truncate text-xs font-semibold leading-[1.2] text-[#6B7280]">
+                                    {chat.socialAvailability}
+                                  </p>
+                                ) : (
+                                  <span className="mt-1.5 block h-[14px]" />
+                                )}
+                              </div>
+                              <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
+                                <span className="text-xs text-[#9AA0B5]">{chat.time}</span>
+                                {chat.unread > 0 ? (
+                                  <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
+                                    {chat.unread > 99 ? "9+" : chat.unread}
+                                  </span>
+                                ) : chat.lastMessageFromMe ? (
+                                  <span
+                                    className={cn(
+                                      "text-[12px] font-semibold leading-none",
+                                      chat.lastMessageReadByOther ? "text-[#2145CF]" : "text-[#A3A8BE]"
+                                    )}
+                                    aria-label={chat.lastMessageReadByOther ? "read" : "sent"}
+                                  >
+                                    ✓
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {/* Outlined red bin — only visible during swipe */}
+                              {swipeDeleteId === chat.id && (
+                                <div className="w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center">
+                                  <Trash2 className="w-4 h-4 text-red-500" />
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                  {visibleConversationChats.length > chatVisibleCount && (
+                    <div className="flex justify-center pt-2">
+                      <button
+                        className="text-sm text-primary hover:underline"
+                        onClick={() => setChatVisibleCount((c) => c + 10)}
+                      >
+                        {t("Load more")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Groups View */}
+            {mainTab === "groups" && (
+              <div className="px-5 pt-2">
+                <div className="space-y-2">
+                  {filteredGroups.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
+                      <p className="text-muted-foreground">{t("No groups found")}</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {isVerified ? t("chats.create_group_prompt") : t("chats.verify_to_create")}
+                      </p>
+                    </div>
+                  ) : (
+                    filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
+                      <motion.div
+                        key={group.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        onClick={() => handleGroupClick(group)}
+                        className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                      >
+                        {/* Group Avatar — no badge */}
+                        {group.avatarUrl ? (
+                          <img
+                            src={group.avatarUrl}
+                            alt={group.name}
+                            className="w-14 h-14 rounded-full object-cover flex-shrink-0"
+                          />
+                        ) : (
+                          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                            <Users className="w-6 h-6 text-primary" />
+                          </div>
+                        )}
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-semibold">{t(group.name)}</h4>
+                              {/* Group creator only: Manage pill */}
+                              {profile?.id && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setGroupManageId(group.id);
+                                  }}
+                                  className="px-2 py-0.5 rounded-full bg-brandBlue text-white text-[10px] font-bold"
+                                >
+                                  Manage
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground">{t(group.time)}</span>
+                          </div>
+                          {/* Static member count under group name */}
+                          <p className="text-[10px] text-muted-foreground">{group.memberCount} members</p>
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            <span className="font-medium">{t(group.lastMessageSender)}:</span> {t(group.lastMessage)}
+                          </p>
+                        </div>
+
+                        {group.unread > 0 && (
+                          <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium flex-shrink-0">
+                            {group.unread > 9 ? "9+" : group.unread}
+                          </span>
+                        )}
+                      </motion.div>
+                    ))
+                  )}
+                </div>
+                {filteredGroups.length > groupVisibleCount && (
+                  <div className="flex justify-center pt-2">
+                    <button
+                      className="text-sm text-primary hover:underline"
+                      onClick={() => setGroupVisibleCount((c) => c + 10)}
+                    >
+                      {t("Load more")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+
+        </div>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={!!deleteConfirmId} onOpenChange={() => setDeleteConfirmId(null)}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>{t("Delete Conversation")}</DialogTitle>
+            <DialogDescription>{t("Confirm deletion of this conversation.")}</DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">{t("This conversation will be permanently deleted. Are you sure?")}</p>
           <DialogFooter className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>{t("Cancel")}</Button>
-            <Button variant="destructive" size="sm" onClick={() => {
+            <NeuButton variant="secondary" size="sm" onClick={() => setDeleteConfirmId(null)}>{t("Cancel")}</NeuButton>
+            <NeuButton variant="destructive" size="sm" onClick={() => {
               const chat = chats.find((c) => c.id === deleteConfirmId);
               if (chat) handleRemoveChat(chat);
               setDeleteConfirmId(null);
-            }}>{t("Delete")}</Button>
+            }}>{t("Delete")}</NeuButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1388,6 +4214,7 @@ const Chats = () => {
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Manage Group</DialogTitle>
+            <DialogDescription>Manage members and invitations for this group chat.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {/* Group Image — working upload */}
@@ -1431,7 +4258,7 @@ const Chats = () => {
                       // Update group avatar in local state
                       setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url } : g));
                       // Persist to DB if groups table exists
-                      await supabase.from("chat_rooms").update({ avatar_url: url }).eq("id", groupManageId);
+                      await supabase.from("chats").update({ avatar_url: url }).eq("id", groupManageId);
                       toast.success(t("Group image updated"));
                     } catch (err) {
                       console.error("Group image upload failed:", err);
@@ -1442,10 +4269,10 @@ const Chats = () => {
                     }
                   }}
                 />
-                <Button size="sm" variant="outline" className="text-xs pointer-events-none" disabled={groupImageUploading}>
+                <NeuButton size="sm" variant="secondary" className="text-xs pointer-events-none" disabled={groupImageUploading}>
                   {groupImageUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
                   Change Image
-                </Button>
+                </NeuButton>
               </label>
             </div>
 
@@ -1463,7 +4290,7 @@ const Chats = () => {
                       <button
                         onClick={async () => {
                           try {
-                            await supabase.from("chat_room_members").delete().eq("room_id", groupManageId!).eq("user_id", m.id);
+                            await supabase.from("chat_room_members").delete().eq("chat_id", groupManageId!).eq("user_id", m.id);
                             setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
                             setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g));
                             toast.success(`${m.name} removed`);
@@ -1493,20 +4320,24 @@ const Chats = () => {
                       <UserAvatar avatarUrl={w.avatarUrl} name={w.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                       <span className="text-sm text-brandText">{w.name}</span>
                     </div>
-                    <Button
+                    <NeuButton
                       size="sm"
                       className="h-6 text-[10px] px-2"
                       onClick={async () => {
                         if (!profile?.id || !groupManageId) return;
                         try {
-                          // Insert notification for receiver: "Do you want to join [Group]?"
-                          await supabase.from("notifications").insert({
-                            user_id: w.id,
-                            type: "group_invite",
-                            title: "Group Invite",
-                            body: `${profile.display_name || "Someone"} invited you to join "${groups.find((g) => g.id === groupManageId)?.name || "a group"}"`,
-                            data: { group_id: groupManageId, inviter_id: profile.id },
-                          });
+                          await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+                            "enqueue_notification",
+                            {
+                              p_user_id: w.id,
+                              p_category: "chats",
+                              p_kind: "group_invite",
+                              p_title: "Group Invite",
+                              p_body: `${profile.display_name || "Someone"} invited you to join "${groups.find((g) => g.id === groupManageId)?.name || "a group"}"`,
+                              p_href: `/chat-dialogue?room=${groupManageId}`,
+                              p_data: { group_id: groupManageId, inviter_id: profile.id },
+                            }
+                          );
                           toast.success(`Invite sent to ${w.name}`);
                           // Remove from invite list to prevent duplicate
                           setMutualWaves((prev) => prev.filter((x) => x.id !== w.id));
@@ -1516,7 +4347,7 @@ const Chats = () => {
                       }}
                     >
                       Invite
-                    </Button>
+                    </NeuButton>
                   </div>
                 )) : (
                   <div className="text-xs text-muted-foreground py-2">No mutual waves available</div>
@@ -1527,152 +4358,41 @@ const Chats = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Connection Status */}
-      {!isConnected && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 bg-yellow-500/90 text-yellow-900 text-xs font-medium rounded-full shadow-lg">
-          {t("chats.connecting")}
-        </div>
-      )}
-
-      {/* Discovery Profile Full-Screen */}
-      <AnimatePresence>
-        {showDiscoveryModal && selectedDiscovery && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/60 z-[2500]"
-              onClick={() => setShowDiscoveryModal(false)}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              className="fixed inset-x-0 bottom-0 z-[2501] bg-card rounded-t-3xl max-w-md mx-auto overflow-hidden"
+      <Dialog open={groupVerifyGateOpen} onOpenChange={setGroupVerifyGateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Identity verification required</DialogTitle>
+            <DialogDescription>Finish verification to sunlock group chats</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuButton
+              variant="secondary"
+              size="lg"
+              className="flex-1 min-w-0"
+              onClick={() => setGroupVerifyGateOpen(false)}
             >
-              <div className="relative">
-                <button
-                  onClick={() => setShowDiscoveryModal(false)}
-                  className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
-                >
-                  <X className="w-5 h-5 text-white" />
-                </button>
-                {(() => {
-                  const album = (albumUrls[selectedDiscovery.id] && albumUrls[selectedDiscovery.id].length > 0)
-                    ? albumUrls[selectedDiscovery.id]
-                    : Array.isArray(selectedDiscovery.social_album) && selectedDiscovery.social_album.length > 0
-                    ? selectedDiscovery.social_album
-                    : selectedDiscovery.avatar_url
-                    ? [selectedDiscovery.avatar_url]
-                    : [];
-                  const current = album[activeAlbumIndex] || album[0];
-                  return (
-                    <>
-                      {current ? (
-                        <img
-                          src={current}
-                          alt=""
-                          className="w-full h-72 object-cover"
-                          loading="lazy"
-                          onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
-                          onTouchEnd={(e) => {
-                            if (touchStartX == null || album.length <= 1) return;
-                            const delta = touchStartX - e.changedTouches[0].clientX;
-                            if (Math.abs(delta) > 40) {
-                              const nextIndex = delta > 0
-                                ? Math.min(activeAlbumIndex + 1, album.length - 1)
-                                : Math.max(activeAlbumIndex - 1, 0);
-                              setActiveAlbumIndex(nextIndex);
-                            }
-                            setTouchStartX(null);
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-72 bg-muted" />
-                      )}
-                      {album.length > 1 && (
-                        <div className="absolute inset-x-0 bottom-3 flex items-center justify-center gap-1">
-                          {album.map((_: string, idx: number) => (
-                            <button
-                              key={`dot-${idx}`}
-                              onClick={() => setActiveAlbumIndex(idx)}
-                              className={cn(
-                                "w-2 h-2 rounded-full",
-                                idx === activeAlbumIndex ? "bg-white" : "bg-white/40"
-                              )}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
+              Not now
+            </NeuButton>
+            <NeuButton
+              size="lg"
+              className="flex-1 min-w-0"
+              onClick={() => {
+                setGroupVerifyGateOpen(false);
+                navigate("/verify-identity");
+              }}
+            >
+              Verify now
+            </NeuButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-              <div className="p-5 max-h-[50vh] overflow-y-auto">
-                {(() => {
-                  const age = selectedDiscovery?.dob
-                    ? Math.floor((Date.now() - new Date(selectedDiscovery.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25))
-                    : null;
-                  const pets = Array.isArray(selectedDiscovery?.pets) ? selectedDiscovery.pets : [];
-                  const petSpecies = Array.isArray(selectedDiscovery?.pet_species)
-                    ? selectedDiscovery.pet_species
-                    : pets.map((pet: { species?: string | null }) => pet.species || "");
-                  return (
-                    <>
-                      <h3 className="text-xl font-bold">{selectedDiscovery.display_name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        {selectedDiscovery.show_age !== false && age ? `${age} • ` : ""}
-                        {selectedDiscovery.show_relationship_status !== false
-                          ? selectedDiscovery.relationship_status || ""
-                          : ""}
-                      </p>
-                      <p className="text-sm text-muted-foreground">{selectedDiscovery.location_name || "—"}</p>
-
-                      {selectedDiscovery.show_bio !== false && selectedDiscovery.bio && (
-                        <div className="mt-3">
-                          <h4 className="text-sm font-semibold">{t("Bio")}</h4>
-                          <p className="text-sm text-muted-foreground">{selectedDiscovery.bio}</p>
-                        </div>
-                      )}
-
-                      <div className="mt-3">
-                        <h4 className="text-sm font-semibold">{t("Pet Info")}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {petSpecies.length > 0 ? petSpecies.join(", ") : t("No pet info")}
-                        </p>
-                      </div>
-
-                      {(selectedDiscovery.show_occupation !== false || selectedDiscovery.show_academic !== false) && (
-                        <div className="mt-3 space-y-1">
-                          {selectedDiscovery.show_occupation !== false && selectedDiscovery.occupation && (
-                            <p className="text-sm text-muted-foreground">
-                              {t("Job")}: {selectedDiscovery.occupation}
-                            </p>
-                          )}
-                          {selectedDiscovery.show_academic !== false && (selectedDiscovery.school || selectedDiscovery.major) && (
-                            <p className="text-sm text-muted-foreground">
-                              {t("School")}: {[selectedDiscovery.school, selectedDiscovery.major].filter(Boolean).join(" • ")}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      <SettingsDrawer isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
       <CreateGroupDialog
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
         onCreateGroup={handleGroupCreated}
+        contacts={groupSelectableUsers}
       />
       </div>
 
@@ -1863,232 +4583,39 @@ const Chats = () => {
           </>
         )}
       </AnimatePresence>
-      {/* Profile Sheet — Full-screen scrollable with 3:4 hero, overlays, pet icon, vertical fields, social album */}
-      <AnimatePresence>
-        {profileSheetUser && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-black/60 z-[80]"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setProfileSheetUser(null)}
-            />
-            <motion.div
-              className="fixed inset-0 z-[81] bg-card overflow-y-auto"
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            >
-              {/* Close button */}
-              <button
-                onClick={() => setProfileSheetUser(null)}
-                className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 flex items-center justify-center"
-              >
-                <X className="w-5 h-5 text-white" />
-              </button>
+      <PublicProfileSheet
+        isOpen={Boolean(profileSheetUser)}
+        onClose={() => setProfileSheetUser(null)}
+        loading={profileSheetLoading}
+        fallbackName={profileSheetUser?.name}
+        viewedUserId={profileSheetUser?.id}
+        data={profileSheetData as never}
+        onStarQuotaBlocked={(targetTier) => openStarUpgradeSheet(targetTier)}
+      />
+      <StarUpgradeSheet
+        isOpen={Boolean(starUpgradeTier)}
+        tier={starUpgradeTier || "plus"}
+        billing={starUpgradeBilling}
+        loading={starCheckoutLoading}
+        onClose={closeStarUpgradeSheet}
+        onBillingChange={setStarUpgradeBilling}
+        onUpgrade={handleStarUpgradeCheckout}
+      />
 
-              {profileSheetLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="w-6 h-6 animate-spin text-brandBlue" />
-                </div>
-              ) : profileSheetData?.non_social === true ? (
-                <div className="flex items-center justify-center h-full p-6">
-                  <div className="rounded-xl border border-border bg-muted/50 p-6 text-center max-w-xs">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
-                      <User className="w-8 h-8 text-muted-foreground" />
-                    </div>
-                    <div className="text-sm font-semibold text-brandText">{profileSheetUser.name}</div>
-                    <div className="mt-3 text-xs text-muted-foreground leading-relaxed">
-                      This user has enabled Non-Social mode and is not available for discovery or chat.
-                    </div>
-                  </div>
-                </div>
-              ) : profileSheetData ? (
-                <div className="pb-8">
-                  {/* 3:4 Hero Image — horizontal images fit to 4:3 container */}
-                  <div className="relative w-full" style={{ aspectRatio: "3/4" }}>
-                    {(profileSheetData.avatar_url || profileSheetUser.avatarUrl) ? (
-                      <img
-                        src={(profileSheetData.avatar_url as string) || profileSheetUser.avatarUrl || ""}
-                        alt={(profileSheetData.display_name as string) || profileSheetUser.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-muted flex items-center justify-center">
-                        <User className="w-16 h-16 text-muted-foreground/40" />
-                      </div>
-                    )}
-                    {/* Gradient overlay at bottom of image */}
-                    <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/80 to-transparent" />
-
-                    {/* Overlays at bottom of image: Name, Age, Social Role, Pet Species, Verified + Car Badge */}
-                    <div className="absolute bottom-3 left-3 right-3 text-white">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {profileSheetData.is_verified && (
-                          <span className="px-2 py-0.5 rounded-full bg-brandGold/90 text-white text-[10px] font-bold">Verified</span>
-                        )}
-                        {profileSheetData.has_car && (
-                          <span className="px-2 py-0.5 rounded-full bg-brandBlue/90 text-white text-[10px] font-bold">Car</span>
-                        )}
-                      </div>
-                      <div className="text-lg font-bold leading-tight">
-                        {(profileSheetData.display_name as string) || profileSheetUser.name}
-                        {profileSheetData.show_age !== false && profileSheetData.dob && (
-                          <span className="ml-1.5 text-base font-medium">
-                            {Math.floor((Date.now() - new Date(profileSheetData.dob as string).getTime()) / (1000 * 60 * 60 * 24 * 365.25))}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-white/80 mt-0.5">
-                        {profileSheetData.social_role ? (profileSheetData.social_role === "nannies" ? "Nanny" : profileSheetData.social_role === "animal-lovers" ? "Animal Lover" : "Playdate") : ""}
-                        {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                          <> • {(profileSheetData.pet_species as string[]).join(", ")}</>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Pet icon below image if owns pet */}
-                  {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                    <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-                      <PawPrint className="w-5 h-5 text-brandBlue" />
-                      <span className="text-sm font-medium text-brandText">Pet Owner</span>
-                    </div>
-                  )}
-
-                  {/* Vertical field list: Bio, Pet Species, Pet Experience, Location, Gender, Orientation, Relationship Status, Academic, Language, Social Album */}
-                  <div className="divide-y divide-border">
-                    {profileSheetData.show_bio !== false && profileSheetData.bio && (
-                      <div className="px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 block mb-1">Bio</span>
-                        <p className="text-sm text-brandText leading-relaxed">{profileSheetData.bio as string}</p>
-                      </div>
-                    )}
-
-                    {Array.isArray(profileSheetData.pet_species) && (profileSheetData.pet_species as string[]).length > 0 && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Pet Species</span>
-                        <span className="text-sm text-brandText">{(profileSheetData.pet_species as string[]).join(", ")}</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.pet_experience_years != null && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Pet Experience</span>
-                        <span className="text-sm text-brandText">{profileSheetData.pet_experience_years as number} years</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.location_name && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Location</span>
-                        <span className="text-sm text-brandText">{profileSheetData.location_name as string}</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.show_gender !== false && profileSheetData.gender_genre && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Gender</span>
-                        <span className="text-sm text-brandText">{profileSheetData.gender_genre as string}</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.show_orientation !== false && profileSheetData.orientation && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Orientation</span>
-                        <span className="text-sm text-brandText">{profileSheetData.orientation as string}</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.show_relationship_status !== false && profileSheetData.relationship_status && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Relationship</span>
-                        <span className="text-sm text-brandText">{profileSheetData.relationship_status as string}</span>
-                      </div>
-                    )}
-
-                    {profileSheetData.show_academic !== false && (profileSheetData.school || profileSheetData.major) && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Academic</span>
-                        <span className="text-sm text-brandText">{[profileSheetData.school, profileSheetData.major].filter(Boolean).join(" • ")}</span>
-                      </div>
-                    )}
-
-                    {Array.isArray(profileSheetData.languages) && (profileSheetData.languages as string[]).length > 0 && (
-                      <div className="flex items-center gap-3 px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 w-28 flex-shrink-0">Language</span>
-                        <span className="text-sm text-brandText">{(profileSheetData.languages as string[]).join(", ")}</span>
-                      </div>
-                    )}
-
-                    {/* Social Album — thumbnail grid */}
-                    {Array.isArray(profileSheetData.social_album) && (profileSheetData.social_album as string[]).length > 0 && (
-                      <div className="px-4 py-3">
-                        <span className="text-xs font-semibold text-brandText/60 block mb-2">Social Album</span>
-                        <div className="grid grid-cols-3 gap-2">
-                          {(profileSheetData.social_album as string[]).slice(0, 9).map((url: string, idx: number) => (
-                            <img
-                              key={`album-${idx}`}
-                              src={url.startsWith("http") ? url : ""}
-                              alt={`Album ${idx + 1}`}
-                              className="w-full rounded-lg object-cover"
-                              style={{ aspectRatio: "1/1" }}
-                              loading="lazy"
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">Profile not found</div>
-              )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Discovery Filter Modal — chevron rows with per-filter selection UIs */}
-      <AnimatePresence>
-        {isFilterModalOpen && (
-          <>
-            <motion.div
-              className="fixed inset-0 bg-foreground/30 backdrop-blur-sm z-[70]"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => { setIsFilterModalOpen(false); setActiveFilterRow(null); }}
-            />
-            <motion.div
-              className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-card rounded-t-3xl z-[71] shadow-2xl overflow-y-auto"
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            >
-              <div className="sticky top-0 z-10 flex items-center justify-between px-5 pt-5 pb-3 bg-card border-b border-border">
-                <h3 className="text-base font-bold text-brandText">
-                  {activeFilterRow ? activeFilterRow.label : t("Discovery Filters")}
-                </h3>
-                <button
-                  onClick={() => {
-                    if (activeFilterRow) { setActiveFilterRow(null); } else { setIsFilterModalOpen(false); }
-                  }}
-                  className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center"
-                >
-                  {activeFilterRow ? <ChevronRight className="w-5 h-5 rotate-180" /> : <X className="w-5 h-5" />}
-                </button>
-              </div>
-
+      {/* Discovery Filter Modal */}
+      <GlassModal
+        isOpen={isFilterModalOpen}
+        onClose={() => { setIsFilterModalOpen(false); setActiveFilterRow(null); }}
+        title={activeFilterRow ? activeFilterRow.label : t("Filters")}
+        maxWidth="max-w-lg"
+        className="max-h-[78vh] overflow-y-auto pb-4"
+      >
               {/* Main list of filter rows */}
               {!activeFilterRow && (
                 <div className="divide-y divide-border">
                   {FILTER_ROWS.map((row) => {
                     const locked =
-                      (row.tier === "premium" && effectiveTier === "free") ||
+                      (row.tier === "plus" && effectiveTier === "free") ||
                       (row.tier === "gold" && effectiveTier !== "gold");
                     return (
                       <button
@@ -2096,8 +4623,7 @@ const Chats = () => {
                         className="w-full flex items-center justify-between px-5 py-3.5 text-sm"
                         onClick={() => {
                           if (locked) {
-                            const target = row.tier === "gold" ? "Gold" : "Plus";
-                            toast.error(`${target} includes this filter`);
+                            toast.error(quotaConfig.copy.filters.locked);
                             return;
                           }
                           setActiveFilterRow(row);
@@ -2140,19 +4666,55 @@ const Chats = () => {
                       <div className="flex items-center gap-4">
                         <div className="flex-1">
                           <label className="text-xs font-semibold text-brandText/70">Min Age</label>
-                          <input type="number" min={18} max={99} value={filters.ageMin}
-                            onChange={(e) => setFilters((f) => ({ ...f, ageMin: Math.max(18, Math.min(99, Number(e.target.value))) }))}
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={ageMinDraft}
+                            onChange={(e) => setAgeMinDraft(e.target.value)}
+                            onBlur={() => {
+                              const digits = ageMinDraft.replace(/[^\d]/g, "");
+                              const parsed = Number(digits);
+                              setFilters((f) => {
+                                const nextMin = Number.isFinite(parsed) ? Math.max(16, Math.min(99, parsed)) : f.ageMin;
+                                const clampedMin = Math.min(nextMin, f.ageMax);
+                                setAgeMinDraft(String(clampedMin));
+                                return { ...f, ageMin: clampedMin };
+                              });
+                            }}
                             className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                         <span className="text-muted-foreground mt-5">–</span>
                         <div className="flex-1">
                           <label className="text-xs font-semibold text-brandText/70">Max Age</label>
-                          <input type="number" min={18} max={99} value={filters.ageMax}
-                            onChange={(e) => setFilters((f) => ({ ...f, ageMax: Math.max(f.ageMin, Math.min(99, Number(e.target.value))) }))}
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={ageMaxDraft}
+                            onChange={(e) => setAgeMaxDraft(e.target.value)}
+                            onBlur={() => {
+                              const digits = ageMaxDraft.replace(/[^\d]/g, "");
+                              const parsed = Number(digits);
+                              setFilters((f) => {
+                                const nextMax = Number.isFinite(parsed) ? Math.max(16, Math.min(99, parsed)) : f.ageMax;
+                                const clampedMax = Math.max(f.ageMin, nextMax);
+                                setAgeMaxDraft(String(clampedMax));
+                                return { ...f, ageMax: clampedMax };
+                              });
+                            }}
                             className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm" />
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground text-center">{filters.ageMin} – {filters.ageMax} years old</div>
+                      {(() => {
+                        const draftDigits = ageMinDraft.replace(/[^\d]/g, "");
+                        const draftMin = Number(draftDigits);
+                        if (!Number.isFinite(draftMin) || draftMin >= 16) return null;
+                        return (
+                          <div className="text-xs text-center text-[#7D86A6]">
+                            {DISCOVER_MIN_AGE_MESSAGE}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                   {/* Height Range */}
@@ -2174,6 +4736,49 @@ const Chats = () => {
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground text-center">{filters.heightMin} – {filters.heightMax} cm</div>
+                    </div>
+                  )}
+                  {/* Pet Experience Range */}
+                  {activeFilterRow.key === "experienceYearsMin" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Min years</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={99}
+                            value={filters.experienceYearsMin}
+                            onChange={(e) =>
+                              setFilters((f) => ({
+                                ...f,
+                                experienceYearsMin: Math.max(0, Math.min(99, Number(e.target.value))),
+                              }))
+                            }
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm"
+                          />
+                        </div>
+                        <span className="text-muted-foreground mt-5">–</span>
+                        <div className="flex-1">
+                          <label className="text-xs font-semibold text-brandText/70">Max years</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={99}
+                            value={filters.experienceYearsMax}
+                            onChange={(e) =>
+                              setFilters((f) => ({
+                                ...f,
+                                experienceYearsMax: Math.max(f.experienceYearsMin, Math.min(99, Number(e.target.value))),
+                              }))
+                            }
+                            className="w-full mt-1 h-9 px-2 py-1 text-left rounded-lg border border-border bg-background text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground text-center">
+                        {filters.experienceYearsMin} – {filters.experienceYearsMax} years
+                      </div>
                     </div>
                   )}
                   {/* Distance slider */}
@@ -2215,12 +4820,12 @@ const Chats = () => {
                   {/* Social Role (pill toggles) */}
                   {activeFilterRow.key === "socialRoles" && (
                     <div className="flex flex-wrap gap-2">
-                      {([["playdates", "Pet Parents"], ["nannies", "Nannies"], ["animal-lovers", "Animal Lovers"]] as const).map(([val, label]) => (
+                      {[...ALL_SOCIAL_ROLES].map((val) => (
                         <button key={val}
                           onClick={() => setFilters((f) => ({ ...f, socialRoles: f.socialRoles.includes(val) ? f.socialRoles.filter((x) => x !== val) : [...f.socialRoles, val] }))}
                           className={cn("px-4 py-2 rounded-full text-sm font-medium border transition-colors",
                             filters.socialRoles.includes(val) ? "bg-brandBlue text-white border-brandBlue" : "bg-white text-brandText border-border")}>
-                          {label}
+                          {val}
                         </button>
                       ))}
                     </div>
@@ -2284,12 +4889,6 @@ const Chats = () => {
                       <Switch checked={filters.hasCar} onCheckedChange={(v) => setFilters((f) => ({ ...f, hasCar: v }))} />
                     </div>
                   )}
-                  {activeFilterRow.key === "hasPetExperience" && (
-                    <div className="flex items-center justify-between py-3">
-                      <span className="text-sm font-medium text-brandText">Show users with Pet Experience</span>
-                      <Switch checked={filters.hasPetExperience} onCheckedChange={(v) => setFilters((f) => ({ ...f, hasPetExperience: v }))} />
-                    </div>
-                  )}
                   {activeFilterRow.key === "verifiedOnly" && (
                     <div className="flex items-center justify-between py-3">
                       <span className="text-sm font-medium text-brandText">Show only Verified Users</span>
@@ -2328,10 +4927,7 @@ const Chats = () => {
                   </button>
                 </div>
               )}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      </GlassModal>
     </div>
   );
 };

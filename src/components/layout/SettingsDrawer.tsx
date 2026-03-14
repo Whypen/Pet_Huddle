@@ -15,9 +15,9 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const { signOut, profile } = useAuth();
   const { t } = useLanguage();
 
-  const isVerified = profile?.is_verified;
+  const isVerified = profile?.is_verified === true;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "premium" || effectiveTier === "gold";
+  const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
 
   const menuItems = [
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
@@ -92,7 +92,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                       className={cn(
                         "absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center",
                         isVerified
-                          ? "bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-[#D97706]"
+                          ? "bg-brandBlue"
                           : "bg-muted"
                       )}
                     >

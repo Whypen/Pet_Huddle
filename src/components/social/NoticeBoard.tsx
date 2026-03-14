@@ -73,6 +73,7 @@ interface Thread {
     social_id?: string | null;
     avatar_url: string | null;
     verification_status?: string | null;
+    is_verified?: boolean | null;
     location_country?: string | null;
     last_lat?: number | null;
     last_lng?: number | null;
@@ -990,6 +991,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       social_id: (row.author_social_id as string | null) ?? null,
       avatar_url: (row.author_avatar_url as string | null) ?? null,
       verification_status: (row.author_verification_status as string | null) ?? null,
+      is_verified: (row.author_is_verified as boolean | null) ?? false,
       location_country: (row.author_location_country as string | null) ?? null,
       last_lat: typeof row.author_last_lat === "number" ? row.author_last_lat : null,
       last_lng: typeof row.author_last_lng === "number" ? row.author_last_lng : null,
@@ -1063,11 +1065,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (userIds.length > 0) {
       const { data: profileRows } = await supabase
         .from("profiles")
-        .select("id, social_id, display_name, avatar_url")
+        .select("id, social_id, display_name, avatar_url, is_verified")
         .in("id", userIds);
       if (profileRows && profileRows.length > 0) {
         const profileMap = new Map(
-          (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null }>).map((row) => [
+          (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null; is_verified?: boolean | null }>).map((row) => [
             row.id,
             row,
           ])
@@ -1082,6 +1084,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               display_name: author.display_name ?? notice.author?.display_name ?? null,
               social_id: author.social_id ?? notice.author?.social_id ?? null,
               avatar_url: author.avatar_url ?? notice.author?.avatar_url ?? null,
+              is_verified: author.is_verified === true,
             },
           };
         });
@@ -1236,6 +1239,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               social_id,
               avatar_url,
               verification_status,
+              is_verified,
               non_social,
               location_country,
               last_lat,
@@ -1266,6 +1270,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             author_social_id: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).social_id : null,
             author_avatar_url: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).avatar_url : null,
             author_verification_status: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).verification_status : null,
+            author_is_verified: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).is_verified : null,
             author_location_country: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).location_country : null,
             author_last_lat: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lat : null,
             author_last_lng: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lng : null,
@@ -1332,6 +1337,30 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   useEffect(() => {
     if (!user?.id) {
+      setLikedNotices(new Set());
+      return;
+    }
+    const ids = notices.map((n) => n.id).filter(Boolean);
+    if (ids.length === 0) {
+      setLikedNotices(new Set());
+      return;
+    }
+    void (async () => {
+      const { data, error } = await supabase
+        .from("thread_supports" as "profiles")
+        .select("thread_id")
+        .eq("user_id", user.id)
+        .in("thread_id", ids);
+      if (error) return;
+      const next = new Set(
+        (((data || []) as Array<{ thread_id?: string | null }>).map((row) => row.thread_id).filter(Boolean)) as string[]
+      );
+      setLikedNotices(next);
+    })();
+  }, [notices, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
       setBlockedUsers(new Set());
       return;
     }
@@ -1344,7 +1373,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   useEffect(() => {
     setFocusedThreadId(focusThreadId || null);
     if (focusThreadId) {
-      setTopicFilter("All");
+      setTopicFilters([]);
     }
   }, [focusThreadId]);
 
@@ -2031,6 +2060,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               display_name: profile?.display_name || "You",
               avatar_url: profile?.avatar_url || null,
               verification_status: profile?.verification_status || null,
+              is_verified: profile?.is_verified === true,
             },
           };
           setNotices((prev) => [optimisticThread, ...prev.filter((item) => item.id !== optimisticThread.id)]);
@@ -2089,16 +2119,45 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             item.id === noticeId ? { ...item, likes: Math.max(0, Number(item.likes ?? 0) + delta) } : item
           )
         );
-        const nextLikes = Math.max(0, Number(target.likes ?? 0) + delta);
-        const { error: likeErr } = await supabase
-          .from("threads" as "profiles")
-          .update({ likes: nextLikes } as Record<string, unknown>)
-          .eq("id", noticeId);
-        if (likeErr) {
-          toast.error(likeErr.message || "Unable to update support.");
-          void fetchNotices(true);
-          return;
+        if (isRemoving) {
+          const { error: removeErr } = await supabase
+            .from("thread_supports" as "profiles")
+            .delete()
+            .eq("thread_id", noticeId)
+            .eq("user_id", user.id);
+          if (removeErr) {
+            toast.error(removeErr.message || "Unable to update support.");
+            void fetchNotices(true);
+            return;
+          }
+        } else {
+          const { error: addErr } = await supabase.from("thread_supports" as "profiles").insert({
+            thread_id: noticeId,
+            user_id: user.id,
+          });
+          if (addErr) {
+            const code = String((addErr as { code?: string }).code || "");
+            const message = String((addErr as { message?: string }).message || "").toLowerCase();
+            if (code === "23505" || message.includes("duplicate") || message.includes("conflict")) {
+              setLikedNotices((prev) => {
+                const next = new Set(prev);
+                next.add(noticeId);
+                return next;
+              });
+            } else {
+              toast.error(addErr.message || "Unable to update support.");
+            }
+            void fetchNotices(true);
+            return;
+          }
         }
+
+        const { count } = await supabase
+          .from("thread_supports" as "profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("thread_id", noticeId);
+        const resolvedCount = Number(count ?? 0);
+        setNotices((prev) => prev.map((item) => (item.id === noticeId ? { ...item, likes: resolvedCount } : item)));
         if (!isRemoving && target.user_id !== user.id) {
           const actorHandle = profile?.social_id || profile?.display_name || "user";
           await enqueueSocialNotification({
@@ -2106,7 +2165,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             kind: "thread_like",
             title: "New like",
             body: `@${actorHandle} liked your post.`,
-            href: `/threads?focus=${noticeId}`,
+            href: `/social?focus=${noticeId}`,
             data: {
               thread_id: noticeId,
               actor_id: user.id,
@@ -2179,26 +2238,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
-  const [pinnedNotices, setPinnedNotices] = useState<Set<string>>(() => {
-    try {
-      const raw = localStorage.getItem("huddle_social_pins");
-      if (!raw) return new Set<string>();
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return new Set<string>();
-    }
-  });
-  const [savedNotices, setSavedNotices] = useState<Set<string>>(() => {
-    try {
-      const raw = localStorage.getItem("huddle_social_saves");
-      if (!raw) return new Set<string>();
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return new Set<string>();
-    }
-  });
+  const socialPinsKey = useMemo(() => `huddle_social_pins:${profile?.id || "anon"}`, [profile?.id]);
+  const socialSavesKey = useMemo(() => `huddle_social_saves:${profile?.id || "anon"}`, [profile?.id]);
+  const [pinnedNotices, setPinnedNotices] = useState<Set<string>>(new Set());
+  const [savedNotices, setSavedNotices] = useState<Set<string>>(new Set());
   const getTagStyle = (tag: string, threadId: string) => {
     if (String(tag).toLowerCase() !== "news") return "bg-primary text-white border border-primary";
     const notice = notices.find((item) => item.id === threadId);
@@ -2309,12 +2352,32 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("huddle_social_pins", JSON.stringify(Array.from(pinnedNotices)));
-  }, [pinnedNotices]);
+    try {
+      const raw = localStorage.getItem(socialPinsKey);
+      const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+      setPinnedNotices(new Set(Array.isArray(parsed) ? parsed : []));
+    } catch {
+      setPinnedNotices(new Set());
+    }
+  }, [socialPinsKey]);
 
   useEffect(() => {
-    localStorage.setItem("huddle_social_saves", JSON.stringify(Array.from(savedNotices)));
-  }, [savedNotices]);
+    try {
+      const raw = localStorage.getItem(socialSavesKey);
+      const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+      setSavedNotices(new Set(Array.isArray(parsed) ? parsed : []));
+    } catch {
+      setSavedNotices(new Set());
+    }
+  }, [socialSavesKey]);
+
+  useEffect(() => {
+    localStorage.setItem(socialPinsKey, JSON.stringify(Array.from(pinnedNotices)));
+  }, [pinnedNotices, socialPinsKey]);
+
+  useEffect(() => {
+    localStorage.setItem(socialSavesKey, JSON.stringify(Array.from(savedNotices)));
+  }, [savedNotices, socialSavesKey]);
 
   const visibleNotices = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -2418,7 +2481,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   return (
     <div
-      className="space-y-4"
+      className="space-y-4 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+28px)]"
       onTouchStart={handleTopPullStart}
       onTouchMove={handleTopPullMove}
       onTouchEnd={handleTopPullEnd}
@@ -2503,7 +2566,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             ) : visibleNotices.length === 0 ? (
               <div className="bg-muted/50 rounded-xl p-6 text-center">
                 <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">{t("No threads yet")}</p>
+                <p className="text-sm text-muted-foreground">No posts yet</p>
               </div>
             ) : (
               <div className="divide-y divide-border/70">
@@ -2562,21 +2625,22 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       <button
                         type="button"
                         className={cn(
-                          "w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0",
-                          String(notice.author?.verification_status ?? "").toLowerCase() === "verified"
-                            ? "shadow-[inset_0_0_0_1.25px_rgba(33,69,207,1)]"
-                            : ""
+                          "relative w-10 h-10 rounded-full bg-transparent border-[1.5px] flex items-center justify-center overflow-hidden flex-shrink-0",
+                          notice.author?.is_verified === true
+                            ? "border-[rgba(33,69,207,1)]"
+                            : "border-[rgba(74,73,101,0.28)]"
                         )}
                         onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User")}
                       >
+                        <span className="absolute inset-[1px] rounded-full bg-muted/20" />
                         {notice.author?.avatar_url ? (
                           <img 
                             src={notice.author.avatar_url} 
                             alt="" 
-                            className="w-full h-full object-contain bg-muted/40" 
+                            className="relative z-[1] w-full h-full object-cover" 
                           />
                         ) : (
-                          <span className="text-sm font-semibold">
+                          <span className="relative z-[1] text-sm font-semibold">
                             {notice.author?.display_name?.charAt(0) || t("Unknown").charAt(0)}
                           </span>
                         )}
@@ -2994,7 +3058,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                   animate={{ y: 0 }}
                   exit={{ y: "100%" }}
                   onClick={(e) => e.stopPropagation()}
-                  className="fixed left-0 right-0 bottom-[calc(64px+env(safe-area-inset-bottom))] w-full max-h-[calc(100svh-64px-env(safe-area-inset-bottom))] overflow-y-auto bg-card rounded-t-3xl p-6 pb-3"
+                  className="fixed left-0 right-0 bottom-0 w-full max-h-[100svh] overflow-y-auto bg-card rounded-t-3xl p-6 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
                 >
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">{editingNoticeId ? t("Edit Post") : t("Create Post")}</h3>

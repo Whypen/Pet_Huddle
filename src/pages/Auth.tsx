@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -7,13 +7,17 @@ import { Mail, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { FormField, NeuCheckbox } from "@/components/ui";
+import { FormFieldOtp } from "@/components/ui/FormFieldOtp";
 import { toast } from "sonner";
-import huddleLogo from "@/assets/huddle-logo-transparent.png";
 import huddleVideo from "@/assets/huddle video.mp4";
 import appleIcon from "@/assets/Apple icon.png";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { LegalModal } from "@/components/modals/LegalModal";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
+import { addPasskeyHint, hasPasskeyHint, mapPasskeyError, verifyPasskeyFactor } from "@/lib/passkey";
+import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -24,16 +28,39 @@ type LoginForm = {
   remember: boolean;
 };
 
-type EmailModalStep = "choice" | "signin";
+// ── Step machine: email modal ──────────────────────────────────────────────────
+// "choice"        → Sign in / Create account picker
+// "signin"        → Email + password + optional "Continue with passkey" CTA
+// "mfa-challenge" → TOTP only (passkey fires invisibly — modal is closed)
+type EmailModalStep = "choice" | "signin" | "mfa-challenge";
 
 const Auth = () => {
   const { t } = useLanguage();
+  const { signIn } = useAuth();
   const navigate = useNavigate();
   const [authError, setAuthError] = useState("");
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>("choice");
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
+
+  // ── MFA challenge state ────────────────────────────────────────────────────
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [mfaMethod, setMfaMethod] = useState<"totp" | "passkey">("totp");
+  const [mfaOtpCode, setMfaOtpCode] = useState("");
+  const [mfaError, setMfaError] = useState("");
+  const [mfaLoading, setMfaLoading] = useState(false);
+
+  // ── Credentials step state ─────────────────────────────────────────────────
+  const [passkeyInlineError, setPasskeyInlineError] = useState("");
+
+  // Auto-fire passkey challenge — no button needed
+  useEffect(() => {
+    if (emailModalStep === "mfa-challenge" && mfaMethod === "passkey") {
+      void onMfaVerify();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailModalStep, mfaMethod]);
 
   const schema = useMemo(() => {
     return z.object({
@@ -88,9 +115,9 @@ const Auth = () => {
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
     if (!values.email) return;
-    const { error } = await supabase.auth.signInWithPassword({ email: values.email, password: values.password });
-    if (error) {
-      setAuthError("Couldn’t sign you in.");
+    const result = await signIn(values.email, values.password);
+    if (result.error) {
+      setAuthError(result.error.message || "Couldn't sign you in.");
       return;
     }
 
@@ -102,18 +129,93 @@ const Auth = () => {
       enableSessionOnly();
     }
 
+    if (result.mfaRequired && result.mfaFactorId) {
+      const isPasskey = result.mfaMethod === "passkey";
+      setMfaFactorId(result.mfaFactorId);
+      setMfaMethod(isPasskey ? "passkey" : "totp");
+      setMfaOtpCode("");
+      setMfaError("");
+      if (isPasskey) {
+        // Close modal first — OS biometric sheet takes over immediately
+        setEmailModalOpen(false);
+      }
+      setEmailModalStep("mfa-challenge");
+      return;
+    }
+
     navigate("/");
+  };
+
+  // ── MFA: verify 6-digit code ───────────────────────────────────────────────
+  const onMfaVerify = async () => {
+    if (!mfaFactorId) return;
+    if (mfaMethod === "totp" && mfaOtpCode.length < 6) return;
+    setMfaLoading(true);
+    setMfaError("");
+    try {
+      if (mfaMethod === "passkey") {
+        await verifyPasskeyFactor(supabase, mfaFactorId);
+      } else {
+        await challengeAndVerifyTotp(supabase, mfaFactorId, mfaOtpCode);
+      }
+      const aalData = await getAuthenticatorAssurance(supabase);
+      if (aalData.currentLevel !== "aal2") throw new Error("aal_not_upgraded");
+      if (mfaMethod === "passkey") addPasskeyHint(watch("email") ?? "");
+      setEmailModalOpen(false);
+      navigate("/");
+    } catch (error) {
+      if (mfaMethod === "passkey") {
+        const msg = mapPasskeyError(error as { message?: string }, "Couldn’t verify your passkey.");
+        toast.error(msg);
+        setEmailModalStep("signin");
+        setEmailModalOpen(true);
+      } else {
+        setMfaError(mapMfaError(error as { message?: string }, "Couldn’t verify your 2FA code."));
+      }
+      setMfaOtpCode("");
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  // ── MFA: back to sign-in form ──────────────────────────────────────────────
+  const backToSignIn = () => {
+    setEmailModalStep("signin");
+    setMfaOtpCode("");
+    setMfaError("");
+    setMfaFactorId(null);
+    setMfaMethod("totp");
+  };
+
+  // ── Sign-in step: passkey CTA handler ─────────────────────────────────────
+  const handlePasskeyContinue = () => {
+    const pwValue = watch("password");
+    if (!pwValue) {
+      setPasskeyInlineError("Enter your password once to continue with passkey.");
+      const el = document.querySelector<HTMLInputElement>('[autocomplete="current-password"]');
+      if (el) {
+        el.focus();
+        try { el.reportValidity(); } catch { /* best-effort */ }
+      }
+      return;
+    }
+    setPasskeyInlineError("");
+    void handleSubmit(onSubmit)();
   };
 
   const handleCreateAccount = () => {
     const prefillEmail = watch("email") || "";
     if (prefillEmail) {
+      const owner = normalizeStorageOwner(prefillEmail);
+      const scopedSignupKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner);
       try {
-        const existing = localStorage.getItem("huddle_signup_v2");
+        const existing = localStorage.getItem(scopedSignupKey);
         const parsed = existing ? JSON.parse(existing) : {};
-        localStorage.setItem("huddle_signup_v2", JSON.stringify({ ...parsed, email: prefillEmail }));
+        localStorage.setItem(scopedSignupKey, JSON.stringify({ ...parsed, email: prefillEmail }));
+        localStorage.removeItem(SIGNUP_STORAGE_KEY);
       } catch {
-        localStorage.setItem("huddle_signup_v2", JSON.stringify({ email: prefillEmail }));
+        localStorage.setItem(scopedSignupKey, JSON.stringify({ email: prefillEmail }));
+        localStorage.removeItem(SIGNUP_STORAGE_KEY);
       }
     }
     setEmailModalOpen(false);
@@ -141,25 +243,41 @@ const Auth = () => {
       },
     });
     if (error) {
-      toast.error("Couldn’t start sign in.");
+      toast.error("Couldn't start sign in.");
     }
   };
+
+  // ── Dialog title / description keyed to current step ──────────────────────
+  const dialogTitle =
+    emailModalStep === "choice" ? "Continue with Email"
+    : emailModalStep === "mfa-challenge" ? "Two-step verification"
+    : "Sign in";
+
+  const dialogDescription =
+    emailModalStep === "choice" ? "Choose how you want to continue with email."
+    : emailModalStep === "mfa-challenge" ? "Enter your verification code to complete sign in."
+    : "Enter your email and password to sign in.";
 
   return (
     <div className="min-h-svh flex flex-col justify-center items-center px-6 pb-[calc(88px+env(safe-area-inset-bottom))]">
       <div className="w-full flex flex-col items-center">
-        <div className="text-center">
-          <video
-            autoPlay
-            muted
-            playsInline
-            loop
-            className="mx-auto h-28 w-28 object-contain"
-            aria-label={t("app.name")}
-          >
-            <source src={huddleVideo} type="video/mp4" />
-            <img src={huddleLogo} alt={t("app.name")} className="mx-auto h-28 w-28 object-contain" />
-          </video>
+        <div className="flex flex-col items-center">
+          {/* video has ~41px blank at top + ~42px blank at bottom; shift up 41px and clip to logo content */}
+          <div className="overflow-hidden relative -top-2" style={{ height: "84px", width: "160px" }}>
+            <video
+              autoPlay
+              muted
+              playsInline
+              loop
+              className="block h-[160px] w-[160px] object-contain -mt-[41px]"
+              aria-label={t("app.name")}
+            >
+              <source src={huddleVideo} type="video/mp4" />
+            </video>
+          </div>
+          <p className="mt-1 text-center text-lg font-bold leading-none" style={{ color: "#1e4ad4" }}>
+            huddle
+          </p>
         </div>
 
         <div className="mt-8 w-full max-w-sm rounded-[24px] border border-white/55 bg-white/28 backdrop-blur-xl shadow-[0_12px_26px_rgba(66,73,101,0.14)] p-4">
@@ -232,17 +350,30 @@ const Auth = () => {
       <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
       <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
 
-      <Dialog open={emailModalOpen} onOpenChange={setEmailModalOpen}>
+      <Dialog
+        open={emailModalOpen}
+        onOpenChange={(open) => {
+          setEmailModalOpen(open);
+          if (!open) {
+            setMfaError("");
+            setMfaOtpCode("");
+            setMfaFactorId(null);
+            setMfaMethod("totp");
+            setEmailModalStep("choice");
+            setPasskeyInlineError("");
+          }
+        }}
+      >
         <DialogContent className="max-w-sm">
           <DialogTitle className="text-brandText text-base font-semibold">
-            {emailModalStep === "choice" ? "Continue with Email" : "Sign in"}
+            {dialogTitle}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {emailModalStep === "choice"
-              ? "Choose how you want to continue with email."
-              : "Sign in with your email and password."}
+            {dialogDescription}
           </DialogDescription>
-          {emailModalStep === "choice" ? (
+
+          {/* ── Choice step ── */}
+          {emailModalStep === "choice" && (
             <div className="space-y-3">
               <NeuButton type="button" className="w-full h-10" onClick={openSignInModal}>
                 Sign in
@@ -251,7 +382,10 @@ const Auth = () => {
                 Create account
               </NeuButton>
             </div>
-          ) : (
+          )}
+
+          {/* ── Sign-in step: email + password + optional passkey CTA ── */}
+          {emailModalStep === "signin" && (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
               <FormField
                 type="email"
@@ -263,15 +397,21 @@ const Auth = () => {
                 autoFocus
                 {...register("email")}
               />
-
               <FormField
                 type="password"
                 label="Password"
                 leadingIcon={<Lock size={16} strokeWidth={1.75} />}
                 placeholder="••••••••"
+                autoComplete="current-password"
                 error={errors.password?.message || authError || undefined}
                 {...register("password")}
               />
+
+              {passkeyInlineError && !errors.password?.message && !authError && (
+                <p className="text-xs text-[var(--color-error,#E84545)] -mt-1 pl-1">
+                  {passkeyInlineError}
+                </p>
+              )}
 
               <div className="flex items-center justify-between">
                 <NeuCheckbox
@@ -282,9 +422,21 @@ const Auth = () => {
                 <Link to="/reset-password" className="text-xs text-brandBlue">Forgot password?</Link>
               </div>
 
-              <NeuButton type="submit" className="w-full h-10" disabled={!isValid}>
-                Sign in
-              </NeuButton>
+              {hasPasskeyHint(watch("email") ?? "") ? (
+                <NeuButton
+                  type="button"
+                  className="w-full h-10"
+                  onClick={handlePasskeyContinue}
+                  loading={mfaLoading}
+                  disabled={mfaLoading}
+                >
+                  Continue with passkey
+                </NeuButton>
+              ) : (
+                <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading}>
+                  Sign in
+                </NeuButton>
+              )}
               {authError ? (
                 <NeuButton
                   type="button"
@@ -305,6 +457,45 @@ const Auth = () => {
                 </NeuButton>
               )}
             </form>
+          )}
+
+          {/* ── MFA challenge step ── */}
+          {emailModalStep === "mfa-challenge" && (
+            <div className="space-y-4">
+              {mfaMethod === "passkey" ? null : (
+                <>
+                  <p className="text-sm text-brandText/70 leading-relaxed">
+                    Enter the 6-digit code from your authenticator app.
+                  </p>
+                  <FormFieldOtp
+                    value={mfaOtpCode}
+                    onChange={setMfaOtpCode}
+                    error={mfaError}
+                    disabled={mfaLoading}
+                  />
+                </>
+              )}
+
+              {mfaMethod === "totp" && (
+                <NeuButton
+                  type="button"
+                  className="w-full h-10"
+                  disabled={mfaOtpCode.length < 6 || mfaLoading}
+                  loading={mfaLoading}
+                  onClick={() => void onMfaVerify()}
+                >
+                  Verify
+                </NeuButton>
+              )}
+
+              <button
+                type="button"
+                className="w-full text-center text-xs text-brandText/50 hover:text-brandText/70 transition-colors py-1"
+                onClick={backToSignIn}
+              >
+                ← Back to sign in
+              </button>
+            </div>
           )}
         </DialogContent>
       </Dialog>
