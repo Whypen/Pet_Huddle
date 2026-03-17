@@ -122,6 +122,13 @@ const ChatDialogue = () => {
   const [groupMuted, setGroupMuted] = useState(false);
   const [groupMediaUrls, setGroupMediaUrls] = useState<string[]>([]);
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
+  // Inline manage members — stays within ChatDialogue, no navigate-away
+  const [groupManageOpen, setGroupManageOpen] = useState(false);
+  const [groupManageMembers, setGroupManageMembers] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
+  const [groupManageFriends, setGroupManageFriends] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
+  const [groupManageSearch, setGroupManageSearch] = useState("");
+  const [groupManageLoading, setGroupManageLoading] = useState(false);
+  const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const reportImageInputRef = useRef<HTMLInputElement | null>(null);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
@@ -619,6 +626,53 @@ const ChatDialogue = () => {
       setConfirmUnmatchOpen(false);
     }
   }, [counterpart?.id, navigate, profile?.id]);
+
+  const loadGroupManageData = useCallback(async () => {
+    if (!roomId || !profile?.id) return;
+    setGroupManageLoading(true);
+    try {
+      // Fetch current members with profile data
+      const { data: memberRows } = await supabase
+        .from("chat_room_members")
+        .select("user_id, profiles!chat_room_members_user_id_fkey(id, display_name, avatar_url)")
+        .eq("chat_id", roomId);
+      const members = (memberRows || []).map((row) => {
+        const p = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as { id?: string; display_name?: string; avatar_url?: string | null } | null;
+        return { id: row.user_id as string, name: p?.display_name || "User", avatarUrl: p?.avatar_url || null };
+      });
+      setGroupManageMembers(members);
+
+      // Fetch matched friends not already in group
+      const memberIds = new Set(members.map((m) => m.id));
+      const { data: matchRows } = await supabase
+        .from("matches")
+        .select("user1_id, user2_id")
+        .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+        .eq("status", "matched");
+      const friendIds = (matchRows || [])
+        .map((r) => (r.user1_id === profile.id ? r.user2_id : r.user1_id))
+        .filter((id) => !memberIds.has(id));
+      if (friendIds.length === 0) {
+        setGroupManageFriends([]);
+        return;
+      }
+      const { data: friendProfiles } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url")
+        .in("id", friendIds);
+      setGroupManageFriends(
+        (friendProfiles || []).map((p) => ({
+          id: p.id as string,
+          name: (p.display_name as string) || "User",
+          avatarUrl: (p.avatar_url as string | null) || null,
+        }))
+      );
+    } catch {
+      toast.error("Couldn't load group members.");
+    } finally {
+      setGroupManageLoading(false);
+    }
+  }, [roomId, profile?.id]);
 
   const handleReportSubmit = useCallback(async () => {
     if (!profile?.id || !counterpart?.id) return;
@@ -1168,11 +1222,12 @@ const ChatDialogue = () => {
               <span className="text-sm font-medium">{groupMuted ? "Unmute notifications" : "Mute notifications"}</span>
             </button>
 
-            {/* Add members */}
+            {/* Add members — inline, no navigate-away */}
             <button
               onClick={() => {
                 setGroupInfoOpen(false);
-                navigate(`/chats?tab=groups&manage=${roomId ?? ""}`);
+                setGroupManageOpen(true);
+                void loadGroupManageData();
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
             >
@@ -1211,6 +1266,134 @@ const ChatDialogue = () => {
           </div>{/* end scrollable body */}
         </SheetContent>
       </Sheet>
+
+      {/* ── Manage Members Sheet (inline, no navigate-away) ── */}
+      <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) setGroupManageSearch(""); }}>
+        <SheetContent side="bottom" className="rounded-t-2xl h-[88vh] flex flex-col overflow-hidden pb-safe">
+          <SheetHeader className="pb-3 shrink-0">
+            <SheetTitle className="text-left">Manage Members</SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto space-y-5">
+            {groupManageLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <>
+                {/* Current members */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Members ({groupManageMembers.length})</p>
+                  <div className="space-y-2">
+                    {groupManageMembers.map((m) => (
+                      <div key={m.id} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <UserAvatar avatarUrl={m.avatarUrl} name={m.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                          <span className="text-sm text-brandText">{m.id === profile?.id ? `${m.name} (You)` : m.name}</span>
+                        </div>
+                        {m.id !== profile?.id && (
+                          <button
+                            onClick={async () => {
+                              if (!(profile as unknown as { is_verified?: boolean })?.is_verified) {
+                                setGroupVerifyGateOpen(true);
+                                return;
+                              }
+                              try {
+                                await supabase.from("chat_room_members").delete().eq("chat_id", roomId!).eq("user_id", m.id);
+                                setGroupManageMembers((prev) => prev.filter((x) => x.id !== m.id));
+                                toast.success(`${m.name} removed`);
+                              } catch {
+                                toast.error("Couldn't remove member.");
+                              }
+                            }}
+                            className="text-[10px] font-medium text-red-500 hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Add friends */}
+                {groupManageFriends.length > 0 && (() => {
+                  const filtered = groupManageSearch.trim()
+                    ? groupManageFriends.filter((u) => u.name.toLowerCase().includes(groupManageSearch.toLowerCase()))
+                    : groupManageFriends;
+                  return (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Add Members</p>
+                      {groupManageFriends.length > 4 && (
+                        <div className="form-field-rest relative flex items-center mb-2">
+                          <input
+                            value={groupManageSearch}
+                            onChange={(e) => setGroupManageSearch(e.target.value)}
+                            placeholder="Search friends…"
+                            className="field-input-core text-sm h-9"
+                          />
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        {filtered.map((u) => (
+                          <div key={u.id} className="flex items-center justify-between py-1">
+                            <div className="flex items-center gap-2">
+                              <UserAvatar avatarUrl={u.avatarUrl} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                              <span className="text-sm text-brandText">{u.name}</span>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                if (!(profile as unknown as { is_verified?: boolean })?.is_verified) {
+                                  setGroupVerifyGateOpen(true);
+                                  return;
+                                }
+                                if (!profile?.id || !roomId) return;
+                                try {
+                                  await supabase.from("chat_room_members").insert({ chat_id: roomId, user_id: u.id });
+                                  setGroupManageMembers((prev) => [...prev, u]);
+                                  setGroupManageFriends((prev) => prev.filter((f) => f.id !== u.id));
+                                  toast.success(`${u.name} added`);
+                                } catch {
+                                  toast.error("Couldn't add member.");
+                                }
+                              }}
+                              className="h-7 w-7 flex items-center justify-center rounded-full bg-brandBlue/10 hover:bg-brandBlue/20 transition-colors"
+                              aria-label="Add member"
+                            >
+                              <UserPlus className="h-3.5 w-3.5 text-brandBlue" />
+                            </button>
+                          </div>
+                        ))}
+                        {filtered.length === 0 && (
+                          <p className="text-xs text-muted-foreground py-2">No friends found</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Verify gate dialog */}
+      <Dialog open={groupVerifyGateOpen} onOpenChange={setGroupVerifyGateOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Identity verification required</DialogTitle>
+            <DialogDescription>Complete identity verification to add or remove group members.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <button className="flex-1 h-10 rounded-full border px-4 text-sm" onClick={() => setGroupVerifyGateOpen(false)}>Not now</button>
+            <button
+              className="flex-1 h-10 rounded-full bg-brandBlue px-4 text-sm font-semibold text-white"
+              onClick={() => { setGroupVerifyGateOpen(false); navigate("/verify-identity"); }}
+            >
+              Verify now
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -2968,7 +2968,7 @@ const Chats = () => {
     setIsCreateGroupOpen(true);
   };
 
-  const handleGroupCreated = async (groupData: { name: string; members: unknown[]; allowMemberControl: boolean; avatarFile?: File | null }) => {
+  const handleGroupCreated = async (groupData: { name: string; members: unknown[]; avatarFile?: File | null }) => {
     if (!profile?.id) {
       toast.error("Sign in required.");
       return;

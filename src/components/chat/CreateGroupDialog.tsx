@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Plus, Trash2, Users, Check, Crown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { X, Plus, Users, Check, Image as ImageIcon } from "lucide-react";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -20,35 +20,34 @@ interface CreateGroupDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onCreateGroup: (groupData: GroupData) => void;
+  contacts: Contact[];
 }
 
 interface GroupData {
   name: string;
   members: Contact[];
-  allowMemberControl: boolean;
+  avatarFile?: File | null;
 }
 
-// Mock verified contacts
-const verifiedContacts: Contact[] = [
-  { id: "1", name: "Marcus", verified: true },
-  { id: "2", name: "Pet Care Pro", verified: true },
-  { id: "3", name: "Dr. Wong", verified: true },
-  { id: "4", name: "Emma's Pets", verified: true },
-  { id: "5", name: "Cat Cafe", verified: true },
-];
-
-export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGroupDialogProps) => {
+export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup, contacts }: CreateGroupDialogProps) => {
   const { t } = useLanguage();
   const [groupName, setGroupName] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<Contact[]>([]);
-  const [allowMemberControl, setAllowMemberControl] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [groupAvatarFile, setGroupAvatarFile] = useState<File | null>(null);
+  const [groupAvatarPreview, setGroupAvatarPreview] = useState<string | null>(null);
 
-  const availableContacts = verifiedContacts.filter(
-    (contact) =>
-      !selectedMembers.find((m) => m.id === contact.id) &&
-      contact.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const availableContacts = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    return contacts.filter((contact) => {
+      const name = String(contact.name || "");
+      if (!name) return false;
+      const alreadySelected = selectedMembers.some((m) => m.id === contact.id);
+      if (alreadySelected) return false;
+      if (!needle) return true;
+      return name.toLowerCase().includes(needle);
+    });
+  }, [contacts, searchQuery, selectedMembers]);
 
   const handleAddMember = (contact: Contact) => {
     setSelectedMembers((prev) => [...prev, contact]);
@@ -72,42 +71,83 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
     onCreateGroup({
       name: groupName,
       members: selectedMembers,
-      allowMemberControl,
+      avatarFile: groupAvatarFile,
     });
 
     // Reset form
     setGroupName("");
     setSelectedMembers([]);
     setAllowMemberControl(false);
+    if (groupAvatarPreview) {
+      URL.revokeObjectURL(groupAvatarPreview);
+    }
+    setGroupAvatarPreview(null);
+    setGroupAvatarFile(null);
     onClose();
     toast.success(t("Group created successfully!"));
   };
 
-  return (
+  useEffect(() => {
+    if (!isOpen && groupAvatarPreview) {
+      URL.revokeObjectURL(groupAvatarPreview);
+      setGroupAvatarPreview(null);
+      setGroupAvatarFile(null);
+    }
+  }, [groupAvatarPreview, isOpen]);
+
+  const handleAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file.");
+      event.target.value = "";
+      return;
+    }
+    if (groupAvatarPreview) {
+      URL.revokeObjectURL(groupAvatarPreview);
+    }
+    setGroupAvatarFile(file);
+    setGroupAvatarPreview(URL.createObjectURL(file));
+    event.target.value = "";
+  };
+
+  if (!isOpen || typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
-      {isOpen && (
-        <>
+      <>
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-[2200]"
           />
 
           {/* Dialog */}
+          <div className="fixed inset-0 z-[2201] flex items-center justify-center p-3">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto bg-card rounded-2xl shadow-elevated z-50 max-h-[80vh] flex flex-col"
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            className="z-[2202] w-[calc(100vw-24px)] max-w-[var(--app-max-width,430px)] bg-card rounded-3xl shadow-elevated max-h-[82vh] flex flex-col"
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-primary" />
+                <div className="relative h-10 w-10">
+                  <div className="h-10 w-10 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
+                    {groupAvatarPreview ? (
+                      <img src={groupAvatarPreview} alt="Group avatar preview" className="h-full w-full object-contain bg-white" />
+                    ) : (
+                      <Users className="w-5 h-5 text-primary" />
+                    )}
+                  </div>
+                  <label className="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded-full bg-black/50">
+                    <ImageIcon className="h-4 w-4 text-white" />
+                    <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+                  </label>
                 </div>
                 <h2 className="text-lg font-semibold">{t("Create Group")}</h2>
               </div>
@@ -124,13 +164,15 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
               {/* Group Name */}
               <div className="space-y-2">
                 <Label htmlFor="groupName">{t("Group Name")}</Label>
-                <Input
-                  id="groupName"
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  placeholder={t("Enter group name...")}
-                  className="h-12 rounded-xl"
-                />
+                <div className="form-field-rest relative flex items-center">
+                  <input
+                    id="groupName"
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    placeholder="Title"
+                    className="field-input-core bg-transparent text-sm"
+                  />
+                </div>
               </div>
 
               {/* Selected Members */}
@@ -165,12 +207,14 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
               {/* Add Contacts */}
               <div className="space-y-2">
                 <Label>{t("Add Contacts")}</Label>
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t("Search verified contacts...")}
-                  className="h-11 rounded-xl"
-                />
+                <div className="form-field-rest relative flex items-center">
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search contacts"
+                    className="field-input-core bg-transparent text-sm"
+                  />
+                </div>
                 
                 {availableContacts.length > 0 && (
                   <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
@@ -199,50 +243,32 @@ export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup }: CreateGrou
                   </div>
                 )}
 
-                {searchQuery && availableContacts.length === 0 && (
+                {availableContacts.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    {t("No verified contacts found")}
+                    {searchQuery ? t("No contacts found") : "No matched friends available yet"}
                   </p>
                 )}
               </div>
 
-              {/* Delegate Control */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50 border border-border">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Crown className="w-5 h-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-sm">{t("Delegate Control")}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("Allow members to add/remove others")}
-                    </p>
-                  </div>
-                </div>
-                <Switch
-                  checked={allowMemberControl}
-                  onCheckedChange={setAllowMemberControl}
-                />
-              </div>
-
               <p className="text-xs text-muted-foreground text-center">
-                {t("You can always edit group settings by clicking the group name")}
+                {t("Only verified members can add or remove users from this group.")}
               </p>
             </div>
 
             {/* Footer */}
             <div className="p-4 border-t border-border">
-              <Button
+              <NeuButton
                 onClick={handleCreate}
                 disabled={!groupName.trim() || selectedMembers.length === 0}
                 className="w-full h-12 rounded-xl text-base font-semibold"
               >
                 {t("Create Group")}
-              </Button>
+              </NeuButton>
             </div>
           </motion.div>
-        </>
-      )}
+          </div>
+      </>
     </AnimatePresence>
+    , document.body
   );
 };
