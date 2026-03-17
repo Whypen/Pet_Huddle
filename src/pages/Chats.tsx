@@ -501,7 +501,9 @@ const Chats = () => {
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("friends");
+  const [mainTab, setMainTab] = useState<MainTab>(() =>
+    searchParams.get("tab") === "groups" ? "groups" : "friends"
+  );
   const [chats, setChats] = useState<ChatUser[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
@@ -511,7 +513,7 @@ const Chats = () => {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [topTab, setTopTab] = useState<"discover" | "chats">(() => {
     const tab = searchParams.get("tab");
-    return tab === "chats" ? "chats" : "discover";
+    return tab === "chats" || tab === "groups" ? "chats" : "discover";
   });
   const [swipeDir, setSwipeDir] = useState<"up" | "down" | null>(null);
   const [discoveryRefreshTick, setDiscoveryRefreshTick] = useState(0);
@@ -591,6 +593,11 @@ const Chats = () => {
 
   useEffect(() => {
     const tab = searchParams.get("tab");
+    if (tab === "groups") {
+      setTopTab("chats");
+      setMainTab("groups");
+      return;
+    }
     if (tab === "chats") {
       setTopTab("chats");
       return;
@@ -982,16 +989,20 @@ const Chats = () => {
     void (async () => {
       const rows = await fetchUserMatches();
       if (cancelled) return;
-      const activeCounterparts = new Set(
-        rows
-          .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
-          .filter((id) => Boolean(id))
-      );
-      const nextSeen = new Set(
-        Array.from(seenMatchUserIdsRef.current).filter((id) => activeCounterparts.has(id))
-      );
-      if (nextSeen.size !== seenMatchUserIdsRef.current.size) {
-        persistSeenMatches(nextSeen);
+      // Only trim seen-match IDs when we received real data; an empty result likely
+      // means a schema/network error and must NOT clear the persisted set.
+      if (rows.length > 0) {
+        const activeCounterparts = new Set(
+          rows
+            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+            .filter((id) => Boolean(id))
+        );
+        const nextSeen = new Set(
+          Array.from(seenMatchUserIdsRef.current).filter((id) => activeCounterparts.has(id))
+        );
+        if (nextSeen.size !== seenMatchUserIdsRef.current.size) {
+          persistSeenMatches(nextSeen);
+        }
       }
     })();
     return () => {
@@ -4389,9 +4400,8 @@ const Chats = () => {
               if (addableFriends.length === 0) return null;
               return (
                 <div>
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center mb-2">
                     <div className="text-xs font-semibold text-brandText/70">Add Members</div>
-                    <UserPlus className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                   {addableFriends.length > 4 && (
                     <div className="form-field-rest relative flex items-center mb-2">
@@ -4412,6 +4422,7 @@ const Chats = () => {
                         </div>
                         <NeuButton
                           size="sm"
+                          variant="secondary"
                           className="h-7 w-7 p-0 flex items-center justify-center"
                           aria-label="Add member"
                           onClick={async () => {
@@ -4421,13 +4432,24 @@ const Chats = () => {
                             }
                             if (!profile?.id || !groupManageId) return;
                             try {
-                              await supabase.from("chat_room_members").insert({ chat_id: groupManageId, user_id: u.id });
-                              setGroupMembers((prev) => [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]);
+                              const { error: memberErr } = await supabase
+                                .from("chat_room_members")
+                                .upsert(
+                                  { chat_id: groupManageId, user_id: u.id },
+                                  { onConflict: "chat_id,user_id", ignoreDuplicates: true }
+                                );
+                              if (memberErr) throw memberErr;
+                              setGroupMembers((prev) =>
+                                prev.some((m) => m.id === u.id)
+                                  ? prev
+                                  : [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]
+                              );
                               setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
-                              // Send group_invite notification to the added user
+                              toast.success(`${u.name} added`);
+                              // Fire-and-forget notification (ignore RLS errors)
                               const grpName = groups.find((g) => g.id === groupManageId)?.name || "a group";
                               const inviterName = (profile as unknown as { display_name?: string }).display_name || "Someone";
-                              await supabase.from("notifications").insert({
+                              void supabase.from("notifications").insert({
                                 user_id: u.id,
                                 type: "group_invite",
                                 title: `${inviterName} added you to a group`,
@@ -4436,7 +4458,6 @@ const Chats = () => {
                                 data: { chat_id: groupManageId, chat_name: grpName, inviter_name: inviterName },
                                 is_read: false,
                               });
-                              toast.success(`${u.name} added`);
                             } catch {
                               toast.error("Couldn't add member.");
                             }
@@ -4490,10 +4511,10 @@ const Chats = () => {
       <Dialog open={!!pendingGroupInvite} onOpenChange={() => setPendingGroupInvite(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Group invite</DialogTitle>
+            <DialogTitle>Group invite 🐾</DialogTitle>
             <DialogDescription>
               <strong>{pendingGroupInvite?.inviterName}</strong> invited you to join{" "}
-              <strong>{pendingGroupInvite?.chatName}</strong>.
+              <strong>{pendingGroupInvite?.chatName}</strong>. Want to hop in?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="!flex-row gap-2 pt-2">
@@ -4508,7 +4529,7 @@ const Chats = () => {
                 setPendingGroupInvite(null);
               }}
             >
-              Decline
+              Not Now
             </NeuButton>
             <NeuButton
               size="lg"

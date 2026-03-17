@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -129,6 +129,7 @@ const ChatDialogue = () => {
   const [groupManageSearch, setGroupManageSearch] = useState("");
   const [groupManageLoading, setGroupManageLoading] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const reportImageInputRef = useRef<HTMLInputElement | null>(null);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
@@ -634,38 +635,77 @@ const ChatDialogue = () => {
       // Fetch current members with profile data
       const { data: memberRows } = await supabase
         .from("chat_room_members")
-        .select("user_id, profiles!chat_room_members_user_id_fkey(id, display_name, avatar_url)")
+        .select("user_id, profiles!chat_room_members_user_id_fkey(id, display_name, avatar_url, social_album)")
         .eq("chat_id", roomId);
       const members = (memberRows || []).map((row) => {
-        const p = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as { id?: string; display_name?: string; avatar_url?: string | null } | null;
-        return { id: row.user_id as string, name: p?.display_name || "User", avatarUrl: p?.avatar_url || null };
+        const p = (Array.isArray(row.profiles) ? row.profiles[0] : row.profiles) as { id?: string; display_name?: string; avatar_url?: string | null; social_album?: unknown } | null;
+        const albumFallback = Array.isArray(p?.social_album)
+          ? String((p!.social_album as unknown[])[0] || "").trim()
+          : "";
+        return { id: row.user_id as string, name: p?.display_name || "User", avatarUrl: p?.avatar_url || albumFallback || null };
       });
       setGroupManageMembers(members);
 
-      // Fetch matched friends not already in group
+      // Fetch addable contacts: mutual matches + direct chat peers, excluding current members
       const memberIds = new Set(members.map((m) => m.id));
+      const contactIdSet = new Set<string>();
+
+      // 1. Mutual matches
       const { data: matchRows } = await supabase
         .from("matches")
         .select("user1_id, user2_id")
         .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
         .eq("status", "matched");
-      const friendIds = (matchRows || [])
-        .map((r) => (r.user1_id === profile.id ? r.user2_id : r.user1_id))
-        .filter((id) => !memberIds.has(id));
-      if (friendIds.length === 0) {
+      (matchRows || []).forEach((r) => {
+        const peerId = r.user1_id === profile.id ? r.user2_id : r.user1_id;
+        if (!memberIds.has(peerId as string)) contactIdSet.add(peerId as string);
+      });
+
+      // 2. Direct (1-on-1) chat peers
+      const { data: myRoomRows } = await supabase
+        .from("chat_room_members")
+        .select("chat_id")
+        .eq("user_id", profile.id);
+      const myRoomIds = (myRoomRows || []).map((r) => r.chat_id as string);
+      if (myRoomIds.length > 0) {
+        const { data: directChats } = await supabase
+          .from("chats")
+          .select("id")
+          .in("id", myRoomIds)
+          .eq("type", "direct");
+        const directIds = (directChats || []).map((c) => c.id as string);
+        if (directIds.length > 0) {
+          const { data: peerRows } = await supabase
+            .from("chat_room_members")
+            .select("user_id")
+            .in("chat_id", directIds)
+            .neq("user_id", profile.id);
+          (peerRows || []).forEach((r) => {
+            if (!memberIds.has(r.user_id as string)) contactIdSet.add(r.user_id as string);
+          });
+        }
+      }
+
+      if (contactIdSet.size === 0) {
         setGroupManageFriends([]);
         return;
       }
       const { data: friendProfiles } = await supabase
         .from("profiles")
-        .select("id, display_name, avatar_url")
-        .in("id", friendIds);
+        .select("id, display_name, avatar_url, social_album")
+        .in("id", [...contactIdSet]);
       setGroupManageFriends(
-        (friendProfiles || []).map((p) => ({
-          id: p.id as string,
-          name: (p.display_name as string) || "User",
-          avatarUrl: (p.avatar_url as string | null) || null,
-        }))
+        (friendProfiles || []).map((p) => {
+          const row = p as unknown as { id: string; display_name?: string | null; avatar_url?: string | null; social_album?: unknown };
+          const albumFallback = Array.isArray(row.social_album)
+            ? String((row.social_album as unknown[])[0] || "").trim()
+            : "";
+          return {
+            id: row.id,
+            name: row.display_name || "User",
+            avatarUrl: row.avatar_url || albumFallback || null,
+          };
+        })
       );
     } catch {
       toast.error("Couldn't load group members.");
@@ -750,7 +790,7 @@ const ChatDialogue = () => {
             <>
               <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
                 {groupAvatarUrl ? (
-                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
+                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
                 ) : (
                   <Users className="h-4 w-4 text-primary" />
                 )}
@@ -1163,12 +1203,12 @@ const ChatDialogue = () => {
 
       {/* ── Group Info Sheet (WhatsApp-style) ── */}
       <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[92vh] flex flex-col overflow-hidden pb-safe">
+        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-4 shrink-0">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
                 {groupAvatarUrl
-                  ? <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
+                  ? <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
                   : <Users className="h-5 w-5 text-primary" />}
               </div>
               <div className="min-w-0">
@@ -1177,7 +1217,7 @@ const ChatDialogue = () => {
               </div>
             </div>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
 
           {/* Media — horizontal swipeable album */}
           <div className="mb-5">
@@ -1222,7 +1262,7 @@ const ChatDialogue = () => {
               <span className="text-sm font-medium">{groupMuted ? "Unmute notifications" : "Mute notifications"}</span>
             </button>
 
-            {/* Add members — inline, no navigate-away */}
+            {/* Manage Group */}
             <button
               onClick={() => {
                 setGroupInfoOpen(false);
@@ -1231,8 +1271,8 @@ const ChatDialogue = () => {
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
             >
-              <UserPlus className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm font-medium">Add members</span>
+              <Settings className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm font-medium">Manage Group</span>
             </button>
 
             {/* Report group */}
@@ -1246,17 +1286,7 @@ const ChatDialogue = () => {
 
             {/* Leave group */}
             <button
-              onClick={async () => {
-                setGroupInfoOpen(false);
-                if (!profile?.id || !roomId) return;
-                try {
-                  await supabase.from("chat_room_members").delete().eq("chat_id", roomId).eq("user_id", profile.id);
-                  toast.success("You left the group.");
-                  navigate("/chats?tab=groups", { replace: true });
-                } catch {
-                  toast.error("Unable to leave group right now.");
-                }
-              }}
+              onClick={() => { setGroupInfoOpen(false); setConfirmLeaveOpen(true); }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
             >
               <LogOut className="h-5 w-5 text-red-500" />
@@ -1269,11 +1299,11 @@ const ChatDialogue = () => {
 
       {/* ── Manage Members Sheet (inline, no navigate-away) ── */}
       <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) setGroupManageSearch(""); }}>
-        <SheetContent side="bottom" className="rounded-t-2xl h-[88vh] flex flex-col overflow-hidden pb-safe">
+        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[88vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-3 shrink-0">
             <SheetTitle className="text-left">Manage Members</SheetTitle>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto space-y-5">
+          <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
             {groupManageLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -1352,6 +1382,17 @@ const ChatDialogue = () => {
                                   setGroupManageMembers((prev) => [...prev, u]);
                                   setGroupManageFriends((prev) => prev.filter((f) => f.id !== u.id));
                                   toast.success(`${u.name} added`);
+                                  // Notify the added user
+                                  const inviterName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
+                                  void supabase.from("notifications").insert({
+                                    user_id: u.id,
+                                    type: "group_invite",
+                                    title: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    body: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    message: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    data: { chat_id: roomId, chat_name: roomName, inviter_name: inviterName },
+                                    is_read: false,
+                                  });
                                 } catch {
                                   toast.error("Couldn't add member.");
                                 }
@@ -1390,6 +1431,54 @@ const ChatDialogue = () => {
               onClick={() => { setGroupVerifyGateOpen(false); navigate("/verify-identity"); }}
             >
               Verify now
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Leave group confirmation */}
+      <Dialog open={confirmLeaveOpen} onOpenChange={setConfirmLeaveOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Leave group?</DialogTitle>
+            <DialogDescription>
+              You'll no longer see new messages in this group.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <button
+              className="flex-1 h-10 rounded-full border px-4 text-sm"
+              onClick={() => setConfirmLeaveOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="flex-1 h-10 rounded-full bg-red-500 px-4 text-sm font-semibold text-white"
+              onClick={async () => {
+                if (!profile?.id || !roomId) return;
+                setConfirmLeaveOpen(false);
+                try {
+                  // Remove the user from the group
+                  await supabase
+                    .from("chat_room_members")
+                    .delete()
+                    .eq("chat_id", roomId)
+                    .eq("user_id", profile.id);
+                  // Insert system message visible to remaining members
+                  const displayName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
+                  await supabase.from("messages").insert({
+                    chat_id: roomId,
+                    sender_id: profile.id,
+                    content: `${displayName} left the group.`,
+                    type: "system",
+                  });
+                  navigate("/chats?tab=groups", { replace: true });
+                } catch {
+                  toast.error("Unable to leave group right now.");
+                }
+              }}
+            >
+              Leave
             </button>
           </DialogFooter>
         </DialogContent>
