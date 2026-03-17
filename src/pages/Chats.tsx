@@ -1859,15 +1859,20 @@ const Chats = () => {
     const checkInvites = async () => {
       const { data: invites } = await supabase
         .from("notifications")
-        .select("id, data")
+        .select("id, data, metadata")
         .eq("user_id", profile.id)
-        .eq("type", "group_invite")
         .eq("is_read", false)
+        .or("type.eq.group_invite,type.eq.chats")
         .order("created_at", { ascending: false })
-        .limit(1);
+        .limit(10);
       if (!invites || invites.length === 0) return;
-      const inv = invites[0];
-      const invData = (inv.data || {}) as { chat_id?: string; chat_name?: string; inviter_name?: string };
+      // Find first notification that's a group invite (either old direct inserts or via enqueue_notification)
+      const inv = invites.find((n) => {
+        const d = (n.data || n.metadata || {}) as Record<string, unknown>;
+        return d.kind === "group_invite" || d.chat_id;
+      });
+      if (!inv) return;
+      const invData = ((inv.data || inv.metadata) || {}) as { chat_id?: string; chat_name?: string; inviter_name?: string; kind?: string };
       if (!invData.chat_id) return;
       setPendingGroupInvite({
         notifId: String(inv.id),
@@ -4170,9 +4175,9 @@ const Chats = () => {
                           className="flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
                         >
                           {/* Group Avatar */}
-                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
                             {group.avatarUrl ? (
-                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
+                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-contain" />
                             ) : (
                               <Users className="w-6 h-6 text-primary" />
                             )}
@@ -4449,14 +4454,14 @@ const Chats = () => {
                               // Fire-and-forget notification (ignore RLS errors)
                               const grpName = groups.find((g) => g.id === groupManageId)?.name || "a group";
                               const inviterName = (profile as unknown as { display_name?: string }).display_name || "Someone";
-                              void supabase.from("notifications").insert({
-                                user_id: u.id,
-                                type: "group_invite",
-                                title: `${inviterName} added you to a group`,
-                                body: `You've been added to ${grpName}`,
-                                message: `${inviterName} added you to ${grpName}`,
-                                data: { chat_id: groupManageId, chat_name: grpName, inviter_name: inviterName },
-                                is_read: false,
+                              void supabase.rpc("enqueue_notification", {
+                                p_user_id: u.id,
+                                p_category: "chats",
+                                p_kind: "group_invite",
+                                p_title: `${inviterName} invited you to ${grpName}! 🐾`,
+                                p_body: `${inviterName} invited you to ${grpName}! 🐾`,
+                                p_href: "/chats?tab=groups",
+                                p_data: { chat_id: groupManageId, chat_name: grpName, inviter_name: inviterName },
                               });
                             } catch {
                               toast.error("Couldn't add member.");

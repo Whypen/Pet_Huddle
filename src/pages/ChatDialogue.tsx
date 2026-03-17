@@ -788,9 +788,9 @@ const ChatDialogue = () => {
           </button>
           {isGroup ? (
             <>
-              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
+              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center">
                 {groupAvatarUrl ? (
-                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
+                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
                 ) : (
                   <Users className="h-4 w-4 text-primary" />
                 )}
@@ -1105,13 +1105,13 @@ const ChatDialogue = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Report</DialogTitle>
-            <DialogDescription>Tell us what happened so we can protect the community.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
+      <Sheet open={reportOpen} onOpenChange={setReportOpen}>
+        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
+          <SheetHeader className="pb-3 shrink-0">
+            <SheetTitle className="text-left">Report</SheetTitle>
+            <p className="text-sm text-muted-foreground text-left">Tell us what happened so we can protect the community.</p>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto space-y-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
             <div className="space-y-2">
               {REPORT_REASONS.map((reason) => (
                 <label key={reason} className="flex items-center gap-2 text-sm">
@@ -1187,8 +1187,6 @@ const ChatDialogue = () => {
                 </div>
               )}
             </div>
-          </div>
-          <DialogFooter>
             <button
               type="button"
               onClick={() => void handleReportSubmit()}
@@ -1197,16 +1195,16 @@ const ChatDialogue = () => {
             >
               {reportSubmitting ? "Sending..." : "Send report"}
             </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Group Info Sheet (WhatsApp-style) ── */}
       <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>
         <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-4 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center">
                 {groupAvatarUrl
                   ? <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
                   : <Users className="h-5 w-5 text-primary" />}
@@ -1382,16 +1380,16 @@ const ChatDialogue = () => {
                                   setGroupManageMembers((prev) => [...prev, u]);
                                   setGroupManageFriends((prev) => prev.filter((f) => f.id !== u.id));
                                   toast.success(`${u.name} added`);
-                                  // Notify the added user
+                                  // Notify the added user via security-definer RPC (bypasses insert RLS)
                                   const inviterName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
-                                  void supabase.from("notifications").insert({
-                                    user_id: u.id,
-                                    type: "group_invite",
-                                    title: `${inviterName} invited you to ${roomName}! 🐾`,
-                                    body: `${inviterName} invited you to ${roomName}! 🐾`,
-                                    message: `${inviterName} invited you to ${roomName}! 🐾`,
-                                    data: { chat_id: roomId, chat_name: roomName, inviter_name: inviterName },
-                                    is_read: false,
+                                  void supabase.rpc("enqueue_notification", {
+                                    p_user_id: u.id,
+                                    p_category: "chats",
+                                    p_kind: "group_invite",
+                                    p_title: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    p_body: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    p_href: "/chats?tab=groups",
+                                    p_data: { chat_id: roomId, chat_name: roomName, inviter_name: inviterName },
                                   });
                                 } catch {
                                   toast.error("Couldn't add member.");
