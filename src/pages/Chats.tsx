@@ -4177,7 +4177,7 @@ const Chats = () => {
                           {/* Group Avatar */}
                           <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
                             {group.avatarUrl ? (
-                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-contain" />
+                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
                             ) : (
                               <Users className="w-6 h-6 text-primary" />
                             )}

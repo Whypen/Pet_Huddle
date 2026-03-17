@@ -655,7 +655,7 @@ const ChatDialogue = () => {
         .from("matches")
         .select("user1_id, user2_id")
         .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
-        .eq("status", "matched");
+        .eq("is_active", true);
       (matchRows || []).forEach((r) => {
         const peerId = r.user1_id === profile.id ? r.user2_id : r.user1_id;
         if (!memberIds.has(peerId as string)) contactIdSet.add(peerId as string);
@@ -1458,11 +1458,11 @@ const ChatDialogue = () => {
                 try {
                   const displayName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
                   // Insert system message BEFORE removing membership (policy checks membership)
-                  await supabase.from("messages").insert({
+                  // Table is chat_messages (FK target of message_reads); no message_type column
+                  await supabase.from("chat_messages").insert({
                     chat_id: roomId,
                     sender_id: profile.id,
                     content: `${displayName} left the group.`,
-                    message_type: "system",
                   });
                   // Then remove the user from the group
                   await supabase
