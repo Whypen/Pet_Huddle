@@ -790,7 +790,7 @@ const ChatDialogue = () => {
             <>
               <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center">
                 {groupAvatarUrl ? (
-                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
+                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
                 ) : (
                   <Users className="h-4 w-4 text-primary" />
                 )}
@@ -1456,20 +1456,20 @@ const ChatDialogue = () => {
                 if (!profile?.id || !roomId) return;
                 setConfirmLeaveOpen(false);
                 try {
-                  // Remove the user from the group
+                  const displayName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
+                  // Insert system message BEFORE removing membership (policy checks membership)
+                  await supabase.from("messages").insert({
+                    chat_id: roomId,
+                    sender_id: profile.id,
+                    content: `${displayName} left the group.`,
+                    message_type: "system",
+                  });
+                  // Then remove the user from the group
                   await supabase
                     .from("chat_room_members")
                     .delete()
                     .eq("chat_id", roomId)
                     .eq("user_id", profile.id);
-                  // Insert system message visible to remaining members
-                  const displayName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
-                  await supabase.from("messages").insert({
-                    chat_id: roomId,
-                    sender_id: profile.id,
-                    content: `${displayName} left the group.`,
-                    type: "system",
-                  });
                   navigate("/chats?tab=groups", { replace: true });
                 } catch {
                   toast.error("Unable to leave group right now.");

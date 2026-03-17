@@ -210,7 +210,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       "discovery_session_",
       "chat_room_seen_",
       "chat_direct_peer_by_room_",
-      "seen_match_modal_",
       "chats_unread_",
       "chats_unread_seen_",
       "chats_unread_ack_",
@@ -234,7 +233,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       "huddle_social_pins",
       "huddle_social_saves",
       "huddle_offline_actions",
-      "seen_match_modal",
     ] as const;
     try {
       const localKeys = Object.keys(localStorage);
