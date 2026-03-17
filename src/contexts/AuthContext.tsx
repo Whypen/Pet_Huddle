@@ -312,7 +312,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       // Auto-expire any restriction/suspension that has passed its deadline
-      void supabase.rpc("expire_account_restrictions" as "get_chat_participant_names");
+      void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
 
       setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
     } catch (error) {

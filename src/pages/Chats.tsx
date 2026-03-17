@@ -1848,7 +1848,7 @@ const Chats = () => {
     const checkInvites = async () => {
       const { data: invites } = await supabase
         .from("notifications")
-        .select("id, data, sender_id")
+        .select("id, data")
         .eq("user_id", profile.id)
         .eq("type", "group_invite")
         .eq("is_read", false)
@@ -4426,13 +4426,14 @@ const Chats = () => {
                               setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
                               // Send group_invite notification to the added user
                               const grpName = groups.find((g) => g.id === groupManageId)?.name || "a group";
+                              const inviterName = (profile as unknown as { display_name?: string }).display_name || "Someone";
                               await supabase.from("notifications").insert({
                                 user_id: u.id,
-                                sender_id: profile.id,
                                 type: "group_invite",
-                                title: `${profile.display_name || "Someone"} added you to a group`,
+                                title: `${inviterName} added you to a group`,
                                 body: `You've been added to ${grpName}`,
-                                data: { chat_id: groupManageId, chat_name: grpName, inviter_name: profile.display_name || "" },
+                                message: `${inviterName} added you to ${grpName}`,
+                                data: { chat_id: groupManageId, chat_name: grpName, inviter_name: inviterName },
                                 is_read: false,
                               });
                               toast.success(`${u.name} added`);
