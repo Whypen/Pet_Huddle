@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, ShieldAlert, UserX } from "lucide-react";
+import { ArrowLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 
@@ -113,8 +114,17 @@ const ChatDialogue = () => {
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [uploadingComposer, setUploadingComposer] = useState(false);
+  const [isGroup, setIsGroup] = useState(false);
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
+  const [groupMemberCount, setGroupMemberCount] = useState(0);
+  const [senderNames, setSenderNames] = useState<Record<string, string>>({});
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [groupMuted, setGroupMuted] = useState(false);
+  const [groupMediaUrls, setGroupMediaUrls] = useState<string[]>([]);
+  const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const reportImageInputRef = useRef<HTMLInputElement | null>(null);
+  const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
 
   const reportUploadPreviews = useMemo(
     () =>
@@ -133,10 +143,6 @@ const ChatDialogue = () => {
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
-  const directPeerByRoomKey = useMemo(
-    () => `chat_direct_peer_by_room_${profile?.id || "anon"}`,
-    [profile?.id]
-  );
   const firstHelloStarters = useMemo(
     () => [
       "Hey there—what drew your pack to Huddle?",
@@ -206,6 +212,41 @@ const ChatDialogue = () => {
     }
   }, [profile?.id]);
 
+  const loadGroupInfo = useCallback(async (nextRoomId: string): Promise<boolean> => {
+    const { data: chatRow } = await supabase
+      .from("chats")
+      .select("id, name, type, avatar_url")
+      .eq("id", nextRoomId)
+      .maybeSingle();
+    const row = chatRow as { name?: string | null; type?: string; avatar_url?: string | null } | null;
+    if (!row || row.type !== "group") return false;
+
+    setIsGroup(true);
+    setGroupAvatarUrl(row.avatar_url || null);
+    setRoomName(row.name || "Group");
+
+    const { data: members } = await supabase
+      .from("chat_room_members")
+      .select("user_id")
+      .eq("chat_id", nextRoomId);
+    const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
+    setGroupMemberCount(memberIds.length);
+
+    if (memberIds.length > 0) {
+      memberIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
+      const { data: memberProfiles } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", memberIds);
+      const nameMap: Record<string, string> = {};
+      ((memberProfiles || []) as { id: string; display_name?: string | null }[]).forEach((p) => {
+        if (p.id && p.display_name) nameMap[p.id] = p.display_name;
+      });
+      setSenderNames(nameMap);
+    }
+    return true;
+  }, []);
+
   const loadRoomMessages = useCallback(async (nextRoomId: string) => {
     const { data, error } = await supabase
       .from("chat_messages")
@@ -232,16 +273,6 @@ const ChatDialogue = () => {
     let counterpartId = memberCounterpartId || null;
     if (!counterpartId && hintUserId && hintUserId !== profile.id) {
       counterpartId = hintUserId;
-    }
-    if (!counterpartId) {
-      try {
-        const raw = localStorage.getItem(directPeerByRoomKey);
-        const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-        const cached = String(parsed?.[nextRoomId] || "").trim();
-        if (cached && cached !== profile.id) counterpartId = cached;
-      } catch {
-        // ignore malformed cache
-      }
     }
     if (!counterpartId) return;
 
@@ -295,20 +326,6 @@ const ChatDialogue = () => {
       hasCar: Boolean(profileRow?.has_car),
     });
 
-    try {
-      const raw = localStorage.getItem(directPeerByRoomKey);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      localStorage.setItem(
-        directPeerByRoomKey,
-        JSON.stringify({
-          ...parsed,
-          [nextRoomId]: counterpartId,
-        })
-      );
-    } catch {
-      // ignore cache write failure
-    }
-
     const { data: blocks } = await supabase
       .from("user_blocks")
       .select("blocker_id, blocked_id")
@@ -334,7 +351,7 @@ const ChatDialogue = () => {
     } else {
       setUnmatchState("none");
     }
-  }, [directPeerByRoomKey, profile?.id]);
+  }, [profile?.id]);
 
   const uploadFilesToNotices = useCallback(async (files: File[], folder: string): Promise<Attachment[]> => {
     if (!profile?.id || !roomId || files.length === 0) return [];
@@ -384,7 +401,8 @@ const ChatDialogue = () => {
 
           if (membership) {
             setRoomId(room);
-            await Promise.all([loadRoomMessages(room), loadCounterpart(room, name, hintedUserId)]);
+            const grouped = await loadGroupInfo(room);
+            await Promise.all([loadRoomMessages(room), grouped ? Promise.resolve() : loadCounterpart(room, name, hintedUserId)]);
             return;
           }
 
@@ -408,7 +426,8 @@ const ChatDialogue = () => {
 
           const nextRoomId = await ensureDirectChatRoom(supabase, profile.id, fallbackTargetId, name);
           setRoomId(nextRoomId);
-          await Promise.all([loadRoomMessages(nextRoomId), loadCounterpart(nextRoomId, name, fallbackTargetId)]);
+          const grouped2 = await loadGroupInfo(nextRoomId);
+          await Promise.all([loadRoomMessages(nextRoomId), grouped2 ? Promise.resolve() : loadCounterpart(nextRoomId, name, fallbackTargetId)]);
           navigate(
             `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}&with=${encodeURIComponent(fallbackTargetId)}`,
             { replace: true }
@@ -442,7 +461,7 @@ const ChatDialogue = () => {
         setLoading(false);
       }
     })();
-  }, [loadCounterpart, loadRoomMessages, navigate, profile?.id, searchParams]);
+  }, [loadCounterpart, loadGroupInfo, loadRoomMessages, navigate, profile?.id, searchParams]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -456,6 +475,62 @@ const ChatDialogue = () => {
       void supabase.removeChannel(roomChannel);
     };
   }, [loadRoomMessages, roomId]);
+
+  // Initial load of read receipts for my sent messages
+  useEffect(() => {
+    if (!roomId || !profile?.id || isGroup || messages.length === 0) return;
+    const myMessageIds = messages.filter((m) => m.sender_id === profile.id).map((m) => m.id);
+    if (myMessageIds.length === 0) return;
+    void (async () => {
+      const { data } = await supabase
+        .from("message_reads")
+        .select("message_id")
+        .in("message_id", myMessageIds)
+        .neq("user_id", profile.id);
+      if (data) {
+        setReadMessageIds(new Set((data as { message_id: string }[]).map((r) => r.message_id)));
+      }
+    })();
+  }, [roomId, profile?.id, isGroup, messages]);
+
+  // Realtime subscription for blue tick — separate from message reload
+  useEffect(() => {
+    if (!roomId || !profile?.id || isGroup) return;
+    const readChannel = supabase
+      .channel(`chat_dialogue_reads_${roomId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
+        const row = payload.new as { message_id?: string; user_id?: string } | null;
+        if (!row?.message_id || row.user_id === profile.id) return;
+        setReadMessageIds((prev) => new Set([...prev, row.message_id!]));
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(readChannel); };
+  }, [roomId, profile?.id, isGroup]);
+
+  // For group chats: lazily fetch display names for any new sender not yet loaded
+  useEffect(() => {
+    if (!isGroup || messages.length === 0) return;
+    const unknownIds = [
+      ...new Set(
+        messages
+          .map((m) => m.sender_id)
+          .filter((id) => id && id !== profile?.id && !fetchedSenderIdsRef.current.has(id))
+      ),
+    ];
+    if (unknownIds.length === 0) return;
+    unknownIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
+    void (async () => {
+      const { data } = await supabase.from("profiles").select("id, display_name").in("id", unknownIds);
+      if (!data) return;
+      setSenderNames((prev) => {
+        const next = { ...prev };
+        (data as { id: string; display_name?: string | null }[]).forEach((p) => {
+          if (p.id && p.display_name) next[p.id] = p.display_name;
+        });
+        return next;
+      });
+    })();
+  }, [isGroup, messages, profile?.id]);
 
   const sendMessage = useCallback(async () => {
     const cannotSend =
@@ -555,22 +630,35 @@ const ChatDialogue = () => {
     setReportSubmitting(true);
     try {
       const attachments = await uploadFilesToNotices(reportUploads, "reports");
+      const attachmentUrls = attachments.map((item) => item.url);
       const payload = {
         target_user_id: counterpart.id,
         room_id: roomId,
         reasons: selectedReasons,
         other: selectedReasons.includes("Other") ? reportOther.trim() : "",
         details: reportDetails.trim(),
-        attachments: attachments.map((item) => item.url),
+        attachments: attachmentUrls,
       };
-      const { error } = await supabase.from("support_requests").insert({
-        user_id: profile.id,
-        category: "user_report",
-        subject: `Report user ${counterpart.id}`,
-        message: JSON.stringify(payload),
-        email: profile.email || null,
+      // Score + enforce via DB function
+      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: unknown }>)(
+        "process_user_report",
+        {
+          p_target_id:       counterpart.id,
+          p_categories:      selectedReasons,
+          p_details:         reportDetails.trim() || null,
+          p_attachment_urls: attachmentUrls,
+        }
+      );
+      // Send email via edge function (best-effort)
+      void supabase.functions.invoke("support-request", {
+        body: {
+          userId:  profile.id,
+          subject: `Report: ${counterpart.displayName || counterpart.id}`,
+          message: JSON.stringify(payload),
+          email:   (profile as unknown as { email?: string }).email || null,
+          source:  isGroup ? "Group Chat" : "Chat",
+        },
       });
-      if (error) throw error;
       toast.success("Report sent");
       setReportOpen(false);
       setReportReasons(new Set());
@@ -582,7 +670,7 @@ const ChatDialogue = () => {
     } finally {
       setReportSubmitting(false);
     }
-  }, [counterpart?.id, profile?.email, profile?.id, reportDetails, reportOther, reportReasons, reportUploads, roomId, uploadFilesToNotices]);
+  }, [counterpart, isGroup, profile, reportDetails, reportOther, reportReasons, reportUploads, roomId, uploadFilesToNotices]);
 
   if (loading) {
     return (
@@ -601,47 +689,90 @@ const ChatDialogue = () => {
     <div className="h-full min-h-0 flex flex-col bg-background">
       <div className="shrink-0 border-b border-border bg-white/88 backdrop-blur-md px-3 py-2">
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate("/chats?tab=chats")} className="rounded-full p-2 hover:bg-muted" aria-label="Back">
+          <button onClick={() => navigate(isGroup ? "/chats?tab=groups" : "/chats?tab=chats")} className="rounded-full p-2 hover:bg-muted" aria-label="Back">
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <button onClick={() => void openCounterpartProfile()} className="shrink-0">
-            <UserAvatar
-              avatarUrl={counterpart?.avatarUrl || null}
-              name={counterpart?.displayName || roomName}
-              isVerified={counterpart?.isVerified || false}
-              hasCar={counterpart?.hasCar || false}
-              size="md"
-              showBadges={true}
-            />
-          </button>
-          <button onClick={() => void openCounterpartProfile()} className="min-w-0 flex-1 text-left">
-            <div className="truncate text-sm font-semibold text-brandText">
-              {counterpart?.displayName || roomName}
-              {counterpart?.socialId ? <span className="ml-1 text-xs font-medium text-muted-foreground">@{counterpart.socialId}</span> : null}
-            </div>
-            <div className="truncate text-xs text-muted-foreground">{counterpart?.availability || "Friend"}</div>
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="rounded-full p-2 hover:bg-muted" aria-label="More">
-                <MoreVertical className="h-4 w-4 text-muted-foreground" />
+          {isGroup ? (
+            <>
+              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
+                {groupAvatarUrl ? (
+                  <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
+                ) : (
+                  <Users className="h-4 w-4 text-primary" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-brandText">{roomName}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {groupMemberCount > 0 ? `${groupMemberCount} members` : "Group"}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <button onClick={() => void openCounterpartProfile()} className="shrink-0">
+                <UserAvatar
+                  avatarUrl={counterpart?.avatarUrl || null}
+                  name={counterpart?.displayName || roomName}
+                  isVerified={counterpart?.isVerified || false}
+                  hasCar={counterpart?.hasCar || false}
+                  size="md"
+                  showBadges={true}
+                />
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={() => setReportOpen(true)}>
-                <ShieldAlert className="mr-2 h-4 w-4" />
-                Report User
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setConfirmBlockOpen(true)}>
-                <UserX className="mr-2 h-4 w-4" />
-                {blockState === "blocked_by_me" ? "Unblock User" : "Block User"}
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setConfirmUnmatchOpen(true)}>
-                <UserX className="mr-2 h-4 w-4" />
-                Unmatch
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <button onClick={() => void openCounterpartProfile()} className="min-w-0 flex-1 text-left">
+                <div className="truncate text-sm font-semibold text-brandText">
+                  {counterpart?.displayName || roomName}
+                  {counterpart?.socialId ? <span className="ml-1 text-xs font-medium text-muted-foreground">@{counterpart.socialId}</span> : null}
+                </div>
+                <div className="truncate text-xs text-muted-foreground">{counterpart?.availability || "Friend"}</div>
+              </button>
+            </>
+          )}
+          {isGroup ? (
+            <button
+              className="rounded-full p-2 hover:bg-muted"
+              aria-label="Group info"
+              onClick={() => {
+                // Collect media from current messages
+                const media: string[] = [];
+                for (const msg of messages) {
+                  try {
+                    const p = JSON.parse(msg.content) as { attachments?: { url: string; mime: string }[] };
+                    if (Array.isArray(p.attachments)) {
+                      p.attachments.filter((a) => !a.mime.startsWith("video/")).forEach((a) => media.push(a.url));
+                    }
+                  } catch { /* plain text */ }
+                }
+                setGroupMediaUrls(media);
+                setGroupInfoOpen(true);
+              }}
+            >
+              <MoreVertical className="h-4 w-4 text-muted-foreground" />
+            </button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="rounded-full p-2 hover:bg-muted" aria-label="More">
+                  <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuItem onClick={() => setReportOpen(true)}>
+                  <ShieldAlert className="mr-2 h-4 w-4" />
+                  Report User
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setConfirmBlockOpen(true)}>
+                  <UserX className="mr-2 h-4 w-4" />
+                  {blockState === "blocked_by_me" ? "Unblock User" : "Block User"}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setConfirmUnmatchOpen(true)}>
+                  <UserX className="mr-2 h-4 w-4" />
+                  Unmatch
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -667,7 +798,7 @@ const ChatDialogue = () => {
             </span>
           </div>
         )}
-        {messages.length === 0 ? (
+        {messages.length === 0 && !isGroup ? (
           <div className="mt-auto rounded-[18px] border border-white/45 bg-white/55 p-3 shadow-[0_10px_24px_rgba(33,71,201,0.10)] backdrop-blur-[18px]">
             <p className="text-sm font-semibold text-[#4F5677]">Paw-Vibe Check?</p>
             <div className="mt-2 flex flex-col gap-2">
@@ -702,6 +833,11 @@ const ChatDialogue = () => {
                     </span>
                   </div>
                 ) : null}
+                {isGroup && !mine && (
+                  <div className="pl-1 mb-0.5 text-[11px] font-semibold text-muted-foreground">
+                    {senderNames[message.sender_id] || ""}
+                  </div>
+                )}
                 <div
                   className={cn(
                     "w-fit max-w-[90%] rounded-xl border px-3 py-2 text-sm",
@@ -725,8 +861,19 @@ const ChatDialogue = () => {
                   )}
                   {parsed.text ? <div className="whitespace-pre-wrap break-words">{parsed.text}</div> : null}
                 </div>
-                <div className={cn("mt-1 text-[11px] text-[#9AA0B5]", mine ? "text-right pr-1" : "text-left pl-1")}>
-                  {formatMessageTime(message.created_at)}
+                <div className={cn("mt-1 flex items-center gap-1 text-[11px] text-[#9AA0B5]", mine ? "justify-end pr-1" : "justify-start pl-1")}>
+                  <span>{formatMessageTime(message.created_at)}</span>
+                  {mine && !isGroup && (
+                    <span
+                      className={cn(
+                        "font-semibold leading-none",
+                        readMessageIds.has(message.id) ? "text-brandBlue" : "text-[#9AA0B5]"
+                      )}
+                      aria-label={readMessageIds.has(message.id) ? "read" : "sent"}
+                    >
+                      {readMessageIds.has(message.id) ? "✓✓" : "✓"}
+                    </span>
+                  )}
                 </div>
               </div>
             );
@@ -867,7 +1014,7 @@ const ChatDialogue = () => {
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Report user</DialogTitle>
+            <DialogTitle>Report</DialogTitle>
             <DialogDescription>Tell us what happened so we can protect the community.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -959,6 +1106,111 @@ const ChatDialogue = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Group Info Sheet (WhatsApp-style) ── */}
+      <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl h-[92vh] flex flex-col overflow-hidden pb-safe">
+          <SheetHeader className="pb-4 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-primary/10 flex items-center justify-center">
+                {groupAvatarUrl
+                  ? <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-contain" />
+                  : <Users className="h-5 w-5 text-primary" />}
+              </div>
+              <div className="min-w-0">
+                <SheetTitle className="text-left">{roomName}</SheetTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">{groupMemberCount} members</p>
+              </div>
+            </div>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto">
+
+          {/* Media — horizontal swipeable album */}
+          <div className="mb-5">
+            <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
+              Media{groupMediaUrls.length > 0 ? ` (${groupMediaUrls.length})` : ""}
+            </p>
+            {groupMediaUrls.length > 0 ? (
+              <div className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory">
+                {groupMediaUrls.map((url, idx) => (
+                  <a
+                    key={idx}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-none w-24 h-24 snap-start overflow-hidden rounded-xl"
+                  >
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <ImageIcon className="h-4 w-4" />
+                <span className="text-sm">No media shared yet</span>
+              </div>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-1">
+            {/* Mute notifications */}
+            <button
+              onClick={() => {
+                setGroupMuted((v) => !v);
+                toast.success(groupMuted ? "Notifications on" : "Group muted");
+              }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
+            >
+              {groupMuted
+                ? <BellOff className="h-5 w-5 text-muted-foreground" />
+                : <Bell className="h-5 w-5 text-muted-foreground" />}
+              <span className="text-sm font-medium">{groupMuted ? "Unmute notifications" : "Mute notifications"}</span>
+            </button>
+
+            {/* Add members */}
+            <button
+              onClick={() => {
+                setGroupInfoOpen(false);
+                navigate(`/chats?tab=groups&manage=${roomId ?? ""}`);
+              }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
+            >
+              <UserPlus className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm font-medium">Add members</span>
+            </button>
+
+            {/* Report group */}
+            <button
+              onClick={() => { setGroupInfoOpen(false); setReportOpen(true); }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
+            >
+              <ShieldAlert className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm font-medium">Report group</span>
+            </button>
+
+            {/* Leave group */}
+            <button
+              onClick={async () => {
+                setGroupInfoOpen(false);
+                if (!profile?.id || !roomId) return;
+                try {
+                  await supabase.from("chat_room_members").delete().eq("chat_id", roomId).eq("user_id", profile.id);
+                  toast.success("You left the group.");
+                  navigate("/chats?tab=groups", { replace: true });
+                } catch {
+                  toast.error("Unable to leave group right now.");
+                }
+              }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
+            >
+              <LogOut className="h-5 w-5 text-red-500" />
+              <span className="text-sm font-medium text-red-500">Leave group</span>
+            </button>
+          </div>
+          </div>{/* end scrollable body */}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

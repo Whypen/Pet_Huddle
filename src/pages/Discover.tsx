@@ -88,8 +88,10 @@ const DISCOVER_AGE_GATE_BODY =
 const extractDistrictToken = (value: string | null | undefined) => {
   const raw = String(value || "").trim();
   if (!raw) return null;
-  const first = raw.split(",")[0]?.trim();
-  return first || raw || null;
+  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 3) return parts[1] || parts[0] || raw || null;
+  if (parts.length === 2) return parts[0] || raw || null;
+  return parts[0] || raw || null;
 };
 
 const resolveDiscoveryLocationLabel = ({
@@ -106,7 +108,7 @@ const resolveDiscoveryLocationLabel = ({
   extractDistrictToken(liveLocationDistrict) ||
   extractDistrictToken(pinDistrict) ||
   extractDistrictToken(profileLocationDistrict) ||
-  String(profileLocationName || "").trim() ||
+  extractDistrictToken(profileLocationName) ||
   null;
 
 const Discover = () => {
@@ -264,7 +266,8 @@ const Discover = () => {
               .from("profiles")
               .select("id, display_name, avatar_url, verification_status, is_verified, bio, relationship_status, dob, location_name, occupation, school, major, tier, social_album, pets(species,name,is_active,is_public)")
               .in("id", fallbackIds)
-              .or("non_social.is.null,non_social.eq.false");
+              .or("non_social.is.null,non_social.eq.false")
+              .or("account_status.is.null,account_status.eq.active");
 
             if (fallbackProfilesError) throw fallbackProfilesError;
 
@@ -287,18 +290,6 @@ const Discover = () => {
           .map((row) => String((row as DiscoveryProfile).id || "").trim())
           .filter(Boolean);
         if (profileIds.length > 0) {
-          const { data: pinRows } = await supabase
-            .from("pins")
-            .select("user_id, address, created_at")
-            .in("user_id", profileIds)
-            .is("thread_id", null)
-            .order("created_at", { ascending: false });
-          for (const row of (pinRows || []) as Array<{ user_id?: string | null; address?: string | null }>) {
-            const userId = String(row.user_id || "").trim();
-            if (!userId || pinDistrictByUserId.has(userId)) continue;
-            pinDistrictByUserId.set(userId, extractDistrictToken(row.address || null));
-          }
-
           const { data: liveRows } = await supabase
             .from("user_locations")
             .select("user_id, location_name, updated_at")
@@ -307,7 +298,11 @@ const Discover = () => {
           for (const row of (liveRows || []) as Array<{ user_id?: string | null; location_name?: string | null }>) {
             const userId = String(row.user_id || "").trim();
             if (!userId || liveLocationDistrictByUserId.has(userId)) continue;
-            liveLocationDistrictByUserId.set(userId, extractDistrictToken(row.location_name || null));
+            const district = extractDistrictToken(row.location_name || null);
+            liveLocationDistrictByUserId.set(userId, district);
+            if (!pinDistrictByUserId.has(userId)) {
+              pinDistrictByUserId.set(userId, district);
+            }
           }
 
           const { data: profileRows } = await supabase

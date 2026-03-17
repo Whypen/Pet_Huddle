@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 const supabaseUrl = Deno.env.get("SUPABASE_URL") as string;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string;
 const resendApiKey = Deno.env.get("RESEND_API_KEY") as string | undefined;
-const supportEmailTo = Deno.env.get("SUPPORT_EMAIL_TO") || "kuriocollectives";
+const supportEmailTo = Deno.env.get("SUPPORT_EMAIL_TO") || "support@huddle.pet";
 const supportEmailFrom = Deno.env.get("SUPPORT_EMAIL_FROM") || "support@huddle.app";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -21,7 +21,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { userId, subject, message, email } = await req.json();
+    const { userId, subject, message, email, source } = await req.json();
     if (!userId || !message) {
       return json({ error: "Missing required parameters" }, 400);
     }
@@ -34,6 +34,9 @@ serve(async (req: Request) => {
     });
 
     if (resendApiKey) {
+      const emailSubject = source
+        ? `REPORT (${source}) — ${subject || "Huddle Report"}`
+        : subject || "Huddle Support Request";
       await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
@@ -43,8 +46,8 @@ serve(async (req: Request) => {
         body: JSON.stringify({
           from: supportEmailFrom,
           to: supportEmailTo,
-          subject: subject || "Huddle Support Request",
-          text: `User: ${userId}\nEmail: ${email || ""}\n\n${message}`,
+          subject: emailSubject,
+          text: `User: ${userId}\nEmail: ${email || ""}\nSource: ${source || "N/A"}\n\n${message}`,
         }),
       });
     }

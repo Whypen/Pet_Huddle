@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -30,10 +30,10 @@ import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import waveHandCta from "@/assets/Wave Hand CTA.png";
 import matchPageImage from "@/assets/Match page.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
+import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
-import { MAP_PIN_STORAGE_KEY, buildScopedStorageKey } from "@/lib/signupOnboarding";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -200,8 +200,10 @@ const DISCOVER_AGE_GATE_BODY =
 const extractDistrictToken = (value: string | null | undefined) => {
   const raw = String(value || "").trim();
   if (!raw) return null;
-  const first = raw.split(",")[0]?.trim();
-  return first || raw || null;
+  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 3) return parts[1] || parts[0] || raw || null;
+  if (parts.length === 2) return parts[0] || raw || null;
+  return parts[0] || raw || null;
 };
 
 const resolveDiscoveryLocationLabel = ({
@@ -218,7 +220,7 @@ const resolveDiscoveryLocationLabel = ({
   extractDistrictToken(liveLocationDistrict) ||
   extractDistrictToken(pinDistrict) ||
   extractDistrictToken(profileLocationDistrict) ||
-  String(profileLocationName || "").trim() ||
+  extractDistrictToken(profileLocationName) ||
   null;
 
 type MainTab = "friends" | "groups";
@@ -524,10 +526,13 @@ const Chats = () => {
   // Group management
   const [groupManageId, setGroupManageId] = useState<string | null>(null);
   const [swipeDeleteId, setSwipeDeleteId] = useState<string | null>(null);
+  const [swipeDeleteGroupId, setSwipeDeleteGroupId] = useState<string | null>(null);
+  const [deleteGroupConfirmId, setDeleteGroupConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [groupImageUploading, setGroupImageUploading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [groupAddSearch, setGroupAddSearch] = useState("");
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
@@ -544,6 +549,12 @@ const Chats = () => {
   const [matchModal, setMatchModal] = useState<MatchModalState | null>(null);
   const [openingMatchChat, setOpeningMatchChat] = useState(false);
   const [matchQuickHello, setMatchQuickHello] = useState("");
+  const [pendingGroupInvite, setPendingGroupInvite] = useState<{
+    notifId: string;
+    chatId: string;
+    chatName: string;
+    inviterName: string;
+  } | null>(null);
 
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeRoomName, setActiveRoomName] = useState<string>("");
@@ -657,20 +668,25 @@ const Chats = () => {
     () => `discovery_filters_${profile?.id || "anon"}`,
     [profile?.id]
   );
-  const directPeerByRoomKey = useMemo(
-    () => `chat_direct_peer_by_room_${profile?.id || "anon"}`,
-    [profile?.id]
-  );
   const matchedDiscoveryKey = useMemo(
     () => `discovery_matched_${profile?.id || "anon"}`,
     [profile?.id]
   );
-  const pinStorageKey = useMemo(
-    () => buildScopedStorageKey(MAP_PIN_STORAGE_KEY, profile?.id || ""),
-    [profile?.id]
-  );
-
   const resolveDiscoveryAnchor = useCallback(async (): Promise<DiscoveryAnchor | null> => {
+    if (profile?.id) {
+      const { data } = await supabase
+        .from("user_locations")
+        .select("location")
+        .eq("user_id", profile.id)
+        .eq("is_public", true)
+        .maybeSingle();
+      const point = (data?.location || null) as unknown as { coordinates?: unknown } | null;
+      const coords = Array.isArray(point?.coordinates) ? point?.coordinates : null;
+      if (coords && typeof coords[0] === "number" && typeof coords[1] === "number") {
+        return { lat: Number(coords[1]), lng: Number(coords[0]), source: "device" };
+      }
+    }
+
     if (typeof navigator !== "undefined" && navigator.geolocation) {
       try {
         const deviceAnchor = await new Promise<DiscoveryAnchor>((resolve, reject) => {
@@ -693,18 +709,6 @@ const Chats = () => {
       }
     }
 
-    try {
-      const raw = localStorage.getItem(pinStorageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
-        if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
-          return { lat: parsed.lat, lng: parsed.lng, source: "pinned" };
-        }
-      }
-    } catch {
-      // ignore malformed localStorage
-    }
-
     if (profile?.id) {
       const { data: latestPin } = await supabase
         .from("pins")
@@ -720,16 +724,8 @@ const Chats = () => {
     }
 
     if (profile?.id) {
-      const { data } = await supabase
-        .from("user_locations")
-        .select("location")
-        .eq("user_id", profile.id)
-        .eq("is_public", true)
-        .maybeSingle();
-      const point = (data?.location || null) as unknown as { coordinates?: unknown } | null;
-      const coords = Array.isArray(point?.coordinates) ? point?.coordinates : null;
-      if (coords && typeof coords[0] === "number" && typeof coords[1] === "number") {
-        return { lat: Number(coords[1]), lng: Number(coords[0]), source: "pinned" };
+      if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
+        return { lat: profile.last_lat, lng: profile.last_lng, source: "profile" };
       }
     }
 
@@ -738,7 +734,7 @@ const Chats = () => {
     }
 
     return null;
-  }, [pinStorageKey, profile?.id, profile?.last_lat, profile?.last_lng]);
+  }, [profile?.id, profile?.last_lat, profile?.last_lng]);
 
   const openLocationSettings = useCallback(() => {
     const ua = navigator.userAgent || "";
@@ -860,14 +856,8 @@ const Chats = () => {
 
   useEffect(() => {
     if (!profile?.id) return;
-    try {
-      const raw = localStorage.getItem(directPeerByRoomKey);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      directPeerByRoomRef.current = parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      directPeerByRoomRef.current = {};
-    }
-  }, [directPeerByRoomKey, profile?.id]);
+    directPeerByRoomRef.current = {};
+  }, [profile?.id]);
 
   const rememberDirectPeer = useCallback((roomId: string, peerUserId: string) => {
     const nextRoomId = String(roomId || "").trim();
@@ -875,12 +865,7 @@ const Chats = () => {
     if (!nextRoomId || !nextPeerId) return;
     const next = { ...directPeerByRoomRef.current, [nextRoomId]: nextPeerId };
     directPeerByRoomRef.current = next;
-    try {
-      localStorage.setItem(directPeerByRoomKey, JSON.stringify(next));
-    } catch {
-      // ignore cache write failures
-    }
-  }, [directPeerByRoomKey]);
+  }, []);
 
   const persistRoomSeen = useCallback((next: Record<string, string>) => {
     roomSeenRef.current = next;
@@ -1693,13 +1678,17 @@ const Chats = () => {
         const last = lastByRoom.get(roomId);
 
         if (isGroup) {
+          const senderProfile = last?.sender_id ? (profileById.get(last.sender_id) || null) : null;
+          const senderName = last?.sender_id === profile.id
+            ? "You"
+            : (String(senderProfile?.display_name || "").trim() || null);
           nextGroups.push({
             id: roomId,
             name: String(room.name || "Group"),
             avatarUrl: (room.avatar_url as string | null) ?? null,
             memberCount: roomMembers.length,
-            lastMessage: last?.content || "",
-            lastMessageSender: "",
+            lastMessage: parseChatPreviewText(last?.content),
+            lastMessageSender: senderName || "",
             time: formatChatTimestamp(last?.created_at),
             unread: unreadByRoom.get(roomId) || 0,
           });
@@ -1852,6 +1841,32 @@ const Chats = () => {
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
+
+  // Check for pending group invite notifications when opening Groups tab
+  useEffect(() => {
+    if (!profile?.id || mainTab !== "groups") return;
+    const checkInvites = async () => {
+      const { data: invites } = await supabase
+        .from("notifications")
+        .select("id, data, sender_id")
+        .eq("user_id", profile.id)
+        .eq("type", "group_invite")
+        .eq("is_read", false)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!invites || invites.length === 0) return;
+      const inv = invites[0];
+      const invData = (inv.data || {}) as { chat_id?: string; chat_name?: string; inviter_name?: string };
+      if (!invData.chat_id) return;
+      setPendingGroupInvite({
+        notifId: String(inv.id),
+        chatId: String(invData.chat_id),
+        chatName: invData.chat_name || "a group",
+        inviterName: invData.inviter_name || "Someone",
+      });
+    };
+    void checkInvites();
+  }, [profile?.id, mainTab]);
 
   // Discovery cards (embedded in Chats) — send full filter payload
   useEffect(() => {
@@ -2152,18 +2167,6 @@ const Chats = () => {
 
           const mergedIds = Array.from(mergedProfiles.keys());
           if (mergedIds.length > 0) {
-            const { data: pinRows } = await supabase
-              .from("pins")
-              .select("user_id, address, created_at")
-              .in("user_id", mergedIds)
-              .is("thread_id", null)
-              .order("created_at", { ascending: false });
-            for (const row of (pinRows || []) as Array<{ user_id?: string | null; address?: string | null }>) {
-              const userId = String(row.user_id || "").trim();
-              if (!userId || pinDistrictByUserId.has(userId)) continue;
-              pinDistrictByUserId.set(userId, extractDistrictToken(row.address || null));
-            }
-
             const { data: liveLocations } = await supabase
               .from("user_locations")
               .select("user_id, location_name, updated_at")
@@ -2173,7 +2176,11 @@ const Chats = () => {
             for (const row of (liveLocations || []) as Array<{ user_id?: string | null; location_name?: string | null }>) {
               const userId = String(row.user_id || "").trim();
               if (!userId || liveLocationDistrictByUserId.has(userId)) continue;
-              liveLocationDistrictByUserId.set(userId, extractDistrictToken(row.location_name || null));
+              const district = extractDistrictToken(row.location_name || null);
+              liveLocationDistrictByUserId.set(userId, district);
+              if (!pinDistrictByUserId.has(userId)) {
+                pinDistrictByUserId.set(userId, district);
+              }
             }
 
             const { data: profileEnrichment } = await supabase
@@ -2766,6 +2773,8 @@ const Chats = () => {
   const openMatchModalFor = useCallback(
     async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
       if (!profile?.id || !target.userId) return null;
+      // Mark seen immediately so re-mounts / re-subscriptions never re-trigger
+      markMatchSeen(target.userId);
       persistMatchedDiscoveryUser(target.userId);
       const nextModal: MatchModalState = {
         userId: target.userId,
@@ -2796,7 +2805,7 @@ const Chats = () => {
         return null;
       }
     },
-    [loadConversations, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
+    [loadConversations, markMatchSeen, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
   );
 
   useEffect(() => {
@@ -2876,6 +2885,13 @@ const Chats = () => {
 
   useEffect(() => {
     if (!profile?.id) return;
+    // Auto-open group manage dialog if navigated here via ?manage=roomId
+    const manageGroupId = searchParams.get("manage");
+    if (manageGroupId) {
+      setGroupManageId(manageGroupId);
+      setMainTab("groups");
+    }
+
     const openUserId = searchParams.get("with");
     const openUserName = searchParams.get("name") || "Conversation";
     const openRoomId = searchParams.get("room");
@@ -3947,9 +3963,15 @@ const Chats = () => {
                 <div className="px-5">
                   <div className="space-y-0.5">
                     {visibleConversationChats.length === 0 && avatarOnlyMatchedChats.length === 0 && avatarOnlyMatchOnlyAvatars.length === 0 ? (
-                      <div className="text-center py-8">
-                        <MessageSquare className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                        <p className="text-muted-foreground">{t("No conversations found")}</p>
+                      <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
+                        <img
+                          src={emptyChatImage}
+                          alt="No chats yet"
+                          className="w-full max-w-[360px] object-contain"
+                        />
+                        <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+                          Get new conversations going by joining Social discussion or add more into to make your profile pop and get matched easier.
+                        </p>
                       </div>
                     ) : (
                       <>
@@ -4116,59 +4138,77 @@ const Chats = () => {
                     </div>
                   ) : (
                     filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
-                      <motion.div
-                        key={group.id}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.05 }}
-                        onClick={() => handleGroupClick(group)}
-                        className="flex items-center gap-4 p-4 rounded-xl bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
-                      >
-                        {/* Group Avatar — no badge */}
-                        {group.avatarUrl ? (
-                          <img
-                            src={group.avatarUrl}
-                            alt={group.name}
-                            className="w-14 h-14 rounded-full object-cover flex-shrink-0"
-                          />
-                        ) : (
-                          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                            <Users className="w-6 h-6 text-primary" />
+                      <div key={group.id} className="relative overflow-hidden rounded-xl">
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          drag="x"
+                          dragConstraints={{ left: -80, right: 0 }}
+                          dragElastic={0.1}
+                          onDrag={(_, info) => {
+                            setSwipeDeleteGroupId(info.offset.x < -30 ? group.id : null);
+                          }}
+                          onDragEnd={(_, info) => {
+                            setSwipeDeleteGroupId(null);
+                            if (info.offset.x < -60) {
+                              setDeleteGroupConfirmId(group.id);
+                            }
+                          }}
+                          onClick={() => handleGroupClick(group)}
+                          className="flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                        >
+                          {/* Group Avatar */}
+                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                            {group.avatarUrl ? (
+                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Users className="w-6 h-6 text-primary" />
+                            )}
                           </div>
-                        )}
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold">{t(group.name)}</h4>
-                              {/* Group creator only: Manage pill */}
-                              {profile?.id && (
+                          <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
+                            <div className="min-w-0">
+                              {/* Primary: group name */}
+                              <h4 className="truncate font-semibold leading-[1.2]">{t(group.name)}</h4>
+                              {/* Secondary: sender: preview */}
+                              <p className="mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
+                                {group.lastMessageSender
+                                  ? <><span className="font-medium text-brandText/80">{group.lastMessageSender}:</span> {group.lastMessage}</>
+                                  : group.lastMessage || <span className="italic">No messages yet</span>
+                                }
+                              </p>
+                              {/* Bottom row: member count */}
+                              <p className="mt-1 text-[11px] font-[500] text-[#6B7280]">{group.memberCount} members</p>
+                            </div>
+                            <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
+                              <span className="text-xs text-[#9AA0B5]">{t(group.time)}</span>
+                              {group.unread > 0 ? (
+                                <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
+                                  {group.unread > 9 ? "9+" : group.unread}
+                                </span>
+                              ) : (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setGroupManageId(group.id);
                                   }}
-                                  className="px-2 py-0.5 rounded-full bg-brandBlue text-white text-[10px] font-bold"
+                                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-muted"
+                                  aria-label="Edit group"
                                 >
-                                  Manage
+                                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                                 </button>
                               )}
                             </div>
-                            <span className="text-xs text-muted-foreground">{t(group.time)}</span>
                           </div>
-                          {/* Static member count under group name */}
-                          <p className="text-[10px] text-muted-foreground">{group.memberCount} members</p>
-                          <p className="text-sm text-muted-foreground truncate mt-0.5">
-                            <span className="font-medium">{t(group.lastMessageSender)}:</span> {t(group.lastMessage)}
-                          </p>
-                        </div>
-
-                        {group.unread > 0 && (
-                          <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium flex-shrink-0">
-                            {group.unread > 9 ? "9+" : group.unread}
-                          </span>
-                        )}
-                      </motion.div>
+                          {/* Swipe trash indicator */}
+                          {swipeDeleteGroupId === group.id && (
+                            <div className="absolute right-3 w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center">
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                            </div>
+                          )}
+                        </motion.div>
+                      </div>
                     ))
                   )}
                 </div>
@@ -4209,12 +4249,37 @@ const Chats = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Group Manage Modal — group image upload, members list with Remove, invite from mutual waves */}
-      <Dialog open={!!groupManageId} onOpenChange={() => setGroupManageId(null)}>
+      {/* Delete Group Confirmation */}
+      <Dialog open={!!deleteGroupConfirmId} onOpenChange={() => setDeleteGroupConfirmId(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Leave Group</DialogTitle>
+            <DialogDescription>You will leave this group chat.</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Are you sure you want to leave this group? This cannot be undone.</p>
+          <DialogFooter className="flex gap-2">
+            <NeuButton variant="secondary" size="sm" onClick={() => setDeleteGroupConfirmId(null)}>Cancel</NeuButton>
+            <NeuButton variant="destructive" size="sm" onClick={async () => {
+              if (!profile?.id || !deleteGroupConfirmId) return;
+              try {
+                await supabase.from("chat_room_members").delete().eq("chat_id", deleteGroupConfirmId).eq("user_id", profile.id);
+                setGroups((prev) => prev.filter((g) => g.id !== deleteGroupConfirmId));
+                toast.success("You left the group.");
+              } catch {
+                toast.error("Unable to leave group right now.");
+              }
+              setDeleteGroupConfirmId(null);
+            }}>Leave</NeuButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group Manage Modal — group image upload, members list with Remove, add members */}
+      <Dialog open={!!groupManageId} onOpenChange={() => { setGroupManageId(null); setGroupAddSearch(""); }}>
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Manage Group</DialogTitle>
-            <DialogDescription>Manage members and invitations for this group chat.</DialogDescription>
+            <DialogDescription>Edit photo, members, and group settings.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {/* Group Image — working upload */}
@@ -4251,9 +4316,9 @@ const Chats = () => {
                       const compressed = await compress(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
                       const ext = compressed.name.split(".").pop() || "jpg";
                       const path = `groups/${groupManageId}/${Date.now()}.${ext}`;
-                      const { error: uploadErr } = await supabase.storage.from("notices").upload(path, compressed);
+                      const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, compressed, { upsert: true });
                       if (uploadErr) throw uploadErr;
-                      const { data: pub } = supabase.storage.from("notices").getPublicUrl(path);
+                      const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
                       const url = pub.publicUrl;
                       // Update group avatar in local state
                       setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url } : g));
@@ -4289,6 +4354,10 @@ const Chats = () => {
                     {m.id !== profile?.id && (
                       <button
                         onClick={async () => {
+                          if (!profile?.is_verified) {
+                            setGroupVerifyGateOpen(true);
+                            return;
+                          }
                           try {
                             await supabase.from("chat_room_members").delete().eq("chat_id", groupManageId!).eq("user_id", m.id);
                             setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
@@ -4310,50 +4379,79 @@ const Chats = () => {
               </div>
             </div>
 
-            {/* Invite from Mutual Waves — real notification flow */}
-            <div>
-              <div className="text-xs font-semibold text-brandText/70 mb-2">Invite from Mutual Waves</div>
-              <div className="space-y-2 max-h-32 overflow-y-auto">
-                {mutualWaves.length > 0 ? mutualWaves.map((w) => (
-                  <div key={w.id} className="flex items-center justify-between py-1.5">
-                    <div className="flex items-center gap-2">
-                      <UserAvatar avatarUrl={w.avatarUrl} name={w.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
-                      <span className="text-sm text-brandText">{w.name}</span>
-                    </div>
-                    <NeuButton
-                      size="sm"
-                      className="h-6 text-[10px] px-2"
-                      onClick={async () => {
-                        if (!profile?.id || !groupManageId) return;
-                        try {
-                          await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
-                            "enqueue_notification",
-                            {
-                              p_user_id: w.id,
-                              p_category: "chats",
-                              p_kind: "group_invite",
-                              p_title: "Group Invite",
-                              p_body: `${profile.display_name || "Someone"} invited you to join "${groups.find((g) => g.id === groupManageId)?.name || "a group"}"`,
-                              p_href: `/chat-dialogue?room=${groupManageId}`,
-                              p_data: { group_id: groupManageId, inviter_id: profile.id },
-                            }
-                          );
-                          toast.success(`Invite sent to ${w.name}`);
-                          // Remove from invite list to prevent duplicate
-                          setMutualWaves((prev) => prev.filter((x) => x.id !== w.id));
-                        } catch {
-                          toast.error(t("Failed to send invite"));
-                        }
-                      }}
-                    >
-                      Invite
-                    </NeuButton>
+            {/* Add Members — search from matched friends not yet in group */}
+            {(() => {
+              const currentMemberIds = new Set(groupMembers.map((m) => m.id));
+              const addableFriends = groupSelectableUsers.filter((u) => !currentMemberIds.has(u.id));
+              const filtered = groupAddSearch.trim()
+                ? addableFriends.filter((u) => u.name.toLowerCase().includes(groupAddSearch.toLowerCase()))
+                : addableFriends;
+              if (addableFriends.length === 0) return null;
+              return (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-semibold text-brandText/70">Add Members</div>
+                    <UserPlus className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
-                )) : (
-                  <div className="text-xs text-muted-foreground py-2">No mutual waves available</div>
-                )}
-              </div>
-            </div>
+                  {addableFriends.length > 4 && (
+                    <div className="form-field-rest relative flex items-center mb-2">
+                      <input
+                        value={groupAddSearch}
+                        onChange={(e) => setGroupAddSearch(e.target.value)}
+                        placeholder="Search friends…"
+                        className="field-input-core text-sm h-9"
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {filtered.slice(0, 20).map((u) => (
+                      <div key={u.id} className="flex items-center justify-between py-1">
+                        <div className="flex items-center gap-2">
+                          <UserAvatar avatarUrl={u.avatarUrl || null} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                          <span className="text-sm text-brandText">{u.name}</span>
+                        </div>
+                        <NeuButton
+                          size="sm"
+                          className="h-7 w-7 p-0 flex items-center justify-center"
+                          aria-label="Add member"
+                          onClick={async () => {
+                            if (!profile?.is_verified) {
+                              setGroupVerifyGateOpen(true);
+                              return;
+                            }
+                            if (!profile?.id || !groupManageId) return;
+                            try {
+                              await supabase.from("chat_room_members").insert({ chat_id: groupManageId, user_id: u.id });
+                              setGroupMembers((prev) => [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]);
+                              setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
+                              // Send group_invite notification to the added user
+                              const grpName = groups.find((g) => g.id === groupManageId)?.name || "a group";
+                              await supabase.from("notifications").insert({
+                                user_id: u.id,
+                                sender_id: profile.id,
+                                type: "group_invite",
+                                title: `${profile.display_name || "Someone"} added you to a group`,
+                                body: `You've been added to ${grpName}`,
+                                data: { chat_id: groupManageId, chat_name: grpName, inviter_name: profile.display_name || "" },
+                                is_read: false,
+                              });
+                              toast.success(`${u.name} added`);
+                            } catch {
+                              toast.error("Couldn't add member.");
+                            }
+                          }}
+                        >
+                          <UserPlus className="h-3.5 w-3.5" />
+                        </NeuButton>
+                      </div>
+                    ))}
+                    {filtered.length === 0 && (
+                      <p className="text-xs text-muted-foreground py-2">No friends found</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </DialogContent>
       </Dialog>
@@ -4382,6 +4480,56 @@ const Chats = () => {
               }}
             >
               Verify now
+            </NeuButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Group invite acceptance popup */}
+      <Dialog open={!!pendingGroupInvite} onOpenChange={() => setPendingGroupInvite(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Group invite</DialogTitle>
+            <DialogDescription>
+              <strong>{pendingGroupInvite?.inviterName}</strong> invited you to join{" "}
+              <strong>{pendingGroupInvite?.chatName}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <NeuButton
+              variant="secondary"
+              size="lg"
+              className="flex-1 min-w-0"
+              onClick={async () => {
+                if (pendingGroupInvite) {
+                  await supabase.from("notifications").update({ is_read: true }).eq("id", pendingGroupInvite.notifId);
+                }
+                setPendingGroupInvite(null);
+              }}
+            >
+              Decline
+            </NeuButton>
+            <NeuButton
+              size="lg"
+              className="flex-1 min-w-0"
+              onClick={async () => {
+                if (!pendingGroupInvite || !profile?.id) return;
+                try {
+                  await supabase.from("chat_room_members").insert({
+                    chat_id: pendingGroupInvite.chatId,
+                    user_id: profile.id,
+                  });
+                  await supabase.from("notifications").update({ is_read: true }).eq("id", pendingGroupInvite.notifId);
+                  toast.success(`Joined ${pendingGroupInvite.chatName}`);
+                  void loadConversations();
+                } catch {
+                  toast.error("Unable to join group right now.");
+                } finally {
+                  setPendingGroupInvite(null);
+                }
+              }}
+            >
+              Join
             </NeuButton>
           </DialogFooter>
         </DialogContent>

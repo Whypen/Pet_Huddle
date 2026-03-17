@@ -4,7 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
 import { isPasskeySupportedBrowser, listPasskeyFactors } from "@/lib/passkey";
 import { trackDeviceFingerprint } from "@/lib/deviceFingerprint";
+import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
 import {
+  clearSignupScopedStorage,
   SIGNUP_PASSWORD_SESSION_KEY,
   SIGNUP_STORAGE_KEY,
   buildScopedStorageKey,
@@ -80,6 +82,7 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  mfaPending: boolean;
   signUp: (
     email: string,
     password: string,
@@ -116,6 +119,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mfaPending, setMfaPending] = useState(false);
 
   const profileColumns = [
     "id",
@@ -182,9 +186,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const profileSelect = profileColumns.join(", ");
   const activityTouchKey = "huddle_last_activity_touch_at";
   const previousUserIdRef = useRef<string | null>(null);
+  const hydrationRunRef = useRef(0);
+
+  const beginHydrationRun = useCallback(() => {
+    hydrationRunRef.current += 1;
+    return hydrationRunRef.current;
+  }, []);
+
+  const isHydrationRunCurrent = useCallback((runId: number) => {
+    return hydrationRunRef.current === runId;
+  }, []);
 
   const clearTransientUserStorage = useCallback(() => {
     const scopedPrefixes = [
+      "huddle_signup_v2:",
+      "huddle_signup_password_v1:",
+      "signup_pending_verification_v1:",
       "discovery_handled_",
       "discovery_passed_",
       "discovery_passed_session_",
@@ -205,6 +222,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       "huddle_offline_actions:",
     ] as const;
     const globalUnsafeKeys = [
+      "huddle_signup_v2",
+      "huddle_signup_password_v1",
+      "signup_pending_verification_v1",
+      "signup_verify_submitted_v1",
+      "signup_verify_docs_submitted",
+      "huddle_vi_status",
+      "setprofile_prefill",
+      "setpet_prefill",
       "huddle_pin",
       "huddle_social_pins",
       "huddle_social_saves",
@@ -224,6 +249,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       const sessionKeys = Object.keys(sessionStorage);
       sessionKeys.forEach((key) => {
+        if (globalUnsafeKeys.includes(key as (typeof globalUnsafeKeys)[number])) {
+          sessionStorage.removeItem(key);
+          return;
+        }
         if (scopedPrefixes.some((prefix) => key.startsWith(prefix))) {
           sessionStorage.removeItem(key);
         }
@@ -233,13 +262,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const resetAuthBoundary = useCallback((runId?: number) => {
+    if (typeof runId === "number" && !isHydrationRunCurrent(runId)) return;
+    supabase.realtime.setAuth(null);
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setMfaPending(false);
+    previousUserIdRef.current = null;
+    clearTransientUserStorage();
+    clearSignupScopedStorage([]);
+  }, [clearTransientUserStorage, isHydrationRunCurrent]);
+
+  const fetchProfile = useCallback(async (userId: string, runId: number) => {
     try {
       const { data, error } = await supabase
         .from("profiles")
         .select(profileSelect)
         .eq("id", userId)
         .maybeSingle();
+      if (!isHydrationRunCurrent(runId)) return;
       if (error) throw error;
       if (!data) {
         setProfile(null);
@@ -254,6 +296,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .eq("invitee_user_id" as "id", userId)
         .eq("status" as "id", "accepted")
         .maybeSingle() as unknown as { data: { inviter_user_id?: string } | null };
+      if (!isHydrationRunCurrent(runId)) return;
 
       if (family?.inviter_user_id) {
         familyOwnerId = family.inviter_user_id;
@@ -262,17 +305,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           .select("tier")
           .eq("id", family.inviter_user_id)
           .maybeSingle() as unknown as { data: { tier?: string } | null };
+        if (!isHydrationRunCurrent(runId)) return;
         if (inviter?.tier) {
           effectiveTier = inviter.tier;
         }
       }
 
+      // Auto-expire any restriction/suspension that has passed its deadline
+      void supabase.rpc("expire_account_restrictions" as "get_chat_participant_names");
+
       setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
     } catch (error) {
+      if (!isHydrationRunCurrent(runId)) return;
       console.error("[AuthContext] fetchProfile failed", error);
       setProfile(null);
     }
-  }, [profileSelect]);
+  }, [isHydrationRunCurrent, profileSelect]);
 
   const touchProfileActivity = useCallback(async () => {
     try {
@@ -292,18 +340,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const hydrateValidatedSession = useCallback(async (candidateSession: Session | null) => {
+    const runId = beginHydrationRun();
     if (!candidateSession) {
-      supabase.realtime.setAuth(null);
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      previousUserIdRef.current = null;
-      clearTransientUserStorage();
+      resetAuthBoundary(runId);
       setLoading(false);
       return;
     }
 
-    const { data, error } = await supabase.auth.getUser();
+    // Do NOT call setLoading(true) here. Loading starts as `true` and is only
+    // ever set to `false` — re-raising it on subsequent auth state changes
+    // (e.g. after signInWithPassword) causes PublicRoute to unmount the Auth
+    // component, destroying modal state like emailModalOpen.
+    const { data, error } = await supabase.auth.getUser(candidateSession.access_token);
+    if (!isHydrationRunCurrent(runId)) return;
     if (error || !data.user) {
       if (import.meta.env.DEV) {
         console.warn("[AuthContext] clearing stale local session", {
@@ -311,21 +360,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         });
       }
       await supabase.auth.signOut({ scope: "local" });
-      supabase.realtime.setAuth(null);
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      previousUserIdRef.current = null;
-      clearTransientUserStorage();
+      if (!isHydrationRunCurrent(runId)) return;
+      resetAuthBoundary(runId);
       setLoading(false);
       return;
     }
 
     supabase.realtime.setAuth(candidateSession.access_token ?? null);
     const aal = await getAuthenticatorAssurance(supabase);
+    if (!isHydrationRunCurrent(runId)) return;
     const isMfaPending = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
     setSession(candidateSession);
     if (isMfaPending) {
+      setMfaPending(true);
       // Keep public routes visible until MFA challenge is completed.
       setUser(null);
       setProfile(null);
@@ -333,15 +380,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
       return;
     }
+    setMfaPending(false);
+
     if (previousUserIdRef.current && previousUserIdRef.current !== data.user.id) {
       clearTransientUserStorage();
+      clearSignupScopedStorage([previousUserIdRef.current, data.user.email, data.user.id]);
     }
+
     previousUserIdRef.current = data.user.id;
+    setProfile(null);
     setUser(data.user);
-    await fetchProfile(data.user.id);
+    await fetchProfile(data.user.id, runId);
+    if (!isHydrationRunCurrent(runId)) return;
     void touchProfileActivity();
     setLoading(false);
-  }, [clearTransientUserStorage, fetchProfile, touchProfileActivity]);
+  }, [
+    beginHydrationRun,
+    clearTransientUserStorage,
+    fetchProfile,
+    isHydrationRunCurrent,
+    resetAuthBoundary,
+    touchProfileActivity,
+  ]);
 
   useEffect(() => {
     if (!user) return;
@@ -349,19 +409,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [touchProfileActivity, user]);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        void hydrateValidatedSession(session);
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      void hydrateValidatedSession(session);
+    let mounted = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      void hydrateValidatedSession(data.session ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      void hydrateValidatedSession(nextSession);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [hydrateValidatedSession]);
 
   const signUp = async (
@@ -371,8 +433,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     phone: string,
     consent?: { acceptedAtIso: string; version: string }
   ) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    if (import.meta.env.DEV) console.debug("Attempting Signup to:", supabaseUrl);
+    const runtimeEnv = getAuthRuntimeEnv();
+    if (import.meta.env.DEV) {
+      console.debug("[auth.signup] runtime", {
+        mode: runtimeEnv.mode,
+        host: runtimeEnv.host,
+        supabaseUrl: runtimeEnv.supabaseUrl,
+      });
+    }
     const redirectUrl = `${window.location.origin}/`;
 
     let data: { user: { id: string } | null } | null = null;
@@ -427,8 +495,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string, phone?: string) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/+$/, "");
-    if (import.meta.env.DEV) console.debug("Attempting Login to:", supabaseUrl);
+    const runtimeEnv = getAuthRuntimeEnv();
+    if (import.meta.env.DEV) {
+      console.debug("[auth.signin] runtime", {
+        mode: runtimeEnv.mode,
+        host: runtimeEnv.host,
+        supabaseUrl: runtimeEnv.supabaseUrl,
+        email: (email || "").toLowerCase(),
+        hasPhone: Boolean(phone),
+      });
+    }
     try {
       const signInResult = phone
         ? await supabase.auth.signInWithPassword({ phone, password })
@@ -442,10 +518,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const verifiedPasskeys = (await listPasskeyFactors(supabase)).filter((factor) => factor.status === "verified");
       const factors = await listTotpFactors(supabase);
       const verifiedTotp = factors.find((factor) => factor.status === "verified") || null;
-      const hasVerifiedFactor = verifiedPasskeys.length > 0 || Boolean(verifiedTotp?.id);
-      if (aal.currentLevel !== "aal2" && hasVerifiedFactor) {
-        const passkeySupported = await isPasskeySupportedBrowser();
-        if (verifiedPasskeys.length > 0 && passkeySupported) {
+      const mfaRequired = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
+      if (mfaRequired) {
+        setMfaPending(true);
+        // Prefer passkey over TOTP — do NOT gate on passkeySupported here;
+        // if the device doesn't support WebAuthn the ceremony will fail
+        // gracefully in the UI rather than silently logging the user out.
+        if (verifiedPasskeys.length > 0) {
           return {
             error: null,
             mfaRequired: true,
@@ -458,7 +537,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         await supabase.auth.signOut({ scope: "local" });
         return {
-          error: new Error("Two-factor authentication is required but no compatible authenticator is available on this device."),
+          error: new Error("Two-factor authentication is required, but no usable authenticator is available. Please use your enrolled device or recover your account."),
           mfaRequired: false,
           mfaFactorId: null,
           mfaMethod: null,
@@ -484,10 +563,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const scopedSignupKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, emailOwner);
     const scopedSignupPasswordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, emailOwner);
     await supabase.auth.signOut();
-    supabase.realtime.setAuth(null);
-    setProfile(null);
-    previousUserIdRef.current = null;
-    clearTransientUserStorage();
+    beginHydrationRun();
+    resetAuthBoundary();
     // Clear local storage stale records
     localStorage.removeItem("rememberedIdentifier");
     localStorage.removeItem("auth_login_identifier");
@@ -496,13 +573,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem(SIGNUP_STORAGE_KEY);
     sessionStorage.removeItem(scopedSignupPasswordKey);
     sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+    sessionStorage.removeItem("huddle_vi_status");
+    sessionStorage.removeItem("signup_verify_submitted_v1");
+    sessionStorage.removeItem("signup_verify_docs_submitted");
     localStorage.removeItem("huddle_offline_actions");
     localStorage.removeItem("pending_addon");
   };
 
   const refreshProfile = async () => {
     if (user) {
-      await fetchProfile(user.id);
+      const runId = beginHydrationRun();
+      await fetchProfile(user.id, runId);
     }
   };
 
@@ -513,6 +594,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         session,
         profile,
         loading,
+        mfaPending,
         signUp,
         signIn,
         signOut,
