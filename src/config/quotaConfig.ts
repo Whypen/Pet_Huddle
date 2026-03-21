@@ -212,7 +212,7 @@ const COPY: QuotaCopy = {
     slotsFull: "You have too many active broadcasts. Wait for one to expire or upgrade for more slots.",
   },
   filters: {
-    locked: "Plus or Gold includes this filter.",
+    locked: "Unlock with Huddle+ or Gold to use this filter.",
   },
   familyInvite: {
     nonGold: "Upgrade to Gold for Family Sharing.",

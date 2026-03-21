@@ -11,7 +11,7 @@ interface FilterSheetProps {
   onClose: () => void;
   filters: FilterState;
   onApply: (filters: FilterState) => void;
-  onPremiumClick: () => void;
+  onPremiumClick: (tier: "plus" | "gold") => void;
 }
 
 const roles = [
@@ -68,8 +68,9 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
     }));
   };
 
-  const handlePremiumToggle = (key: keyof FilterState) => {
-    onPremiumClick();
+  // All current locked filters are Plus-tier. Pass "gold" here when Gold-only filters are added.
+  const handlePremiumToggle = (_key: keyof FilterState, tier: "plus" | "gold" = "plus") => {
+    onPremiumClick(tier);
   };
 
   const handleApply = () => {
@@ -87,7 +88,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-50"
+            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-[5000]"
           />
 
           {/* Sheet */}
@@ -96,7 +97,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-0 left-0 right-0 bg-card rounded-t-3xl z-50 max-h-[90vh] flex flex-col"
+            className="fixed left-0 right-0 bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom,0px))] mx-auto w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl z-[5001] max-h-[calc(100svh-var(--nav-height,64px)-env(safe-area-inset-bottom,0px)-8px)] flex flex-col"
           >
             {/* Handle */}
             <div className="flex justify-center pt-3 pb-2">
@@ -333,11 +334,11 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                 </div>
               </div>
 
-              {/* Premium Filters Section */}
+              {/* Plus Filters Section */}
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                    {t("Premium Filters")}
+                    {t("Plus Filters")}
                   </h3>
                   <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-brandBlue to-[#1B39AA] text-xs font-semibold text-white">
                     <Lock className="w-3 h-3" />
