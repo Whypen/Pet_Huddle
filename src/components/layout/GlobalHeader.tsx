@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Activity,
   AlertCircle,
   Bell,
+  BookOpen,
+  ChevronDown,
   ChevronRight,
   FileText,
   Heart,
+  HelpCircle,
   Info,
   MessageSquare,
   Settings,
   Shield,
+  ShieldAlert,
   Star,
   User as UserIcon,
   UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -22,12 +28,14 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { membershipTierLabel } from "@/lib/membership";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
+import { getQuotaCapsForTier } from "@/config/quotaConfig";
 import { NeuControl } from "@/components/ui/NeuControl";
-import { NeuChip } from "@/components/ui/NeuChip";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
+import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 
 // ─── Notification types & helpers ────────────────────────────────────────────
 
@@ -111,7 +119,19 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-
+  const [carerGateOpen, setCarerGateOpen] = useState(false);
+  const [familySheetOpen, setFamilySheetOpen] = useState(false);
+  const [familyUsedCount, setFamilyUsedCount] = useState(0);
+  const [starsRemaining, setStarsRemaining] = useState<number | null>(() => {
+    const initial = Number(profile?.stars_count);
+    return Number.isFinite(initial) ? Math.max(0, initial) : null;
+  });
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportEmailOptIn, setSupportEmailOptIn] = useState(true);
+  const [legalExpanded, setLegalExpanded] = useState(false);
+  const [petCareExpanded, setPetCareExpanded] = useState(false);
 
   // ── Notification drawer state ──────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -120,14 +140,75 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const markedOnOpenRef = useRef(false);
 
   const isVerified = profile?.is_verified === true;
-  const tierLabel = membershipTierLabel(profile?.effective_tier ?? profile?.tier);
+  const dob = (profile as Record<string, unknown> | null)?.dob as string | null ?? null;
+  const isAge18Plus = dob
+    ? (() => {
+        const birth = new Date(dob);
+        const now = new Date();
+        const age = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
+      })()
+    : false;
+  const normalizedTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
+  const tierLabel = membershipTierLabel(normalizedTier);
   const avatarUrl = profile?.avatar_url ? String(profile.avatar_url) : "";
-  const isPlusOrAbove = tierLabel === "Plus" || tierLabel === "Gold";
-  const isGold = tierLabel === "Gold";
+  const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
+  const isGold = normalizedTier === "gold";
   const initials = useMemo(() => {
     const name = profile?.display_name || "User";
     return name.trim().slice(0, 1).toUpperCase();
   }, [profile?.display_name]);
+  const membershipPillClassName = useMemo(() => {
+    if (normalizedTier === "gold") {
+      return "bg-[#FF6452] text-white";
+    }
+    if (normalizedTier === "plus") {
+      return "bg-[#5BA4F5] text-white";
+    }
+    return "bg-[#E9ECF3] text-[#7E8599]";
+  }, [normalizedTier]);
+  const starPillClassName = starsRemaining && starsRemaining > 0
+    ? "bg-white text-[#4A4965] border border-[#E4E8F2]"
+    : "bg-transparent text-[#98A0B8] border border-[#C6CAD6]";
+  const starPillLabel = `${Math.max(0, Number(starsRemaining || 0))} ⭐`;
+
+  useEffect(() => {
+    if (!menuOpen || !profile?.id) return;
+    let cancelled = false;
+    const loadStars = async () => {
+      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+      if (snapshot.error) {
+        if (!cancelled) {
+          const fallback = Number(profile?.stars_count);
+          setStarsRemaining(Number.isFinite(fallback) ? Math.max(0, fallback) : 0);
+        }
+        return;
+      }
+      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
+      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
+      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
+      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
+      const used = Number(typed.stars_used_cycle || 0);
+      const extra = Number(typed.extra_stars || 0);
+      const nextRemaining = Math.max(0, cap - used) + Math.max(0, extra);
+      if (!cancelled) setStarsRemaining(nextRemaining);
+    };
+    void loadStars();
+    return () => {
+      cancelled = true;
+    };
+  }, [menuOpen, profile?.effective_tier, profile?.id, profile?.stars_count, profile?.tier]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from("family_members" as never)
+      .select("id", { count: "exact", head: true })
+      .eq("inviter_user_id", user.id)
+      .neq("status", "declined")
+      .then(({ count }: { count: number | null }) => setFamilyUsedCount(count ?? 0));
+  }, [user?.id, familySheetOpen]);
 
   useEffect(() => {
     const state = location.state as { openSettingsDrawer?: boolean } | null;
@@ -166,11 +247,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     const refreshUnread = async () => {
       const res = await supabase
         .from("notifications" as "profiles")
-        .select("id", { count: "exact", head: true })
+        .select("id,metadata,data" as "*")
         .eq("user_id", user.id)
         .eq("read" as "user_id", false);
       if (cancelled) return;
-      setUnreadCount((res as { count: number | null }).count ?? 0);
+      const rows = (res as { data: Array<{ metadata?: Record<string, unknown>; data?: Record<string, unknown> }> | null }).data ?? [];
+      const count = rows.filter((r) => !r.data?.skip_history && !r.metadata?.skip_history).length;
+      setUnreadCount(count);
     };
 
     const channel = supabase
@@ -206,7 +289,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         .order("created_at" as "id", { ascending: false })
         .limit(200);
       if (cancelled) return;
-      const rows = (res.data ?? []) as NotificationRow[];
+      const rows = ((res.data ?? []) as NotificationRow[]).filter(
+        (r) => !r.data?.skip_history && !r.metadata?.skip_history
+      );
       setNotifRows(rows);
       setNotifLoading(false);
 
@@ -321,6 +406,29 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         </div>
       </div>
     );
+  };
+
+  const submitSupport = async () => {
+    const msg = supportMessage.trim();
+    if (!msg) return;
+    try {
+      const { error } = await supabase.from("support_requests").insert({
+        user_id: user?.id ?? null,
+        category: "help",
+        subject: supportSubject.trim() || "Support Request",
+        message: msg + (supportEmailOptIn ? "\n\n[You may follow up via email]" : ""),
+        email: (profile as Record<string, unknown> | null)?.email as string | null ?? null,
+        contact_method: supportEmailOptIn ? "email" : null,
+      } as never);
+      if (error) throw error;
+      setSupportOpen(false);
+      setSupportSubject("");
+      setSupportMessage("");
+      setSupportEmailOptIn(true);
+      toast.success("Message sent. We'll be in touch soon.");
+    } catch {
+      toast.error("Couldn't send your message. Please try again.");
+    }
   };
 
   const handleLogoClick = () => navigate("/");
@@ -502,9 +610,33 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     <h3 className="text-[16px] font-[600] text-[var(--text-primary,#424965)] truncate leading-tight">
                       {profile?.display_name || "User"}
                     </h3>
-                    <NeuChip as="span" className="mt-1.5 capitalize text-[11px]">
-                      {tierLabel}
-                    </NeuChip>
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none",
+                          membershipPillClassName
+                        )}
+                      >
+                        {tierLabel}
+                      </span>
+                      {starsRemaining !== null && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setMenuOpen(false);
+                            navigate("/premium");
+                          }}
+                          className={cn(
+                            "inline-flex h-6 items-center justify-center rounded-full px-2.5 text-[11px] font-[700] leading-none",
+                            starPillClassName
+                          )}
+                        >
+                          {starPillLabel}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <ChevronRight
                     size={16}
@@ -515,40 +647,70 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 </button>
               </SheetClose>
 
-              {/* 2. Manage Membership CTA */}
-              <SheetClose asChild>
-                <NeuControl
-                  variant={isGold ? "gold" : "primary"}
-                  tier={isGold ? "gold" : undefined}
-                  size="lg"
-                  fullWidth
-                  onClick={() =>
-                    navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"))
-                  }
-                >
-                  Manage Membership
-                </NeuControl>
-              </SheetClose>
+              {/* 2. Membership panel */}
+              <InsetPanel>
+                <SheetClose asChild>
+                  <InsetRow
+                    label="Manage Membership"
+                    icon={<Star size={16} strokeWidth={1.75} />}
+                    variant="nav"
+                    onClick={() => {
+                      if (onUpgradeClick && !isPlusOrAbove) {
+                        setTimeout(onUpgradeClick, 200);
+                      } else {
+                        navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"));
+                      }
+                    }}
+                  />
+                </SheetClose>
+                <InsetDivider />
+                <InsetRow
+                  label="Family Account"
+                  icon={<Users size={16} strokeWidth={1.75} />}
+                  variant="nav"
+                  value={familyUsedCount > 0 ? `${familyUsedCount} member${familyUsedCount > 1 ? "s" : ""}` : undefined}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setTimeout(() => setFamilySheetOpen(true), 150);
+                  }}
+                />
+              </InsetPanel>
 
-              {/* 3. Navigation panel */}
+              {/* 3. Profile & Access panel */}
               <InsetPanel>
                 <SheetClose asChild>
                   <InsetRow
                     label="Identity Verification"
-                    icon={(
-                      <span
-                        className={cn(
-                          "inline-flex h-5 w-5 items-center justify-center rounded-full",
-                          isVerified ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white",
-                        )}
-                      >
+                    icon={
+                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${isVerified ? "bg-brandBlue" : "bg-[#A1A4A9]"} text-white`}>
                         <Shield size={12} strokeWidth={1.75} />
                       </span>
-                    )}
+                    }
                     variant="nav"
-                    onClick={() => navigate("/verify-identity", { state: { from: location.pathname } })}
+                    value={isVerified ? "Verified" : undefined}
+                    onClick={() => navigate("/verify-identity")}
                   />
                 </SheetClose>
+                {isAge18Plus && (
+                  <>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Pet Carer Profile"
+                        icon={<Heart size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        value={isVerified ? undefined : "Verify first"}
+                        onClick={() => {
+                          if (isVerified) {
+                            navigate("/carerprofile", { state: { from: location.pathname } });
+                          } else {
+                            setTimeout(() => setCarerGateOpen(true), 150);
+                          }
+                        }}
+                      />
+                    </SheetClose>
+                  </>
+                )}
                 <InsetDivider />
                 <SheetClose asChild>
                   <InsetRow
@@ -560,25 +722,102 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 </SheetClose>
               </InsetPanel>
 
-              {/* 4. Legal panel */}
+              {/* 4. Support + Legal panel */}
               <InsetPanel>
-                <SheetClose asChild>
-                  <InsetRow
-                    label="Privacy & Policy"
-                    icon={<FileText size={16} strokeWidth={1.75} />}
-                    variant="nav"
-                    onClick={() => navigate("/privacy")}
-                  />
-                </SheetClose>
+                <InsetRow
+                  label="Help & Support"
+                  icon={<HelpCircle size={16} strokeWidth={1.75} />}
+                  variant="nav"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setTimeout(() => setSupportOpen(true), 150);
+                  }}
+                />
                 <InsetDivider />
-                <SheetClose asChild>
-                  <InsetRow
-                    label="Terms of Service"
-                    icon={<FileText size={16} strokeWidth={1.75} />}
-                    variant="nav"
-                    onClick={() => navigate("/terms")}
+                <button
+                  type="button"
+                  onClick={() => setLegalExpanded((v) => !v)}
+                  className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
+                >
+                  <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
+                    <FileText size={16} strokeWidth={1.75} />
+                  </span>
+                  <span className="flex-1 text-[14px] font-[500] text-[var(--text-primary)]">Legal Information</span>
+                  <ChevronDown
+                    size={16}
+                    strokeWidth={1.75}
+                    className={`text-[var(--text-tertiary)] transition-transform duration-200 ${legalExpanded ? "rotate-180" : ""}`}
                   />
-                </SheetClose>
+                </button>
+                {legalExpanded && (
+                  <>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Privacy Policy"
+                        icon={<ShieldAlert size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/privacy")}
+                      />
+                    </SheetClose>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Terms of Service"
+                        icon={<FileText size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/terms")}
+                      />
+                    </SheetClose>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Community Guidelines"
+                        icon={<BookOpen size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/community-guidelines")}
+                      />
+                    </SheetClose>
+                    <InsetDivider />
+                    <button
+                      type="button"
+                      onClick={() => setPetCareExpanded((v) => !v)}
+                      className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
+                    >
+                      <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
+                        <FileText size={16} strokeWidth={1.75} />
+                      </span>
+                      <span className="flex-1 text-[14px] font-[500] text-[var(--text-primary)]">Pet Care Services</span>
+                      <ChevronDown
+                        size={16}
+                        strokeWidth={1.75}
+                        className={`text-[var(--text-tertiary)] transition-transform duration-200 ${petCareExpanded ? "rotate-180" : ""}`}
+                      />
+                    </button>
+                    {petCareExpanded && (
+                      <>
+                        <InsetDivider />
+                        <SheetClose asChild>
+                          <InsetRow
+                            label="Service Agreement"
+                            icon={<FileText size={16} strokeWidth={1.75} />}
+                            variant="nav"
+                            onClick={() => navigate("/service-agreement")}
+                          />
+                        </SheetClose>
+                        <InsetDivider />
+                        <SheetClose asChild>
+                          <InsetRow
+                            label="Booking Terms"
+                            icon={<BookOpen size={16} strokeWidth={1.75} />}
+                            variant="nav"
+                            onClick={() => navigate("/booking-terms")}
+                          />
+                        </SheetClose>
+                      </>
+                    )}
+                  </>
+                )}
               </InsetPanel>
 
             </SheetContent>
@@ -586,6 +825,102 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         )}
 
       </div>
+
+      {/* ── Carer profile gate (outside sheet so it renders after sheet closes) ── */}
+      {carerGateOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => setCarerGateOpen(false)}
+        >
+          <div
+            className="bg-card rounded-2xl shadow-xl mx-4 p-5 max-w-sm w-full space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="space-y-1">
+              <h2 className="text-[16px] font-semibold text-[var(--text-primary)]">Identity verification required</h2>
+              <p className="text-[13px] text-[var(--text-secondary)]">Finish verification to start offering trusted pet-care services.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCarerGateOpen(false)}
+                className="flex-1 h-10 rounded-xl border border-border text-[14px] font-medium text-[var(--text-secondary)] hover:bg-muted transition-colors"
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCarerGateOpen(false); navigate("/verify-identity"); }}
+                className="flex-1 h-10 rounded-xl bg-brandBlue text-white text-[14px] font-semibold hover:opacity-90 transition-opacity"
+              >
+                Verify now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ManageFamilySheet isOpen={familySheetOpen} onClose={() => setFamilySheetOpen(false)} />
+
+      {/* ── Help & Support dialog ── */}
+      <Dialog open={supportOpen} onOpenChange={(o) => { if (!o) setSupportOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Help &amp; Support</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Subject</label>
+              <div className="form-field-rest relative flex items-center">
+                <input
+                  value={supportSubject}
+                  onChange={(e) => setSupportSubject(e.target.value)}
+                  placeholder="Subject (optional)"
+                  className="field-input-core"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Message</label>
+              <div className="form-field-rest relative h-auto min-h-[96px] py-3">
+                <textarea
+                  value={supportMessage}
+                  onChange={(e) => setSupportMessage(e.target.value)}
+                  placeholder="How can we help?"
+                  className="field-input-core resize-none min-h-[72px]"
+                />
+              </div>
+            </div>
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={supportEmailOptIn}
+                onChange={(e) => setSupportEmailOptIn(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded accent-brandBlue flex-shrink-0"
+              />
+              <span className="text-[13px] text-[var(--text-secondary)]">
+                You may follow up with me via email if needed.
+              </span>
+            </label>
+          </div>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setSupportOpen(false)}
+              className="flex-1 h-11 rounded-xl border border-[var(--border)] text-[14px] font-[500] text-[var(--text-primary)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitSupport}
+              className="flex-1 h-11 rounded-xl bg-brandBlue text-white text-[14px] font-[500]"
+            >
+              Send
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 };

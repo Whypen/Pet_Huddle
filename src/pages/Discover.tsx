@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Star, X, Loader2, Lock } from "lucide-react";
+import { Star, X, Loader2, Lock, SlidersHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { FilterSheet } from "@/components/social/FilterSheet";
+import { defaultFilters, type FilterState } from "@/components/social/filterTypes";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsell } from "@/hooks/useUpsell";
@@ -13,7 +15,7 @@ import { toast } from "sonner";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
-import profilePlaceholder from "@/assets/users/Demo profile pic.png";
+import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
@@ -118,6 +120,14 @@ const Discover = () => {
   const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
+  const [premiumTier, setPremiumTier] = useState<"plus" | "gold">("plus");
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState<FilterState>(defaultFilters);
+
+  const openPremiumForTier = (tier: "plus" | "gold") => {
+    setPremiumTier(tier);
+    setIsPremiumOpen(true);
+  };
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -378,7 +388,7 @@ const Discover = () => {
   return (
     <div className="min-h-svh bg-background pb-nav relative">
       <GlobalHeader
-        onUpgradeClick={() => setIsPremiumOpen(true)}
+        onUpgradeClick={() => openPremiumForTier("plus")}
       />
 
       <div>
@@ -391,6 +401,14 @@ const Discover = () => {
             </div>
           ) : null}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-2">
+            {/* Advanced Filters button */}
+            <button
+              onClick={() => setFilterSheetOpen(true)}
+              className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-background text-xs font-medium shrink-0"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              {t("Filters")}
+            </button>
             <select
               value={discoveryRole}
               onChange={(e) => setDiscoveryRole(e.target.value)}
@@ -532,14 +550,19 @@ const Discover = () => {
                       <Lock className="w-8 h-8 text-brandBlue" />
                       <p className="text-xs text-center font-semibold text-brandText">{quotaConfig.copy.discovery.exhausted.free}</p>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setIsPremiumOpen(true); }}
+                        onClick={(e) => { e.stopPropagation(); openPremiumForTier("plus"); }}
                         className="px-4 py-1.5 rounded-full bg-brandBlue text-white text-xs font-bold"
                       >
                         {t("See plans")}
                       </button>
                     </div>
                   )}
-                  <MediaThumb src={cover} alt={p.display_name || ""} className="h-44 w-full rounded-none border-0" />
+                  <img
+                    src={cover}
+                    alt={p.display_name || ""}
+                    className="h-44 w-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).src = profilePlaceholder; }}
+                  />
                   <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 via-foreground/10 to-transparent" />
 
                   <div className="absolute top-2 right-2 flex gap-1">
@@ -625,6 +648,7 @@ const Discover = () => {
                         src={current}
                         alt={selectedDiscovery.display_name || "Discovery profile"}
                         className="w-full h-72 rounded-none border-0"
+                        fallbackSrc={profilePlaceholder}
                       />
                       {album.length > 1 && (
                         <div className="absolute inset-x-0 bottom-3 flex items-center justify-center gap-1">
@@ -699,7 +723,14 @@ const Discover = () => {
         )}
       </AnimatePresence>
 
-      <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
+      <FilterSheet
+        isOpen={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        filters={advancedFilters}
+        onApply={(f) => setAdvancedFilters(f)}
+        onPremiumClick={(tier) => { setFilterSheetOpen(false); openPremiumForTier(tier); }}
+      />
+      <PremiumUpsell isOpen={isPremiumOpen} tier={premiumTier} onClose={() => setIsPremiumOpen(false)} />
       <UpsellModal
         isOpen={upsellModal.isOpen}
         type={upsellModal.type}
