@@ -1,5 +1,4 @@
 export type QuotaTier = "free" | "plus" | "gold";
-export type QuotaBillingCycle = "monthly" | "annual";
 
 export type QuotaCaps = {
   aiVetUploadsPerDay: number;
@@ -44,18 +43,6 @@ export type QuotaCopy = {
   };
   stars: {
     exhausted: string;
-    upgrade: {
-      free: {
-        headline: string;
-        subheadline: string;
-        cta: string;
-      };
-      plus: {
-        headline: string;
-        subheadline: string;
-        cta: string;
-      };
-    };
   };
   broadcast: {
     quotaExhausted: {
@@ -75,18 +62,6 @@ export type QuotaCopy = {
   misc: {
     nonSocialProfileTap: string;
   };
-};
-
-export type StripePlanConfig = {
-  lookupKey: string;
-  priceId: string;
-  amount: number;
-  unit: "/mo" | "/yr";
-};
-
-export type StripePlansByTier = {
-  plus: Record<QuotaBillingCycle, StripePlanConfig>;
-  gold: Record<QuotaBillingCycle, StripePlanConfig>;
 };
 
 export type QuotaResetRules = {
@@ -128,7 +103,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
   plus: {
     aiVetUploadsPerDay: 20,
     discoveryViewsPerDay: 250,
-    discoveryLabel: "x2 Discovery",
+    discoveryLabel: "×2 Discovery",
     discoveryPrioritySortWeight: 2,
     discoveryPriorityLabel: null,
     threadPostsPerDay: 30,
@@ -150,7 +125,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     discoveryViewsPerDay: null,
     discoveryLabel: "Unlimited Discovery",
     discoveryPrioritySortWeight: 3,
-    discoveryPriorityLabel: "3x visibility",
+    discoveryPriorityLabel: "3× visibility",
     threadPostsPerDay: 60,
     starsPerMonth: 10,
     starsWalletCap: 10,
@@ -188,20 +163,8 @@ const COPY: QuotaCopy = {
     },
   },
   stars: {
-    exhausted: "You've used all your Stars this month. New Stars arrive with your cycle reset.",
-    upgrade: {
-      free: {
-        headline: "Upgrade to Huddle+",
-        subheadline: "Activate now to send stars and find 2x more connections!",
-        cta: "Upgrade to Huddle+",
-      },
-      plus: {
-        headline: "Upgrade to Huddle Gold",
-        subheadline:
-          "Activate now to send stars and become a top profile in your area and find more connections!",
-        cta: "Upgrade to Huddle Gold",
-      },
-    },
+    exhausted:
+      "You've used all your Stars this month. New Stars arrive with your cycle reset.",
   },
   broadcast: {
     quotaExhausted: {
@@ -209,7 +172,8 @@ const COPY: QuotaCopy = {
       plus: "Your alerts are keeping everyone busy. Upgrade to Gold for more broadcasts.",
       gold: "Your alerts are keeping everyone busy. Let's do it tomorrow.",
     },
-    slotsFull: "You have too many active broadcasts. Wait for one to expire or upgrade for more slots.",
+    slotsFull:
+      "You have too many active broadcasts. Wait for one to expire or upgrade for more slots.",
   },
   filters: {
     locked: "Plus or Gold includes this filter.",
@@ -219,7 +183,8 @@ const COPY: QuotaCopy = {
     received: "<Display Name> has invited you to join their family! [Accept] [Decline]",
   },
   misc: {
-    nonSocialProfileTap: "This user has enabled Non-Social mode and is not available for discovery or chat.",
+    nonSocialProfileTap:
+      "This user has enabled Non-Social mode and is not available for discovery or chat.",
   },
 };
 
@@ -232,43 +197,11 @@ const RESET_RULES: QuotaResetRules = {
   broadcastActiveSlots: "realtime",
 };
 
-const STRIPE_PLANS: StripePlansByTier = {
-  plus: {
-    monthly: {
-      lookupKey: "plus_monthly",
-      priceId: "price_1T926a5QcAjQDse0QEYva3ZH",
-      amount: 5.99,
-      unit: "/mo",
-    },
-    annual: {
-      lookupKey: "plus_yearly",
-      priceId: "price_1T92355QcAjQDse0BAnwV7PU",
-      amount: 59.99,
-      unit: "/yr",
-    },
-  },
-  gold: {
-    monthly: {
-      lookupKey: "Gold_monthly",
-      priceId: "price_1T92Cp5QcAjQDse0W4wT20OX",
-      amount: 11.99,
-      unit: "/mo",
-    },
-    annual: {
-      lookupKey: "Gold_yearly",
-      priceId: "price_1T92Cp5QcAjQDse0jvWohWoJ",
-      amount: 109.99,
-      unit: "/yr",
-    },
-  },
-};
-
 export const quotaConfig = {
   tierLabels: TIER_LABELS,
   capsByTier: CAPS_BY_TIER,
   copy: COPY,
   resetRules: RESET_RULES,
-  stripePlans: STRIPE_PLANS,
   starPolicy: {
     deductOnlyOnSuccessfulConversationOpen: true,
     noDeductionIfConversationFails: true,
