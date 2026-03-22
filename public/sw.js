@@ -1,5 +1,14 @@
-const CACHE_NAME = "huddle-shell-v2";
-const OFFLINE_ASSETS = ["/", "/index.html", "/manifest.json", "/favicon.png"];
+const CACHE_NAME = "huddle-shell-v3";
+const OFFLINE_ASSETS = [
+  "/",
+  "/index.html",
+  "/manifest.json",
+  "/favicon.png",
+  "/favicon-32.png",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(OFFLINE_ASSETS)));
