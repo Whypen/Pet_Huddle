@@ -5,6 +5,11 @@ export const SIGNUP_PENDING_VERIFICATION_KEY = "signup_pending_verification_v1";
 export const SETPROFILE_PREFILL_KEY = "setprofile_prefill";
 export const SETPET_PREFILL_KEY = "setpet_prefill";
 export const MAP_PIN_STORAGE_KEY = "huddle_pin";
+export const SIGNUP_VERIFY_STATUS_KEYS = [
+  "huddle_vi_status",
+  "signup_verify_submitted_v1",
+  "signup_verify_docs_submitted",
+] as const;
 
 export const normalizeStorageOwner = (owner: string | null | undefined): string => {
   const next = String(owner || "").trim().toLowerCase();
@@ -14,6 +19,33 @@ export const normalizeStorageOwner = (owner: string | null | undefined): string 
 export const buildScopedStorageKey = (base: string, owner: string | null | undefined): string => {
   const normalizedOwner = normalizeStorageOwner(owner);
   return normalizedOwner ? `${base}:${normalizedOwner}` : base;
+};
+
+export const clearSignupScopedStorage = (ownerHints: Array<string | null | undefined>): void => {
+  const owners = Array.from(new Set(ownerHints.map((owner) => normalizeStorageOwner(owner)).filter(Boolean)));
+  const scopedBases = [
+    SIGNUP_STORAGE_KEY,
+    SIGNUP_PASSWORD_SESSION_KEY,
+    SIGNUP_PENDING_VERIFICATION_KEY,
+    SETPROFILE_PREFILL_KEY,
+    SETPET_PREFILL_KEY,
+  ] as const;
+  try {
+    owners.forEach((owner) => {
+      scopedBases.forEach((base) => {
+        const key = buildScopedStorageKey(base, owner);
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+      });
+    });
+    scopedBases.forEach((base) => {
+      localStorage.removeItem(base);
+      sessionStorage.removeItem(base);
+    });
+    SIGNUP_VERIFY_STATUS_KEYS.forEach((key) => sessionStorage.removeItem(key));
+  } catch {
+    // best-effort cleanup only
+  }
 };
 
 export type PendingSignupVerification = {

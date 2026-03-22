@@ -5,15 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:fn": "supabase functions serve --env-file supabase/functions/.env",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "ops:edge:harden": "bash scripts/ops/harden-local-edge-runtime.sh",
     "audit:map": "node scripts/self_audit_map.mjs",
+    "audit:security": "node scripts/security_posture_audit.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fingerprintjs/fingerprintjs": "^4.4.2",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -43,6 +47,7 @@
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
     "@supabase/supabase-js": "^2.93.1",
+    "@stripe/stripe-js": "^7.7.0",
     "@tanstack/react-query": "^5.83.0",
     "@turf/distance": "^7.3.4",
     "@turf/helpers": "^7.3.4",

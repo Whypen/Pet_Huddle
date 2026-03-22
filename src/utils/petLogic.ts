@@ -23,6 +23,25 @@ export function computeAgeYears(dobISO: string | null | undefined, now = new Dat
   return years < 0 ? 0 : years;
 }
 
+export function formatPetAge(dobISO: string | null | undefined, now = new Date()): string {
+  if (!dobISO) return "";
+  const birth = new Date(dobISO);
+  if (Number.isNaN(birth.getTime())) return "";
+
+  const today = startOfDay(now);
+  let years = today.getFullYear() - birth.getFullYear();
+  let months = today.getMonth() - birth.getMonth();
+  if (today.getDate() < birth.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years <= 0) return `${Math.max(months, 0)} mo`;
+  if (months <= 0) return `${years} yr`;
+  return `${years} yr ${months} mo`;
+}
+
 export type NextEvent = {
   date: Date;
   reasons: string[];
@@ -79,4 +98,3 @@ export function formatNextEventLabel(ev: NextEvent | null): string {
   const reasons = ev.reasons.length ? ev.reasons.join(", ") : "Reminder";
   return `${formatEventDate(ev.date)}, ${reasons}`;
 }
-
