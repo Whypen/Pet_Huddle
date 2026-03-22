@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 
@@ -22,7 +22,15 @@ const AuthCallback = () => {
         }
       }
       if (type !== "recovery") {
-        navigate("/onboarding");
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user?.id) {
+          navigate("/auth");
+          return;
+        }
+        // Deterministic route ownership lives in ProtectedRoute/AuthContext.
+        navigate("/");
         return;
       }
       setReady(true);
@@ -43,7 +51,7 @@ const AuthCallback = () => {
   if (!ready) return null;
 
   return (
-    <div className="min-h-screen bg-background px-6 pt-10">
+    <div className="min-h-svh bg-background px-6 pt-10">
       <h1 className="text-xl font-bold text-brandText">Set a new password</h1>
       <div className="mt-6 space-y-3">
         <Input
@@ -53,9 +61,9 @@ const AuthCallback = () => {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="New password"
         />
-        <Button className="w-full h-10" onClick={updatePassword} disabled={password.length < 8}>
+        <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8}>
           Update password
-        </Button>
+        </NeuButton>
       </div>
     </div>
   );
