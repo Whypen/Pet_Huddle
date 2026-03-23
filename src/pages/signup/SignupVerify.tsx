@@ -229,6 +229,9 @@ const SignupVerify = () => {
               <br />Trust starts with you.
             </p>
           </div>
+
+          {/* Spacer: ensures 2-button CTA bar never overlaps content */}
+          <div className="h-[calc(env(safe-area-inset-bottom,0px)+72px)]" aria-hidden="true" />
         </form>
       </SignupShell>
 

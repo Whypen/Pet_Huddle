@@ -86,9 +86,6 @@ export const credentialsSchema = z
       .regex(/[0-9]/, "Must include number")
       .regex(/[!@#$%^&*]/, "Must include special character"),
     confirmPassword: z.string(),
-    agreedToTerms: z.literal(true, {
-      errorMap: () => ({ message: "You must agree to continue" }),
-    }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
