@@ -2,45 +2,46 @@
  * SignupVerify — C.5  Step 4 of 4
  * Identity verification decision. Uses SignupShell for layout.
  * Two CTAs: "Start Verification" (primary) + "Skip for now" (ghost).
- * All business logic (supabase.auth.signUp, profile update, skip dialog) preserved.
  */
 
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { ShieldCheck, User } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import signupVerifyImg from "@/assets/Sign up/Signup_verify.png";
-import { verifySchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
-import { Button, FormField } from "@/components/ui";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { SETPROFILE_PREFILL_KEY, SIGNUP_VERIFY_SUBMITTED_KEY } from "@/lib/signupOnboarding";
+import {
+  SETPET_PREFILL_KEY,
+  SETPROFILE_PREFILL_KEY,
+  SIGNUP_PASSWORD_SESSION_KEY,
+  SIGNUP_PENDING_VERIFICATION_KEY,
+  SIGNUP_STORAGE_KEY,
+  buildScopedStorageKey,
+  normalizeStorageOwner,
+} from "@/lib/signupOnboarding";
+import { supabase } from "@/integrations/supabase/client";
+import { humanizeError } from "@/lib/humanizeError";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FORM_ID = "signup-verify-form";
-const hasValidLegalName = (value: string): boolean => {
-  const trimmed = value.trim();
-  if (trimmed.length < 2) return false;
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  return words.length >= 2 && words.every((word) => word.length >= 1);
-};
-const LEGAL_NAME_SUBTEXT = "Legal name should include at least two words - first and last name.";
-const LEGAL_NAME_RETRY_ERROR = "Let’s try again with a valid legal name";
 const SIGNUP_VERIFY_RETURN_TO = "/set-profile";
-
+const AUTH_UPSTREAM_DOWN_ERROR = "Verification service is temporarily unavailable. Please try again in a moment.";
+const isAlreadyRegisteredError = (message: string) =>
+  message.toLowerCase().includes("already") && message.toLowerCase().includes("registered");
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const SignupVerify = () => {
   const navigate = useNavigate();
-  const { data, update } = useSignup();
+  const { data, update, setFlowState } = useSignup();
+  const { user, signIn } = useAuth();
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [verificationSubmitted, setVerificationSubmitted] = useState(false);
-  const [legalNameInlineError, setLegalNameInlineError] = useState("");
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -48,52 +49,64 @@ const SignupVerify = () => {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    const resolveVerificationState = async () => {
+      if (!user?.id) {
+        if (!cancelled) setVerificationSubmitted(false);
+        return;
+      }
+      try {
+        const { data: profileRow, error } = await supabase
+          .from("profiles")
+          .select("is_verified")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) {
+          setVerificationSubmitted(false);
+          return;
+        }
+        setVerificationSubmitted(profileRow?.is_verified === true);
+      } catch {
+        if (!cancelled) setVerificationSubmitted(false);
+      }
+    };
+    void resolveVerificationState();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    setFlowState("signup");
+  }, [setFlowState]);
+
+  useEffect(() => {
     try {
-      setVerificationSubmitted(sessionStorage.getItem(SIGNUP_VERIFY_SUBMITTED_KEY) === "true");
+      sessionStorage.removeItem("huddle_vi_status");
+      sessionStorage.removeItem("signup_verify_submitted_v1");
+      sessionStorage.removeItem("signup_verify_docs_submitted");
     } catch {
-      setVerificationSubmitted(false);
+      // no-op
     }
   }, []);
 
-  const {
-    register,
-    handleSubmit,
-    watch,
-    formState: { errors },
-  } = useForm<{ legal_name: string }>({
-    resolver: zodResolver(verifySchema),
-    defaultValues: { legal_name: data.legal_name || "" },
-  });
-  const legalNameInput = watch("legal_name") || data.legal_name || "";
-
-  useEffect(() => {
-    update({ legal_name: legalNameInput });
-    if (legalNameInlineError && hasValidLegalName(legalNameInput)) {
-      setLegalNameInlineError("");
-    }
-  }, [legalNameInlineError, legalNameInput, update]);
 
   // ── Shared pre-flight validation (unchanged) ─────────────────────────────────
 
-  const preflightOk = (legalName: string) => {
-    if (!hasValidLegalName(legalName)) {
-      setLegalNameInlineError(LEGAL_NAME_RETRY_ERROR);
-      return false;
-    }
-    setLegalNameInlineError("");
-    return true;
-  };
-
-  const snapshotSetProfilePrefill = (legalName: string) => {
+  const snapshotSetProfilePrefill = () => {
     try {
+      const owner = normalizeStorageOwner(data.email || "");
+      if (!owner) return;
+      const key = buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner);
       localStorage.setItem(
-        SETPROFILE_PREFILL_KEY,
+        key,
         JSON.stringify({
+          prefill_owner: owner,
           display_name: data.display_name || "",
           social_id: data.social_id || "",
           phone: data.phone || "",
           dob: data.dob || "",
-          legal_name: legalName || data.legal_name || "",
         }),
       );
     } catch {
@@ -101,29 +114,91 @@ const SignupVerify = () => {
     }
   };
 
+  const clearScopedSignupDrafts = () => {
+    try {
+      const owner = normalizeStorageOwner(data.email || "");
+      if (!owner) return;
+      localStorage.removeItem(buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner));
+      localStorage.removeItem(buildScopedStorageKey(SETPET_PREFILL_KEY, owner));
+      localStorage.removeItem(buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner));
+      sessionStorage.removeItem(buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner));
+      sessionStorage.removeItem(buildScopedStorageKey(SIGNUP_PENDING_VERIFICATION_KEY, owner));
+      sessionStorage.removeItem("huddle_vi_status");
+      sessionStorage.removeItem("signup_verify_submitted_v1");
+      sessionStorage.removeItem("signup_verify_docs_submitted");
+    } catch {
+      // no-op
+    }
+  };
+
   // ── Start verification (unchanged) ──────────────────────────────────────────
 
-  const startVerificationSignup = async (legalName?: string) => {
-    const resolvedLegalName = legalName || data.legal_name || "";
-    if (!preflightOk(resolvedLegalName)) return;
-    update({ legal_name: resolvedLegalName });
-    snapshotSetProfilePrefill(resolvedLegalName);
-    navigate("/verify-identity", {
-      state: {
-        returnTo: SIGNUP_VERIFY_RETURN_TO,
-        backTo: "/signup/verify",
-      },
-    });
-  };
-
-  const onStartVerification = (values: { legal_name: string }) => {
-    startVerificationSignup(values.legal_name || data.legal_name);
-  };
-
-  const ensureAccountAndGoSetProfile = async (legalName: string) => {
-    if (!preflightOk(legalName)) return;
+  const startVerificationSignup = async () => {
+    setLoading(true);
     try {
-      snapshotSetProfilePrefill(legalName || data.legal_name || "");
+      let activeUser = (await supabase.auth.getSession()).data.session?.user ?? null;
+
+      if (!activeUser) {
+        const email = (data.email || "").trim();
+        const password = data.password || "";
+        if (!email || !password) {
+          toast.error("Please complete signup details first.");
+          navigate("/signup/credentials");
+          return;
+        }
+
+        const { error: signupError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              display_name: data.display_name || "",
+              social_id: data.social_id || "",
+              phone: data.phone || "",
+              dob: data.dob || "",
+            },
+          },
+        });
+        if (signupError && !isAlreadyRegisteredError(signupError.message || "")) {
+          throw signupError;
+        }
+
+        activeUser = (await supabase.auth.getSession()).data.session?.user ?? null;
+        if (!activeUser) {
+          const signInResult = await signIn(email, password);
+          if (signInResult.error) throw signInResult.error;
+          if (signInResult.mfaRequired) {
+            throw new Error("Please complete sign-in verification on the login screen, then continue.");
+          }
+          activeUser = (await supabase.auth.getSession()).data.session?.user ?? null;
+        }
+
+        if (!activeUser) {
+          throw new Error("Please verify your email, then sign in to continue.");
+        }
+      }
+
+      setFlowState("verify_identity");
+      snapshotSetProfilePrefill();
+      navigate("/verify-identity", {
+        state: {
+          returnTo: SIGNUP_VERIFY_RETURN_TO,
+          backTo: "/signup/verify",
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "We couldn't start verification.";
+      toast.error(message || "We couldn't start verification.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const ensureAccountAndGoSetProfile = async () => {
+    try {
+      clearScopedSignupDrafts();
+      setFlowState("signup");
+      snapshotSetProfilePrefill();
       navigate("/set-profile");
     } catch (err: unknown) {
       console.error("[SignupVerify] ensureAccountAndGoSetProfile failed", err);
@@ -139,13 +214,13 @@ const SignupVerify = () => {
   };
 
   const onContinueAfterVerification = async () => {
-    await ensureAccountAndGoSetProfile(legalNameInput || data.legal_name || "");
+    await ensureAccountAndGoSetProfile();
   };
 
   // ── Skip verification (unchanged) ───────────────────────────────────────────
 
   const skipVerificationSignup = async () => {
-    await ensureAccountAndGoSetProfile(legalNameInput || data.legal_name || "");
+    await ensureAccountAndGoSetProfile();
     setShowSkipConfirm(false);
   };
 
@@ -160,9 +235,9 @@ const SignupVerify = () => {
             {/* Primary: Start verification (submits form) */}
             <Button
               variant="primary"
-              type="submit"
-              form={FORM_ID}
+              type="button"
               disabled={loading}
+              onClick={() => void startVerificationSignup()}
               className="w-full h-12"
             >
               {loading ? "Processing…" : "Start Verification"}
@@ -175,9 +250,6 @@ const SignupVerify = () => {
               onClick={() => {
                 if (verificationSubmitted) {
                   void onContinueAfterVerification();
-                  return;
-                }
-                if (!preflightOk(legalNameInput || data.legal_name || "")) {
                   return;
                 }
                 setShowSkipConfirm(true);
@@ -200,16 +272,7 @@ const SignupVerify = () => {
           Build the safest community for our pets and earn your <strong className="font-[600] text-[#424965]">Verified</strong> badge by completing a quick identity check.
         </p>
 
-        <form id={FORM_ID} onSubmit={handleSubmit(onStartVerification)} className="mt-5 space-y-3">
-          {/* Legal name */}
-          <FormField
-            label="Legal Name (as shown on ID)"
-            leadingIcon={<User size={16} strokeWidth={1.75} />}
-            placeholder="First Name and Last Name"
-            error={legalNameInlineError || (errors.legal_name ? (hasValidLegalName(legalNameInput) ? undefined : LEGAL_NAME_SUBTEXT) : undefined)}
-            {...register("legal_name")}
-          />
-
+        <div className="mt-5 space-y-3">
           {/* Verify info card */}
           <div
             className="rounded-[20px] p-[16px]"
@@ -229,7 +292,7 @@ const SignupVerify = () => {
               <br />Trust starts with you.
             </p>
           </div>
-        </form>
+        </div>
       </SignupShell>
 
       {/* Skip confirmation dialog (unchanged) */}

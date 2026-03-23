@@ -13,6 +13,7 @@ import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { getClientEnv } from "@/lib/env";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { FormField, NeuCheckbox } from "@/components/ui";
@@ -20,7 +21,7 @@ import { LegalModal } from "@/components/modals/LegalModal";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { requestPhoneOtp, verifyPhoneOtp } from "@/lib/phoneOtp";
+import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ const shouldBypassDuplicateCheck =
 const SignupCredentials = () => {
   const navigate = useNavigate();
   const { data, update } = useSignup();
+  const { signIn } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
 
   const goTo = (to: string) => {
@@ -51,11 +53,7 @@ const SignupCredentials = () => {
   };
 
   // ── All original state (unchanged) ──────────────────────────────────────────
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpValue, setOtpValue] = useState("");
-  const [otpError, setOtpError] = useState<string | null>(null);
-  const [otpVerified, setOtpVerified] = useState(data.otp_verified);
-  const [resendIn, setResendIn] = useState(0);
+  const otpVerified = true;
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [duplicateDetected, setDuplicateDetected] = useState(false);
@@ -71,15 +69,12 @@ const SignupCredentials = () => {
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
-  const e164Regex = /^\+[1-9]\d{1,14}$/;
 
   const {
     register,
     handleSubmit,
     setValue,
     watch,
-    trigger,
-    setError,
     formState: { errors, isValid },
   } = useForm({
     resolver: zodResolver(credentialsSchema),
@@ -104,7 +99,6 @@ const SignupCredentials = () => {
   const confirmPassword = watch("confirmPassword") || "";
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
   const phoneInvalid = Boolean(errors.phone);
-  const otpRequirementMet = otpVerified;
 
   // ── Effects (all unchanged) ──────────────────────────────────────────────────
 
@@ -120,14 +114,6 @@ const SignupCredentials = () => {
     if (!getClientEnv().isDev) return;
     console.debug(errors, isValid);
   }, [errors, isValid]);
-
-  useEffect(() => {
-    setOtpSent(false);
-    setOtpVerified(false);
-    setOtpValue("");
-    setOtpError(null);
-    setResendIn(0);
-  }, [phone]);
 
   useEffect(() => {
     setDismissedDuplicateKey(null);
@@ -151,6 +137,7 @@ const SignupCredentials = () => {
     const checkId = ++duplicateCheckRef.current;
     const timer = setTimeout(async () => {
       try {
+        const runtimeEnv = getAuthRuntimeEnv();
         setCheckingDuplicate(true);
         setDuplicateCheckError(null);
         const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
@@ -166,6 +153,15 @@ const SignupCredentials = () => {
         const isRegistered = Boolean(checkResult?.registered);
         setDuplicateDetected(isRegistered);
         if (isRegistered && dismissedDuplicateKey !== duplicateKey) {
+          if (import.meta.env.DEV) {
+            console.info("[signup.credentials] already_registered_detected", {
+              email: trimmedEmail.toLowerCase(),
+              phone: trimmedPhone,
+              envMode: runtimeEnv.mode,
+              envHost: runtimeEnv.host,
+              supabaseUrl: runtimeEnv.supabaseUrl,
+            });
+          }
           setSigninEmail(trimmedEmail);
           setShowSignInModal(true);
         }
@@ -181,48 +177,12 @@ const SignupCredentials = () => {
     return () => clearTimeout(timer);
   }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey]);
 
-  useEffect(() => {
-    if (!resendIn) return;
-    const timer = setInterval(() => setResendIn((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(timer);
-  }, [resendIn]);
-
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
   // ── Handlers (unchanged) ────────────────────────────────────────────────────
 
-  const sendOtp = async () => {
-    if (!phone || !e164Regex.test(phone)) {
-      setError("phone", { type: "manual", message: "Your phone number is invalid" });
-      return;
-    }
-    const result = await requestPhoneOtp(phone);
-    if (!result.ok) {
-      setOtpError(result.error || "Unable to send OTP.");
-      return;
-    }
-    setOtpSent(true);
-    setResendIn(60);
-    setOtpVerified(false);
-    setOtpValue("");
-    setOtpError(null);
-  };
-
-  const verifyOtp = async () => {
-    if (otpValue.length !== 6) { setOtpError("Invalid code"); setOtpVerified(false); return; }
-    const result = await verifyPhoneOtp(phone, otpValue);
-    if (!result.ok) {
-      setOtpError(result.error || "Invalid code");
-      setOtpVerified(false);
-      return;
-    }
-    setOtpVerified(true);
-    setOtpError(null);
-    void trigger();
-  };
-
   const onSubmit = async () => {
-    if (!otpRequirementMet || duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
+    if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
       goTo("/signup/name");
       return;
@@ -281,7 +241,6 @@ const SignupCredentials = () => {
 
   const ctaDisabled =
     !isValid ||
-    !otpRequirementMet ||
     duplicateDetected ||
     checkingDuplicate ||
     submitting ||
@@ -294,13 +253,7 @@ const SignupCredentials = () => {
       ? "Agree to Terms to continue"
       : phoneInvalid
         ? "Enter a valid phone number"
-        : otpSent && otpError
-          ? "Invalid code"
-          : otpSent && otpValue.length < 6
-            ? "Enter the 6-digit code"
-            : !otpRequirementMet
-              ? "Verify your phone number"
-              : "Complete all required fields to continue";
+        : "Complete all required fields to continue";
 
   return (
     <>
@@ -347,7 +300,7 @@ const SignupCredentials = () => {
             {...register("email")}
           />
 
-          {/* Phone + OTP send */}
+          {/* Phone */}
           <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Phone Number</label>
             <div className={`form-field-rest relative flex items-center ${errors.phone ? "form-field-error" : ""}`}>
@@ -370,16 +323,6 @@ const SignupCredentials = () => {
                   outline: "none",
                 }}
               />
-              <NeuButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-3 z-10 h-8 px-2.5 text-[12px] text-[#2145CF] hover:bg-transparent shrink-0"
-                onClick={sendOtp}
-                disabled={resendIn > 0}
-              >
-                {resendIn > 0 ? `Resend in ${resendIn}s` : "Send Code"}
-              </NeuButton>
             </div>
             {errors.phone && (
               <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
@@ -387,44 +330,6 @@ const SignupCredentials = () => {
               </p>
             )}
           </div>
-
-          {/* OTP verification */}
-          {otpSent && (
-            <div>
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1 block" style={{ marginBottom: "var(--field-gap-lc, 6px)" }}>
-                Verification code
-              </label>
-              <div className="form-field-rest relative flex items-center">
-                <input
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="6-digit code"
-                  autoComplete="one-time-code"
-                  className="field-input-core pl-4 pr-[88px] focus:outline-none peer tracking-[0.18em]"
-                  value={otpValue}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, "").slice(0, 6);
-                    setOtpValue(val);
-                    setOtpError(null);
-                  }}
-                />
-                <NeuButton
-                  type="button"
-                  size="sm"
-                  onClick={verifyOtp}
-                  disabled={otpVerified || otpValue.length !== 6}
-                  className={`absolute right-2 ${otpVerified ? "bg-brandSuccess hover:bg-brandSuccess text-white" : ""}`}
-                >
-                  {otpVerified ? "Verified ✓" : "Verify"}
-                </NeuButton>
-              </div>
-              {otpError && (
-                <p className="text-[12px] text-[#EF4444] mt-2" aria-live="polite">
-                  {otpError}
-                </p>
-              )}
-            </div>
-          )}
 
           {/* Password */}
           <div>
@@ -547,11 +452,14 @@ const SignupCredentials = () => {
                 setSigninLoading(true);
                 setSigninError("");
                 try {
-                  const { error } = await supabase.auth.signInWithPassword({
-                    email: signinEmail,
-                    password: signinPassword,
-                  });
-                  if (error) throw error;
+                  const result = await signIn(signinEmail, signinPassword);
+                  if (result.error) throw result.error;
+                  if (result.mfaRequired) {
+                    setShowSignInModal(false);
+                    goTo("/auth");
+                    toast.info("Complete two-step verification on the login screen.");
+                    return;
+                  }
 
                   if (signinRemember) {
                     localStorage.setItem("auth_login_identifier", signinEmail);
