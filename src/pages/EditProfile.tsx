@@ -1473,6 +1473,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         resetSignup();
         clearOnboardingDraftKeys(activeUser.id);
       }
+      // Brevo CRM sync — fire-and-forget, never blocks the user flow
+      void supabase.functions.invoke("brevo-sync", {
+        body: { event: "profile_completed", user_id: activeUser.id },
+      }).catch((err) => console.warn("[brevo-sync] profile_completed failed silently", err));
       if (!onboardingMode) {
         toast.success(t("Profile updated!"));
       }

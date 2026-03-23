@@ -1106,6 +1106,11 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
         // no-op
       }
 
+      // Brevo CRM sync — fire-and-forget, never blocks the user flow
+      void supabase.functions.invoke("brevo-sync", {
+        body: { event: "pet_profile_completed", user_id: activeUser.id },
+      }).catch((err) => console.warn("[brevo-sync] pet_profile_completed failed silently", err));
+
       const shouldGoHome = onboardingMode || location.pathname === "/set-pet";
       if (shouldGoHome) {
         if (onboardingMode) {
