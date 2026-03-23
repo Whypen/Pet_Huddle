@@ -89,7 +89,6 @@ const SignupCredentials = () => {
       phone: data.phone,
       password: data.password,
       confirmPassword: data.password,
-      agreedToTerms: false,
     },
   });
 
@@ -290,8 +289,6 @@ const SignupCredentials = () => {
     ? "This email or phone number is already registered"
     : checkingDuplicate
       ? "Checking account details…"
-    : !watch("agreedToTerms")
-      ? "Agree to Terms to continue"
       : phoneInvalid
         ? "Enter a valid phone number"
         : otpSent && otpError
@@ -446,36 +443,26 @@ const SignupCredentials = () => {
             {...register("confirmPassword")}
           />
 
-          {/* Terms checkbox */}
-          <div className="flex items-start gap-3">
-            <NeuCheckbox
-              className="mt-[1px]"
-              checked={Boolean(watch("agreedToTerms"))}
-              onCheckedChange={(v) => setValue("agreedToTerms", Boolean(v), { shouldValidate: true })}
-            />
-            <span className="text-[13px] text-[rgba(74,73,101,0.70)]">
-              I have read and agree to the{" "}
-              <button
-                type="button"
-                className="text-[#2145CF] underline"
-                onClick={() => setLegalModal("terms")}
-              >
-                Terms of Service
-              </button>{" "}
-              and{" "}
-              <button
-                type="button"
-                className="text-[#2145CF] underline"
-                onClick={() => setLegalModal("privacy")}
-              >
-                Privacy Policy
-              </button>
-              .
-            </span>
-          </div>
-          {errors.agreedToTerms && (
-            <p className="text-[12px] text-[#EF4444]">{errors.agreedToTerms.message as string}</p>
-          )}
+          {/* Legal consent copy */}
+          <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
+            By tapping Continue, you agree to our{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("terms")}
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("privacy")}
+            >
+              Privacy Policy
+            </button>
+            , and to receive community safety alerts, pet care tips, and Huddle updates. You can unsubscribe anytime from any email.
+          </p>
 
           <div className="h-[calc(env(safe-area-inset-bottom,0px)+8px)]" aria-hidden="true" />
         </form>
