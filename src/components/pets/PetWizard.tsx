@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -500,14 +500,14 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
                       onChange={(e) => setVaccinationInput(prev => ({ ...prev, date: e.target.value }))}
                       className="h-10 rounded-lg w-36"
                     />
-                    <Button
+                    <NeuButton
                       type="button"
                       onClick={addVaccination}
-                      variant="outline"
+                      variant="secondary"
                       className="h-10 px-3"
                     >
                       +
-                    </Button>
+                    </NeuButton>
                   </div>
                 </div>
               </div>
@@ -680,17 +680,17 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
       {/* Navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border px-4 py-4 flex gap-3">
         {currentStep > 1 && (
-          <Button
-            variant="outline"
+          <NeuButton
+            variant="secondary"
             onClick={handleBack}
             className="h-12 rounded-xl"
           >
             <ChevronLeft className="w-5 h-5 mr-1" />
             {t("Back")}
-          </Button>
+          </NeuButton>
         )}
         
-        <Button
+        <NeuButton
           onClick={handleNext}
           disabled={loading}
           className="flex-1 h-12 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
@@ -705,7 +705,7 @@ export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
               <ChevronRight className="w-5 h-5 ml-1" />
             </>
           )}
-        </Button>
+        </NeuButton>
       </div>
     </motion.div>
   );

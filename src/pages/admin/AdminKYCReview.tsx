@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
@@ -12,21 +12,41 @@ type VerificationUpload = {
   document_type: string;
   document_url: string;
   selfie_url: string | null;
+  email?: string | null;
   country: string | null;
   legal_name: string | null;
   status: string;
   uploaded_at: string;
+  local?: boolean;
 };
+
+const ADMIN_EMAIL_ALLOWLIST = new Set([
+  "twenty_illkid@msn.com",
+  "fongpoman114@gmail.com",
+  "kuriocollectives@gmail.com",
+]);
+const LOCAL_KYC_SUBMISSIONS_KEY = "local_kyc_submissions";
 
 const AdminKYCReview = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [uploads, setUploads] = useState<VerificationUpload[]>([]);
   const [selected, setSelected] = useState<VerificationUpload | null>(null);
   const [docUrl, setDocUrl] = useState<string | null>(null);
   const [selfieUrl, setSelfieUrl] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const isAdmin = profile?.is_admin === true;
+  const isAdmin =
+    profile?.is_admin === true ||
+    ADMIN_EMAIL_ALLOWLIST.has((user?.email || "").toLowerCase());
+
+  const getLocalUploads = (): VerificationUpload[] => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LOCAL_KYC_SUBMISSIONS_KEY) || "[]") as VerificationUpload[];
+      return raw.filter((item) => item.status === "pending");
+    } catch {
+      return [];
+    }
+  };
 
   const loadUploads = useCallback(async () => {
     const { data, error } = await supabase
@@ -34,13 +54,20 @@ const AdminKYCReview = () => {
       .select("id, user_id, document_type, document_url, selfie_url, country, legal_name, status, uploaded_at")
       .eq("status", "pending")
       .order("uploaded_at", { ascending: false });
+    const local = getLocalUploads();
     if (error) {
-      toast.error(error.message);
+      setUploads(local);
+      if (!selected && local.length) {
+        setSelected(local[0]);
+      }
       return;
     }
-    setUploads((data || []) as VerificationUpload[]);
-    if (!selected && data && data.length) {
-      setSelected(data[0] as VerificationUpload);
+    const merged = [...((data || []) as VerificationUpload[]), ...local].sort(
+      (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime(),
+    );
+    setUploads(merged);
+    if (!selected && merged.length) {
+      setSelected(merged[0]);
     }
   }, [selected]);
 
@@ -52,6 +79,11 @@ const AdminKYCReview = () => {
   useEffect(() => {
     const loadSigned = async () => {
       if (!selected) return;
+      if (selected.local) {
+        setDocUrl(selected.document_url || null);
+        setSelfieUrl(selected.selfie_url || null);
+        return;
+      }
       const { data: docSigned } = await supabase.storage
         .from("identity_verification")
         .createSignedUrl(selected.document_url, 60);
@@ -64,18 +96,57 @@ const AdminKYCReview = () => {
     void loadSigned();
   }, [selected]);
 
-  const handleReview = async (action: "approve" | "reject") => {
+  const handleReview = async (action: "verified" | "unverified") => {
     if (!selected) return;
-    const { error } = await supabase.rpc("handle_identity_review", {
-      target_user_id: selected.user_id,
-      action,
-      notes,
-    });
-    if (error) {
-      toast.error(error.message);
+    if (selected.local) {
+      const updated = getLocalUploads().filter((item) => item.id !== selected.id);
+      localStorage.setItem(LOCAL_KYC_SUBMISSIONS_KEY, JSON.stringify(updated));
+      toast.success(action === "verified" ? "Verified" : "Marked unverified");
+      setSelected(null);
+      setDocUrl(null);
+      setSelfieUrl(null);
+      setNotes("");
+      await loadUploads();
       return;
     }
-    toast.success(action === "approve" ? "Approved" : "Rejected");
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        verification_status: action,
+        verification_comment: action === "unverified" ? notes || null : null,
+      })
+      .eq("id", selected.user_id);
+    if (profileError) {
+      toast.error(profileError.message);
+      return;
+    }
+
+    const { error: uploadError } = await supabase
+      .from("verification_uploads")
+      .update({
+        status: action,
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: profile?.id || null,
+        rejection_reason: action === "unverified" ? notes || null : null,
+      })
+      .eq("id", selected.id);
+    if (uploadError) {
+      toast.error(uploadError.message);
+      return;
+    }
+
+    const { error: emailError } = await supabase.functions.invoke("verification-email", {
+      body: {
+        userId: selected.user_id,
+        status: action,
+        comment: notes,
+      },
+    });
+    if (emailError) {
+      toast.error(emailError.message);
+    }
+
+    toast.success(action === "verified" ? "Verified" : "Marked unverified");
     setSelected(null);
     setDocUrl(null);
     setSelfieUrl(null);
@@ -86,14 +157,14 @@ const AdminKYCReview = () => {
   const selectedLabel = useMemo(
     () =>
       selected
-        ? `${selected.legal_name || "Unknown"} (${selected.document_type})`
+        ? `${selected.legal_name || selected.email || "Unknown"} (${selected.document_type})`
         : "Select a submission",
     [selected],
   );
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-svh flex items-center justify-center">
         <div className="text-sm text-muted-foreground">
           Admin access required.{" "}
           <button className="text-brandBlue underline" onClick={() => navigate("/")}>
@@ -105,7 +176,7 @@ const AdminKYCReview = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background px-6 py-6">
+    <div className="min-h-svh bg-background px-6 py-6">
       <h1 className="text-xl font-bold text-brandText">KYC Review</h1>
       <div className="mt-4 grid gap-4 lg:grid-cols-[300px,1fr]">
         <div className="space-y-2">
@@ -154,12 +225,12 @@ const AdminKYCReview = () => {
               className="h-9"
             />
             <div className="flex gap-2">
-              <Button className="w-full h-10" onClick={() => handleReview("approve")} disabled={!selected}>
-                Approve
-              </Button>
-              <Button variant="destructive" className="w-full h-10" onClick={() => handleReview("reject")} disabled={!selected}>
-                Reject
-              </Button>
+              <NeuButton className="w-full h-10" onClick={() => handleReview("verified")} disabled={!selected}>
+                Verify
+              </NeuButton>
+              <NeuButton variant="destructive" className="w-full h-10" onClick={() => handleReview("unverified")} disabled={!selected}>
+                Mark Unverified
+              </NeuButton>
             </div>
           </div>
         </div>

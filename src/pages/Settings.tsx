@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, HelpCircle, Lock, Shield, ShieldAlert, ShieldCheck, MessagesSquare, MapPin, Newspaper, Eye, Bell, Mail, FileText, Users, ChevronRight } from "lucide-react";
+import { CircleAlert, Lock, ShieldCheck, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, ChevronRight, PawPrint } from "lucide-react";
 import { listTotpFactors } from "@/lib/mfa";
 import { listPasskeyFactors } from "@/lib/passkey";
-import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
+import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/layouts/PageHeader";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuControl } from "@/components/ui/NeuControl";
-import { NeuChip } from "@/components/ui/NeuChip";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { GlassModal } from "@/components/ui/GlassModal";
@@ -19,20 +20,22 @@ import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
 
 type NotificationPrefs = {
   push_enabled: boolean;
+  pets: boolean;
   social: boolean;
   chats: boolean;
   map: boolean;
-  news: boolean;
-  email: boolean;
+  services: boolean;
+  systems: boolean;
 };
 
 const DEFAULT_PREFS: NotificationPrefs = {
   push_enabled: true,
+  pets: true,
   social: true,
   chats: true,
   map: true,
-  news: true,
-  email: true,
+  services: true,
+  systems: true,
 };
 
 const Settings: React.FC = () => {
@@ -46,13 +49,6 @@ const Settings: React.FC = () => {
   const [nonSocial, setNonSocial] = useState(false);
   const [hideFromMap, setHideFromMap] = useState(false);
 
-  const [familySheetOpen, setFamilySheetOpen] = useState(false);
-  const [familyUsedCount, setFamilyUsedCount] = useState(0);
-
-  const [supportOpen, setSupportOpen] = useState(false);
-  const [supportSubject, setSupportSubject] = useState("");
-  const [supportMessage, setSupportMessage] = useState("");
-
   const [hasMfa, setHasMfa] = useState(false);
   const [hasPasskey, setHasPasskey] = useState(false);
 
@@ -64,7 +60,6 @@ const Settings: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [carerGateOpen, setCarerGateOpen] = useState(false);
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
@@ -75,19 +70,20 @@ const Settings: React.FC = () => {
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("")
     .slice(0, 2) || "U";
-  const effectiveTier = (p.effective_tier as string) || (p.tier as string) || "free";
-  const verificationStatus = String(p.verification_status ?? "unverified").toLowerCase();
+  const effectiveTier = normalizeMembershipTier((p.effective_tier as string) || (p.tier as string) || "free");
+  const tierChipClass =
+    effectiveTier === "gold"
+      ? "bg-[#FF6452] text-white"
+      : effectiveTier === "plus"
+        ? "bg-[#5BA4F5] text-white"
+        : "bg-[#E9ECF3] text-[#7E8599]";
+  const starsCount = Math.max(0, Number((p.stars_count as number | null) ?? 0));
+  const starsPillClass =
+    starsCount > 0
+      ? "border border-[#E4E8F2] bg-white text-[#4A4965]"
+      : "border border-[#C6CAD6] bg-transparent text-[#98A0B8]";
   const isVerified = p.is_verified === true;
   const dob = (p.dob as string | null) ?? null;
-  const isAge18Plus = dob
-    ? (() => {
-        const birth = new Date(dob);
-        const now = new Date();
-        const age = now.getFullYear() - birth.getFullYear();
-        const m = now.getMonth() - birth.getMonth();
-        return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
-      })()
-    : false;
   const isAge16Plus = dob
     ? (() => {
         const birth = new Date(dob);
@@ -98,13 +94,6 @@ const Settings: React.FC = () => {
         return age >= 16;
       })()
     : true;
-  const handleCarerProfileRow = () => {
-    if (isVerified) {
-      navigate("/carerprofile");
-    } else {
-      setCarerGateOpen(true);
-    }
-  };
   const speciesSource = [p.pet_species, p.pet_experience, p.species, p.pets]
     .flatMap((value) => {
       if (Array.isArray(value)) {
@@ -154,12 +143,13 @@ const Settings: React.FC = () => {
                   user_id: user.id,
                   push_enabled: prefs.push_enabled,
                   pause_all: false,
+                  pets: prefs.pets,
                   social: prefs.social,
                   chats: false,
                   map: prefs.map,
-                  push_news: prefs.news,
-                  email_enabled: prefs.email,
-                  email: prefs.email,
+                  vet: prefs.services,
+                  email_enabled: prefs.systems,
+                  email: prefs.systems,
                 } as Record<string, unknown>,
                 { onConflict: "user_id" },
               )
@@ -172,17 +162,7 @@ const Settings: React.FC = () => {
     };
 
     void enforceMinorSafety();
-  }, [isAge16Plus, nonSocial, prefs.chats, prefs.email, prefs.map, prefs.news, prefs.push_enabled, prefs.social, refreshProfile, user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from("family_members" as never)
-      .select("id", { count: "exact", head: true })
-      .eq("inviter_user_id", user.id)
-      .neq("status", "declined")
-      .then(({ count }) => setFamilyUsedCount(count ?? 0));
-  }, [user?.id, familySheetOpen]); // re-query when sheet closes
+  }, [isAge16Plus, nonSocial, prefs.chats, prefs.systems, prefs.map, prefs.services, prefs.push_enabled, prefs.social, prefs.pets, refreshProfile, user?.id]);
 
   const loadPrefs = async () => {
     if (!user?.id) return;
@@ -190,7 +170,7 @@ const Settings: React.FC = () => {
 
     const { data, error } = await supabase
       .from("notification_preferences")
-      .select("push_enabled,pause_all,social,chats,map,push_news,email,email_enabled")
+      .select("push_enabled,pause_all,social,chats,map,pets,vet,email,email_enabled")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -203,17 +183,18 @@ const Settings: React.FC = () => {
     if (!data) {
       const { error: initError } = await supabase
         .from("notification_preferences")
-        .insert({
+        .upsert({
           user_id: user.id,
           push_enabled: DEFAULT_PREFS.push_enabled,
           pause_all: false,
+          pets: DEFAULT_PREFS.pets,
           social: DEFAULT_PREFS.social,
           chats: DEFAULT_PREFS.chats,
           map: DEFAULT_PREFS.map,
-          push_news: DEFAULT_PREFS.news,
-          email_enabled: DEFAULT_PREFS.email,
-          email: DEFAULT_PREFS.email,
-        } as Record<string, unknown>);
+          vet: DEFAULT_PREFS.services,
+          email_enabled: DEFAULT_PREFS.systems,
+          email: DEFAULT_PREFS.systems,
+        } as Record<string, unknown>, { onConflict: "user_id" });
       if (initError) toast.error("We couldn't initialize notification settings.");
       setPrefs(DEFAULT_PREFS);
       setLoadingPrefs(false);
@@ -223,11 +204,12 @@ const Settings: React.FC = () => {
     const row = data as Record<string, unknown>;
     const next: NotificationPrefs = {
       push_enabled: row.push_enabled === true && row.pause_all !== true,
+      pets: Boolean(row.pets ?? true),
       social: Boolean(row.social),
       chats: Boolean(row.chats),
       map: Boolean(row.map),
-      news: Boolean(row.push_news),
-      email: Boolean(row.email_enabled ?? row.email),
+      services: Boolean(row.vet ?? true),
+      systems: Boolean(row.email_enabled ?? row.email ?? true),
     };
 
     setPrefs(next);
@@ -265,12 +247,13 @@ const Settings: React.FC = () => {
         user_id: user.id,
         push_enabled: next.push_enabled,
         pause_all: false,
+        pets: next.pets,
         social: next.social,
         chats: next.chats,
         map: next.map,
-        push_news: next.news,
-        email_enabled: next.email,
-        email: next.email,
+        vet: next.services,
+        email_enabled: next.systems,
+        email: next.systems,
       } as Record<string, unknown>,
       { onConflict: "user_id" }
     );
@@ -314,39 +297,12 @@ const Settings: React.FC = () => {
     await persistPrefs({ ...prefs, push_enabled: next });
   };
 
-  const handleCategoryToggle = async (key: "social" | "chats" | "map" | "news", next: boolean) => {
+  const handleCategoryToggle = async (key: "pets" | "social" | "chats" | "map" | "services" | "systems", next: boolean) => {
     if (key === "map" && prefs.map && !next) {
       setConfirmToggleOff("map");
       return;
     }
     await persistPrefs({ ...prefs, [key]: next });
-  };
-
-  const submitSupport = async () => {
-    if (!user?.id) return;
-    if (!supportMessage.trim()) {
-      toast.error("Please enter your message.");
-      return;
-    }
-
-    setBusy(true);
-    const { error } = await supabase.from("support_requests").insert({
-      user_id: user.id,
-      category: "general",
-      subject: supportSubject.trim() || null,
-      message: supportMessage.trim(),
-    });
-    setBusy(false);
-
-    if (error) {
-      toast.error("We couldn't submit support request. Please retry.");
-      return;
-    }
-
-    toast.success("Support request submitted.");
-    setSupportOpen(false);
-    setSupportSubject("");
-    setSupportMessage("");
   };
 
   const submitPasswordChange = async () => {
@@ -391,6 +347,15 @@ const Settings: React.FC = () => {
     }
 
     setBusy(true);
+    const runtimeEnv = getAuthRuntimeEnv();
+    if (import.meta.env.DEV) {
+      console.info("[settings.delete_account] invoking", {
+        userId: session.user.id,
+        envMode: runtimeEnv.mode,
+        envHost: runtimeEnv.host,
+        supabaseUrl: runtimeEnv.supabaseUrl,
+      });
+    }
     const { error } = await supabase.functions.invoke("delete-account", {
       body: {},
       headers: {
@@ -410,6 +375,13 @@ const Settings: React.FC = () => {
       console.error("[settings.delete_account.failed]", error);
       toast.error("We couldn't delete your account. Please retry.");
       return;
+    }
+    if (import.meta.env.DEV) {
+      console.info("[settings.delete_account] success", {
+        userId: session.user.id,
+        envMode: runtimeEnv.mode,
+        envHost: runtimeEnv.host,
+      });
     }
 
     await signOut();
@@ -446,36 +418,25 @@ const Settings: React.FC = () => {
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="text-[16px] font-[600] text-[var(--text-primary)] leading-[1.3] truncate">{displayName}</h3>
-            <NeuChip as="span" className="mt-1 capitalize text-[11px]">{effectiveTier}</NeuChip>
+            <div className="mt-1 inline-flex items-center gap-1.5">
+              <span className={cn("inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none", tierChipClass)}>
+                {membershipTierLabel(effectiveTier)}
+              </span>
+              <button
+                type="button"
+                className={cn("inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none", starsPillClass)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  navigate("/premium");
+                }}
+              >
+                {starsCount} ⭐
+              </button>
+            </div>
           </div>
           <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
         </div>
-
-        {/* ── Subscription ── */}
-        <InsetPanel>
-          <InsetRow
-            label="Manage Membership"
-            variant="nav"
-            onClick={() => navigate("/premium")}
-          />
-          <InsetDivider />
-          <button
-            type="button"
-            onClick={() => setFamilySheetOpen(true)}
-            className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
-          >
-            <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
-              <Users size={16} strokeWidth={1.75} />
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-[14px] font-[500] text-[var(--text-primary)]">Family Account</span>
-              <span className="block text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                {familyUsedCount} of {Math.min(profile?.family_slots ?? 0, 3)} Slots
-              </span>
-            </span>
-            <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
-          </button>
-        </InsetPanel>
 
         {/* ── VISIBILITY ── */}
         <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">VISIBILITY</p>
@@ -496,12 +457,12 @@ const Settings: React.FC = () => {
           />
           <InsetDivider />
           <InsetRow
-            label="Visible on Map"
+            label="Incognito on Map"
             icon={<MapPin size={16} strokeWidth={1.75} />}
             trailingSlot={
               <NeuToggle
-                checked={!hideFromMap}
-                onCheckedChange={(value) => void persistPrivacy({ nonSocial, hideFromMap: !value })}
+                checked={hideFromMap}
+                onCheckedChange={(value) => void persistPrivacy({ nonSocial, hideFromMap: value })}
               />
             }
           />
@@ -518,6 +479,18 @@ const Settings: React.FC = () => {
                 disabled={loadingPrefs}
                 checked={prefs.push_enabled}
                 onCheckedChange={(value) => void handlePushToggle(value)}
+              />
+            }
+          />
+          <InsetDivider />
+          <InsetRow
+            label="Pets"
+            icon={<PawPrint size={16} strokeWidth={1.75} />}
+            trailingSlot={
+              <NeuToggle
+                disabled={loadingPrefs || !prefs.push_enabled}
+                checked={prefs.pets}
+                onCheckedChange={(value) => void handleCategoryToggle("pets", value)}
               />
             }
           />
@@ -562,64 +535,28 @@ const Settings: React.FC = () => {
           />
           <InsetDivider />
           <InsetRow
-            label="News & updates"
-            icon={<Newspaper size={16} strokeWidth={1.75} />}
+            label="Services"
+            icon={<Briefcase size={16} strokeWidth={1.75} />}
             trailingSlot={
               <NeuToggle
                 disabled={loadingPrefs || !prefs.push_enabled}
-                checked={prefs.news}
-                onCheckedChange={(value) => void handleCategoryToggle("news", value)}
+                checked={prefs.services}
+                onCheckedChange={(value) => void handleCategoryToggle("services", value)}
               />
             }
           />
           <InsetDivider />
           <InsetRow
-            label="Email"
-            icon={<Mail size={16} strokeWidth={1.75} />}
+            label="Systems"
+            icon={<Shield size={16} strokeWidth={1.75} />}
             trailingSlot={
               <NeuToggle
                 disabled={loadingPrefs}
-                checked={prefs.email}
-                onCheckedChange={(value) => void persistPrefs({ ...prefs, email: value })}
+                checked={prefs.systems}
+                onCheckedChange={(value) => void persistPrefs({ ...prefs, systems: value })}
               />
             }
           />
-        </InsetPanel>
-
-        {/* ── COMMUNITY ── */}
-        <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">Being a Community Provider</p>
-        <InsetPanel>
-          <InsetRow
-            label="Identity Verification"
-            icon={
-              <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${isVerified ? "bg-brandBlue text-white" : "bg-[#A1A4A9] text-white"}`}>
-                <Shield size={12} strokeWidth={1.75} />
-              </span>
-            }
-            variant="nav"
-            value={
-              isVerified ? "Verified"
-              : verificationStatus === "pending" ? "Pending"
-              : undefined
-            }
-            onClick={() => navigate("/verify-identity")}
-          />
-          {isAge18Plus && (
-            <>
-              <InsetDivider />
-              <button
-                type="button"
-                onClick={handleCarerProfileRow}
-                className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
-              >
-                <span className="flex-1 min-w-0">
-                  <span className="block text-[15px] font-[500] text-[var(--text-primary)]">Pet-Care Profile</span>
-                  <span className="block text-[11px] text-[var(--text-tertiary)] mt-0.5">Customize how you offer trusted support</span>
-                </span>
-                <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
-              </button>
-            </>
-          )}
         </InsetPanel>
 
         {/* ── SECURITY ── */}
@@ -646,31 +583,6 @@ const Settings: React.FC = () => {
           />
         </InsetPanel>
 
-        {/* ── ABOUT ── */}
-        <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">ABOUT</p>
-        <InsetPanel>
-          <InsetRow
-            label="Privacy Policy"
-            variant="nav"
-            icon={<ShieldAlert size={16} strokeWidth={1.75} />}
-            onClick={() => navigate("/privacy")}
-          />
-          <InsetDivider />
-          <InsetRow
-            label="Terms of Service"
-            variant="nav"
-            icon={<FileText size={16} strokeWidth={1.75} />}
-            onClick={() => navigate("/terms")}
-          />
-          <InsetDivider />
-          <InsetRow
-            label="Help & support"
-            variant="nav"
-            icon={<HelpCircle size={16} strokeWidth={1.75} />}
-            onClick={() => setSupportOpen(true)}
-          />
-        </InsetPanel>
-
         {/* ── Log out ── */}
         <InsetPanel className="mt-4">
           <InsetRow
@@ -690,43 +602,6 @@ const Settings: React.FC = () => {
         </button>
       </div>
       </div>
-
-      {/* ── Help & Support dialog ── */}
-      <Dialog open={supportOpen} onOpenChange={(o) => { if (!o) setSupportOpen(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Help &amp; Support</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Subject</label>
-              <div className="form-field-rest relative flex items-center">
-                <input
-                  value={supportSubject}
-                  onChange={(e) => setSupportSubject(e.target.value)}
-                  placeholder="Subject (optional)"
-                  className="field-input-core"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Message</label>
-              <div className="form-field-rest relative h-auto min-h-[96px] py-3">
-                <textarea
-                  value={supportMessage}
-                  onChange={(e) => setSupportMessage(e.target.value)}
-                  placeholder="How can we help?"
-                  className="field-input-core resize-none min-h-[72px]"
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="!flex-row gap-2 pt-2">
-            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setSupportOpen(false)}>Cancel</NeuControl>
-            <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy} onClick={submitSupport}>Send</NeuControl>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ── Change Password dialog ── */}
       <Dialog open={passwordOpen} onOpenChange={(o) => { if (!o) setPasswordOpen(false); }}>
@@ -816,8 +691,6 @@ const Settings: React.FC = () => {
         </div>
       </GlassModal>
 
-      <ManageFamilySheet isOpen={familySheetOpen} onClose={() => setFamilySheetOpen(false)} />
-
       {/* ── Notification toggle-off confirm dialog ── */}
       <Dialog open={confirmToggleOff !== null} onOpenChange={(o) => { if (!o) setConfirmToggleOff(null); }}>
         <DialogContent className="max-w-sm">
@@ -859,29 +732,6 @@ const Settings: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Carer profile gate ── */}
-      <Dialog open={carerGateOpen} onOpenChange={(o) => { if (!o) setCarerGateOpen(false); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Identity verification required</DialogTitle>
-            <DialogDescription>
-              Finish verification to start offering trusted pet-care services.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="!flex-row gap-2 pt-2">
-            <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setCarerGateOpen(false)}>
-              Not now
-            </NeuControl>
-            <NeuControl
-              size="lg"
-              className="flex-1 min-w-0"
-              onClick={() => { setCarerGateOpen(false); navigate("/verify-identity"); }}
-            >
-              Verify now
-            </NeuControl>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Camera, Plus, X, PawPrint, Syringe, Pill, Cpu, Stethoscope, Loader2, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -496,7 +496,7 @@ export const PetProfileForm = ({
 
       {/* Action Buttons */}
       <div className="space-y-3 pt-2">
-        <Button
+        <NeuButton
           onClick={handleSubmit}
           disabled={loading || !formData.name.trim() || (!formData.species || (formData.species === "Others" && !formData.customSpecies.trim()))}
           className="w-full h-12 rounded-xl bg-primary hover:bg-primary/90"
@@ -509,16 +509,16 @@ export const PetProfileForm = ({
               {submitText}
             </>
           )}
-        </Button>
+        </NeuButton>
 
         {showCancel && onCancel && (
-          <Button
+          <NeuButton
             variant="ghost"
             onClick={onCancel}
             className="w-full h-11 text-muted-foreground"
           >
             {t("Cancel")}
-          </Button>
+          </NeuButton>
         )}
       </div>
     </div>

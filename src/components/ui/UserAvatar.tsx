@@ -1,6 +1,7 @@
-import { Shield, Car } from "lucide-react";
+import { Car } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
+import profilePlaceholder from "@/assets/Profile Placeholder.png";
 
 interface UserAvatarProps {
   avatarUrl?: string | null;
@@ -34,6 +35,20 @@ const iconSizeClasses = {
   xl: "w-4 h-4",
 };
 
+const verificationRingClasses = {
+  sm: "border border-[rgba(33,69,207,1)]",
+  md: "border border-[rgba(33,69,207,1)]",
+  lg: "border border-[rgba(33,69,207,1)]",
+  xl: "border border-[rgba(33,69,207,1)]",
+};
+
+const unverifiedRingClasses = {
+  sm: "border border-[rgba(74,73,101,0.28)]",
+  md: "border border-[rgba(74,73,101,0.28)]",
+  lg: "border border-[rgba(74,73,101,0.28)]",
+  xl: "border border-[rgba(74,73,101,0.28)]",
+};
+
 export const UserAvatar = ({
   avatarUrl,
   name,
@@ -61,20 +76,20 @@ export const UserAvatar = ({
           alt={name || t("User")}
           className={cn(
             sizeClasses[size],
-            "rounded-full object-cover ring-2 ring-white"
+            "rounded-full object-cover bg-muted/20",
+            isVerified ? verificationRingClasses[size] : unverifiedRingClasses[size]
           )}
         />
       ) : (
-        <div
+        <img
+          src={profilePlaceholder}
+          alt={name || t("User")}
           className={cn(
             sizeClasses[size],
-            "rounded-full bg-muted flex items-center justify-center ring-2 ring-white",
-            "text-muted-foreground font-semibold"
+            "rounded-full object-cover bg-muted/20",
+            isVerified ? verificationRingClasses[size] : unverifiedRingClasses[size]
           )}
-          style={{ fontSize: size === "sm" ? "0.75rem" : size === "md" ? "1rem" : size === "lg" ? "1.25rem" : "1.5rem" }}
-        >
-          {initials}
-        </div>
+        />
       )}
 
       {showBadges && (
@@ -91,16 +106,6 @@ export const UserAvatar = ({
             </div>
           )}
 
-          {/* Verification Badge - Bottom Right (UAT: no crown/premium) */}
-          <div
-            className={cn(
-              "absolute -bottom-1 -right-1 rounded-full flex items-center justify-center ring-2 ring-white",
-              badgeSizeClasses[size],
-              isVerified ? "bg-brandGold" : "bg-[#A1A4A9]"
-            )}
-          >
-            <Shield className={cn("text-white", iconSizeClasses[size])} />
-          </div>
         </>
       )}
     </div>

@@ -30,8 +30,9 @@ const BroadcastMarker = ({ map, coords, alertType }: BroadcastMarkerProps) => {
     map.on("rotate", syncToMap);
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
+    map.on("render", syncToMap);
 
-    console.log("[MARKER_MOUNT]", { type: "broadcast", hasMap: true });
+    if (import.meta.env.DEV) console.debug("[MARKER_MOUNT]", { type: "broadcast", hasMap: true });
 
     return () => {
       map.off("move", syncToMap);
@@ -39,6 +40,7 @@ const BroadcastMarker = ({ map, coords, alertType }: BroadcastMarkerProps) => {
       map.off("rotate", syncToMap);
       map.off("pitch", syncToMap);
       map.off("resize", syncToMap);
+      map.off("render", syncToMap);
     };
   }, [coords, map]);
 

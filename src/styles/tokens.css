@@ -1,0 +1,197 @@
+/* ============================================================
+   UI CONTRACT v3 — Huddle Design Tokens
+   Sections A.1 – A.8. Single source of truth.
+   DO NOT ADD VALUES NOT IN THE CONTRACT.
+   ============================================================ */
+
+:root {
+
+  /* ─── A.1 Canvas ───────────────────────────────────────────
+     Source: cosmos.so AI_Vet + Broadcast screenshots            */
+  --canvas:       #FFFFFF;
+  --canvas-solid: #FFFFFF; /* safe-area / status bar fill */
+
+
+  /* ─── A.2 Glass Surface System ────────────────────────────
+     Source: Behance Glassmorphism UI Kit                        */
+
+  /* L1 — Content cards */
+  --glass-card-bg:      rgba(255,255,255,0.62);
+  --glass-card-blur:    18px;
+  --glass-card-border:  1px solid rgba(255,255,255,0.55);
+  --glass-card-shadow:  0 2px 10px rgba(0,87,255,0.12), 0 1px 3px rgba(0,87,255,0.06), inset 0 1px 0 rgba(255,255,255,0.70);
+  --glass-card-radius:  20px;
+
+  /* L2 — Sheets, drawers, toolbars */
+  --glass-l2-bg:        rgba(255,255,255,0.72);
+  --glass-l2-blur:      24px;
+  --glass-l2-border:    1px solid rgba(255,255,255,0.60);
+  --glass-l2-shadow:    0 8px 20px rgba(0,87,255,0.14), 0 2px 6px rgba(0,87,255,0.08), inset 0 1px 0 rgba(255,255,255,0.75);
+  --glass-l2-radius:    24px;
+  --glass-l2-padding:   28px;
+
+  /* L3 — Dialogs, confirmations */
+  --glass-l3-bg:        rgba(255,255,255,0.82);
+  --glass-l3-blur:      32px;
+  --glass-l3-border:    1px solid rgba(255,255,255,0.68);
+  --glass-l3-shadow:    0 20px 48px rgba(0,87,255,0.18), 0 0 0 1px rgba(255,255,255,0.30), inset 0 1px 0 rgba(255,255,255,0.80);
+  --glass-l3-radius:    28px;
+  --glass-l3-padding:   32px;
+
+  /* Nav bar (bottom) */
+  --glass-nav-bg:       rgba(255,255,255,0.68);
+  --glass-nav-blur:     20px;
+  --glass-nav-border:   1px solid rgba(255,255,255,0.50);
+  --glass-nav-shadow:   0 -4px 16px rgba(0,87,255,0.10);
+
+  /* Composer / header bars */
+  --glass-bar-bg:       rgba(255,255,255,0.70);
+  --glass-bar-blur:     20px;
+  --glass-bar-border:   1px solid rgba(255,255,255,0.48);
+
+
+  /* ─── A.3 Neumorphic System ────────────────────────────────
+     Source: cosmos.so Buttons                                   */
+
+  /* Raised element on glass (L1 base) */
+  /* Section 6: Drop shadow MUST be neutral cool-grey — NOT blue-tinted */
+  --neu-base:           rgba(255,255,255,0.82);
+  --neu-drop:           rgba(163,168,190,0.28);   /* Layer 2: neutral drop (Section 6) */
+  --neu-lift:           rgba(255,255,255,0.84);   /* Layer 3: outer lift */
+  --neu-inner:          rgba(255,255,255,0.90);   /* Layer 4: inner bevel */
+  --neu-pressed-drop:   rgba(163,168,190,0.28);   /* Layer 2 inverted (pressed) */
+  --neu-pressed-lift:   rgba(255,255,255,0.82);   /* Layer 3 inverted (pressed) */
+
+  /* Brand Blue (Huddle primary / Plus tier) */
+  --neu-blue-bg:        linear-gradient(145deg, #2A53E0 0%, #1C3ECC 100%);
+  --neu-blue-drop:      rgba(33,69,207,0.30);
+  --neu-blue-lift:      rgba(96,141,255,0.45);
+
+  /* Gold — Gold tier ONLY */
+  --neu-gold-bg:        linear-gradient(145deg, #D9B528 0%, #BF9B18 100%);
+  --neu-gold-drop:      rgba(207,171,33,0.32);
+  --neu-gold-lift:      rgba(255,220,70,0.50);
+
+
+  /* ─── A.4 Color Tokens — Huddle Brand ─────────────────────
+     Source: user spec (#2145CF, #CFAB21, #424965, #4a4a4a)      */
+
+  /* Brand */
+  --blue:               #2145CF;   /* Plus tier + primary actions */
+  --blue-light:         #3A5FE8;
+  --blue-surface:       rgba(33,69,207,0.08);
+  --blue-glow:          rgba(33,69,207,0.28);
+
+  /* Gold — Gold tier ONLY
+     Use ONLY for: Gold tier paywall CTA, Gold tier badge, Gold tier block.
+     MUST NOT be used for: Plus tier upgrades, general accents, decorative
+     highlights, or any UI element outside explicit Gold-tier moments.    */
+  --gold:               #CFAB21;
+  --gold-light:         #E0BC2A;
+  --gold-surface:       rgba(207,171,33,0.10);
+  --gold-glow:          rgba(207,171,33,0.30);
+
+  /* Text */
+  --text-primary:       #424965;
+  --text-secondary:     #4a4a4a;
+  --text-tertiary:      rgba(74,73,101,0.55);
+  --text-white:         #FFFFFF;
+  --text-on-gold:       #2A2400;
+
+  /* Semantic */
+  --color-error:        #E84545;
+  --color-success:      #22C55E;
+  --color-emergency:    #F97316;   /* Emergency broadcast ONLY */
+
+  /* Service Chat status */
+  --service-pending:     #888888;
+  --service-pending-bg:  rgba(136,136,136,0.10);
+  --service-booked:      #16a34a;
+  --service-booked-bg:   rgba(22,163,74,0.10);
+  --service-progress:    #2563eb;
+  --service-progress-bg: rgba(37,99,235,0.10);
+  --service-complete:    #16a34a;
+  --service-complete-bg: rgba(22,163,74,0.10);
+  --service-disputed:    #ef6450;
+  --service-disputed-bg: rgba(239,100,80,0.10);
+
+  /* Surfaces (contextual glass fills) */
+  --surface-input:      rgba(255,255,255,0.55);
+  --surface-chip:       rgba(255,255,255,0.58);
+  --surface-divider:    rgba(255,255,255,0.30);
+
+
+  /* ─── A.5 Typography ───────────────────────────────────────
+     Contract RULE 10: Urbanist exclusively (Section 12).         */
+  --font:         'Urbanist', system-ui, sans-serif;   /* canonical — MUST be used exclusively */
+  --font-body:    'Urbanist', system-ui, sans-serif;
+  --font-display: 'Urbanist', system-ui, sans-serif;
+
+
+  /* ─── A.8 Motion ───────────────────────────────────────────
+     Section 9 canonical values. MUST NOT inline cubic-bezier.
+     BANNED: any cubic-bezier parameter > 1.0 (no spring/bounce)  */
+  --dur-micro:    75ms;
+  --dur-fast:     150ms;
+  --dur-base:     200ms;
+  --dur-slow:     300ms;
+  --dur-enter:    350ms;
+  --dur-shimmer:  1400ms;
+
+  --ease-out:     cubic-bezier(0.22, 1.00, 0.36, 1.00);  /* Section 9 canonical */
+  --ease-std:     cubic-bezier(0.40, 0.00, 0.20, 1.00);  /* Section 9 canonical */
+  --ease-in:      cubic-bezier(0.55, 0.00, 1.00, 0.45);  /* Section 9 canonical */
+  --ease-linear:  linear;                                  /* Section 9 canonical */
+  /* NOTE: --ease-spring removed — cubic-bezier(0.34,1.20,0.64,1) has param > 1.0 — BANNED */
+
+
+  /* ─── Section 5 Glass Elevation Aliases (e-tier naming) ─────
+     Contract uses glass-e1/e2/e3. These alias the l1/l2/l3 tokens.
+     New code MUST use e-tier names; l-tier names kept for backward compat. */
+
+  /* glass-e1 — Content layer: cards, InsetPanel, plan tiles */
+  --glass-e1-bg:      rgba(255,255,255,0.60);   /* range 0.58–0.65 */
+  --glass-e1-blur:    18px;                      /* minimum 16px */
+  --glass-e1-border:  1px solid rgba(255,255,255,0.55);
+  --glass-e1-shadow:  0 2px 10px rgba(0,87,255,0.11), 0 1px 3px rgba(0,87,255,0.06), inset 0 1px 0 rgba(255,255,255,0.72);
+  --glass-e1-radius:  20px;
+
+  /* glass-e2 — Sheet layer: headers, composer, StickyCTA */
+  --glass-e2-bg:      rgba(255,255,255,0.72);   /* range 0.68–0.76 */
+  --glass-e2-blur:    24px;                      /* range 22–26px */
+  --glass-e2-border:  1px solid rgba(255,255,255,0.60);
+  --glass-e2-shadow:  0 8px 24px rgba(0,87,255,0.13), 0 2px 6px rgba(0,87,255,0.07), inset 0 1px 0 rgba(255,255,255,0.78);
+  --glass-e2-radius:  24px;
+  --glass-e2-padding: 28px;
+
+  /* glass-e3 — Overlay layer: modals, dialogs, PaywallModal */
+  --glass-e3-bg:      rgba(255,255,255,0.82);   /* range 0.78–0.86 */
+  --glass-e3-blur:    32px;                      /* range 28–36px */
+  --glass-e3-border:  1px solid rgba(255,255,255,0.68);
+  --glass-e3-shadow:  0 20px 48px rgba(0,87,255,0.17), 0 0 0 1px rgba(255,255,255,0.30), inset 0 1px 0 rgba(255,255,255,0.82);
+  --glass-e3-radius:  28px;
+  --glass-e3-padding: 32px;
+
+  /* ─── Z-index scale ─────────────────────────────────────────
+     Contract Section 3 T7: modal:40, backdrop:39              */
+  --z-fab:      30;
+  --z-nav:      40;
+  --z-backdrop: 39;
+  --z-modal:    40;
+  --z-progress: 50;
+  --z-toast:    60;
+
+  /* ─── Viewport frame (RULE 14) ────────────────────────────── */
+  --cta-height:   56px;   /* StickyCTA / Composer height for pb calc */
+  --header-h:     56px;   /* PageHeader height */
+  --nav-h:        64px;   /* BottomNav height */
+
+  /* ─── FormField anatomy spacing (Section 7 — immutable) ─── */
+  --field-height:   52px;
+  --field-radius:   14px;
+  --field-gap-lc:   6px;   /* Label → Control */
+  --field-gap-cm:   6px;   /* Control → MessageSlot */
+  --field-gap-rel:  12px;  /* Related fields */
+  --field-gap-unr:  20px;  /* Unrelated fields */
+
+}

@@ -22,8 +22,8 @@ export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: Pr
         className={cn(
           "rounded-full flex items-center justify-center",
           verified
-            ? "bg-brandGold"
-            : "bg-muted",
+            ? "bg-brandBlue"
+            : "bg-[#A1A4A9]",
           badgeSize
         )}
         title={verified ? t("Verified User") : t("Not Verified")}

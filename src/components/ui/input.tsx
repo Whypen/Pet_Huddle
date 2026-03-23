@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
   ({ className, type, ...props }, ref) => {
     const isInvalid = props["aria-invalid"] === true || props["aria-invalid"] === "true";
+    const isDate = type === "date";
     return (
       <input
         type={type}
@@ -15,6 +16,8 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
           "border-brandText/40 placeholder:italic placeholder:text-gray-500/60",
           "focus-visible:outline-none focus-visible:border-brandBlue focus-visible:shadow-sm focus-visible:ring-0",
           "disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-[#f0f0f0]",
+          isDate &&
+            "huddle-date-input pr-10 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100",
           isInvalid && "border-brandError text-brandError focus-visible:border-brandError",
           className,
         )}

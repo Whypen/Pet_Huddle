@@ -9,7 +9,7 @@ interface AppLayoutProps {
 // Settings drawer lives in GlobalHeader (Sheet) — do NOT add it here.
 export const AppLayout = ({ children }: AppLayoutProps) => {
   return (
-    <div className="min-h-screen bg-background max-w-md mx-auto relative">
+    <div className="min-h-svh bg-background w-full max-w-[430px] mx-auto relative overflow-x-hidden">
       <div className="pb-nav">
         {children}
         <Outlet />

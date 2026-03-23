@@ -1,4 +1,4 @@
-export type BroadcastAlertType = "Stray" | "Lost" | "Others";
+export type BroadcastAlertType = "Stray" | "Lost" | "Caution" | "Others";
 export type BroadcastIconKey = "paw" | "alert" | "info";
 
 export interface BroadcastPinStyle {
@@ -7,15 +7,17 @@ export interface BroadcastPinStyle {
 }
 
 const STYLE_BY_TYPE: Record<BroadcastAlertType, BroadcastPinStyle> = {
-  Stray: { color: "#EAB308", icon: "paw" },
-  Lost: { color: "#EF4444", icon: "alert" },
-  Others: { color: "#A1A4A9", icon: "info" },
+  Stray:   { color: "#EAB308", icon: "paw" },
+  Lost:    { color: "#EF4444", icon: "paw" },
+  Caution: { color: "#2145CF", icon: "alert" },
+  Others:  { color: "#A1A4A9", icon: "info" },
 };
 
 export function normalizeBroadcastAlertType(value: string | null | undefined): BroadcastAlertType {
   if (!value) return "Stray";
   const normalized = value.toLowerCase();
   if (normalized === "lost") return "Lost";
+  if (normalized === "caution") return "Caution";
   if (normalized === "others" || normalized === "other") return "Others";
   return "Stray";
 }

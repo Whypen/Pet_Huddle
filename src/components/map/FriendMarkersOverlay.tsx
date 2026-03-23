@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type mapboxgl from "mapbox-gl";
+import { User } from "lucide-react";
 
 export type FriendOverlayPin = {
   id: string;
   name: string;
   lat: number;
   lng: number;
+  avatarUrl?: string | null;
+  isVerified?: boolean;
+  isInvisible?: boolean;
 };
 
 type Props = {
@@ -47,12 +51,14 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
     map.on("rotate", sync);
     map.on("pitch", sync);
     map.on("resize", sync);
+    map.on("render", sync);
     return () => {
       map.off("move", sync);
       map.off("zoom", sync);
       map.off("rotate", sync);
       map.off("pitch", sync);
       map.off("resize", sync);
+      map.off("render", sync);
     };
   }, [map, friends]);
 
@@ -63,6 +69,28 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
       {friends.map((friend) => {
         const pt = points[friend.id];
         if (!pt) return null;
+        const ringColor = friend.isVerified ? "#2145CF" : "#C9CEDA";
+        if (friend.isInvisible) {
+          return (
+            <div
+              key={friend.id}
+              className="absolute z-[1150] pointer-events-none"
+              style={{
+                left: `${pt.x}px`,
+                top: `${pt.y}px`,
+                transform: "translate(-50%, -100%)",
+              }}
+              aria-label="Incognito user"
+            >
+              <span
+                className="flex h-11 w-11 items-center justify-center rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
+                style={{ background: "#A6D539", border: "2px solid #A6D539" }}
+              >
+                <User className="h-5 w-5 text-white" strokeWidth={2.4} />
+              </span>
+            </div>
+          );
+        }
         return (
           <button
             key={friend.id}
@@ -76,8 +104,21 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
             onClick={() => onSelect(friend.id)}
             aria-label={`Open ${friend.name}`}
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-white bg-[#A6D539] text-sm font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              {friend.name.charAt(0).toUpperCase()}
+            <span
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
+              style={{ border: `1.5px solid ${ringColor}` }}
+            >
+              {friend.avatarUrl ? (
+                <img
+                  src={friend.avatarUrl}
+                  alt={friend.name}
+                  className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
+                />
+              ) : (
+                <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
+                  {friend.name.charAt(0).toUpperCase()}
+                </span>
+              )}
             </span>
           </button>
         );
@@ -87,4 +128,3 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
 };
 
 export default FriendMarkersOverlay;
-

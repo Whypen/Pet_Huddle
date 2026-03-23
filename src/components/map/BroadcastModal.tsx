@@ -1,24 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Camera, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle, Camera, ChevronDown, Loader2, MapPin, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { NeuButton } from "@/components/ui/NeuButton";
+import { NeuSlider } from "@/components/ui/NeuSlider";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { getBroadcastPinStyle, normalizeBroadcastAlertType } from "@/lib/broadcastPinStyle";
+import { quotaConfig } from "@/config/quotaConfig";
 import { humanError } from "@/lib/humanError";
+import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { toast } from "sonner";
+import { MediaThumb } from "@/components/media/MediaThumb";
+import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
+
+type BroadcastMedia = {
+  file: File;
+  previewUrl: string;
+};
+
+const MAX_BROADCAST_MEDIA = 10;
 
 interface BroadcastModalProps {
   isOpen: boolean;
   onClose: () => void;
   selectedLocation: { lat: number; lng: number } | null;
+  selectedAddress?: string | null;
   alertType: string;
   onAlertTypeChange: (next: string) => void;
   onRequestPinLocation: () => void;
   onClearLocation: () => void;
-  onRequestUpgrade: () => void;
   onSuccess: (payload?: {
     alertId: string | null;
     threadId: string | null;
@@ -30,6 +45,7 @@ interface BroadcastModalProps {
       title: string | null;
       description: string | null;
       photo_url: string | null;
+      media_urls?: string[] | null;
       support_count: number;
       report_count: number;
       created_at: string;
@@ -47,26 +63,26 @@ const BroadcastModal = ({
   isOpen,
   onClose,
   selectedLocation,
+  selectedAddress,
   alertType,
   onAlertTypeChange,
   onRequestPinLocation,
   onClearLocation,
-  onRequestUpgrade,
   onSuccess,
   onError,
 }: BroadcastModalProps) => {
+  const navigate = useNavigate();
   const { user, profile } = useAuth();
   const [alertTitle, setAlertTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<BroadcastMedia[]>([]);
   const [postOnThreads, setPostOnThreads] = useState(false);
   const [creating, setCreating] = useState(false);
   const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
   const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
-  const baseRangeKm = tier === "gold" ? 50 : tier === "premium" ? 25 : 10;
-  const baseDurationHours = tier === "gold" ? 48 : tier === "premium" ? 24 : 12;
+  const baseRangeKm = tier === "gold" ? 50 : tier === "plus" ? 25 : 10;
+  const baseDurationHours = tier === "gold" ? 48 : tier === "plus" ? 24 : 12;
   const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
   const capRangeKm = extraBroadcast72h > 0 ? 150 : baseRangeKm;
   const capDurationHours = extraBroadcast72h > 0 ? 72 : baseDurationHours;
@@ -75,6 +91,8 @@ const BroadcastModal = ({
   const [showUpsell, setShowUpsell] = useState(false);
   const upsellOnceRef = useRef(false);
   const upsellResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const RANGE_STEPS = [1, 5, 10, 25, 50, 100, 150];
+  const DURATION_STEPS = [1, 3, 6, 12, 24, 48, 72];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -101,6 +119,12 @@ const BroadcastModal = ({
     setRangeKm((current) => Math.min(current, capRangeKm));
     setDurationHours((current) => Math.min(current, capDurationHours));
   }, [capDurationHours, capRangeKm, isOpen]);
+
+  useEffect(() => {
+    return () => {
+      mediaFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    };
+  }, [mediaFiles]);
 
   const showUpsellOncePerDrag = () => {
     if (upsellOnceRef.current) return;
@@ -130,6 +154,51 @@ const BroadcastModal = ({
     setDurationHours(nextValue);
   };
 
+  const removeMediaAt = (index: number) => {
+    setMediaFiles((prev) => {
+      const target = prev[index];
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((_, currentIndex) => currentIndex !== index);
+    });
+  };
+
+  const handleMediaChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    const availableSlots = Math.max(0, MAX_BROADCAST_MEDIA - mediaFiles.length);
+    if (availableSlots <= 0) {
+      toast.error(`You can upload up to ${MAX_BROADCAST_MEDIA} photos.`);
+      event.target.value = "";
+      return;
+    }
+
+    const acceptedFiles = files.filter((file) => file.type.startsWith("image/")).slice(0, availableSlots);
+    if (acceptedFiles.length < files.length) {
+      toast.info(`Only the first ${MAX_BROADCAST_MEDIA} photos are kept.`);
+    }
+
+    const prepared = acceptedFiles.map((file) => ({
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+
+    setMediaFiles((prev) => [...prev, ...prepared]);
+    event.target.value = "";
+  };
+
+  const resetComposer = () => {
+    setAlertTitle("");
+    setDescription("");
+    setMediaFiles((prev) => {
+      prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
+    setPostOnThreads(false);
+    setRangeKm(baseRangeKm);
+    setDurationHours(baseDurationHours);
+  };
+
   const handleSubmit = async () => {
     if (!user || !selectedLocation) {
       toast.error("Pin location first");
@@ -143,115 +212,88 @@ const BroadcastModal = ({
 
     setCreating(true);
     let photoUrl: string | null = null;
+    let photoUrls: string[] = [];
     let createdAlertId: string | null = null;
     try {
-      if (imageFile) {
-        const fileExt = imageFile.name.split(".").pop() || "jpg";
-        const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-        const upload = await supabase.storage.from("alerts").upload(fileName, imageFile);
-        if (upload.error) throw upload.error;
-        photoUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
+      let resolvedAddress = selectedAddress || null;
+      if (!resolvedAddress && selectedLocation) {
+        try {
+          const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${selectedLocation.lng},${selectedLocation.lat}.json?access_token=${encodeURIComponent(MAPBOX_ACCESS_TOKEN)}&types=address,place,locality,neighborhood&limit=1&language=en`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            resolvedAddress = String(data?.features?.[0]?.place_name || "").trim() || null;
+          }
+        } catch {
+          resolvedAddress = selectedAddress || null;
+        }
+      }
+
+      if (mediaFiles.length > 0) {
+        const uploaded = await Promise.all(
+          mediaFiles.map(async (item, index) => {
+            const fileExt = item.file.name.split(".").pop() || "jpg";
+            const fileName = `${user.id}/${Date.now()}-${index}.${fileExt}`;
+            const upload = await supabase.storage.from("alerts").upload(fileName, item.file);
+            if (upload.error) throw upload.error;
+            return supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
+          })
+        );
+        photoUrls = uploaded.filter(Boolean);
+        photoUrl = photoUrls[0] || null;
       }
 
       const expiresAt = new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString();
       const rangeMeters = Math.round(rangeKm * 1000);
-      const locationLabel = "Pinned Location";
+      const payload = {
+        lat: selectedLocation.lat,
+        lng: selectedLocation.lng,
+        type: normalizedType,
+        title: alertTitle.trim() || null,
+        description: description.trim() || null,
+        address: resolvedAddress,
+        photo_url: photoUrl,
+        images: photoUrls,
+        range_meters: rangeMeters,
+        expires_at: expiresAt,
+        post_on_social: postOnThreads,
+        post_on_threads: postOnThreads,
+      };
 
-      const { data, error } = await supabase
-        .from("map_alerts")
-        .insert({
-          creator_id: user.id,
-          alert_type: normalizedType,
-          title: alertTitle.trim() || null,
-          description: description.trim() || null,
-          photo_url: photoUrl,
-          media_urls: photoUrl ? [photoUrl] : null,
-          address: null,
-          latitude: selectedLocation.lat,
-          longitude: selectedLocation.lng,
-          range_meters: rangeMeters,
-          range_km: rangeKm,
-          duration_hours: durationHours,
-          expires_at: expiresAt,
-          post_on_social: postOnThreads,
-          posted_to_threads: postOnThreads,
-          location_street: null,
-          location_district: null,
-        })
-        .select("id, created_at, expires_at, range_meters")
-        .single();
+      const rpcResult = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+        "create_alert_thread_and_pin",
+        { payload }
+      );
+      if (rpcResult.error) throw rpcResult.error;
 
-      if (error) throw error;
-      createdAlertId = data.id;
-
-      let threadId: string | null = null;
-      if (postOnThreads && (normalizedType === "Stray" || normalizedType === "Lost" || normalizedType === "Others")) {
-        const canonicalTitle = alertTitle.trim() || `${normalizedType} Alert`;
-        const canonicalText = [
-          `Type: ${normalizedType}`,
-          canonicalTitle ? `Title: ${canonicalTitle}` : "",
-          description.trim() ? `Description: ${description.trim()}` : "",
-          `Location: ${locationLabel}`,
-        ]
-          .filter(Boolean)
-          .join("\n");
-
-        const { data: threadRow, error: threadError } = await supabase
-          .from("threads")
-          .insert({
-            user_id: user.id,
-            title: canonicalTitle,
-            content: canonicalText,
-            images: photoUrl ? [photoUrl] : [],
-            is_map_alert: true,
-            map_id: data.id,
-            is_public: true,
-          })
-          .select("id")
-          .single();
-
-        if (threadError) {
-          console.error("[SOCIAL_DUPLICATION_ERROR]", threadError);
-          toast.error(`Pinned, but Social failed: ${humanError(threadError)}`);
-          await supabase
-          .from("map_alerts")
-          .update({ social_status: "failed" } as Record<string, unknown>)
-          .eq("id", data.id);
-        } else {
-          threadId = threadRow.id;
-          await supabase
-            .from("map_alerts")
-            .update({
-              thread_id: threadId,
-              social_post_id: threadId,
-              posted_to_threads: true,
-              social_status: "posted",
-              social_url: `/threads/${threadId}`,
-            } as Record<string, unknown>)
-            .eq("id", data.id);
-        }
+      const rpcData = (rpcResult.data || {}) as { alert_id?: string | null; thread_id?: string | null };
+      createdAlertId = rpcData.alert_id ?? null;
+      if (!createdAlertId) {
+        throw { message: "Broadcast create RPC did not return alert_id" };
       }
+      const threadId: string | null = rpcData.thread_id ?? null;
 
       onSuccess({
-        alertId: data.id,
+        alertId: createdAlertId,
         threadId,
         alert: {
-          id: data.id,
+          id: createdAlertId,
           latitude: selectedLocation.lat,
           longitude: selectedLocation.lng,
           alert_type: normalizedType,
           title: alertTitle.trim() || null,
           description: description.trim() || null,
           photo_url: photoUrl,
+          media_urls: photoUrls,
           support_count: 0,
           report_count: 0,
-          created_at: data.created_at || new Date().toISOString(),
+          created_at: new Date().toISOString(),
           creator_id: user.id,
           thread_id: threadId,
           social_post_id: threadId,
           post_on_social: postOnThreads,
-          expires_at: data.expires_at ?? expiresAt,
-          range_meters: data.range_meters ?? rangeMeters,
+          expires_at: expiresAt,
+          range_meters: rangeMeters,
           range_km: rangeKm,
           duration_hours: durationHours,
           creator: {
@@ -262,27 +304,30 @@ const BroadcastModal = ({
       });
 
       toast.success("Your pin is live!");
+      resetComposer();
       onClose();
     } catch (err) {
-      if (createdAlertId) {
-        await supabase.from("map_alerts").delete().eq("id", createdAlertId);
-      }
       console.error("[BASELINE_INSERT_ERROR]", err);
-      toast.error(`Broadcast failed: ${humanError(err)}`);
+      const normalizedError = humanError(err).toLowerCase();
+      if (normalizedError.includes("active broadcast") || normalizedError.includes("slot")) {
+        toast.error(quotaConfig.copy.broadcast.slotsFull);
+      } else {
+        toast.error(`Broadcast failed: ${humanError(err)}`);
+      }
       onError();
     } finally {
       setCreating(false);
     }
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[5000] bg-black/50 flex items-end"
+          className="fixed inset-0 z-[5000] bg-black/50"
           onClick={onClose}
         >
         <motion.div
@@ -291,172 +336,170 @@ const BroadcastModal = ({
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
           onClick={(e) => e.stopPropagation()}
-          className="relative w-full glass-e2 rounded-t-3xl p-6 max-h-[90vh] overflow-auto"
+          className="fixed left-0 right-0 bottom-0 w-full bg-card rounded-t-3xl p-6 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)] max-h-[100svh] overflow-auto border-t border-border shadow-elevated"
         >
-          <div className="flex items-center justify-between mb-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-brandText">Broadcast Alert</h2>
             <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                onClick={() => {
-                  if (selectedLocation) {
-                    onClearLocation();
-                  } else {
-                    onRequestPinLocation();
-                    onClose();
-                  }
-                }}
-                className={[
-                  "h-9 rounded-full px-4 text-xs font-semibold",
-                  selectedLocation ? "bg-muted text-muted-foreground hover:bg-muted" : "bg-[#2145CF] text-white hover:bg-[#1b39ab]",
-                ].join(" ")}
-              >
-                {selectedLocation ? "Remove Location" : "Pin location"}
-              </Button>
               <button onClick={onClose} aria-label="Close">
                 <X className="w-6 h-6" />
               </button>
             </div>
           </div>
 
-            <div className="mb-4">
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Topic</label>
-              <select
-                value={normalizedType}
-                onChange={(e) => onAlertTypeChange(e.target.value)}
-                className="w-full h-11 rounded-xl border border-border bg-white px-4 text-sm font-medium"
-                style={{ color: pinStyle.color }}
-              >
-                <option value="Stray">Stray</option>
-                <option value="Lost">Lost</option>
-                <option value="Others">Others</option>
-              </select>
+            <div className="mb-4 flex items-center gap-2">
+              {/* Pin button + type select — single compound field */}
+              <div className="form-field-rest relative flex flex-1 min-w-0 items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedLocation) {
+                      onClearLocation();
+                      return;
+                    }
+                    onRequestPinLocation();
+                  }}
+                  className="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ml-1"
+                  style={selectedLocation
+                    ? { background: "rgba(115,122,140,0.12)" }
+                    : { background: `${pinStyle.color}1a` }
+                  }
+                  aria-label={selectedLocation ? "Clear pinned location" : "Pin location"}
+                  title={selectedLocation ? "Clear pinned location" : "Pin location"}
+                >
+                  {selectedLocation ? (
+                    <X className="h-3.5 w-3.5 text-[#737A8C]" />
+                  ) : (
+                    <MapPin className="h-3.5 w-3.5" style={{ color: pinStyle.color }} strokeWidth={2.5} />
+                  )}
+                </button>
+                {/* Thin divider */}
+                <div className="mx-2 h-4 w-px shrink-0 bg-border/60" />
+                <select
+                  value={normalizedType}
+                  onChange={(e) => onAlertTypeChange(e.target.value)}
+                  className="field-input-core appearance-none bg-transparent pr-9 text-sm font-semibold"
+                  style={{ color: pinStyle.color }}
+                >
+                  <option value="Stray">Stray</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Caution">Caution</option>
+                  <option value="Others">Others</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-4 h-4 w-4 text-[var(--text-tertiary)]" />
+              </div>
+              {/* On Social — height matches form-field-rest (52px) */}
+              <div className="flex shrink-0 h-[52px] items-center gap-2 rounded-[14px] bg-muted/50 px-3">
+                <span className="text-sm font-medium text-brandText whitespace-nowrap">On Social</span>
+                <Switch checked={postOnThreads} onCheckedChange={setPostOnThreads} />
+              </div>
             </div>
 
-            <div className="mb-4 rounded-xl border border-border p-3">
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                Range: {rangeKm} km
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={150}
-                step={1}
-                value={rangeKm}
-                onPointerDown={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onPointerUp={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onTouchEnd={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onChange={(e) => handleRangeChange(Number(e.target.value))}
-                className="w-full"
-              />
-              <label className="text-xs font-medium text-muted-foreground mb-1 mt-3 block">
-                Duration: {durationHours} h
-              </label>
-              <input
-                type="range"
-                min={1}
-                max={72}
-                step={1}
-                value={durationHours}
-                onPointerDown={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onPointerUp={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onTouchEnd={() => {
-                  upsellOnceRef.current = false;
-                }}
-                onChange={(e) => handleDurationChange(Number(e.target.value))}
-                className="w-full"
-              />
+            <div className="mb-4 rounded-xl border border-border bg-white p-4">
+              <div className="space-y-4">
+                <NeuSlider
+                  label="Reach"
+                  showValue
+                  formatValue={(v) => `${RANGE_STEPS[v] ?? rangeKm} km`}
+                  min={0}
+                  max={RANGE_STEPS.length - 1}
+                  step={1}
+                  value={[Math.max(0, RANGE_STEPS.indexOf(rangeKm))]}
+                  onValueChange={([idx = 0]) => handleRangeChange(RANGE_STEPS[idx] ?? rangeKm)}
+                />
+                <NeuSlider
+                  label="Duration"
+                  showValue
+                  formatValue={(v) => `${DURATION_STEPS[v] ?? durationHours} hrs`}
+                  min={0}
+                  max={DURATION_STEPS.length - 1}
+                  step={1}
+                  value={[Math.max(0, DURATION_STEPS.indexOf(durationHours))]}
+                  onValueChange={([idx = 0]) => handleDurationChange(DURATION_STEPS[idx] ?? durationHours)}
+                />
+              </div>
               {showUpsell && extraBroadcast72h <= 0 ? (
-                <div className="mt-3 rounded-xl border border-[#EAB308]/30 bg-[#FEF9C3] p-3 text-xs text-[#854D0E] flex items-center justify-between gap-3">
-                  <span>Expand range and duration with Plus or Gold.</span>
+                <div className="mt-3 rounded-xl border border-border bg-white p-3 text-xs text-brandText flex items-center justify-between gap-3">
+                  <span>Upgrade to spread wider & stay longer!</span>
                   <button
                     type="button"
-                    onClick={onRequestUpgrade}
-                    className="shrink-0 rounded-full bg-[#A6D539] px-3 py-1 text-[11px] font-semibold text-brandText"
+                    onClick={() => navigate("/premium")}
+                    className="shrink-0 rounded-full border border-brandBlue/25 bg-white px-3 py-1 text-[11px] font-semibold text-brandBlue"
                   >
-                    View plans
+                    Unlock
                   </button>
                 </div>
               ) : null}
             </div>
 
-            <div className="space-y-1 mb-3">
-              <label className="text-xs font-medium text-muted-foreground">Title</label>
-              <Input value={alertTitle} onChange={(e) => setAlertTitle(e.target.value.slice(0, 100))} />
-            </div>
-
-            <div className="space-y-1 mb-3">
-              <label className="text-xs font-medium text-muted-foreground">Description</label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value.slice(0, 500))} className="min-h-[80px]" />
-            </div>
-
-            {imagePreview ? (
-              <div className="relative mb-3">
-                <img src={imagePreview} alt="" className="rounded-xl max-h-32 object-cover w-full" />
-                <button
-                  onClick={() => { setImageFile(null); setImagePreview(null); }}
-                  className="absolute top-2 right-2 w-6 h-6 rounded-full bg-black/50 flex items-center justify-center"
-                >
-                  <X className="w-4 h-4 text-white" />
-                </button>
+            <div className="mb-3 space-y-3">
+              <div className="form-field-rest relative flex items-center">
+                <Input
+                  value={alertTitle}
+                  onChange={(e) => setAlertTitle(e.target.value.slice(0, 100))}
+                  placeholder="Describe the situation"
+                  className="field-input-core h-auto rounded-none border-0 bg-transparent px-0 py-0 text-sm shadow-none outline-none focus-visible:ring-0"
+                />
               </div>
-            ) : (
-              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer mb-3">
-                <Camera className="w-5 h-5" />
-                Add Photo
+
+              <div className="form-field-rest relative h-auto min-h-[112px] py-3">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value.slice(0, 500))}
+                  className="field-input-core min-h-[88px] resize-none rounded-none border-0 bg-transparent px-0 py-0 text-sm shadow-none outline-none focus-visible:ring-0"
+                  placeholder="Details help everyone stay connected"
+                />
+              </div>
+            </div>
+
+            {mediaFiles.length > 0 ? (
+              <div className="mt-4 mb-3 flex items-start">
+                <div className="flex flex-wrap items-start gap-3">
+                  {mediaFiles.map((item, index) => (
+                    <div key={`${item.previewUrl}-${index}`} className="relative h-[150px] w-[150px] shrink-0 overflow-hidden rounded-[24px]">
+                      <MediaThumb src={item.previewUrl} alt={`Broadcast preview ${index + 1}`} className="h-full w-full rounded-[24px]" />
+                      <button
+                        onClick={() => removeMediaAt(index)}
+                        className="absolute top-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
+                      >
+                        <X className="w-4 h-4 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mb-1 flex items-center gap-3">
+              <label className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border bg-muted/60 hover:bg-muted">
+                <Camera className="h-4 w-4 text-muted-foreground" />
                 <input
                   type="file"
                   accept="image/*"
+                  multiple
                   className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    setImageFile(file);
-                    const reader = new FileReader();
-                    reader.onloadend = () => setImagePreview(reader.result as string);
-                    reader.readAsDataURL(file);
-                  }}
+                  onChange={handleMediaChange}
                 />
               </label>
-            )}
-
-            <label className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-              <input
-                type="checkbox"
-                checked={postOnThreads}
-                onChange={(e) => setPostOnThreads(e.target.checked)}
-                className="w-4 h-4 rounded"
-              />
-              Posted on Social
-            </label>
-
-            <Button
-              onClick={handleSubmit}
-              disabled={creating || !selectedLocation}
-              className="w-full h-12 rounded-xl text-white font-semibold"
-              style={{ backgroundColor: pinStyle.color }}
-            >
-              {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                <span className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5" />
-                  Broadcast {normalizedType} Alert
-                </span>
-              )}
-            </Button>
+              <NeuButton
+                onClick={handleSubmit}
+                disabled={creating || !selectedLocation}
+                className="flex-1 h-12 rounded-xl font-semibold disabled:bg-muted disabled:text-muted-foreground"
+                style={creating || !selectedLocation ? undefined : { backgroundColor: pinStyle.color, color: "#fff" }}
+              >
+                {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5" />
+                    Broadcast {normalizedType} Alert
+                  </span>
+                )}
+              </NeuButton>
+            </div>
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };
 

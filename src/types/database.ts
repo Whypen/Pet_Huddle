@@ -22,7 +22,6 @@ export interface UserProfile {
   has_car: boolean | null;
   languages: string[] | null;
   location_name: string | null;
-  is_verified: boolean | null;
   user_role: string | null;
   tier: string | null;
   subscription_status: string | null;
@@ -32,7 +31,7 @@ export interface UserProfile {
   family_slots: number | null;
   onboarding_completed: boolean | null;
   owns_pets: boolean | null;
-  social_availability: boolean | null;
+  non_social: boolean | null;
   availability_status: string[] | null;
   show_gender: boolean | null;
   show_orientation: boolean | null;

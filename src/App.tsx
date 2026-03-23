@@ -19,6 +19,7 @@ import Social from "./pages/Social";
 import Discover from "./pages/Discover";
 import Chats from "./pages/Chats";
 import ChatDialogue from "./pages/ChatDialogue";
+import ServiceChat from "./pages/ServiceChat";
 import AIVet from "./pages/AIVet";
 import MapPage from "./pages/Map";
 import Auth from "./pages/Auth";
@@ -39,11 +40,20 @@ import Premium from "./pages/Premium";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import CommunityGuidelines from "./pages/CommunityGuidelines";
+import CookiesPolicy from "./pages/CookiesPolicy";
+import PrivacyChoices from "./pages/PrivacyChoices";
+import ServiceAgreement from "./pages/ServiceAgreement";
+import BookingTerms from "./pages/BookingTerms";
 import Notifications from "./pages/Notifications";
 import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/VerifyIdentity";
 import CarerProfile from "./pages/CarerProfile";
 import Marketplace from "./pages/Marketplace";
+import Service from "./pages/Service";
+import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
+import CarerStripeReturn from "./pages/carerprofile/StripeReturn";
+import CarerStripeRefresh from "./pages/carerprofile/StripeRefresh";
 import AdminDisputes from "./screens/AdminDisputes";
 import AdminKYCReview from "./pages/admin/AdminKYCReview";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
@@ -177,6 +187,16 @@ const App = () => (
                     }
                   />
                   <Route
+                    path="/service-chat"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <ServiceChat />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/ai-vet"
                     element={
                       <ProtectedRoute>
@@ -218,6 +238,45 @@ const App = () => (
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/service"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <Service />
+                          <BottomNav />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/carerprofile/stripe-return"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <CarerStripeReturn />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/carerprofile/stripe-refresh"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <CarerStripeRefresh />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/service-provider-agreement"
+                    element={
+                      <AppShell>
+                        <ServiceProviderAgreement />
+                      </AppShell>
                     }
                   />
 
@@ -356,6 +415,56 @@ const App = () => (
                       <ProtectedRoute>
                         <AppShell>
                           <Terms />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/community-guidelines"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <CommunityGuidelines />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/service-agreement"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <ServiceAgreement />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/booking-terms"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <BookingTerms />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/cookies"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <CookiesPolicy />
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/privacy-choices"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell>
+                          <PrivacyChoices />
                         </AppShell>
                       </ProtectedRoute>
                     }

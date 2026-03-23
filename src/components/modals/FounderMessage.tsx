@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Heart } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { useApi } from "@/hooks/useApi";
 import { useLanguage } from "@/contexts/LanguageContext";
 import huddleLogo from "@/assets/huddle-logo-transparent.png";
@@ -94,13 +94,13 @@ const FounderMessage = ({ onClose }: FounderMessageProps) => {
 
           {/* Footer */}
           <div className="px-6 pb-6">
-            <Button
+            <NeuButton
               onClick={handleClose}
               className="w-full gap-2 bg-gradient-to-r from-primary to-accent hover:opacity-90 text-white"
             >
               <Heart className="w-4 h-4" />
               {t("Get Started")}
-            </Button>
+            </NeuButton>
           </div>
         </motion.div>
       </motion.div>

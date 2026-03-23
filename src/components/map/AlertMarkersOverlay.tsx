@@ -7,6 +7,7 @@ type OverlayAlert = {
   latitude: number;
   longitude: number;
   alert_type: string;
+  marker_state?: "active" | "expired_dot";
   is_demo?: boolean;
 };
 
@@ -48,6 +49,7 @@ const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps
     map.on("rotate", syncToMap);
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
+    map.on("render", syncToMap);
 
     return () => {
       map.off("move", syncToMap);
@@ -55,6 +57,7 @@ const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps
       map.off("rotate", syncToMap);
       map.off("pitch", syncToMap);
       map.off("resize", syncToMap);
+      map.off("render", syncToMap);
     };
   }, [alerts, map]);
 
@@ -78,7 +81,7 @@ const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps
             onClick={() => onSelect(alert.id)}
             aria-label={`Open ${alert.alert_type} alert`}
           >
-            <AlertPinMarker alertType={alert.alert_type} interactive />
+            <AlertPinMarker alertType={alert.alert_type} markerState={alert.marker_state || "active"} interactive />
             {alert.is_demo ? (
               <span className="sr-only">Demo alert</span>
             ) : null}

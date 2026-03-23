@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
-console.log("CURRENT API URL:", import.meta.env.VITE_API_URL);
+if (import.meta.env.DEV) console.debug("CURRENT API URL:", import.meta.env.VITE_API_URL);
 
 interface ApiResponse<T = unknown> {
   success: boolean;
@@ -46,6 +46,10 @@ export const useApi = () => {
       const data: unknown = await response.json();
 
       if (!response.ok) {
+        const errorPayload =
+          (typeof data === "object" && data !== null) ? (data as Record<string, unknown>) : {};
+        const errorCode = typeof errorPayload.code === "string" ? errorPayload.code : "";
+        const errorMessage = String(errorPayload.error || errorPayload.message || "Request failed");
         if (response.status === 429) {
           return {
             success: false,
@@ -53,11 +57,16 @@ export const useApi = () => {
             message: "Quota Exceeded",
           };
         }
+        if (response.status === 503 && errorCode === "provider_rate_limited") {
+          return {
+            success: false,
+            error: "provider_rate_limited",
+            message: errorMessage,
+          };
+        }
         return {
           success: false,
-          error: (typeof data === "object" && data !== null && ("error" in data || "message" in data))
-            ? (String((data as Record<string, unknown>).error || (data as Record<string, unknown>).message || "Request failed"))
-            : "Request failed",
+          error: errorMessage,
         };
       }
 

@@ -42,7 +42,7 @@ async function lookupAddressFromCoords(lng: number, lat: number, token: string):
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${token}&types=address,place,locality,neighborhood&limit=1`;
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${token}&types=address,place,locality,neighborhood&limit=1&language=en`;
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
     if (!res.ok) return "";
@@ -64,7 +64,7 @@ async function forwardGeocode(
 ): Promise<{ lat: number; lng: number; address: string } | null> {
   try {
     const bboxParam = bbox ? `&bbox=${bbox}` : "";
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&types=address,place,locality,neighborhood,poi&limit=1${bboxParam}`;
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&types=address,place,locality,neighborhood,poi&limit=1&language=en${bboxParam}`;
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
@@ -178,7 +178,7 @@ const PinningLayer = ({
 
     setIsLoading(true);
     setShowManualInput(false);
-    console.log(`[PinningLayer] moveEnd — center: lat=${lat.toFixed(5)}, lng=${lng.toFixed(5)}`);
+    if (import.meta.env.DEV) console.debug(`[PinningLayer] moveEnd — center: lat=${lat.toFixed(5)}, lng=${lng.toFixed(5)}`);
 
     // Get mapbox access token from the map instance
     const token = mapboxgl.accessToken as string;
@@ -186,7 +186,7 @@ const PinningLayer = ({
     // Nuclear baseline: disable geocoding + POI calls.
     const addr = "TEST LOCATION";
     const pois: NearbyPOI[] = [];
-    console.log(`[PinningLayer] Baseline address="${addr}", geocoding disabled`);
+    if (import.meta.env.DEV) console.debug(`[PinningLayer] Baseline address="${addr}", geocoding disabled`);
 
     // Turf.js distance from device GPS to center pin
     let dist = 0;

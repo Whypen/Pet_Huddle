@@ -1,18 +1,75 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Copy, Send, X } from "lucide-react";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { buildSocialShareLinks } from "@/lib/socialShare";
 import { toast } from "sonner";
+import { useNavigate } from "react-router-dom";
 
 interface ShareSheetProps {
   open: boolean;
   onClose: () => void;
   url: string;
   text: string;
+  title?: string;
+  imageUrl?: string;
+  onShareAction?: () => void;
 }
 
-export const ShareSheet = ({ open, onClose, url, text }: ShareSheetProps) => {
+export const ShareSheet = ({ open, onClose, url, text, title, imageUrl, onShareAction }: ShareSheetProps) => {
+  const navigate = useNavigate();
   const links = buildSocialShareLinks(url, text);
+  const payloadText = `${text} ${url}`.trim();
+
+  const handleSystemShare = async () => {
+    if (!navigator.share) return false;
+    try {
+      const basePayload: ShareData = {
+        title: title || "Huddle",
+        text,
+        url,
+      };
+
+      if (imageUrl && typeof navigator.canShare === "function" && typeof File !== "undefined") {
+        try {
+          const response = await fetch(imageUrl);
+          if (response.ok) {
+            const blob = await response.blob();
+            const ext = blob.type.split("/")[1] || "jpg";
+            const file = new File([blob], `huddle-share.${ext}`, { type: blob.type || "image/jpeg" });
+            const filePayload: ShareData = { ...basePayload, files: [file] };
+            if (navigator.canShare(filePayload)) {
+              await navigator.share(filePayload);
+              toast.success("Shared");
+              return true;
+            }
+          }
+        } catch {
+          // Fall back to text+url sharing if file fetch fails
+        }
+      }
+
+      await navigator.share(basePayload);
+      toast.success("Shared");
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        toast.info("Share canceled");
+        return true;
+      }
+      toast.error("Unable to share right now");
+      return true;
+    }
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(payloadText);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Failed to copy link");
+    }
+  };
+
   return (
     <AnimatePresence>
       {open && (
@@ -20,54 +77,74 @@ export const ShareSheet = ({ open, onClose, url, text }: ShareSheetProps) => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[4000] bg-black/50 flex items-center justify-center px-6"
+          className="fixed inset-0 z-[4000] bg-black/50 flex items-center justify-center px-4"
           onClick={onClose}
         >
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 12, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
+            className="bg-card rounded-2xl p-4 max-w-[420px] w-full shadow-elevated"
           >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold text-brandText">Share to...</h3>
-              <button onClick={onClose}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-brandText">Share</h3>
+              <button onClick={onClose} className="rounded-full p-1 hover:bg-muted">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="grid grid-cols-4 gap-3 mb-4">
-              <a className="flex flex-col items-center gap-1 text-xs text-muted-foreground" href={links.whatsapp} target="_blank" rel="noreferrer">
-                <span className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center">WA</span>
+
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.whatsapp} target="_blank" rel="noreferrer" onClick={onShareAction}>
                 WhatsApp
               </a>
-              <a className="flex flex-col items-center gap-1 text-xs text-muted-foreground" href={links.facebook} target="_blank" rel="noreferrer">
-                <span className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center">FB</span>
+              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.facebook} target="_blank" rel="noreferrer" onClick={onShareAction}>
                 Facebook
               </a>
-              <a className="flex flex-col items-center gap-1 text-xs text-muted-foreground" href={links.messenger} target="_blank" rel="noreferrer">
-                <span className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center">MS</span>
-                Messenger
+              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.threads} target="_blank" rel="noreferrer" onClick={onShareAction}>
+                Threads
               </a>
-              <a className="flex flex-col items-center gap-1 text-xs text-muted-foreground" href={links.instagram} target="_blank" rel="noreferrer">
-                <span className="w-10 h-10 rounded-full bg-pink-500 text-white flex items-center justify-center">IG</span>
+              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.instagram} target="_blank" rel="noreferrer" onClick={onShareAction}>
                 Instagram
               </a>
+              <button
+                type="button"
+                className="neu-rest rounded-xl p-3 text-center text-xs"
+                onClick={() => {
+                  onShareAction?.();
+                  navigate(`/chats?shareUrl=${encodeURIComponent(url)}`);
+                  onClose();
+                }}
+              >
+                Huddle Chats
+              </button>
+              <button
+                type="button"
+                className="neu-rest rounded-xl p-3 text-center text-xs"
+                onClick={() => {
+                  onShareAction?.();
+                  void copyLink();
+                }}
+              >
+                Copy Link
+              </button>
             </div>
-            <Button
-              variant="outline"
+
+            <NeuButton
+              variant="secondary"
               className="w-full"
               onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(`${text} ${url}`.trim());
-                  toast.success("Link copied to clipboard!");
-                } catch {
-                  toast.error("Failed to copy link");
+                onShareAction?.();
+                const usedSystem = await handleSystemShare();
+                if (!usedSystem) {
+                  await copyLink();
                 }
+                onClose();
               }}
             >
-              Copy Link
-            </Button>
+              <Send className="w-4 h-4" />
+              Share
+            </NeuButton>
           </motion.div>
         </motion.div>
       )}

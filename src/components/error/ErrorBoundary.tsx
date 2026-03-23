@@ -1,6 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { LanguageContext } from "@/contexts/LanguageContext";
 
 interface Props {
@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="min-h-svh bg-background flex items-center justify-center p-6">
           <div className="max-w-md w-full text-center space-y-6">
             {/* Error Icon */}
             <div className="w-20 h-20 mx-auto rounded-full bg-destructive/10 flex items-center justify-center">
@@ -89,21 +89,21 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Actions */}
             <div className="flex flex-col gap-3">
-              <Button
+              <NeuButton
                 onClick={this.handleRetry}
                 className="w-full h-12 rounded-xl"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
                 {t("Try Again")}
-              </Button>
-              <Button
+              </NeuButton>
+              <NeuButton
                 variant="outline"
                 onClick={this.handleGoHome}
                 className="w-full h-12 rounded-xl"
               >
                 <Home className="w-4 h-4 mr-2" />
                 {t("Go to Home")}
-              </Button>
+              </NeuButton>
             </div>
 
             {/* Help Text */}
