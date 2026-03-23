@@ -7,7 +7,7 @@ const Terms = () => {
   const { t } = useLanguage();
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
+    <div className="h-full min-h-0 w-full max-w-full overflow-x-hidden">
       <GlobalHeader />
       <header className="flex items-center gap-3 px-4 border-b border-border h-12">
         <BackButton />

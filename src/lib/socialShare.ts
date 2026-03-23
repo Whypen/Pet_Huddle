@@ -1,9 +1,8 @@
 export type SocialShareLinks = {
   whatsapp: string;
   facebook: string;
-  messenger: string;
   instagram: string;
-  twitter: string;
+  threads: string;
 };
 
 export const buildSocialShareLinks = (url: string, text: string): SocialShareLinks => {
@@ -12,8 +11,7 @@ export const buildSocialShareLinks = (url: string, text: string): SocialShareLin
   return {
     whatsapp: `https://wa.me/?text=${encodedText}`,
     facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-    messenger: `fb-messenger://share?link=${encodedUrl}`,
-    instagram: "https://www.instagram.com/reels/create/",
-    twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodedUrl}`,
+    instagram: `https://www.instagram.com/?url=${encodedUrl}`,
+    threads: `https://www.threads.net/intent/post?text=${encodedText}`,
   };
 };

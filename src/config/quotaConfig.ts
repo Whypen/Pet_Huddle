@@ -67,6 +67,7 @@ export type QuotaCopy = {
   };
   filters: {
     locked: string;
+    goldLocked: string;
   };
   familyInvite: {
     nonGold: string;
@@ -147,7 +148,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
   },
   gold: {
     aiVetUploadsPerDay: 40,
-    discoveryViewsPerDay: null,
+    discoveryViewsPerDay: 400,
     discoveryLabel: "Unlimited Discovery",
     discoveryPrioritySortWeight: 3,
     discoveryPriorityLabel: "3x visibility",
@@ -170,7 +171,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
 const COPY: QuotaCopy = {
   discovery: {
     exhausted: {
-      free: "Ready to expand the pack? Upgrade to Huddle+ for more or Huddle Gold for unlimited profiles.",
+      free: "Taking a \"paws.\" You’ve reached your daily discovery limit. Come back tomorrow or upgrade to huddle+ for more browsing",
     },
   },
   threads: {
@@ -213,6 +214,7 @@ const COPY: QuotaCopy = {
   },
   filters: {
     locked: "Unlock with Huddle+ or Gold to use this filter.",
+    goldLocked: "Unlock with Gold to use this filter.",
   },
   familyInvite: {
     nonGold: "Upgrade to Gold for Family Sharing.",

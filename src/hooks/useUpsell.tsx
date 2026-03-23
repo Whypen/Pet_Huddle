@@ -7,6 +7,7 @@ import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
+import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 
 export type UpsellType = "star" | "emergency_alert" | "media" | "family_slot" | null;
 
@@ -56,7 +57,8 @@ export const useUpsell = () => {
   }, [user]);
 
   const effectiveTier = useCallback(
-    (snap: QuotaSnapshot | null) => String(profile?.effective_tier || profile?.tier || snap?.tier || "free").toLowerCase(),
+    (snap: QuotaSnapshot | null) =>
+      normalizeQuotaTier(String(profile?.effective_tier || profile?.tier || snap?.tier || "free")),
     [profile?.effective_tier, profile?.tier]
   );
 
@@ -69,7 +71,7 @@ export const useUpsell = () => {
 
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "gold" ? 3 : 0;
+    const base = getQuotaCapsForTier(tier).starsPerMonth;
     const used = snap?.stars_used_cycle ?? 0;
     const extra = snap?.extra_stars ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
@@ -79,7 +81,7 @@ export const useUpsell = () => {
         isOpen: true,
         type: "star",
         title: t("Out of Stars!"),
-        description: t("social.star_prompt"),
+        description: quotaConfig.copy.stars.exhausted,
         price: 4.99,
       });
       return false;
@@ -98,7 +100,7 @@ export const useUpsell = () => {
     // Broadcast usage is enforced server-side by trigger, but we can provide an early upsell hint.
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "free" ? 5 : 20;
+    const base = getQuotaCapsForTier(tier).broadcastAlertsPerMonth;
     const used = snap?.broadcast_alerts_week ?? 0;
     const extra = snap?.extra_broadcast_72h ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
@@ -108,7 +110,7 @@ export const useUpsell = () => {
         isOpen: true,
         type: "emergency_alert",
         title: t("No Emergency Alerts Left"),
-        description: t("Buy an additional Broadcast token to send one more alert."),
+        description: quotaConfig.copy.broadcast.quotaExhausted[tier],
         price: 2.99,
       });
       return false;
@@ -126,7 +128,7 @@ export const useUpsell = () => {
 
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const base = tier === "gold" ? 50 : tier === "premium" ? 10 : 0;
+    const base = getQuotaCapsForTier(tier).aiVetUploadsPerDay;
     const used = snap?.media_usage_today ?? 0;
     const extra = snap?.extra_media_10 ?? 0;
     const remaining = Math.max(0, base - used) + Math.max(0, extra);
@@ -136,7 +138,7 @@ export const useUpsell = () => {
         isOpen: true,
         type: "media",
         title: t("Out of Media Credits"),
-        description: t("Upgrade or buy a +10 Media add-on to continue uploading images."),
+        description: quotaConfig.copy.aiVet.exhausted[tier],
         price: 3.99,
       });
       return false;
@@ -155,7 +157,9 @@ export const useUpsell = () => {
     const ownerId = profile?.family_owner_id || user.id;
     const snap = await fetchQuotaSnapshot();
     const tier = effectiveTier(snap);
-    const totalSlots = tier === "gold" ? 1 : 0;
+    const includedSlots = tier === "free" ? 0 : 1;
+    const addOnSlots = Number(profile?.family_slots || 0);
+    const totalSlots = Math.min(4, Math.max(0, includedSlots) + Math.max(0, addOnSlots));
 
     const { count } = await supabase
       .from("family_members" as "profiles")
@@ -170,14 +174,14 @@ export const useUpsell = () => {
         isOpen: true,
         type: "family_slot",
         title: t("Family Limit Reached"),
-        description: t("Upgrade to Gold to invite 1 family member."),
+        description: quotaConfig.copy.familyInvite.nonGold,
         price: 5.99,
       });
       return false;
     }
 
     return true;
-  }, [effectiveTier, fetchQuotaSnapshot, t, user, profile?.family_owner_id]);
+  }, [effectiveTier, fetchQuotaSnapshot, t, user, profile?.family_owner_id, profile?.family_slots]);
 
   /**
    * Close upsell modal

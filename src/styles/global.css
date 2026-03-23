@@ -1,0 +1,471 @@
+/* ============================================================
+   UI CONTRACT v3 — Canvas + Glass Utilities + Keyframes
+   Import AFTER tokens.css. Import BEFORE component styles.
+   ============================================================ */
+
+
+/* ─── A.1 Canvas — full-bleed fixed gradient ──────────────── */
+
+html,
+body,
+#root {
+  background: var(--canvas);
+  background-attachment: fixed;
+  min-height: 100svh;   /* RULE 14: svh not vh — respects mobile browser chrome */
+  display: flex;
+  flex-direction: column;
+}
+
+:root {
+  --app-max-width: 430px;
+}
+
+/* RULE 10: Urbanist exclusively */
+html {
+  font-family: var(--font);
+}
+
+/* RULE 14: reduced-motion compliance */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration:       0.01ms !important;
+    animation-duration:        0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Section 5 glass fallback (all elevation tiers) */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-e1,
+  .glass-e2,
+  .glass-e3 {
+    background:   rgba(255,255,255,0.95);
+    border-color: rgba(200,205,220,0.60);
+    box-shadow:   0 2px 12px rgba(0,0,0,0.10);
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   SECTION 6 — NeuControl Shadow Utility Classes
+   All 5 layers required on every control. Section 6 canonical.
+   Drop shadow family: rgba(163,168,190,*) — neutral ONLY.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Resting surface (default) ────────────────────────────── */
+.neu-rest {
+  background:  rgba(255,255,255,0.82);              /* Layer 1 */
+  border:      1px solid rgba(255,255,255,0.65);    /* Layer 5 */
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.28),            /* Layer 2 neutral drop */
+    -4px -4px 10px rgba(255,255,255,0.84),           /* Layer 3 outer lift */
+    inset 0 1px 0 rgba(255,255,255,0.90);            /* Layer 4 inner bevel */
+  transition:
+    background   150ms var(--ease-out),
+    box-shadow   150ms var(--ease-out),
+    transform    150ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    opacity      150ms var(--ease-out);
+}
+
+/* ── Pressed (bevel inversion) ────────────────────────────── */
+.neu-rest:active,
+.neu-pressed {
+  background: rgba(255,255,255,0.72);
+  transform:  scale(0.97);
+  box-shadow:
+    inset 3px 3px 9px rgba(163,168,190,0.28),       /* Layer 2 inverted */
+    inset -2px -2px 6px rgba(255,255,255,0.82);     /* Layer 3 inverted */
+  /* Layer 4 removed — concave surface */
+}
+
+/* ── Selected (chip-active / toggle-on / segmented-active) ── */
+.neu-selected {
+  background:  rgba(33,69,207,0.08);
+  border:      1px solid rgba(33,69,207,0.22);
+  color:       #2145CF;
+  box-shadow:
+    inset 2px 2px 6px rgba(163,168,190,0.20),
+    inset -1px -1px 4px rgba(255,255,255,0.68);
+}
+
+/* ── Focus ring (keyboard nav) ───────────────────────────── */
+.neu-rest:focus-visible {
+  outline: none;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.28),
+    -4px -4px 10px rgba(255,255,255,0.84),
+    inset 0 1px 0 rgba(255,255,255,0.90),
+    0 0 0 2px #2145CF,
+    0 0 0 4px rgba(33,69,207,0.18);
+}
+
+/* ── Primary (Huddle Blue) ───────────────────────────────── */
+.neu-primary {
+  background:  linear-gradient(145deg, #2A53E0 0%, #1C3ECC 100%);
+  border:      1px solid rgba(255,255,255,0.22);
+  color:       #FFFFFF;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.32),            /* Layer 2 neutral */
+    -4px -4px 10px rgba(96,141,255,0.38),           /* Layer 3 blue lift */
+    inset 0 1px 0 rgba(255,255,255,0.18);           /* Layer 4 inner bevel */
+  transition:
+    background   150ms var(--ease-out),
+    box-shadow   150ms var(--ease-out),
+    transform    150ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    opacity      150ms var(--ease-out);
+}
+
+.neu-primary:active {
+  box-shadow:
+    inset 4px 4px 10px rgba(0,0,0,0.22),
+    inset -3px -3px 8px rgba(255,255,255,0.10);
+  transform: scale(0.97);
+}
+
+.neu-primary:focus-visible {
+  outline: none;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.32),
+    -4px -4px 10px rgba(96,141,255,0.38),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    0 0 0 2px #2145CF,
+    0 0 0 4px rgba(33,69,207,0.18);
+}
+
+/* ── Gold (tier="gold" guard enforced in component) ───────── */
+.neu-gold {
+  background:  linear-gradient(145deg, #D9B528 0%, #BF9B18 100%);
+  border:      1px solid rgba(255,255,255,0.22);
+  color:       #2A2400;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.28),
+    -4px -4px 10px rgba(255,220,70,0.48),
+    inset 0 1px 0 rgba(255,255,255,0.22);
+  transition:
+    background   150ms var(--ease-out),
+    box-shadow   150ms var(--ease-out),
+    transform    150ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    opacity      150ms var(--ease-out);
+}
+
+.neu-gold:active {
+  box-shadow:
+    inset 4px 4px 10px rgba(0,0,0,0.18),
+    inset -3px -3px 8px rgba(255,255,255,0.10);
+  transform: scale(0.97);
+}
+
+.neu-gold:focus-visible {
+  outline: none;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.28),
+    -4px -4px 10px rgba(255,220,70,0.48),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    0 0 0 2px #CFAB21,
+    0 0 0 4px rgba(207,171,33,0.22);
+}
+
+/* ── Danger ───────────────────────────────────────────────── */
+.neu-danger {
+  background:  rgba(255,255,255,0.80);
+  border:      1px solid rgba(232,69,69,0.22);
+  color:       #E84545;
+  box-shadow:
+    5px 5px 14px rgba(163,168,190,0.22),
+    -4px -4px 10px rgba(255,255,255,0.84),
+    inset 0 1px 0 rgba(255,255,255,0.88);
+  transition:
+    background   150ms var(--ease-out),
+    box-shadow   150ms var(--ease-out),
+    transform    150ms var(--ease-out),
+    border-color 150ms var(--ease-out),
+    opacity      150ms var(--ease-out);
+}
+
+.neu-danger:active {
+  box-shadow:
+    inset 3px 3px 9px rgba(232,69,69,0.12),
+    inset -2px -2px 6px rgba(255,255,255,0.80);
+  transform: scale(0.97);
+}
+
+/* ── Tertiary (text-only) ─────────────────────────────────── */
+.neu-tertiary {
+  background:  transparent;
+  border:      1px solid rgba(255,255,255,0.42);
+  box-shadow:  none;
+  color:       var(--text-secondary, #4a4a4a);
+  transition:
+    background   150ms var(--ease-out),
+    transform    150ms var(--ease-out);
+}
+
+.neu-tertiary:hover  { background: rgba(255,255,255,0.28); }
+.neu-tertiary:active { background: rgba(255,255,255,0.42); transform: scale(0.97); }
+
+/* ── Disabled (shared) ───────────────────────────────────── */
+.neu-disabled,
+[disabled].neu-rest,
+[disabled].neu-primary,
+[disabled].neu-gold,
+[disabled].neu-danger,
+[disabled].neu-tertiary {
+  opacity:        0.38;
+  box-shadow:     none;
+  pointer-events: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   SECTION 7 — FormField Shadow Utility Classes
+   Inset shadow recipe (neutral family, not blue-tinted).
+   ═══════════════════════════════════════════════════════════ */
+
+.form-field-rest {
+  background:    rgba(255,255,255,0.72);
+  border:        1px solid rgba(255,255,255,0.55);
+  box-shadow:
+    inset 2px 2px 6px rgba(163,168,190,0.18),
+    inset -1px -1px 4px rgba(255,255,255,0.80);
+  border-radius: 14px;
+  height:        52px;
+  padding:       0 16px;
+  font-family:   var(--font);
+  font-size:     15px;
+  color:         var(--text-primary, #424965);
+  transition:
+    border-color 150ms var(--ease-out),
+    box-shadow   150ms var(--ease-out);
+  width:         100%;
+  min-width:     0;
+}
+
+.form-field-focus,
+.form-field-rest:focus-within {
+  border-color: rgba(255,255,255,0.62);
+  box-shadow:
+    inset 2px 2px 6px rgba(163,168,190,0.18),
+    inset -1px -1px 4px rgba(255,255,255,0.80),
+    0 0 0 2px rgba(163,168,190,0.16);
+  outline: none;
+}
+
+.form-field-error {
+  border-color: rgba(232,69,69,0.42);
+  box-shadow:
+    inset 2px 2px 6px rgba(232,69,69,0.08),
+    0 0 0 2px rgba(232,69,69,0.14);
+}
+
+.form-field-disabled {
+  opacity:        0.45;
+  pointer-events: none;
+}
+
+.field-input-core {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding-left: 0;
+  padding-right: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary, #424965);
+}
+
+.field-input-core::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.field-input-core:focus,
+.field-input-core:focus-visible,
+.field-input-core:active {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.field-input-core[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.field-input-core[type="number"]::-webkit-outer-spin-button,
+.field-input-core[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Browser autofill neutralization: prevent blue-tinted background on saved values */
+.form-field-rest input:-webkit-autofill,
+.form-field-rest input:-webkit-autofill:hover,
+.form-field-rest input:-webkit-autofill:focus,
+.form-field-rest textarea:-webkit-autofill,
+.form-field-rest textarea:-webkit-autofill:hover,
+.form-field-rest textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary, #424965);
+  caret-color: var(--text-primary, #424965);
+  background-color: transparent !important;
+  -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+
+/* ─── A.2 Glass Utility Classes ────────────────────────────── */
+/* Permitted backdrop-filter consumers: exactly these 5 classes.
+   DO NOT add backdrop-filter blur ad-hoc anywhere else.         */
+
+.glass-card {
+  background:              var(--glass-card-bg);
+  backdrop-filter:         blur(var(--glass-card-blur));
+  -webkit-backdrop-filter: blur(var(--glass-card-blur));
+  border:                  var(--glass-card-border);
+  box-shadow:              var(--glass-card-shadow);
+  border-radius:           var(--glass-card-radius);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-l2 {
+  background:              var(--glass-l2-bg);
+  backdrop-filter:         blur(var(--glass-l2-blur));
+  -webkit-backdrop-filter: blur(var(--glass-l2-blur));
+  border:                  var(--glass-l2-border);
+  box-shadow:              var(--glass-l2-shadow);
+  border-radius:           var(--glass-l2-radius);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-l3 {
+  background:              var(--glass-l3-bg);
+  backdrop-filter:         blur(var(--glass-l3-blur));
+  -webkit-backdrop-filter: blur(var(--glass-l3-blur));
+  border:                  var(--glass-l3-border);
+  box-shadow:              var(--glass-l3-shadow);
+  border-radius:           var(--glass-l3-radius);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-bar {
+  background:              var(--glass-bar-bg);
+  backdrop-filter:         blur(var(--glass-bar-blur));
+  -webkit-backdrop-filter: blur(var(--glass-bar-blur));
+  border-bottom:           var(--glass-bar-border);
+}
+
+.glass-nav {
+  background:              var(--glass-nav-bg);
+  backdrop-filter:         blur(var(--glass-nav-blur));
+  -webkit-backdrop-filter: blur(var(--glass-nav-blur));
+  border:                  var(--glass-nav-border);
+  box-shadow:              var(--glass-nav-shadow);
+  overflow:                hidden;
+}
+
+
+/* ─── A.2 Fallback — no backdrop-filter support ────────────── */
+
+@supports not (backdrop-filter: blur(1px)) {
+  .glass-card,
+  .glass-l2,
+  .glass-l3 {
+    background: rgba(255,255,255,0.95);
+  }
+}
+
+
+/* ─── A.8 Keyframes ─────────────────────────────────────────
+   Referenced by: motion table in A.8.
+   Use CSS var durations + easings when animating.              */
+
+/* Skeleton shimmer — 1400ms linear infinite
+   Apply: background-size: 200% auto; animation: v3-shimmer var(--dur-shimmer) linear infinite */
+@keyframes v3-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+/* Sheet entry — translateY(100%→0) 350ms ease-spring */
+@keyframes v3-sheet-in {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Modal entry — scale(0.96→1) + opacity 300ms ease-out */
+@keyframes v3-modal-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Page reveal — opacity + translateY(10px→0) 200ms ease-out */
+@keyframes v3-page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Send button appear — scale(0→1) 150ms ease-spring */
+@keyframes v3-send-in {
+  from { transform: scale(0); }
+  to   { transform: scale(1); }
+}
+
+/* Send button disappear — scale(1→0) 100ms ease-in */
+@keyframes v3-send-out {
+  from { transform: scale(1); }
+  to   { transform: scale(0); }
+}
+
+/* Broadcast FAB pulse ring — 2s cubic-bezier(0.4,0,0.6,1) infinite */
+@keyframes v3-pulse-ring {
+  0%   { opacity: 0.8; transform: scale(1); }
+  100% { opacity: 0;   transform: scale(1.5); }
+}
+
+/* Upload zone border idle pulse — 2.2s ease-in-out infinite */
+@keyframes v3-border-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.6; }
+}
+
+/* Signup step exit — 180ms ease-in */
+@keyframes v3-step-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-16px); }
+}
+
+/* Signup step enter — 240ms ease-out */
+@keyframes v3-step-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* AI typing dot pulse — scale(0.4→1) stagger 0/120/240ms, 800ms loop */
+@keyframes v3-dot-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.4); }
+  50%       { opacity: 1;    transform: scale(1); }
+}
+
+
+/* ─── A.8 prefers-reduced-motion ────────────────────────────── */
+/* Instant color changes are allowed; all motion is off.         */
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-card,
+  .glass-l2,
+  .glass-l3,
+  .glass-bar,
+  .glass-nav {
+    transition: none !important;
+    animation: none !important;
+  }
+}

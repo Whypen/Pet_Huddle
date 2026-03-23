@@ -1,9 +1,13 @@
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, User, Settings, Shield, LogOut, Crown, Bug, FileText, Scale } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
+import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
+import { supabase } from "@/integrations/supabase/client";
+import { getQuotaCapsForTier } from "@/config/quotaConfig";
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -14,10 +18,53 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const navigate = useNavigate();
   const { signOut, profile } = useAuth();
   const { t } = useLanguage();
+  const [starsRemaining, setStarsRemaining] = useState<number | null>(() => {
+    const initial = Number(profile?.stars_count);
+    return Number.isFinite(initial) ? Math.max(0, initial) : null;
+  });
 
   const isVerified = profile?.is_verified === true;
-  const effectiveTier = profile?.effective_tier || profile?.tier || "free";
-  const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
+  const normalizedTier = normalizeMembershipTier(
+    String(profile?.effective_tier || profile?.tier || "free"),
+  );
+  const tierLabel = membershipTierLabel(normalizedTier);
+  const tierPillClass =
+    normalizedTier === "gold"
+      ? "bg-[#ff6a55] text-white"
+      : normalizedTier === "plus"
+        ? "bg-[#5ba4f5] text-white"
+        : "bg-[#eceff4] text-[#6e7386]";
+  const starPillClass = starsRemaining && starsRemaining > 0
+    ? "border border-[#E4E8F2] bg-white text-[#4A4965]"
+    : "border border-[#C6CAD6] bg-transparent text-[#98A0B8]";
+  const starPillLabel = `${Math.max(0, Number(starsRemaining || 0))} ⭐`;
+
+  useEffect(() => {
+    if (!isOpen || !profile?.id) return;
+    let cancelled = false;
+    const loadStars = async () => {
+      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+      if (snapshot.error) {
+        if (!cancelled) {
+          const fallback = Number(profile?.stars_count);
+          setStarsRemaining(Number.isFinite(fallback) ? Math.max(0, fallback) : 0);
+        }
+        return;
+      }
+      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
+      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
+      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
+      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
+      const used = Number(typed.stars_used_cycle || 0);
+      const extra = Number(typed.extra_stars || 0);
+      const nextRemaining = Math.max(0, cap - used) + Math.max(0, extra);
+      if (!cancelled) setStarsRemaining(nextRemaining);
+    };
+    void loadStars();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, profile?.effective_tier, profile?.id, profile?.stars_count, profile?.tier]);
 
   const menuItems = [
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
@@ -102,16 +149,25 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                   <div>
                     <p className="font-semibold">{profile?.display_name || t("User")}</p>
                     {/* UAT: remove 'identity pending' status text; keep badge on avatar only */}
-                    <span
-                      className={cn(
-                        "inline-block mt-0.5 text-xs font-medium px-2 py-0.5 rounded-full",
-                        isPremium
-                          ? "bg-primary/10 text-primary"
-                          : "bg-muted text-muted-foreground"
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <span
+                        className={cn("inline-block text-xs font-medium px-2 py-0.5 rounded-full", tierPillClass)}
+                      >
+                        {tierLabel}
+                      </span>
+                      {starsRemaining !== null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            navigate("/premium");
+                          }}
+                          className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors", starPillClass)}
+                        >
+                          {starPillLabel}
+                        </button>
                       )}
-                    >
-                      {isPremium ? t("header.premium") : t("header.free")}
-                    </span>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 
 type ChatMessage = {
   id: string;
@@ -29,6 +30,9 @@ type Attachment = {
 type ParsedMessage = {
   text: string;
   attachments: Attachment[];
+  kind?: string | null;
+  senderId?: string | null;
+  recipientId?: string | null;
 };
 
 type CounterpartProfile = {
@@ -161,6 +165,16 @@ const ChatDialogue = () => {
   );
 
   const parseMessageContent = useCallback((content: string): ParsedMessage => {
+    const starParsed = parseStarChatContent(content);
+    if (isStarIntroKind(starParsed.kind)) {
+      return {
+        text: starParsed.text || "Star connection started.",
+        attachments: [],
+        kind: starParsed.kind,
+        senderId: starParsed.senderId,
+        recipientId: starParsed.recipientId,
+      };
+    }
     try {
       const parsed = JSON.parse(content) as { text?: string; attachments?: Attachment[] };
       if (parsed && typeof parsed === "object" && Array.isArray(parsed.attachments)) {
@@ -266,6 +280,28 @@ const ChatDialogue = () => {
     setMessages(nextMessages);
     void markMessagesAsRead(nextMessages);
   }, [markMessagesAsRead]);
+
+  const latestStarIntro = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const parsed = parseMessageContent(messages[index].content);
+      if (isStarIntroKind(parsed.kind || null)) {
+        return parsed;
+      }
+    }
+    return null;
+  }, [messages, parseMessageContent]);
+  const starSenderId = latestStarIntro?.senderId || null;
+  const firstStarUserMessageId = useMemo(() => {
+    if (!starSenderId) return null;
+    for (const message of messages) {
+      const parsed = parseMessageContent(message.content);
+      if (isStarIntroKind(parsed.kind || null)) continue;
+      if (message.sender_id !== starSenderId) continue;
+      if (parsed.attachments.length === 0 && !parsed.text.trim()) continue;
+      return message.id;
+    }
+    return null;
+  }, [messages, parseMessageContent, starSenderId]);
 
   const loadCounterpart = useCallback(async (nextRoomId: string, fallbackName: string, hintUserId?: string | null) => {
     if (!profile?.id) return;
@@ -892,6 +928,15 @@ const ChatDialogue = () => {
             </span>
           </div>
         )}
+        {!isGroup && latestStarIntro && (
+          <div className="flex justify-center py-1">
+            <span className="rounded-full bg-[rgba(245,200,92,0.22)] px-3 py-1 text-xs font-semibold text-[#8A6C1E]">
+              {latestStarIntro.senderId === profile?.id
+                ? "Star sent! You’ve jumped to the front of the line."
+                : `${counterpart?.displayName || "Someone"} used a Star to reach you. Say hi!`}
+            </span>
+          </div>
+        )}
         {messages.length === 0 && !isGroup ? (
           <div className="mt-auto rounded-[18px] border border-white/45 bg-white/55 p-3 shadow-[0_10px_24px_rgba(33,71,201,0.10)] backdrop-blur-[18px]">
             <p className="text-sm font-semibold text-[#4F5677]">Paw-Vibe Check?</p>
@@ -913,6 +958,17 @@ const ChatDialogue = () => {
             const mine = message.sender_id === profile?.id;
             const parsed = parseMessageContent(message.content);
             const attachments = parsed.attachments;
+            const normalizedText = parsed.text.trim();
+            const isStarIntro = !isGroup && isStarIntroKind(parsed.kind || null);
+            const isStarFirstUserMessage =
+              !isGroup &&
+              firstStarUserMessageId != null &&
+              message.id === firstStarUserMessageId;
+            const isMembershipHint =
+              isGroup &&
+              attachments.length === 0 &&
+              normalizedText.length > 0 &&
+              (/just joined the chat\.$/i.test(normalizedText) || /left the group\.$/i.test(normalizedText));
             const previous = index > 0 ? messages[index - 1] : null;
             const previousDay = previous?.created_at ? new Date(previous.created_at).toDateString() : "";
             const currentDay = message.created_at ? new Date(message.created_at).toDateString() : "";
@@ -927,48 +983,71 @@ const ChatDialogue = () => {
                     </span>
                   </div>
                 ) : null}
-                {isGroup && !mine && (
+                {isGroup && !mine && !isMembershipHint && (
                   <div className="pl-1 mb-0.5 text-[11px] font-semibold text-muted-foreground">
                     {senderNames[message.sender_id] || ""}
                   </div>
                 )}
-                <div
-                  className={cn(
-                    "w-fit max-w-[90%] rounded-xl border px-3 py-2 text-sm",
-                    mine
-                      ? "ml-auto border-[rgba(255,255,255,0.36)] bg-brandBlue text-white"
-                      : "border-[rgba(163,168,190,0.35)] bg-muted text-brandText"
-                  )}
-                >
-                  {attachments.length > 0 && (
-                    <div className={cn("mb-2 grid grid-cols-2 gap-2", attachments.length === 1 && "grid-cols-1")}>
-                      {attachments.map((attachment, idx) => (
-                        <a key={`${message.id}-att-${idx}`} href={attachment.url} target="_blank" rel="noreferrer">
-                          {attachment.mime.startsWith("video/") ? (
-                            <video src={attachment.url} controls className="h-36 w-full rounded-lg border border-white/30 object-cover" />
-                          ) : (
-                            <img src={attachment.url} alt={attachment.name} className="h-36 w-full rounded-lg border border-white/30 object-cover" />
-                          )}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {parsed.text ? <div className="whitespace-pre-wrap break-words">{parsed.text}</div> : null}
-                </div>
-                <div className={cn("mt-1 flex items-center gap-1 text-[11px] text-[#9AA0B5]", mine ? "justify-end pr-1" : "justify-start pl-1")}>
-                  <span>{formatMessageTime(message.created_at)}</span>
-                  {mine && !isGroup && (
-                    <span
-                      className={cn(
-                        "font-semibold leading-none",
-                        readMessageIds.has(message.id) ? "text-brandBlue" : "text-[#9AA0B5]"
-                      )}
-                      aria-label={readMessageIds.has(message.id) ? "read" : "sent"}
-                    >
-                      {readMessageIds.has(message.id) ? "✓✓" : "✓"}
+                {isMembershipHint ? (
+                  <div className="flex justify-center py-1">
+                    <span className="rounded-full bg-[rgba(120,128,150,0.15)] px-3 py-1 text-xs font-medium text-[#8C93AA]">
+                      {normalizedText}
                     </span>
-                  )}
-                </div>
+                  </div>
+                ) : isStarIntro ? (
+                  <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
+                    <div
+                      className={cn(
+                        "w-fit max-w-[90%] rounded-xl border px-3 py-2 text-sm",
+                        "border-[rgba(220,170,52,0.52)] bg-[rgba(245,200,92,0.26)] text-[#6F5716]"
+                      )}
+                    >
+                      {mine ? "You sent a Star ⭐" : "New Star Connection ⭐"}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className={cn(
+                        "w-fit max-w-[90%] rounded-xl border px-3 py-2 text-sm",
+                        isStarFirstUserMessage
+                          ? "border-[rgba(220,170,52,0.52)] bg-[rgba(245,200,92,0.26)] text-[#6F5716]"
+                          : mine
+                          ? "ml-auto border-[rgba(255,255,255,0.36)] bg-brandBlue text-white"
+                          : "border-[rgba(163,168,190,0.35)] bg-muted text-brandText"
+                      )}
+                    >
+                      {attachments.length > 0 && (
+                        <div className={cn("mb-2 grid grid-cols-2 gap-2", attachments.length === 1 && "grid-cols-1")}>
+                          {attachments.map((attachment, idx) => (
+                            <a key={`${message.id}-att-${idx}`} href={attachment.url} target="_blank" rel="noreferrer">
+                              {attachment.mime.startsWith("video/") ? (
+                                <video src={attachment.url} controls className="h-36 w-full rounded-lg border border-white/30 object-cover" />
+                              ) : (
+                                <img src={attachment.url} alt={attachment.name} className="h-36 w-full rounded-lg border border-white/30 object-cover" />
+                              )}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                      {parsed.text ? <div className="whitespace-pre-wrap break-words">{parsed.text}</div> : null}
+                    </div>
+                    <div className={cn("mt-1 flex items-center gap-1 text-[11px] text-[#9AA0B5]", mine ? "justify-end pr-1" : "justify-start pl-1")}>
+                      <span>{formatMessageTime(message.created_at)}</span>
+                      {mine && !isGroup && (
+                        <span
+                          className={cn(
+                            "font-semibold leading-none",
+                            readMessageIds.has(message.id) ? "text-brandBlue" : "text-[#9AA0B5]"
+                          )}
+                          aria-label={readMessageIds.has(message.id) ? "read" : "sent"}
+                        >
+                          {readMessageIds.has(message.id) ? "✓✓" : "✓"}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })
@@ -1089,17 +1168,24 @@ const ChatDialogue = () => {
       <Dialog open={confirmBlockOpen} onOpenChange={setConfirmBlockOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{blockState === "blocked_by_me" ? "Unblock user" : "Block user"}</DialogTitle>
+            <DialogTitle>
+              {blockState === "blocked_by_me"
+                ? `Unblock ${counterpart?.displayName ?? "this user"}?`
+                : `Block ${counterpart?.displayName ?? "this user"}?`}
+            </DialogTitle>
             <DialogDescription>
               {blockState === "blocked_by_me"
                 ? "Allow this user to send you messages again?"
-                : "Are you sure you don't want to receive any message from this user?"}
+                : "You will no longer see their posts or alerts, and they won't be able to interact with you."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <button className="h-10 rounded-full border px-4 text-sm" onClick={() => setConfirmBlockOpen(false)}>Cancel</button>
-            <button className="h-10 rounded-full bg-brandBlue px-4 text-sm text-white" onClick={() => void handleBlockToggle()}>
-              {blockState === "blocked_by_me" ? "Unblock User" : "Block User"}
+            <button
+              className={`h-10 rounded-full px-4 text-sm text-white ${blockState === "blocked_by_me" ? "bg-brandBlue" : "bg-destructive"}`}
+              onClick={() => void handleBlockToggle()}
+            >
+              {blockState === "blocked_by_me" ? "Unblock" : "Block"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -1264,13 +1350,13 @@ const ChatDialogue = () => {
             <button
               onClick={() => {
                 setGroupInfoOpen(false);
-                setGroupManageOpen(true);
-                void loadGroupManageData();
+                if (!roomId) return;
+                navigate(`/chats?tab=groups&manage=${encodeURIComponent(roomId)}`);
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
             >
               <Settings className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm font-medium">Manage Group</span>
+              <span className="text-sm font-medium">Manager Group</span>
             </button>
 
             {/* Report group */}
@@ -1295,11 +1381,11 @@ const ChatDialogue = () => {
         </SheetContent>
       </Sheet>
 
-      {/* ── Manage Members Sheet (inline, no navigate-away) ── */}
+      {/* ── Manager Group Sheet (legacy inline path) ── */}
       <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) setGroupManageSearch(""); }}>
         <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[88vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-3 shrink-0">
-            <SheetTitle className="text-left">Manage Members</SheetTitle>
+            <SheetTitle className="text-left">Manager Group</SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
             {groupManageLoading ? (
@@ -1386,8 +1472,8 @@ const ChatDialogue = () => {
                                     p_user_id: u.id,
                                     p_category: "chats",
                                     p_kind: "group_invite",
-                                    p_title: `${inviterName} invited you to ${roomName}! 🐾`,
-                                    p_body: `${inviterName} invited you to ${roomName}! 🐾`,
+                                    p_title: "Group invite",
+                                    p_body: `${inviterName} added you to a group 🐾`,
                                     p_href: "/chats?tab=groups",
                                     p_data: { chat_id: roomId, chat_name: roomName, inviter_name: inviterName },
                                   });

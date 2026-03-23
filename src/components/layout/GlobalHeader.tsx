@@ -45,6 +45,7 @@ type NotificationRow = {
   type: "alert" | "admin" | string;
   read: boolean;
   created_at: string;
+  href?: string | null;
   metadata: Record<string, unknown> | null;
   data: Record<string, unknown> | null;
   title?: string | null;
@@ -138,6 +139,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
+  const showUnreadDot = !notifOpen && unreadCount > 0;
 
   const isVerified = profile?.is_verified === true;
   const dob = (profile as Record<string, unknown> | null)?.dob as string | null ?? null;
@@ -288,15 +290,26 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         .eq("user_id" as "id", user.id)
         .order("created_at" as "id", { ascending: false })
         .limit(200);
+      if ((res as { error?: unknown }).error) {
+        if (!cancelled) {
+          setNotifRows([]);
+          setNotifLoading(false);
+          setUnreadCount(0);
+        }
+        return;
+      }
       if (cancelled) return;
-      const rows = ((res.data ?? []) as NotificationRow[]).filter(
+      const allRows = (res.data ?? []) as NotificationRow[];
+      const rows = allRows.filter(
         (r) => !r.data?.skip_history && !r.metadata?.skip_history
       );
       setNotifRows(rows);
       setNotifLoading(false);
 
-      // Mark all as read on open
-      if (!markedOnOpenRef.current && rows.length > 0) {
+      // Mark all unread as read on open, including skip_history rows.
+      // This keeps the bell badge in sync when only push-only chat rows exist.
+      const hasAnyUnread = allRows.some((row) => row.read !== true);
+      if (!markedOnOpenRef.current && hasAnyUnread) {
         markedOnOpenRef.current = true;
         setNotifRows((prev) => prev.map((r) => ({ ...r, read: true })));
         await supabase
@@ -326,6 +339,12 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     };
   }, [notifOpen, user]);
 
+  useEffect(() => {
+    if (!notifOpen) return;
+    // UX contract: opening the drawer clears the bell-dot immediately.
+    setUnreadCount(0);
+  }, [notifOpen]);
+
   // ── Notification row interaction ─────────────────────────────────────────────
   const handleNotifRowClick = (r: NotificationRow) => {
     setNotifRows((prev) => prev.map((n) => (n.id === r.id ? { ...n, read: true } : n)));
@@ -338,7 +357,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     const meta = (r.data ?? r.metadata ?? {}) as Record<string, unknown>;
     const body = String(r.body ?? r.message ?? "");
     const type = String((r.type || "")).toLowerCase();
-    const href = typeof meta.href === "string" ? meta.href : null;
+    const href =
+      (typeof meta.href === "string" && meta.href.trim() ? meta.href.trim() : null);
     const shouldForceDiscover =
       type === "wave" ||
       body.toLowerCase().includes("open discover to find out");
@@ -448,7 +468,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               className="relative shrink-0"
             >
               <Bell size={20} strokeWidth={1.75} aria-hidden />
-              {unreadCount > 0 && (
+              {showUnreadDot && (
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-brandError pointer-events-none" />
               )}
             </NeuControl>

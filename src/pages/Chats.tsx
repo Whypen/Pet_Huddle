@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -31,18 +31,67 @@ import waveHandCta from "@/assets/Wave Hand CTA.png";
 import matchPageImage from "@/assets/Match page.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
+import serviceImage from "@/assets/Notifications/Service.jpg";
+import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
 const ALL_SPECIES = [...CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS] as const;
 const ALL_SOCIAL_ROLES = [...CANONICAL_SOCIAL_ROLE_OPTIONS] as const;
-const ALL_ORIENTATIONS = [...CANONICAL_ORIENTATION_OPTIONS] as const;
+const ALL_ORIENTATIONS = CANONICAL_ORIENTATION_OPTIONS.filter(
+  (item) => !/^prefer not to say$/i.test(String(item || "").trim())
+) as unknown as readonly string[];
 const ALL_DEGREES = ["High School", "Bachelor", "Master", "PhD", "Other"] as const;
-const ALL_RELATIONSHIP_STATUSES = ["Single", "In relationship", "Married", "Open", "Divorced", "PNA"] as const;
-const ALL_LANGUAGES = ["English", "Cantonese", "Mandarin", "Japanese", "Korean", "French", "Spanish", "Other"] as const;
+const ALL_RELATIONSHIP_STATUSES = [
+  "Single",
+  "In a relationship",
+  "Open relationship",
+  "Married",
+  "Divorced",
+] as const;
+const ALL_LANGUAGES = [
+  "English",
+  "Cantonese",
+  "Mandarin",
+  "Spanish",
+  "French",
+  "Japanese",
+  "Korean",
+  "German",
+  "Portuguese",
+  "Italian",
+  "Arabic",
+  "Hindi",
+  "Bengali",
+  "Urdu",
+  "Russian",
+  "Turkish",
+  "Thai",
+  "Vietnamese",
+  "Indonesian",
+  "Malay",
+  "Tamil",
+  "Telugu",
+  "Polish",
+  "Dutch",
+  "Swedish",
+] as const;
+
+const normalizeRelationshipStatus = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized === "pna" || normalized === "prefer not to say") return "";
+  if (normalized === "in relationship") return "In a relationship";
+  if (normalized === "open") return "Open relationship";
+  if (normalized === "in a relationship") return "In a relationship";
+  if (normalized === "open relationship") return "Open relationship";
+  const exact = ALL_RELATIONSHIP_STATUSES.find((item) => item.toLowerCase() === normalized);
+  return exact || raw;
+};
 
 type DiscoveryFilters = {
   ageMin: number;
@@ -223,10 +272,11 @@ const resolveDiscoveryLocationLabel = ({
   extractDistrictToken(profileLocationName) ||
   null;
 
-type MainTab = "friends" | "groups";
+type MainTab = "friends" | "groups" | "service";
 const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "friends", label: "Friends", icon: MessageSquare },
   { id: "groups", label: "Groups", icon: Users },
+  { id: "service", label: "Service", icon: MessageSquare },
 ];
 
 const applyExperienceYearsFilter = (profiles: DiscoveryProfile[], filters: DiscoveryFilters) => {
@@ -299,7 +349,7 @@ const applyDiscoveryClientFilters = (
     }
 
     if (relationshipFilterActive) {
-      const profileRelationship = String(profile.relationship_status ?? "").trim();
+      const profileRelationship = normalizeRelationshipStatus(profile.relationship_status);
       if (!profileRelationship || !filters.relationshipStatuses.includes(profileRelationship)) return false;
     }
 
@@ -393,14 +443,21 @@ interface ChatUser {
   lastMessageFromMe?: boolean;
   lastMessageReadByOther?: boolean;
   unread: number;
-  type: "friend" | "group";
+  type: "friend" | "group" | "service";
   isOnline?: boolean;
   hasTransaction?: boolean;
   matchedAt?: string | null;
+  lastMessageKind?: string | null;
+  lastMessageStarSenderId?: string | null;
+  lastMessageStarRecipientId?: string | null;
+  serviceStatus?: "pending" | "booked" | "in_progress" | "completed" | "disputed" | null;
+  serviceType?: string | null;
+  serviceDateLabel?: string | null;
 }
 
 interface Group {
   id: string;
+  inviteId?: string | null;
   name: string;
   avatarUrl?: string | null;
   memberCount: number;
@@ -408,6 +465,8 @@ interface Group {
   lastMessageSender: string;
   time: string;
   unread: number;
+  invitePending?: boolean;
+  inviterName?: string | null;
 }
 
 interface GroupContactOption {
@@ -416,6 +475,14 @@ interface GroupContactOption {
   avatar?: string;
   verified: boolean;
 }
+
+type PendingGroupInvite = {
+  inviteId: string;
+  chatId: string;
+  chatName: string;
+  inviterName: string;
+  createdAt?: string | null;
+};
 
 type MatchOnlyAvatar = {
   userId: string;
@@ -445,6 +512,7 @@ type WaveSendStatus = "sent" | "duplicate" | "blocked" | "failed";
 type WaveSendResult = {
   status: WaveSendStatus;
   mutual: boolean;
+  matchCreated: boolean;
 };
 
 type MatchRow = {
@@ -476,6 +544,10 @@ const isWaveSchemaFallbackError = (err: unknown) => {
 const parseChatPreviewText = (rawContent: string | null | undefined) => {
   const raw = String(rawContent || "").trim();
   if (!raw) return "";
+  const starParsed = parseStarChatContent(raw);
+  if (isStarIntroKind(starParsed.kind)) {
+    return "Star connection";
+  }
   try {
     const parsed = JSON.parse(raw) as { text?: unknown; attachments?: Array<{ mime?: unknown }> };
     if (parsed && typeof parsed === "object") {
@@ -492,18 +564,27 @@ const parseChatPreviewText = (rawContent: string | null | undefined) => {
   return raw.replace(/\s+/g, " ").trim();
 };
 
+const isGroupMembershipHint = (text: string | null | undefined) => {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return /just joined the chat\.$/i.test(value) || /left the group\.$/i.test(value);
+};
+
 const Chats = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { t } = useLanguage();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>(() =>
-    searchParams.get("tab") === "groups" ? "groups" : "friends"
-  );
+  const [mainTab, setMainTab] = useState<MainTab>(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "groups") return "groups";
+    if (tab === "service") return "service";
+    return "friends";
+  });
   const [chats, setChats] = useState<ChatUser[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
@@ -533,6 +614,7 @@ const Chats = () => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [groupImageUploading, setGroupImageUploading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [groupPendingInvites, setGroupPendingInvites] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupAddSearch, setGroupAddSearch] = useState("");
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
@@ -551,12 +633,8 @@ const Chats = () => {
   const [matchModal, setMatchModal] = useState<MatchModalState | null>(null);
   const [openingMatchChat, setOpeningMatchChat] = useState(false);
   const [matchQuickHello, setMatchQuickHello] = useState("");
-  const [pendingGroupInvite, setPendingGroupInvite] = useState<{
-    notifId: string;
-    chatId: string;
-    chatName: string;
-    inviterName: string;
-  } | null>(null);
+  const [pendingGroupInvite, setPendingGroupInvite] = useState<PendingGroupInvite | null>(null);
+  const seenGroupInvitePromptsRef = useRef<Set<string>>(new Set());
 
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeRoomName, setActiveRoomName] = useState<string>("");
@@ -568,10 +646,18 @@ const Chats = () => {
   const [starUpgradeTier, setStarUpgradeTier] = useState<StarUpgradeTier | null>(null);
   const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
   const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
+  const [confirmStarTarget, setConfirmStarTarget] = useState<DiscoveryProfile | null>(null);
+  const [starActionLoading, setStarActionLoading] = useState(false);
+  const [starFlightVisible, setStarFlightVisible] = useState(false);
   const [matchOnlyAvatars, setMatchOnlyAvatars] = useState<MatchOnlyAvatar[]>([]);
   const [matchesFeedTick, setMatchesFeedTick] = useState(0);
   const roomSeenRef = useRef<Record<string, string>>({});
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
+  const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
+  const pendingSeenMatchWritesRef = useRef<Set<string>>(new Set());
+  const [localSeenMatchesHydrated, setLocalSeenMatchesHydrated] = useState(false);
+  const [seenMatchesHydrated, setSeenMatchesHydrated] = useState(false);
+  const [seenMatchesServerState, setSeenMatchesServerState] = useState<"idle" | "ready" | "failed">("idle");
   const directPeerByRoomRef = useRef<Record<string, string>>({});
 
   // Nanny Booking modal state
@@ -598,6 +684,11 @@ const Chats = () => {
       setMainTab("groups");
       return;
     }
+    if (tab === "service") {
+      setTopTab("chats");
+      setMainTab("service");
+      return;
+    }
     if (tab === "chats") {
       setTopTab("chats");
       return;
@@ -615,6 +706,7 @@ const Chats = () => {
   const discoverChatAgeBlocked = userAge !== null && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const normalizedTier = String(effectiveTier || "free").toLowerCase();
+  const isGoldTier = normalizedTier === "gold";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
 
   // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
@@ -630,7 +722,6 @@ const Chats = () => {
   const passIndicatorScale = useTransform(dragDownProgress, [0, 0.2, 0.5, 0.7, 1], [0.72, 0.82, 0.94, 1, 1]);
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const discoverImageInteractingRef = useRef(false);
-  const discoveryPrefetchingRef = useRef(false);
   const discoveryKey = useMemo(() => {
     const d = new Date();
     const y = d.getFullYear();
@@ -669,6 +760,10 @@ const Chats = () => {
   );
   const seenMatchesKey = useMemo(
     () => `seen_match_modal_${profile?.id || "anon"}`,
+    [profile?.id]
+  );
+  const pendingSeenMatchesKey = useMemo(
+    () => `seen_match_modal_pending_${profile?.id || "anon"}`,
     [profile?.id]
   );
   const discoveryFiltersKey = useMemo(
@@ -908,13 +1003,55 @@ const Chats = () => {
     }
   }, [seenMatchesKey]);
 
+  const persistPendingSeenMatches = useCallback((next: Set<string>) => {
+    pendingSeenMatchWritesRef.current = next;
+    try {
+      localStorage.setItem(pendingSeenMatchesKey, JSON.stringify(Array.from(next)));
+    } catch {
+      // ignore cache write failures
+    }
+  }, [pendingSeenMatchesKey]);
+
+  const flushPendingSeenMatches = useCallback(async () => {
+    if (!profile?.id || !user?.id) return;
+    const pending = Array.from(pendingSeenMatchWritesRef.current);
+    if (!pending.length) return;
+    const payload = pending.map((matchedUserId) => ({
+      viewer_id: user.id,
+      matched_user_id: matchedUserId,
+    }));
+    try {
+      const { error } = await (supabase
+        .from("discover_match_seen" as "profiles")
+        .upsert(payload as never, { onConflict: "viewer_id,matched_user_id", ignoreDuplicates: true })) as unknown as Promise<{
+        error: { message?: string } | null;
+      }>;
+      if (error) {
+        console.warn("[discover.match_seen] flush_failed", error.message || "unknown_error");
+        return;
+      }
+      const next = new Set(pendingSeenMatchWritesRef.current);
+      pending.forEach((id) => next.delete(id));
+      persistPendingSeenMatches(next);
+    } catch {
+      // best-effort only
+    }
+  }, [persistPendingSeenMatches, profile?.id, user?.id]);
+
   const markMatchSeen = useCallback((userId?: string | null) => {
     const normalized = String(userId || "").trim();
-    if (!normalized) return;
+    if (!normalized || !profile?.id) return;
     const next = new Set(seenMatchUserIdsRef.current);
     next.add(normalized);
     persistSeenMatches(next);
-  }, [persistSeenMatches]);
+    const nextServer = new Set(serverSeenMatchUserIdsRef.current);
+    nextServer.add(normalized);
+    serverSeenMatchUserIdsRef.current = nextServer;
+    const nextPending = new Set(pendingSeenMatchWritesRef.current);
+    nextPending.add(normalized);
+    persistPendingSeenMatches(nextPending);
+    void flushPendingSeenMatches();
+  }, [flushPendingSeenMatches, persistPendingSeenMatches, persistSeenMatches, profile?.id]);
 
   const fetchUserMatches = useCallback(async (): Promise<MatchRow[]> => {
     if (!profile?.id) return [];
@@ -945,6 +1082,11 @@ const Chats = () => {
         lastErrorMessage = result.error.message || lastErrorMessage;
         continue;
       }
+      if (attempt.activeOnly && Array.isArray(result.data) && result.data.length === 0) {
+        // Some environments keep legacy rows where is_active is null/false.
+        // Fall through to non-active query attempts before concluding no matches.
+        continue;
+      }
       return ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
         user1_id: String(row.user1_id || ""),
         user2_id: String(row.user2_id || ""),
@@ -969,7 +1111,11 @@ const Chats = () => {
   }, [profile?.id]);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!profile?.id) {
+      pendingSeenMatchWritesRef.current = new Set();
+      setLocalSeenMatchesHydrated(false);
+      return;
+    }
     try {
       const raw = localStorage.getItem(seenMatchesKey);
       const parsed = raw ? (JSON.parse(raw) as string[]) : [];
@@ -978,10 +1124,74 @@ const Chats = () => {
       } else {
         seenMatchUserIdsRef.current = new Set();
       }
+      const pendingRaw = localStorage.getItem(pendingSeenMatchesKey);
+      const pendingParsed = pendingRaw ? (JSON.parse(pendingRaw) as string[]) : [];
+      if (Array.isArray(pendingParsed)) {
+        pendingSeenMatchWritesRef.current = new Set(
+          pendingParsed.filter((value) => typeof value === "string" && value)
+        );
+      } else {
+        pendingSeenMatchWritesRef.current = new Set();
+      }
     } catch {
       seenMatchUserIdsRef.current = new Set();
+      pendingSeenMatchWritesRef.current = new Set();
+    } finally {
+      setLocalSeenMatchesHydrated(true);
     }
-  }, [profile?.id, seenMatchesKey]);
+  }, [pendingSeenMatchesKey, profile?.id, seenMatchesKey]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      serverSeenMatchUserIdsRef.current = new Set();
+      setSeenMatchesHydrated(false);
+      setSeenMatchesServerState("idle");
+      return;
+    }
+    let cancelled = false;
+    setSeenMatchesHydrated(false);
+    setSeenMatchesServerState("idle");
+    void (async () => {
+      try {
+        const { data, error } = await (supabase
+          .from("discover_match_seen" as "profiles")
+          .select("matched_user_id" as "*")
+          .eq("viewer_id", profile.id)
+          .limit(1000)) as unknown as Promise<{
+          data: Array<{ matched_user_id?: string | null }> | null;
+          error: { message?: string } | null;
+        }>;
+        if (cancelled) return;
+        if (error) {
+          console.warn("[discover.match_seen] load_failed", error.message || "unknown_error");
+          setSeenMatchesServerState("failed");
+        }
+        const next = new Set(
+          (data || [])
+            .map((row) => String(row?.matched_user_id || "").trim())
+            .filter(Boolean)
+        );
+        serverSeenMatchUserIdsRef.current = next;
+        if (!error) {
+          setSeenMatchesServerState("ready");
+        }
+      } catch {
+        if (cancelled) return;
+        serverSeenMatchUserIdsRef.current = new Set();
+        setSeenMatchesServerState("failed");
+      } finally {
+        if (!cancelled) setSeenMatchesHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!localSeenMatchesHydrated || seenMatchesServerState !== "ready") return;
+    void flushPendingSeenMatches();
+  }, [flushPendingSeenMatches, localSeenMatchesHydrated, seenMatchesServerState]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -989,21 +1199,9 @@ const Chats = () => {
     void (async () => {
       const rows = await fetchUserMatches();
       if (cancelled) return;
-      // Only trim seen-match IDs when we received real data; an empty result likely
-      // means a schema/network error and must NOT clear the persisted set.
-      if (rows.length > 0) {
-        const activeCounterparts = new Set(
-          rows
-            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
-            .filter((id) => Boolean(id))
-        );
-        const nextSeen = new Set(
-          Array.from(seenMatchUserIdsRef.current).filter((id) => activeCounterparts.has(id))
-        );
-        if (nextSeen.size !== seenMatchUserIdsRef.current.size) {
-          persistSeenMatches(nextSeen);
-        }
-      }
+      // Intentionally not pruning seenMatchUserIdsRef here.
+      // Pruning caused re-shows when fetchUserMatches() missed rows temporarily.
+      void rows;
     })();
     return () => {
       cancelled = true;
@@ -1012,6 +1210,8 @@ const Chats = () => {
 
   const discoveryDailyCap = getQuotaCapsForTier(profile?.effective_tier || profile?.tier || "free").discoveryViewsPerDay;
   const discoveryQuotaReached = Number.isFinite(discoveryDailyCap) && discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
+  const showDiscoveryQuotaLock = discoveryQuotaReached && !isGoldTier;
+  const silentGoldDiscoveryCapReached = discoveryQuotaReached && isGoldTier;
 
   const bumpDiscoverySeen = async (): Promise<boolean> => {
     if (discoveryQuotaReached) return false;
@@ -1060,10 +1260,10 @@ const Chats = () => {
   );
 
   const finalizeMutualWave = useCallback(
-    async (targetUserId: string) => {
-      if (!profile?.id) return;
+    async (targetUserId: string): Promise<boolean> => {
+      if (!profile?.id) return false;
       try {
-        const { error } = await (supabase.rpc as (
+        const { data, error } = await (supabase.rpc as (
           fn: string,
           params?: Record<string, unknown>
         ) => Promise<{ data: unknown; error: { message?: string } | null }>)("accept_mutual_wave", {
@@ -1075,23 +1275,54 @@ const Chats = () => {
           if (!/accept_mutual_wave/i.test(message) && !/does not exist/i.test(message)) {
             throw error;
           }
+          return false;
+        }
+        if (Array.isArray(data) && data.length > 0) {
+          const first = (data[0] || {}) as { match_created?: unknown };
+          return first.match_created === true;
         }
       } catch {
         // non-blocking: UI should still continue.
+        return false;
       }
+      return false;
     },
     [profile?.id]
   );
 
   const sendDiscoveryWave = useCallback(
     async (targetUserId: string, options?: { showToast?: boolean }): Promise<WaveSendResult> => {
-      if (!profile?.id) return { status: "failed", mutual: false };
+      if (!profile?.id) return { status: "failed", mutual: false, matchCreated: false };
       const showToast = options?.showToast ?? true;
       try {
+        // Hard guard: never allow wave flow (and therefore notifications) once users are already matched.
+        const matchProbeA = await supabase
+          .from("matches")
+          .select("id")
+          .eq("user1_id", profile.id)
+          .eq("user2_id", targetUserId)
+          .limit(1)
+          .maybeSingle();
+        if ((matchProbeA.data as { id?: string } | null)?.id) {
+          if (showToast) toast.info("You're already matched.");
+          return { status: "duplicate", mutual: false, matchCreated: false };
+        }
+        const matchProbeB = await supabase
+          .from("matches")
+          .select("id")
+          .eq("user1_id", targetUserId)
+          .eq("user2_id", profile.id)
+          .limit(1)
+          .maybeSingle();
+        if ((matchProbeB.data as { id?: string } | null)?.id) {
+          if (showToast) toast.info("You're already matched.");
+          return { status: "duplicate", mutual: false, matchCreated: false };
+        }
+
         const isBlocked = await areUsersBlocked(profile.id, targetUserId);
         if (isBlocked) {
           if (showToast) toast.error(t("Cannot wave this user"));
-          return { status: "blocked", mutual: false };
+          return { status: "blocked", mutual: false, matchCreated: false };
         }
 
         const outgoingChecks: Array<{ fromCol: "sender_id" | "from_user_id"; toCol: "receiver_id" | "to_user_id" }> = [
@@ -1112,11 +1343,11 @@ const Chats = () => {
           }
           if ((existingRow as { id?: string } | null)?.id) {
             const mutual = await checkReciprocalWave(targetUserId);
-            if (mutual) await finalizeMutualWave(targetUserId);
+            const matchCreated = mutual ? await finalizeMutualWave(targetUserId) : false;
             if (showToast) {
               toast.info(mutual ? "It’s a pawfect match!" : t("Wave already sent"));
             }
-            return { status: "duplicate", mutual };
+            return { status: "duplicate", mutual, matchCreated };
           }
           break;
         }
@@ -1146,26 +1377,28 @@ const Chats = () => {
           }
         }
         const mutual = await checkReciprocalWave(targetUserId);
+        let matchCreated = false;
         if (mutual) {
-          await finalizeMutualWave(targetUserId);
+          matchCreated = await finalizeMutualWave(targetUserId);
         }
         if (showToast) {
           toast.success(mutual ? "It’s a pawfect match!" : t("Wave sent"));
         }
-        return { status: "sent", mutual };
+        return { status: "sent", mutual, matchCreated };
       } catch (err: unknown) {
         if (isDuplicateWaveError(err)) {
           const mutual = await checkReciprocalWave(targetUserId);
+          let matchCreated = false;
           if (mutual) {
-            await finalizeMutualWave(targetUserId);
+            matchCreated = await finalizeMutualWave(targetUserId);
           }
           if (showToast) {
             toast.info(mutual ? "It’s a pawfect match!" : t("Wave already sent"));
           }
-          return { status: "duplicate", mutual };
+          return { status: "duplicate", mutual, matchCreated };
         }
         if (showToast) toast.error(t("Failed to send wave"));
-        return { status: "failed", mutual: false };
+        return { status: "failed", mutual: false, matchCreated: false };
       }
     },
     [checkReciprocalWave, finalizeMutualWave, profile?.id, t]
@@ -1193,19 +1426,19 @@ const Chats = () => {
     return Math.max(0, cap - used) + Math.max(0, extra);
   }, [profile?.effective_tier, profile?.tier]);
 
-  async function runStarAction(target: DiscoveryProfile) {
-    if (!profile?.id) return false;
+  async function runStarAction(target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> {
+    if (!profile?.id) return { sent: false, roomId: null };
     const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
     if (tier === "free") {
       openStarUpgradeSheet("plus");
-      return false;
+      return { sent: false, roomId: null };
     }
     let remaining = 0;
     try {
       remaining = await getStarRemaining();
     } catch {
       toast.error("Unable to verify Star quota right now.");
-      return false;
+      return { sent: false, roomId: null };
     }
     if (remaining <= 0) {
       if (tier === "plus") {
@@ -1213,7 +1446,7 @@ const Chats = () => {
       } else {
         toast.info(quotaConfig.copy.stars.exhausted);
       }
-      return false;
+      return { sent: false, roomId: null };
     }
     try {
       const roomId = await ensureDirectChatRoom(supabase, profile.id, target.id, target.display_name || "Conversation");
@@ -1228,37 +1461,62 @@ const Chats = () => {
         } else {
           toast.info(quotaConfig.copy.stars.exhausted);
         }
-        return false;
+        return { sent: false, roomId: null };
       }
-      try {
-        const key = `discovery_starred_${profile?.id || "anon"}`;
-        const raw = localStorage.getItem(key);
-        const prev = raw ? (JSON.parse(raw) as string[]) : [];
-        const next = Array.from(new Set([...(Array.isArray(prev) ? prev : []), target.id]));
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        // ignore local persistence failures
-      }
+      const { error: starMessageError } = await supabase.from("chat_messages").insert({
+        chat_id: roomId,
+        sender_id: profile.id,
+        content: buildStarIntroPayload(profile.id, target.id),
+      });
+      if (starMessageError) throw starMessageError;
       void enqueueChatNotification({
         userId: target.id,
         kind: "star",
-        title: "Star Chat Started✨",
-        body: `${profile.display_name || "Someone"} just sent you a Star!`,
+        title: "New star",
+        body: "Someone sent you a Star ⭐ Tap to find out who.",
         href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
         data: { room_id: roomId, from_user_id: profile.id, type: "star" },
       });
       commitDiscoverySwipe("up", target.id, "star");
-      navigate(
-        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
-          target.display_name || "Conversation"
-        )}&with=${encodeURIComponent(target.id)}`
-      );
-      return true;
+      return { sent: true, roomId };
     } catch {
       toast.error("Unable to open chat right now.");
-      return false;
+      return { sent: false, roomId: null };
     }
   }
+
+  const executeConfirmedStar = useCallback(async () => {
+    if (!confirmStarTarget || starActionLoading) return;
+    if (!profile?.id) return;
+    setStarActionLoading(true);
+    try {
+      const ok = await bumpDiscoverySeen();
+      if (!ok) {
+        if (!isGoldTier) {
+          toast.info(quotaConfig.copy.discovery.exhausted.free);
+        }
+        setConfirmStarTarget(null);
+        return;
+      }
+      const result = await runStarAction(confirmStarTarget);
+      if (result.sent && result.roomId) {
+        setStarFlightVisible(true);
+        const roomId = result.roomId;
+        const target = confirmStarTarget;
+        window.setTimeout(() => {
+          setStarFlightVisible(false);
+          navigate(
+            `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
+              target.display_name || "Conversation"
+            )}&with=${encodeURIComponent(target.id)}`
+          );
+        }, 420);
+      }
+      setConfirmStarTarget(null);
+    } finally {
+      setStarActionLoading(false);
+    }
+  }, [bumpDiscoverySeen, confirmStarTarget, isGoldTier, navigate, profile?.id, runStarAction, starActionLoading]);
 
   const handleStarUpgradeCheckout = useCallback(async () => {
     if (!starUpgradeTier || starCheckoutLoading) return;
@@ -1376,6 +1634,32 @@ const Chats = () => {
         // Fallback — show owner only
         setGroupMembers([{ id: profile.id, name: profile.display_name || "You", avatarUrl: profile.avatar_url || null }]);
       }
+      // Fetch pending invites for this group
+      try {
+        const { data: inviteRows } = await supabase
+          .from("group_chat_invites")
+          .select("invitee_user_id, profiles!group_chat_invites_invitee_user_id_fkey(id, display_name, avatar_url)")
+          .eq("chat_id", groupManageId)
+          .eq("status", "pending");
+        if (Array.isArray(inviteRows)) {
+          setGroupPendingInvites(
+            inviteRows
+              .map((row: {
+                invitee_user_id?: string | null;
+                profiles?: { id?: string; display_name?: string | null; avatar_url?: string | null } | null;
+              }) => ({
+                id: String(row.invitee_user_id || row.profiles?.id || ""),
+                name: String(row.profiles?.display_name || "User"),
+                avatarUrl: row.profiles?.avatar_url || null,
+              }))
+              .filter((row) => Boolean(row.id))
+          );
+        } else {
+          setGroupPendingInvites([]);
+        }
+      } catch {
+        setGroupPendingInvites([]);
+      }
       // Fetch mutual waves for invite
       try {
         const { data: waves } = await supabase
@@ -1420,6 +1704,32 @@ const Chats = () => {
   const loadConversations = useCallback(async () => {
     if (!profile?.id) return;
     try {
+      const pendingInvitesByChat = new Map<string, PendingGroupInvite>();
+      try {
+        const { data: inviteRows } = await supabase
+          .from("group_chat_invites")
+          .select("id, chat_id, chat_name, inviter_user_id, created_at, profiles!group_chat_invites_inviter_user_id_fkey(display_name)")
+          .eq("invitee_user_id", profile.id)
+          .eq("status", "pending");
+        if (Array.isArray(inviteRows)) {
+          for (const row of inviteRows as Array<Record<string, unknown>>) {
+            const chatId = String(row.chat_id || "");
+            if (!chatId) continue;
+            const chatName = String(row.chat_name || "Group");
+            const inviterName = String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone");
+            pendingInvitesByChat.set(chatId, {
+              inviteId: String(row.id || ""),
+              chatId,
+              chatName,
+              inviterName,
+              createdAt: typeof row.created_at === "string" ? row.created_at : null,
+            });
+          }
+        }
+      } catch {
+        // non-blocking
+      }
+
       const { data: memberships, error: membershipsError } = await supabase
         .from("chat_room_members")
         .select("chat_id")
@@ -1427,6 +1737,7 @@ const Chats = () => {
       if (membershipsError) throw membershipsError;
 
       let roomIds = [...new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
+      roomIds = [...new Set([...roomIds, ...Array.from(pendingInvitesByChat.keys())])];
       if (!roomIds.length) {
         const { data: ownedChats } = await supabase
           .from("chats")
@@ -1499,7 +1810,7 @@ const Chats = () => {
         return;
       }
 
-      const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, matchesRows] = await Promise.all([
+      const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, { data: serviceChats, error: serviceChatsError }, matchesRows] = await Promise.all([
         supabase.from("chats").select("id, name, avatar_url, type").in("id", roomIds),
         supabase
           .from("chat_room_members")
@@ -1510,12 +1821,48 @@ const Chats = () => {
           .select("id, chat_id, sender_id, content, created_at")
           .in("chat_id", roomIds)
           .order("created_at", { ascending: false }),
+        (supabase as unknown as {
+          from: (table: string) => {
+            select: (cols: string) => {
+              in: (col: string, values: string[]) => Promise<{ data: unknown; error: { message?: string } | null }>;
+            };
+          };
+        })
+          .from("service_chats")
+          .select("chat_id,status,requester_id,provider_id,request_card")
+          .in("chat_id", roomIds),
         fetchUserMatches(),
       ]);
 
       if (roomsError) throw roomsError;
       if (membersError) console.warn("[chats] members query failed", membersError);
       if (messagesError) console.warn("[chats] messages query failed", messagesError);
+      if (serviceChatsError) console.warn("[chats] service_chats query failed", serviceChatsError);
+
+      const serviceByChatId = new Map<
+        string,
+        {
+          status?: string | null;
+          requester_id?: string | null;
+          provider_id?: string | null;
+          request_card?: Record<string, unknown> | null;
+        }
+      >();
+      if (Array.isArray(serviceChats)) {
+        for (const row of serviceChats as Array<Record<string, unknown>>) {
+          const chatId = String(row.chat_id || "");
+          if (!chatId) continue;
+          serviceByChatId.set(chatId, {
+            status: typeof row.status === "string" ? row.status : null,
+            requester_id: typeof row.requester_id === "string" ? row.requester_id : null,
+            provider_id: typeof row.provider_id === "string" ? row.provider_id : null,
+            request_card:
+              row.request_card && typeof row.request_card === "object"
+                ? (row.request_card as Record<string, unknown>)
+                : null,
+          });
+        }
+      }
 
       const memberRows = (members || []) as { chat_id: string; user_id: string }[];
       const matchByChatId = new Map<string, string>();
@@ -1681,11 +2028,30 @@ const Chats = () => {
         return `${day}/${month}/${stamp.getFullYear()}`;
       };
 
+      const formatServiceDateRange = (requestCard: Record<string, unknown> | null | undefined) => {
+        if (!requestCard) return null;
+        const requestedDates = Array.isArray(requestCard.requestedDates)
+          ? (requestCard.requestedDates as unknown[]).map((item) => String(item || "").trim()).filter(Boolean)
+          : [];
+        const fallback = String(requestCard.requestedDate || "").trim();
+        const items = requestedDates.length > 0 ? requestedDates : fallback ? [fallback] : [];
+        if (items.length === 0) return null;
+        const sorted = [...items].sort();
+        const format = (iso: string) => {
+          const [year, month, day] = iso.split("-");
+          if (!year || !month || !day) return iso;
+          return `${day}-${month}-${year}`;
+        };
+        return `From ${format(sorted[0])} to ${format(sorted[sorted.length - 1])}`;
+      };
+
       for (const room of (rooms || []) as Record<string, unknown>[]) {
         const roomId = String(room.id || "");
         if (!roomId) continue;
         const roomMembers = membersByRoom.get(roomId) || [];
-        const isGroup = String(room.type || "direct") === "group" || roomMembers.length > 2;
+        const roomType = String(room.type || "direct");
+        const isService = roomType === "service";
+        const isGroup = roomType === "group" || (!isService && roomMembers.length > 2);
         const last = lastByRoom.get(roomId);
 
         if (isGroup) {
@@ -1693,8 +2059,10 @@ const Chats = () => {
           const senderName = last?.sender_id === profile.id
             ? "You"
             : (String(senderProfile?.display_name || "").trim() || null);
+          const pendingInvite = pendingInvitesByChat.get(roomId) || null;
           nextGroups.push({
             id: roomId,
+            inviteId: pendingInvite?.inviteId || null,
             name: String(room.name || "Group"),
             avatarUrl: (room.avatar_url as string | null) ?? null,
             memberCount: roomMembers.length,
@@ -1702,6 +2070,8 @@ const Chats = () => {
             lastMessageSender: senderName || "",
             time: formatChatTimestamp(last?.created_at),
             unread: unreadByRoom.get(roomId) || 0,
+            invitePending: Boolean(pendingInvite),
+            inviterName: pendingInvite?.inviterName || null,
           });
           continue;
         }
@@ -1731,7 +2101,12 @@ const Chats = () => {
           availabilityList.length > 0
             ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
             : normalizeAvailabilityLabel(String(otherProfile.social_role || otherProfile.user_role || "Friend"));
+        const parsedLastMeta = parseStarChatContent(last?.content || "");
         const preview = parseChatPreviewText(last?.content);
+        const serviceMeta = isService ? serviceByChatId.get(roomId) : null;
+        const serviceRequestCard = serviceMeta?.request_card || null;
+        const showRequesterRequestPrompt =
+          Boolean(isService && serviceMeta && serviceMeta.requester_id === profile.id && !serviceRequestCard);
         const previewOverride = counterpartUserId
           ? (
               blockedByMe.has(counterpartUserId)
@@ -1740,6 +2115,8 @@ const Chats = () => {
                   ? `You're blocked by ${counterpartName}.`
                   : unmatchedByThem.has(counterpartUserId)
                     ? "You've been unmatched."
+                    : showRequesterRequestPrompt
+                      ? "Send a request to get started!"
                     : ""
             )
           : "";
@@ -1758,11 +2135,41 @@ const Chats = () => {
           time: formatChatTimestamp(last?.created_at),
           lastMessageFromMe: last?.sender_id === profile.id,
           lastMessageReadByOther: Boolean(last?.id && lastMessageReadByOther.get(last.id)),
+          lastMessageKind: parsedLastMeta.kind,
+          lastMessageStarSenderId: parsedLastMeta.senderId,
+          lastMessageStarRecipientId: parsedLastMeta.recipientId,
           unread: unreadByRoom.get(roomId) || 0,
-          type: "friend",
+          type: isService ? "service" : "friend",
           isOnline: false,
           hasTransaction: false,
           matchedAt: (counterpartUserId && matchedAtByCounterpart.get(counterpartUserId)) || null,
+          serviceStatus: isService
+            ? ((serviceMeta?.status as ChatUser["serviceStatus"]) || "pending")
+            : null,
+          serviceType: isService
+            ? String(serviceRequestCard?.serviceType || "").trim() || null
+            : null,
+          serviceDateLabel: isService
+            ? formatServiceDateRange(serviceRequestCard)
+            : null,
+        });
+      }
+
+      // Ensure invite-only groups are visible even before membership is accepted.
+      for (const pendingInvite of pendingInvitesByChat.values()) {
+        if (nextGroups.some((group) => group.id === pendingInvite.chatId)) continue;
+        nextGroups.push({
+          id: pendingInvite.chatId,
+          inviteId: pendingInvite.inviteId,
+          name: pendingInvite.chatName,
+          avatarUrl: null,
+          memberCount: 0,
+          lastMessage: `Added by ${pendingInvite.inviterName}`,
+          lastMessageSender: "",
+          time: formatChatTimestamp(pendingInvite.createdAt || null),
+          unread: 0,
+          invitePending: true,
+          inviterName: pendingInvite.inviterName,
         });
       }
 
@@ -1853,32 +2260,55 @@ const Chats = () => {
     void loadConversations();
   }, [loadConversations]);
 
-  // Check for pending group invite notifications when opening Groups tab
+  // Check for pending group invites when opening Groups tab
+  useEffect(() => {
+    if (!profile?.id) return;
+    try {
+      const raw = localStorage.getItem(`group_invite_prompt_seen_${profile.id}`);
+      const parsed = raw ? (JSON.parse(raw) as string[]) : [];
+      if (Array.isArray(parsed)) {
+        seenGroupInvitePromptsRef.current = new Set(parsed.filter((entry) => typeof entry === "string" && entry.trim().length > 0));
+      } else {
+        seenGroupInvitePromptsRef.current = new Set();
+      }
+    } catch {
+      seenGroupInvitePromptsRef.current = new Set();
+    }
+  }, [profile?.id]);
+
   useEffect(() => {
     if (!profile?.id || mainTab !== "groups") return;
     const checkInvites = async () => {
       const { data: invites } = await supabase
-        .from("notifications")
-        .select("id, data, metadata")
-        .eq("user_id", profile.id)
-        .eq("is_read", false)
-        .or("type.eq.group_invite,type.eq.chats")
+        .from("group_chat_invites")
+        .select("id, chat_id, chat_name, created_at, profiles!group_chat_invites_inviter_user_id_fkey(display_name)")
+        .eq("invitee_user_id", profile.id)
+        .eq("status", "pending")
         .order("created_at", { ascending: false })
-        .limit(10);
-      if (!invites || invites.length === 0) return;
-      // Find first notification that's a group invite (either old direct inserts or via enqueue_notification)
-      const inv = invites.find((n) => {
-        const d = (n.data || n.metadata || {}) as Record<string, unknown>;
-        return d.kind === "group_invite" || d.chat_id;
-      });
-      if (!inv) return;
-      const invData = ((inv.data || inv.metadata) || {}) as { chat_id?: string; chat_name?: string; inviter_name?: string; kind?: string };
-      if (!invData.chat_id) return;
+        .limit(1);
+      if (!Array.isArray(invites) || invites.length === 0) return;
+      const first = invites[0] as Record<string, unknown>;
+      const chatId = String(first.chat_id || "");
+      if (!chatId) return;
+      const inviteId = String(first.id || "");
+      const inviteSeenKey = inviteId || `${chatId}:${String(first.created_at || "")}`;
+      if (inviteSeenKey && seenGroupInvitePromptsRef.current.has(inviteSeenKey)) return;
+      if (inviteSeenKey) {
+        seenGroupInvitePromptsRef.current.add(inviteSeenKey);
+        try {
+          localStorage.setItem(
+            `group_invite_prompt_seen_${profile.id}`,
+            JSON.stringify(Array.from(seenGroupInvitePromptsRef.current))
+          );
+        } catch {
+          // ignore cache write errors
+        }
+      }
       setPendingGroupInvite({
-        notifId: String(inv.id),
-        chatId: String(invData.chat_id),
-        chatName: invData.chat_name || "a group",
-        inviterName: invData.inviter_name || "Someone",
+        inviteId,
+        chatId,
+        chatName: String(first.chat_name || "Group"),
+        inviterName: String((first.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
       });
     };
     void checkInvites();
@@ -2064,19 +2494,6 @@ const Chats = () => {
         } catch {
           // ignore malformed local matched cache
         }
-        try {
-          const starredRaw = localStorage.getItem(`discovery_starred_${profile.id}`);
-          if (starredRaw) {
-            const starred = JSON.parse(starredRaw) as string[];
-            if (Array.isArray(starred)) {
-              starred.forEach((id) => {
-                if (typeof id === "string" && id) handledIds.add(id);
-              });
-            }
-          }
-        } catch {
-          // ignore local cache parse failures
-        }
         setHandledDiscoveryIds((prev) => {
           const next = new Set([...prev, ...handledIds]);
           try {
@@ -2230,12 +2647,11 @@ const Chats = () => {
           enforceActiveOnly: filters.activeOnly,
           wavedByUserIds,
           anchor,
-        }).filter((row) => !handledIds.has(row.id));
+        }).filter((row) => row.id !== profile.id && !handledIds.has(row.id));
         if (mergedList.length > 0) {
           setDiscoveryProfiles(mergedList);
           return;
         }
-
         const { data: fallbackProfiles } = await supabase
           .from("profiles")
           .select("id, display_name, avatar_url, verification_status, is_verified, availability_status, pet_experience, pet_experience_years:experience_years, social_album, dob, gender_genre, orientation, relationship_status, degree, languages, height, has_car, last_active_at, updated_at, created_at, last_lat, last_lng, pets(species,name,is_active,is_public)")
@@ -2250,12 +2666,14 @@ const Chats = () => {
             : row.social_role ?? null,
         }));
 
-        setDiscoveryProfiles(applyDiscoveryClientFilters(normalizedFallback, filters, {
+        const fallbackList = applyDiscoveryClientFilters(normalizedFallback, filters, {
           enforceVerifiedOnly: filters.verifiedOnly,
           enforceActiveOnly: filters.activeOnly,
           wavedByUserIds,
           anchor,
-        }).filter((row) => !handledIds.has(row.id)));
+        }).filter((row) => !handledIds.has(row.id));
+
+        setDiscoveryProfiles(fallbackList);
       } catch (err) {
         console.warn("[Chats] Discovery failed", err);
         setDiscoveryProfiles([]);
@@ -2273,6 +2691,8 @@ const Chats = () => {
     resolveDiscoveryAnchor,
     discoveryRefreshTick,
     handledDiscoveryKey,
+    passedDiscoveryKey,
+    passedDiscoverySessionKey,
     matchedDiscoveryKey,
   ]);
 
@@ -2367,13 +2787,37 @@ const Chats = () => {
   const getChatPreview = (chat: ChatUser) => {
     const override = String(chat.previewOverride || "").trim();
     if (override) return override;
+    if (isStarIntroKind(chat.lastMessageKind || null)) {
+      const isSender = chat.lastMessageStarSenderId === profile?.id || chat.lastMessageFromMe === true;
+      return isSender ? "You sent a Star ⭐" : "New Star Connection ⭐";
+    }
     return parseChatPreviewText(chat.lastMessage);
+  };
+
+  const getServiceStatusLabel = (chat: ChatUser) => {
+    switch (chat.serviceStatus) {
+      case "booked":
+        return "Booked";
+      case "in_progress":
+        return "In Progress";
+      case "completed":
+        return "Completed";
+      case "disputed":
+        return "Disputed";
+      default:
+        return "Pending";
+    }
   };
 
   // Filter chats based on active tab and search (unified tab system)
   const filteredChats = chats.filter(chat => {
     if (chat.peerUserId && chat.peerUserId === profile?.id) return false;
-    const matchesTab = mainTab === "groups" ? false : chat.type === "friend";
+    const matchesTab =
+      mainTab === "friends"
+        ? chat.type === "friend" && !chat.hasTransaction
+        : mainTab === "service"
+          ? chat.type === "service"
+          : false;
     const matchesSearch = !searchQuery ||
       chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       getChatPreview(chat).toLowerCase().includes(searchQuery.toLowerCase());
@@ -2387,13 +2831,55 @@ const Chats = () => {
       getChatPreview(chat).length === 0
   );
   const avatarOnlyMatchOnlyAvatars = matchOnlyAvatars.filter(
-    (entry) => !avatarOnlyMatchedChats.some((chat) => chat.peerUserId === entry.userId)
+    (entry) => !filteredChats.some((chat) => chat.peerUserId === entry.userId)
   );
   const visibleConversationChats = filteredChats.filter((chat) => {
     const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
     if (!hasConversationActivity) return false;
     return !avatarOnlyMatchedChats.some((avatarOnly) => avatarOnly.id === chat.id);
   });
+  const priorityStarChats = visibleConversationChats.filter(
+    (chat) => isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true
+  );
+  const regularConversationChats = visibleConversationChats.filter(
+    (chat) => !priorityStarChats.some((priorityChat) => priorityChat.id === chat.id)
+  );
+  const filteredServiceChats = filteredChats;
+  const strictMatchedDiscoveryIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const chat of chats) {
+      if (chat.type !== "friend") continue;
+      const peerId = String(chat.peerUserId || "").trim();
+      if (!peerId) continue;
+      ids.add(peerId);
+    }
+    for (const entry of matchOnlyAvatars) {
+      const peerId = String(entry.userId || "").trim();
+      if (!peerId) continue;
+      ids.add(peerId);
+    }
+    return ids;
+  }, [chats, matchOnlyAvatars]);
+
+  useEffect(() => {
+    if (strictMatchedDiscoveryIds.size === 0) return;
+    setHandledDiscoveryIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of strictMatchedDiscoveryIds) {
+        if (next.has(id)) continue;
+        next.add(id);
+        changed = true;
+      }
+      if (!changed) return prev;
+      try {
+        localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore cache write failure
+      }
+      return next;
+    });
+  }, [handledDiscoveryKey, strictMatchedDiscoveryIds]);
 
   // Filter groups based on search
   const filteredGroups = groups.filter(group => {
@@ -2436,12 +2922,13 @@ const Chats = () => {
     (p) =>
       !hiddenDiscoveryIds.has(p.id) &&
       !blockedUserIds.has(p.id) &&
-      !handledDiscoveryIds.has(p.id)
+      !handledDiscoveryIds.has(p.id) &&
+      !strictMatchedDiscoveryIds.has(p.id)
   );
   const visibleDiscoverySource = baseDiscoverySource.filter((p) => !passedDiscoveryIds.has(p.id));
   const carryoverQueue = visibleDiscoverySource.filter((p) => carryoverPassedIds.has(p.id));
   const primaryQueue = visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id));
-  const discoverySource = [...primaryQueue, ...carryoverQueue];
+  const discoverySource = silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue];
   const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
   const currentDiscovery = discoveryDeck[0] ?? null;
   const nextDiscovery = discoveryDeck[1] ?? null;
@@ -2450,6 +2937,19 @@ const Chats = () => {
   const fifthDiscovery = discoveryDeck[4] ?? null;
   const showDiscoverEmpty = !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
   const discoveryStackHasRealNext = Boolean(currentDiscovery && nextDiscovery);
+
+  useEffect(() => {
+    if (discoveryLoading || discoveryLocationBlocked) return;
+    if (currentDiscovery) return;
+    if (discoveryProfiles.length === 0) return;
+    // Do not auto-reset handled/passed state here. Resetting causes matched users
+    // to re-enter Discover and re-trigger "already matched" dead-end states.
+  }, [
+    currentDiscovery,
+    discoveryLoading,
+    discoveryLocationBlocked,
+    discoveryProfiles.length,
+  ]);
 
   const getDiscoveryAlbum = useCallback((profileRow?: DiscoveryProfile | null) => {
     if (!profileRow) return [] as string[];
@@ -2568,17 +3068,6 @@ const Chats = () => {
     if (discoveryDeck.length < 5 && discoverySource.length > discoveryVisibleCount) {
       setDiscoveryVisibleCount((prev) => Math.min(prev + 20, discoverySource.length));
       return;
-    }
-    if (
-      discoveryDeck.length < 5 &&
-      !discoveryLoading &&
-      !discoveryPrefetchingRef.current
-    ) {
-      discoveryPrefetchingRef.current = true;
-      setDiscoveryRefreshTick((tick) => tick + 1);
-      window.setTimeout(() => {
-        discoveryPrefetchingRef.current = false;
-      }, 1200);
     }
   }, [discoveryDeck.length, discoveryLoading, discoverySource.length, discoveryVisibleCount, passedDiscoveryIds.size]);
   const groupSelectableUsers = useMemo(() => {
@@ -2735,20 +3224,12 @@ const Chats = () => {
           .insert({ chat_id: roomId, sender_id: profile.id, content: text });
         if (messageErr) throw messageErr;
       }
-      void enqueueChatNotification({
-        userId: matchModal.userId,
-        kind: "match",
-        title: "It’s a pawfect match!",
-        body: `${profile.display_name || "Someone"} matched with you.`,
-        href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
-        data: { room_id: roomId, from_user_id: profile.id, type: "match" },
-      });
       setMatchModal(null);
       setMatchQuickHello("");
       markRoomSeen(roomId);
       markMatchSeen(matchModal.userId);
       navigate(
-        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(
+      `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(
           matchModal.userId
         )}`
       );
@@ -2762,7 +3243,7 @@ const Chats = () => {
     } finally {
       setOpeningMatchChat(false);
     }
-  }, [enqueueChatNotification, markMatchSeen, markRoomSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.display_name, profile?.id, rememberDirectPeer]);
+  }, [markMatchSeen, markRoomSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.id, rememberDirectPeer]);
 
   const closeMatchModal = useCallback(() => {
     if (matchModal?.userId) {
@@ -2789,9 +3270,8 @@ const Chats = () => {
   const openMatchModalFor = useCallback(
     async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
       if (!profile?.id || !target.userId) return null;
-      // Mark seen immediately so re-mounts / re-subscriptions never re-trigger
-      markMatchSeen(target.userId);
       persistMatchedDiscoveryUser(target.userId);
+      markMatchSeen(target.userId);
       const nextModal: MatchModalState = {
         userId: target.userId,
         name: target.name || "Conversation",
@@ -2825,7 +3305,8 @@ const Chats = () => {
   );
 
   useEffect(() => {
-    if (!profile?.id || matchModal) return;
+    if (!profile?.id || matchModal || !seenMatchesHydrated || !localSeenMatchesHydrated) return;
+    if (seenMatchesServerState !== "ready") return;
     let cancelled = false;
     void (async () => {
       try {
@@ -2836,6 +3317,7 @@ const Chats = () => {
           const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
           if (!counterpart) continue;
           if (seenMatchUserIdsRef.current.has(counterpart)) continue;
+          if (serverSeenMatchUserIdsRef.current.has(counterpart)) continue;
           if (blockedUserIds.has(counterpart)) continue;
           candidateIds.push(counterpart);
         }
@@ -2874,7 +3356,17 @@ const Chats = () => {
     return () => {
       cancelled = true;
     };
-  }, [blockedUserIds, fetchUserMatches, matchModal, matchesFeedTick, openMatchModalFor, profile?.id]);
+  }, [
+    blockedUserIds,
+    fetchUserMatches,
+    matchModal,
+    matchesFeedTick,
+    openMatchModalFor,
+    profile?.id,
+    localSeenMatchesHydrated,
+    seenMatchesHydrated,
+    seenMatchesServerState,
+  ]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -2904,7 +3396,11 @@ const Chats = () => {
     // Auto-open group manage dialog if navigated here via ?manage=roomId
     const manageGroupId = searchParams.get("manage");
     if (manageGroupId) {
-      setGroupManageId(manageGroupId);
+      if (isVerified) {
+        setGroupManageId(manageGroupId);
+      } else {
+        setGroupVerifyGateOpen(true);
+      }
       setMainTab("groups");
     }
 
@@ -2939,7 +3435,7 @@ const Chats = () => {
         toast.error("Unable to open chat right now.");
       }
     })();
-  }, [ensureDirectRoom, markRoomSeen, navigate, profile?.id, searchParams]);
+  }, [ensureDirectRoom, isVerified, markRoomSeen, navigate, profile?.id, searchParams]);
 
   const sendInlineMessage = useCallback(async () => {
     if (!activeRoomId || !profile?.id || !chatInput.trim() || chatSending) return;
@@ -3030,12 +3526,27 @@ const Chats = () => {
         return;
       }
 
-      const membersPayload = [{ chat_id: roomId, user_id: profile.id }, ...memberIds.map((id) => ({ chat_id: roomId, user_id: id }))];
-      const { error: membersError } = await supabase.from("chat_room_members").insert(membersPayload as Record<string, unknown>[]);
+      const { error: membersError } = await supabase.from("chat_room_members").insert([{ chat_id: roomId, user_id: profile.id }] as Record<string, unknown>[]);
       if (membersError) {
         await supabase.from("chats").delete().eq("id", roomId);
         toast.error("Failed to add members. Group was not created.");
         return;
+      }
+
+      if (memberIds.length > 0) {
+        const inviteRows = memberIds.map((id) => ({
+          chat_id: roomId,
+          chat_name: groupData.name,
+          inviter_user_id: profile.id,
+          invitee_user_id: id,
+          status: "pending",
+        }));
+        const { error: inviteError } = await supabase
+          .from("group_chat_invites")
+          .upsert(inviteRows as Record<string, unknown>[], { onConflict: "chat_id,invitee_user_id" });
+        if (inviteError) {
+          throw inviteError;
+        }
       }
 
       await loadConversations();
@@ -3056,6 +3567,10 @@ const Chats = () => {
       setMatchOnlyAvatars((prev) => prev.filter((entry) => entry.userId !== chat.peerUserId));
     }
     markRoomSeen(chat.id);
+    if (chat.type === "service") {
+      navigate(`/service-chat?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
+      return;
+    }
     navigate(
       `/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}${
         chat.peerUserId ? `&with=${encodeURIComponent(chat.peerUserId)}` : ""
@@ -3089,6 +3604,15 @@ const Chats = () => {
   };
 
   const handleGroupClick = (group: Group) => {
+    if (group.invitePending) {
+      setPendingGroupInvite({
+        inviteId: "",
+        chatId: group.id,
+        chatName: group.name,
+        inviterName: group.inviterName || "Someone",
+      });
+      return;
+    }
     // Mark as read
     setGroups(prev => prev.map(g =>
       g.id === group.id ? { ...g, unread: 0 } : g
@@ -3364,8 +3888,10 @@ const Chats = () => {
                 {showDiscoverEmpty && (
                   <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
                     <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
-                      <p className="text-base font-semibold text-[#4F5677]">No more profiles</p>
-                      <p className="mt-2 text-sm text-[#4F5677]/75">Refresh to load more nearby users.</p>
+                      <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
+                      <p className="mt-2 text-sm text-[#4F5677]/75">
+                        Try expanding your filters or check back later to find more friends.
+                      </p>
                       <button
                         className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]"
                         onClick={refreshDiscovery}
@@ -3431,7 +3957,7 @@ const Chats = () => {
                   }
                   const speciesSummary = Array.from(speciesMap.values()).join(" • ");
                   const album = getDiscoveryAlbum(p);
-                  const cover = album[0];
+                  const cover = album[0] || profilePlaceholder;
 
                   return (
                     <motion.div
@@ -3447,24 +3973,31 @@ const Chats = () => {
                           void (async () => {
                             const ok = await bumpDiscoverySeen();
                             if (!ok) {
-                              toast.info(quotaConfig.copy.discovery.exhausted.free);
+                              if (!isGoldTier) {
+                                toast.info(quotaConfig.copy.discovery.exhausted.free);
+                              }
                               return;
                             }
                             const result = await sendDiscoveryWave(p.id, { showToast: false });
                             if (result.status === "sent" || result.status === "duplicate") {
                               commitDiscoverySwipe("up", p.id, "wave");
-                              if (result.status === "sent") {
+                              if (result.status === "sent" && !result.mutual) {
                                 void enqueueChatNotification({
                                   userId: p.id,
                                   kind: "wave",
-                                  title: "Someone just waved at you - Open Discover to find out.",
-                                  body: "Someone just waved at you - Open Discover to find out.",
+                                  title: "New wave",
+                                  body: "Someone just waved at you 👋",
                                   href: "/chats?tab=discover",
                                   data: { from_user_id: profile?.id, type: "wave" },
                                 });
                               }
                               if (result.mutual) {
                                 persistMatchedDiscoveryUser(p.id);
+                                setHiddenDiscoveryIds((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(p.id);
+                                  return next;
+                                });
                                 if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
                                   navigator.vibrate(18);
                                 }
@@ -3475,7 +4008,7 @@ const Chats = () => {
                                       name: p.display_name || "Conversation",
                                       avatarUrl: p.avatar_url || null,
                                     });
-                                    if (roomId) {
+                                    if (roomId && result.matchCreated) {
                                       const currentName = profile?.display_name || "Someone";
                                       const targetName = p.display_name || "Someone";
                                       void enqueueChatNotification({
@@ -3486,14 +4019,16 @@ const Chats = () => {
                                         href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
                                         data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
                                       });
-                                      void enqueueChatNotification({
-                                        userId: profile?.id || "",
-                                        kind: "match",
-                                        title: `You're now friends with ${targetName}!`,
-                                        body: "It's a pawfect match!",
-                                        href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
-                                        data: { room_id: roomId, from_user_id: p.id, type: "match" },
-                                      });
+                                      if (profile?.id) {
+                                        void enqueueChatNotification({
+                                          userId: profile.id,
+                                          kind: "match",
+                                          title: `You're now friends with ${targetName}!`,
+                                          body: "It's a pawfect match!",
+                                          href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
+                                          data: { room_id: roomId, from_user_id: p.id, type: "match" },
+                                        });
+                                      }
                                     }
                                   })();
                                 }, 180);
@@ -3526,10 +4061,12 @@ const Chats = () => {
                         void handleProfileTap(p.id, p.display_name || "User", p.avatar_url || null);
                       }}
                     >
-                      {discoveryQuotaReached && (
+                      {showDiscoveryQuotaLock && (
                         <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
                           <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
-                            <p className="text-sm font-semibold text-white">{quotaConfig.copy.discovery.exhausted.free}</p>
+                            <p className="text-sm font-semibold text-white">
+                              Taking a "paws." You’ve reached your daily discovery limit. Come back tomorrow or upgrade to huddle+ for more browsing
+                            </p>
                             <button
                               type="button"
                               onClick={() => setIsPremiumOpen(true)}
@@ -3592,16 +4129,15 @@ const Chats = () => {
                             </div>
                           )}
                         </>
-                        ) : cover ? (
+                        ) : (
                           <img
                             src={cover}
                             alt={p.display_name || ""}
                             className="w-full h-full object-cover object-center"
                             style={{ objectPosition: "center center" }}
                             loading="lazy"
+                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = profilePlaceholder; }}
                           />
-                        ) : (
-                          <div className="w-full h-full bg-[linear-gradient(180deg,#93A1F7_0%,#4765E2_54%,#09155F_100%)]" />
                         )}
                         <div className="absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)] pointer-events-none" />
                         <div className="absolute top-4 left-4">
@@ -3663,22 +4199,17 @@ const Chats = () => {
             <button
               className={cn(
                 "flex h-14 w-14 items-center justify-center rounded-full bg-white/88 text-brandBlue shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                discoveryQuotaReached && "cursor-not-allowed opacity-45"
+                showDiscoveryQuotaLock && "cursor-not-allowed opacity-45"
               )}
               aria-label="Star"
-              disabled={discoveryQuotaReached}
+              disabled={showDiscoveryQuotaLock}
               onClick={async (e) => {
                 e.stopPropagation();
                 const p = currentDiscovery;
                 if (!p) return;
                 if (!profile?.id) return;
                 if (blockedUserIds.has(p.id)) return;
-                const ok = await bumpDiscoverySeen();
-                if (!ok) {
-                  toast.info(quotaConfig.copy.discovery.exhausted.free);
-                  return;
-                }
-                await runStarAction(p);
+                setConfirmStarTarget(p);
               }}
             >
               <Star size={22} strokeWidth={1.9} />
@@ -3688,10 +4219,10 @@ const Chats = () => {
             <button
               className={cn(
                 "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.96)] shadow-[0_12px_24px_rgba(33,71,201,0.26)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                discoveryQuotaReached && "cursor-not-allowed opacity-45"
+                showDiscoveryQuotaLock && "cursor-not-allowed opacity-45"
               )}
               aria-label="Wave"
-              disabled={discoveryQuotaReached}
+              disabled={showDiscoveryQuotaLock}
               onClick={async (e) => {
                 e.stopPropagation();
                 const p = currentDiscovery;
@@ -3700,12 +4231,12 @@ const Chats = () => {
                 const ok = await bumpDiscoverySeen();
                 if (!ok) return;
                 const result = await sendDiscoveryWave(p.id, { showToast: true });
-                if (result.status === "sent") {
+                if (result.status === "sent" && !result.mutual) {
                   void enqueueChatNotification({
                     userId: p.id,
                     kind: "wave",
-                    title: "Someone just waved at you - Open Discover to find out.",
-                    body: "Someone just waved at you - Open Discover to find out.",
+                    title: "New wave",
+                    body: "Someone just waved at you 👋",
                     href: "/chats?tab=discover",
                     data: { from_user_id: profile?.id, type: "wave" },
                   });
@@ -3714,6 +4245,11 @@ const Chats = () => {
                   commitDiscoverySwipe("up", p.id, "wave");
                   if (result.mutual) {
                     persistMatchedDiscoveryUser(p.id);
+                    setHiddenDiscoveryIds((prev) => {
+                      const next = new Set(prev);
+                      next.add(p.id);
+                      return next;
+                    });
                     if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
                       navigator.vibrate(18);
                     }
@@ -3724,7 +4260,7 @@ const Chats = () => {
                           name: p.display_name || "Conversation",
                           avatarUrl: p.avatar_url || null,
                         });
-                        if (roomId) {
+                        if (roomId && result.matchCreated) {
                           const currentName = profile?.display_name || "Someone";
                           const targetName = p.display_name || "Someone";
                           void enqueueChatNotification({
@@ -3735,14 +4271,16 @@ const Chats = () => {
                             href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
                             data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
                           });
-                          void enqueueChatNotification({
-                            userId: profile?.id || "",
-                            kind: "match",
-                            title: `You're now friends with ${targetName}!`,
-                            body: "It's a pawfect match!",
-                            href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
-                            data: { room_id: roomId, from_user_id: p.id, type: "match" },
-                          });
+                          if (profile?.id) {
+                            void enqueueChatNotification({
+                              userId: profile.id,
+                              kind: "match",
+                              title: `You're now friends with ${targetName}!`,
+                              body: "It's a pawfect match!",
+                              href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
+                              data: { room_id: roomId, from_user_id: p.id, type: "match" },
+                            });
+                          }
                         }
                       })();
                     }, 180);
@@ -3804,22 +4342,18 @@ const Chats = () => {
                     className="relative h-[clamp(96px,14vw,124px)] w-[clamp(172px,25vw,216px)]"
                   >
                     <div className="absolute left-0 top-1/2 h-[clamp(96px,14vw,124px)] w-[clamp(96px,14vw,124px)] -translate-y-1/2 overflow-hidden rounded-full bg-transparent">
-                      {profile?.avatar_url ? (
-                        <img src={profile.avatar_url} alt={profile?.display_name || "You"} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-transparent text-xl font-semibold text-[#3653BE]">
-                          {(profile?.display_name || "Y").charAt(0).toUpperCase()}
-                        </div>
-                      )}
+                      <img
+                        src={profile?.avatar_url || profilePlaceholder}
+                        alt={profile?.display_name || "You"}
+                        className="h-full w-full object-cover"
+                      />
                     </div>
                     <div className="absolute right-0 top-1/2 h-[clamp(96px,14vw,124px)] w-[clamp(96px,14vw,124px)] -translate-y-1/2 overflow-hidden rounded-full bg-transparent">
-                      {matchModal.avatarUrl ? (
-                        <img src={matchModal.avatarUrl} alt={matchModal.name} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-transparent text-xl font-semibold text-[#3653BE]">
-                          {(matchModal.name || "U").charAt(0).toUpperCase()}
-                        </div>
-                      )}
+                      <img
+                        src={matchModal.avatarUrl || profilePlaceholder}
+                        alt={matchModal.name}
+                        className="h-full w-full object-cover"
+                      />
                     </div>
                   </motion.div>
                 </div>
@@ -3950,22 +4484,24 @@ const Chats = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
-                className="p-2 rounded-full hover:bg-muted transition-colors"
+                className="h-12 w-12 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
               >
                 <Search className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
               </button>
-              <button
-                onClick={handleCreateGroup}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
-                  isVerified
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                <Users className="w-3.5 h-3.5" strokeWidth={1.75} />
-                {t("Create Group")}
-              </button>
+              {mainTab === "groups" && (
+                <button
+                  onClick={handleCreateGroup}
+                  className={cn(
+                    "h-12 w-12 rounded-full flex items-center justify-center transition-colors",
+                    isVerified
+                      ? "bg-accent text-accent-foreground hover:bg-accent/90"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  )}
+                  aria-label="Create Group"
+                >
+                  <Users className="w-5 h-5" strokeWidth={1.75} />
+                </button>
+              )}
             </div>
           </div>
 
@@ -3973,7 +4509,7 @@ const Chats = () => {
           <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y pb-[calc(64px+env(safe-area-inset-bottom)+20px)]">
 
             {/* Chats View (Friends) */}
-            {mainTab !== "groups" && (
+            {mainTab === "friends" && (
               <>
                 {/* Chat List */}
                 <div className="px-5">
@@ -4031,7 +4567,65 @@ const Chats = () => {
                             ))}
                           </div>
                         )}
-                        {visibleConversationChats.slice(0, chatVisibleCount).map((chat, index) => (
+                        {priorityStarChats.length > 0 && (
+                          <div className="px-1 pb-1 pt-1">
+                            <div className="space-y-0.5">
+                              {priorityStarChats.map((chat, index) => (
+                                <div key={`priority-${chat.id}`} className="relative overflow-visible rounded-xl">
+                                  <motion.div
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: index * 0.04 }}
+                                    onClick={() => handleChatClick(chat)}
+                                    className="relative flex items-center gap-3 p-3 bg-card shadow-[0_0_0_1px_rgba(246,198,72,0.38),0_8px_20px_rgba(246,198,72,0.22)] cursor-pointer hover:bg-accent/5 transition-colors"
+                                  >
+                                    <div
+                                      className="relative cursor-pointer rounded-full"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!chat.peerUserId) return;
+                                        handleProfileTap(chat.peerUserId, chat.name, chat.avatarUrl);
+                                      }}
+                                    >
+                                      <UserAvatar
+                                        avatarUrl={chat.avatarUrl}
+                                        name={chat.name}
+                                        isVerified={chat.isVerified}
+                                        hasCar={chat.hasCar}
+                                        size="lg"
+                                        showBadges={true}
+                                      />
+                                    </div>
+                                    <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
+                                      <div className="min-w-0">
+                                        <h4 className="m-0 truncate font-semibold leading-[1.2]">{chat.name}</h4>
+                                        <p className="m-0 mt-0.5 truncate text-sm leading-[1.2] text-[#A27A2A]">
+                                          {getChatPreview(chat)}
+                                        </p>
+                                        {chat.socialAvailability ? (
+                                          <p className="m-0 mt-2 truncate text-xs font-semibold leading-[1.2] text-[#6B7280]">
+                                            {chat.socialAvailability}
+                                          </p>
+                                        ) : (
+                                          <span className="mt-1.5 block h-[14px]" />
+                                        )}
+                                      </div>
+                                      <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
+                                        <span className="text-xs text-[#9AA0B5]">{chat.time}</span>
+                                        {chat.unread > 0 ? (
+                                          <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
+                                            {chat.unread > 99 ? "9+" : chat.unread}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {regularConversationChats.slice(0, Math.max(0, chatVisibleCount - priorityStarChats.length)).map((chat, index) => (
                         <div key={chat.id} className="relative overflow-visible rounded-xl">
                           <motion.div
                             initial={{ opacity: 0, x: -20 }}
@@ -4126,7 +4720,7 @@ const Chats = () => {
                       </>
                     )}
                   </div>
-                  {visibleConversationChats.length > chatVisibleCount && (
+                  {regularConversationChats.length > Math.max(0, chatVisibleCount - priorityStarChats.length) && (
                     <div className="flex justify-center pt-2">
                       <button
                         className="text-sm text-primary hover:underline"
@@ -4140,15 +4734,91 @@ const Chats = () => {
               </>
             )}
 
+            {/* Service View */}
+            {mainTab === "service" && (
+              <div className="px-5">
+                <div className="space-y-0.5">
+                  {filteredServiceChats.length === 0 ? (
+                    <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
+                      <img
+                        src={serviceImage}
+                        alt="Service"
+                        className="w-full max-w-[300px] object-contain"
+                      />
+                      <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+                        Need a hand? Explore local pros in the <span className="font-semibold text-[#1F1F1F]">Service</span>
+                      </p>
+                    </div>
+                  ) : (
+                    filteredServiceChats.slice(0, chatVisibleCount).map((chat, index) => (
+                      <div key={chat.id} className="relative overflow-visible rounded-xl">
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          onClick={() => handleChatClick(chat)}
+                          className="relative flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                        >
+                          <div
+                            className="relative cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!chat.peerUserId) return;
+                              handleProfileTap(chat.peerUserId, chat.name, chat.avatarUrl);
+                            }}
+                          >
+                            <UserAvatar
+                              avatarUrl={chat.avatarUrl}
+                              name={chat.name}
+                              isVerified={chat.isVerified}
+                              hasCar={chat.hasCar}
+                              size="lg"
+                              showBadges={true}
+                            />
+                          </div>
+                            <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
+                              <div className="min-w-0">
+                                <h4 className="m-0 truncate font-semibold leading-[1.2]">{chat.name}</h4>
+                                <p className="m-0 mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
+                                  {chat.serviceType || getChatPreview(chat) || "Service chat"}
+                                </p>
+                                <p className="m-0 mt-2 truncate text-xs font-semibold leading-[1.2] text-[#6B7280]">
+                                  {getServiceStatusLabel(chat)}
+                                  {chat.serviceDateLabel ? ` · ${chat.serviceDateLabel}` : ""}
+                                </p>
+                              </div>
+                            <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
+                              <span className="text-xs text-[#9AA0B5]">{chat.time}</span>
+                              {chat.unread > 0 ? (
+                                <span className="w-5 h-5 rounded-full bg-muted-foreground/70 text-white text-xs flex items-center justify-center font-medium">
+                                  {chat.unread > 99 ? "9+" : chat.unread}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </motion.div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Groups View */}
             {mainTab === "groups" && (
               <div className="px-5 pt-2">
                 <div className="space-y-2">
                   {filteredGroups.length === 0 ? (
-                    <div className="text-center py-8">
-                      <Users className="w-12 h-12 mx-auto text-muted-foreground/50 mb-2" />
-                      <p className="text-muted-foreground">{t("No groups found")}</p>
-                      <p className="text-sm text-muted-foreground mt-1">
+                    <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
+                      <img
+                        src={emptyChatImage}
+                        alt="No groups yet"
+                        className="w-full max-w-[360px] object-contain"
+                      />
+                      <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+                        Better in a pack! Get verified to start a group chat and coordinate your next local meetup.
+                      </p>
+                      <p className="mt-1 text-center text-sm text-muted-foreground">
                         {isVerified ? t("chats.create_group_prompt") : t("chats.verify_to_create")}
                       </p>
                     </div>
@@ -4177,7 +4847,7 @@ const Chats = () => {
                           {/* Group Avatar */}
                           <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
                             {group.avatarUrl ? (
-                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
+                              <img src={group.avatarUrl || profilePlaceholder} alt={group.name} className="w-full h-full object-cover" />
                             ) : (
                               <Users className="w-6 h-6 text-primary" />
                             )}
@@ -4189,13 +4859,17 @@ const Chats = () => {
                               <h4 className="truncate font-semibold leading-[1.2]">{t(group.name)}</h4>
                               {/* Secondary: sender: preview */}
                               <p className="mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
-                                {group.lastMessageSender
+                                {isGroupMembershipHint(group.lastMessage)
+                                  ? group.lastMessage || <span className="italic">No messages yet</span>
+                                  : group.lastMessageSender
                                   ? <><span className="font-medium text-brandText/80">{group.lastMessageSender}:</span> {group.lastMessage}</>
                                   : group.lastMessage || <span className="italic">No messages yet</span>
                                 }
                               </p>
                               {/* Bottom row: member count */}
-                              <p className="mt-1 text-[11px] font-[500] text-[#6B7280]">{group.memberCount} members</p>
+                              <p className="mt-1 text-[11px] font-[500] text-[#6B7280]">
+                                {group.invitePending ? "Invitation pending" : `${group.memberCount} members`}
+                              </p>
                             </div>
                             <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
                               <span className="text-xs text-[#9AA0B5]">{t(group.time)}</span>
@@ -4203,14 +4877,75 @@ const Chats = () => {
                                 <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
                                   {group.unread > 9 ? "9+" : group.unread}
                                 </span>
+                              ) : group.invitePending ? (
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!profile?.id) return;
+                                    try {
+                                      let data: unknown = null;
+                                      let error: { message?: string } | null = null;
+                                      if (group.inviteId) {
+                                        const byId = await (supabase.rpc as (
+                                          fn: string,
+                                          params?: Record<string, unknown>
+                                        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                          "accept_group_chat_invite_by_id",
+                                          {
+                                          p_invite_id: group.inviteId,
+                                          }
+                                        );
+                                        data = byId.data;
+                                        error = byId.error;
+                                      } else {
+                                        const byChat = await (supabase.rpc as (
+                                          fn: string,
+                                          params?: Record<string, unknown>
+                                        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                          "accept_group_chat_invite",
+                                          {
+                                          p_chat_id: group.id,
+                                          }
+                                        );
+                                        data = byChat.data;
+                                        error = byChat.error;
+                                      }
+                                      if (error) throw error;
+                                      const joined = Array.isArray(data)
+                                        ? ((data[0] || {}) as { joined?: unknown }).joined === true
+                                        : false;
+                                      if (!joined) {
+                                        toast.error("Invite is no longer available.");
+                                        return;
+                                      }
+                                      toast.success(`Joined ${group.name}`);
+                                      await loadConversations();
+                                      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                                    } catch (err: unknown) {
+                                      const msg =
+                                        err && typeof err === "object" && "message" in err
+                                          ? String((err as { message?: string }).message || "")
+                                          : "";
+                                      toast.error(msg ? `Unable to join group right now: ${msg}` : "Unable to join group right now.");
+                                    }
+                                  }}
+                                  className="h-7 rounded-full border border-[#3653BE]/30 px-2 text-[11px] font-semibold text-[#3653BE] hover:bg-[#3653BE]/5"
+                                  aria-label="Join group"
+                                >
+                                  Join
+                                </button>
                               ) : (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    if (!isVerified) {
+                                      setGroupVerifyGateOpen(true);
+                                      return;
+                                    }
                                     setGroupManageId(group.id);
                                   }}
                                   className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-muted"
-                                  aria-label="Edit group"
+                                  aria-label="Manage group"
                                 >
                                   <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                                 </button>
@@ -4294,7 +5029,7 @@ const Chats = () => {
       <Dialog open={!!groupManageId} onOpenChange={() => { setGroupManageId(null); setGroupAddSearch(""); }}>
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Group</DialogTitle>
+            <DialogTitle>Manager Group</DialogTitle>
             <DialogDescription>Edit photo, members, and group settings.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -4303,7 +5038,7 @@ const Chats = () => {
               {(() => {
                 const grp = groups.find((g) => g.id === groupManageId);
                 return grp?.avatarUrl ? (
-                  <img src={grp.avatarUrl} alt={grp.name} className="w-14 h-14 rounded-full object-cover flex-shrink-0" />
+                  <img src={grp.avatarUrl || profilePlaceholder} alt={grp.name} className="w-14 h-14 rounded-full object-cover flex-shrink-0" />
                 ) : (
                   <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
                     <Users className="w-6 h-6 text-primary" />
@@ -4392,12 +5127,24 @@ const Chats = () => {
                 )) : (
                   <div className="text-xs text-muted-foreground py-2">Loading members...</div>
                 )}
+                {groupPendingInvites.map((invitee) => (
+                  <div key={`invite-${invitee.id}`} className="flex items-center justify-between py-1.5">
+                    <div className="flex items-center gap-2 opacity-65">
+                      <UserAvatar avatarUrl={invitee.avatarUrl} name={invitee.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                      <span className="text-sm text-brandText">{invitee.name}</span>
+                    </div>
+                    <span className="text-[10px] font-medium text-[#9AA0B5]">Invited</span>
+                  </div>
+                ))}
               </div>
             </div>
 
             {/* Add Members — search from matched friends not yet in group */}
             {(() => {
-              const currentMemberIds = new Set(groupMembers.map((m) => m.id));
+              const currentMemberIds = new Set([
+                ...groupMembers.map((m) => m.id),
+                ...groupPendingInvites.map((m) => m.id),
+              ]);
               const addableFriends = groupSelectableUsers.filter((u) => !currentMemberIds.has(u.id));
               const filtered = groupAddSearch.trim()
                 ? addableFriends.filter((u) => u.name.toLowerCase().includes(groupAddSearch.toLowerCase()))
@@ -4438,33 +5185,26 @@ const Chats = () => {
                             if (!profile?.id || !groupManageId) return;
                             try {
                               const { error: memberErr } = await supabase
-                                .from("chat_room_members")
+                                .from("group_chat_invites")
                                 .upsert(
-                                  { chat_id: groupManageId, user_id: u.id },
-                                  { onConflict: "chat_id,user_id", ignoreDuplicates: true }
+                                  {
+                                    chat_id: groupManageId,
+                                    chat_name: groups.find((g) => g.id === groupManageId)?.name || "Group",
+                                    inviter_user_id: profile.id,
+                                    invitee_user_id: u.id,
+                                    status: "pending",
+                                  },
+                                  { onConflict: "chat_id,invitee_user_id", ignoreDuplicates: false }
                                 );
                               if (memberErr) throw memberErr;
-                              setGroupMembers((prev) =>
+                              setGroupPendingInvites((prev) =>
                                 prev.some((m) => m.id === u.id)
                                   ? prev
                                   : [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]
                               );
-                              setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
-                              toast.success(`${u.name} added`);
-                              // Fire-and-forget notification (ignore RLS errors)
-                              const grpName = groups.find((g) => g.id === groupManageId)?.name || "a group";
-                              const inviterName = (profile as unknown as { display_name?: string }).display_name || "Someone";
-                              void supabase.rpc("enqueue_notification", {
-                                p_user_id: u.id,
-                                p_category: "chats",
-                                p_kind: "group_invite",
-                                p_title: `${inviterName} invited you to ${grpName}! 🐾`,
-                                p_body: `${inviterName} invited you to ${grpName}! 🐾`,
-                                p_href: "/chats?tab=groups",
-                                p_data: { chat_id: groupManageId, chat_name: grpName, inviter_name: inviterName },
-                              });
+                              toast.success(`${u.name} invited`);
                             } catch {
-                              toast.error("Couldn't add member.");
+                              toast.error("Couldn't invite member.");
                             }
                           }}
                         >
@@ -4484,7 +5224,7 @@ const Chats = () => {
       </Dialog>
 
       <Dialog open={groupVerifyGateOpen} onOpenChange={setGroupVerifyGateOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm !z-[9800] !top-[38%] !translate-y-0">
           <DialogHeader>
             <DialogTitle>Identity verification required</DialogTitle>
             <DialogDescription>Finish verification to sunlock group chats</DialogDescription>
@@ -4527,12 +5267,7 @@ const Chats = () => {
               variant="secondary"
               size="lg"
               className="flex-1 min-w-0"
-              onClick={async () => {
-                if (pendingGroupInvite) {
-                  await supabase.from("notifications").update({ is_read: true }).eq("id", pendingGroupInvite.notifId);
-                }
-                setPendingGroupInvite(null);
-              }}
+              onClick={() => setPendingGroupInvite(null)}
             >
               Not Now
             </NeuButton>
@@ -4542,15 +5277,50 @@ const Chats = () => {
               onClick={async () => {
                 if (!pendingGroupInvite || !profile?.id) return;
                 try {
-                  await supabase.from("chat_room_members").insert({
-                    chat_id: pendingGroupInvite.chatId,
-                    user_id: profile.id,
-                  });
-                  await supabase.from("notifications").update({ is_read: true }).eq("id", pendingGroupInvite.notifId);
+                  let data: unknown = null;
+                  let error: { message?: string } | null = null;
+                  if (pendingGroupInvite.inviteId) {
+                    const byId = await (supabase.rpc as (
+                      fn: string,
+                      params?: Record<string, unknown>
+                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                      "accept_group_chat_invite_by_id",
+                      {
+                        p_invite_id: pendingGroupInvite.inviteId,
+                      }
+                    );
+                    data = byId.data;
+                    error = byId.error;
+                  } else {
+                    const byChat = await (supabase.rpc as (
+                      fn: string,
+                      params?: Record<string, unknown>
+                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                      "accept_group_chat_invite",
+                      {
+                        p_chat_id: pendingGroupInvite.chatId,
+                      }
+                    );
+                    data = byChat.data;
+                    error = byChat.error;
+                  }
+                  if (error) throw error;
+                  const joined = Array.isArray(data)
+                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
+                    : false;
+                  if (!joined) {
+                    toast.error("Invite is no longer available.");
+                    return;
+                  }
                   toast.success(`Joined ${pendingGroupInvite.chatName}`);
-                  void loadConversations();
-                } catch {
-                  toast.error("Unable to join group right now.");
+                  await loadConversations();
+                  navigate(`/chat-dialogue?room=${encodeURIComponent(pendingGroupInvite.chatId)}&name=${encodeURIComponent(pendingGroupInvite.chatName)}`);
+                } catch (err: unknown) {
+                  const msg =
+                    err && typeof err === "object" && "message" in err
+                      ? String((err as { message?: string }).message || "")
+                      : "";
+                  toast.error(msg ? `Unable to join group right now: ${msg}` : "Unable to join group right now.");
                 } finally {
                   setPendingGroupInvite(null);
                 }
@@ -4776,12 +5546,63 @@ const Chats = () => {
         onBillingChange={setStarUpgradeBilling}
         onUpgrade={handleStarUpgradeCheckout}
       />
+      <Dialog
+        open={Boolean(confirmStarTarget)}
+        onOpenChange={(open) => {
+          if (starActionLoading) return;
+          if (!open) setConfirmStarTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Use a Star to connect?</DialogTitle>
+            <DialogDescription>This starts a conversation immediately.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <button
+              type="button"
+              className="flex-1 h-10 rounded-full border border-border bg-[#eceff4] px-4 text-sm font-semibold text-[#4a4965]"
+              disabled={starActionLoading}
+              onClick={() => setConfirmStarTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="flex-1 h-10 rounded-full bg-[#F5C85C] px-4 text-sm font-semibold text-[#2C2A19] disabled:opacity-50"
+              disabled={starActionLoading}
+              onClick={() => void executeConfirmedStar()}
+            >
+              {starActionLoading ? "Sending..." : "Send Star"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AnimatePresence>
+        {starFlightVisible && (
+          <motion.div
+            className="pointer-events-none fixed inset-0 z-[9805]"
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[#F5C85C] text-[34px] drop-shadow-[0_8px_18px_rgba(245,200,92,0.45)]"
+              initial={{ scale: 1, x: 0, y: 0, opacity: 1 }}
+              animate={{ scale: 0.36, x: 160, y: -240, opacity: 0 }}
+              transition={{ duration: 0.4, ease: "easeInOut" }}
+            >
+              ⭐
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Discovery Filter Modal */}
       <GlassModal
         isOpen={isFilterModalOpen}
         onClose={() => { setIsFilterModalOpen(false); setActiveFilterRow(null); }}
-        title={activeFilterRow ? activeFilterRow.label : t("Filters")}
+        title={activeFilterRow ? undefined : t("Filters")}
         maxWidth="max-w-lg"
         className="max-h-[78vh] overflow-y-auto pb-4"
       >
@@ -4798,7 +5619,13 @@ const Chats = () => {
                         className="w-full flex items-center justify-between px-5 py-3.5 text-sm"
                         onClick={() => {
                           if (locked) {
+                            if (row.tier === "gold" && effectiveTier !== "gold") {
+                              toast.error(quotaConfig.copy.filters.goldLocked);
+                              openStarUpgradeSheet("gold");
+                              return;
+                            }
                             toast.error(quotaConfig.copy.filters.locked);
+                            openStarUpgradeSheet("plus");
                             return;
                           }
                           setActiveFilterRow(row);
@@ -4835,6 +5662,14 @@ const Chats = () => {
               {/* Per-filter selection UI */}
               {activeFilterRow && (
                 <div className="p-5 space-y-4">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 text-base font-semibold text-brandText hover:text-brandText"
+                    onClick={() => setActiveFilterRow(null)}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    {activeFilterRow.label}
+                  </button>
                   {/* Age Range */}
                   {activeFilterRow.key === "ageMin" && (
                     <div className="space-y-4">

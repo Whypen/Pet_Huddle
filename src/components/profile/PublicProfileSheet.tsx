@@ -12,6 +12,8 @@ import { ensureDirectChatRoom } from "@/lib/chatRooms";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { buildStarIntroPayload } from "@/lib/starChat";
 
 type PublicProfileSheetData = {
   display_name?: string | null;
@@ -19,6 +21,7 @@ type PublicProfileSheetData = {
   bio?: string | null;
   availability_status?: string[] | null;
   social_role?: string | null;
+  social_id?: string | null;
   verification_status?: string | null;
   is_verified?: boolean | null;
   has_car?: boolean | null;
@@ -81,6 +84,9 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
   const [starUpgradeTier, setStarUpgradeTier] = useState<"plus" | "gold" | null>(null);
   const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
   const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
+  const [confirmStarOpen, setConfirmStarOpen] = useState(false);
+  const [starSending, setStarSending] = useState(false);
+  const [starFlightVisible, setStarFlightVisible] = useState(false);
 
   useEffect(() => {
     setResolvedData(data);
@@ -235,22 +241,34 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
         }
         return;
       }
+      const { error: starMessageError } = await supabase.from("chat_messages").insert({
+        chat_id: roomId,
+        sender_id: profile.id,
+        content: buildStarIntroPayload(profile.id, viewedUserId),
+      });
+      if (starMessageError) throw starMessageError;
       void (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
         "enqueue_notification",
         {
           p_user_id: viewedUserId,
           p_category: "chats",
           p_kind: "star",
-          p_title: "Star Chat Started✨",
-          p_body: `${profile.display_name || "Someone"} just sent you a Star!`,
+          p_title: "New star",
+          p_body: "Someone sent you a Star ⭐ Tap to find out who.",
           p_href: `/chat-dialogue?room=${roomId}`,
           p_data: { room_id: roomId, from_user_id: profile.id, type: "star" },
         }
       );
-      navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}`);
-      onClose();
+      setStarFlightVisible(true);
+      window.setTimeout(() => {
+        navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}`);
+        onClose();
+        setStarFlightVisible(false);
+      }, 420);
     } catch {
       toast.error("Unable to open chat right now.");
+    } finally {
+      setStarSending(false);
     }
   };
 
@@ -323,14 +341,14 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
       {isOpen && (
         <>
           <motion.div
-            className="fixed inset-0 z-[2500] bg-black/50"
+            className="fixed inset-0 z-[5500] bg-black/50"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
           <motion.div
-            className="fixed inset-0 z-[2501] flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
+            className="fixed inset-0 z-[5501] flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -338,15 +356,22 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           >
             <div className="h-[80svh] max-h-[80svh] w-[min(calc(100vw-24px),560px)] rounded-3xl border border-border bg-card shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div className="text-sm font-semibold text-brandText truncate">
-                {resolvedData?.display_name || fallbackName || "Profile"}
+              <div className="min-w-0 flex items-baseline gap-2">
+                <div className="truncate text-sm font-semibold text-brandText">
+                  {resolvedData?.display_name || fallbackName || "Profile"}
+                </div>
+                {resolvedData?.social_id ? (
+                  <div className="truncate text-xs font-medium text-[rgba(74,73,101,0.55)]">
+                    @{resolvedData.social_id}
+                  </div>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
                 {canInteract && starAllowedByAge && !hideStartChatAction ? (
                   <>
                     <button
                       type="button"
-                      onClick={() => void handleStar()}
+                      onClick={() => setConfirmStarOpen(true)}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
                       aria-label="Start chat"
                     >
@@ -427,18 +452,70 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
             </div>
             </div>
           </motion.div>
+          <Dialog open={confirmStarOpen} onOpenChange={(open) => {
+            if (starSending) return;
+            setConfirmStarOpen(open);
+          }}>
+            <DialogContent className="max-w-sm !z-[9800] !top-[38%] !translate-y-0">
+              <DialogHeader>
+                <DialogTitle>Use a Star to connect?</DialogTitle>
+                <DialogDescription>This starts a conversation immediately.</DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="!flex-row gap-2 pt-2">
+                <button
+                  type="button"
+                  className="flex-1 h-10 rounded-full border border-border bg-[#eceff4] px-4 text-sm font-semibold text-[#4a4965]"
+                  disabled={starSending}
+                  onClick={() => setConfirmStarOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 h-10 rounded-full bg-[#F5C85C] px-4 text-sm font-semibold text-[#2C2A19] disabled:opacity-50"
+                  disabled={starSending}
+                  onClick={async () => {
+                    setStarSending(true);
+                    setConfirmStarOpen(false);
+                    await handleStar();
+                  }}
+                >
+                  {starSending ? "Sending..." : "Send Star"}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <AnimatePresence>
+            {starFlightVisible && (
+              <motion.div
+                className="pointer-events-none fixed inset-0 z-[5750]"
+                initial={{ opacity: 1 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <motion.div
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[#F5C85C] text-[34px] drop-shadow-[0_8px_18px_rgba(245,200,92,0.45)]"
+                  initial={{ scale: 1, x: 0, y: 0, opacity: 1 }}
+                  animate={{ scale: 0.36, x: 140, y: -220, opacity: 0 }}
+                  transition={{ duration: 0.4, ease: "easeInOut" }}
+                >
+                  ⭐
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <AnimatePresence>
             {petViewOpen && (
               <>
                 <motion.div
-                  className="fixed inset-0 z-[2600] bg-black/45"
+                  className="fixed inset-0 z-[5600] bg-black/45"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={closePetView}
                 />
                 <motion.div
-                  className="fixed inset-0 z-[2601] flex items-center justify-center px-4"
+                  className="fixed inset-0 z-[5601] flex items-center justify-center px-4"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}

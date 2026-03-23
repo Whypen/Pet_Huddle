@@ -7,6 +7,7 @@ import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuDropdown } from "@/components/ui/NeuDropdown";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
@@ -22,17 +23,20 @@ import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/
 import {
   clearPendingSignupVerification,
   loadPendingSignupVerification,
+  SETPET_PREFILL_KEY,
   SETPROFILE_PREFILL_KEY,
-  SIGNUP_VERIFY_SUBMITTED_KEY,
+  SIGNUP_PASSWORD_SESSION_KEY,
+  SIGNUP_PENDING_VERIFICATION_KEY,
+  SIGNUP_STORAGE_KEY,
   buildScopedStorageKey,
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
 
 // Option constants matching database schema
-const genderOptions = [...CANONICAL_GENDER_OPTIONS];
-const orientationOptions = [...CANONICAL_ORIENTATION_OPTIONS];
-const degreeOptions = ["College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD", "PNA"];
-const relationshipOptions = ["Single", "In a relationship", "Open relationship", "Married", "Divorced", "PNA"];
+const genderOptions = CANONICAL_GENDER_OPTIONS.filter(o => o !== "Prefer not to say");
+const orientationOptions = CANONICAL_ORIENTATION_OPTIONS.filter(o => o !== "Prefer not to say");
+const degreeOptions = ["College", "Associate Degree", "Bachelor", "Master", "Doctorate / PhD"];
+const relationshipOptions = ["Single", "In a relationship", "Open relationship", "Married", "Divorced"];
 const petExperienceOptions = [...CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS];
 const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French", "Japanese", "Korean", "German", "Portuguese", "Italian", "Arabic", "Hindi", "Bengali", "Urdu", "Russian", "Turkish", "Thai", "Vietnamese", "Indonesian", "Malay", "Tamil", "Telugu", "Polish", "Dutch", "Swedish"];
 const availabilityOptions = [...CANONICAL_SOCIAL_ROLE_OPTIONS];
@@ -40,8 +44,7 @@ const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const NUMERIC_ONLY_REGEX = /^\d+$/;
 const DECIMAL_NUMBER_REGEX = /^\d+(?:\.\d+)?$/;
 const REQUIRED_CONNECT_ERROR = "Required to help others connect with you";
-const LEGAL_NAME_SUBTEXT = "Legal name should include at least two words - first and last name.";
-const LEGAL_NAME_RETRY_ERROR = "Let’s try again with a valid legal name";
+const PROFILE_WRITE_SCHEMA_DRIFT_ERROR = "Profile schema is updating. Saved compatible fields.";
 const EXPERIENCE_YEARS_ERROR = "Tell us how many years you’ve cared for pets";
 const isAlreadyRegisteredError = (message: string) =>
   message.toLowerCase().includes("already") && message.toLowerCase().includes("registered");
@@ -69,13 +72,6 @@ const describeSupabaseWriteError = (error: unknown) => {
 const normalizeSocialRole = (value: string) => (value === "Vet" ? "Veterinarian" : value);
 const DEFAULT_ROLE_WITH_PETS = "Pet Parent";
 const DEFAULT_ROLE_WITHOUT_PETS = "Animal Friend (No Pet)";
-
-const hasValidLegalName = (value: string): boolean => {
-  const trimmed = value.trim();
-  if (trimmed.length < 2) return false;
-  const words = trimmed.split(/\s+/).filter(Boolean);
-  return words.length >= 2 && words.every((word) => word.length >= 1);
-};
 
 const inferCountryCodeFromPhone = (phone: string): string => {
   const normalized = phone.replace(/\s+/g, "");
@@ -152,14 +148,12 @@ type EditProfileProps = {
 const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { user, profile, refreshProfile } = useAuth();
-  const { data: signupData, reset: resetSignup } = useSignup();
+  const { user, profile, refreshProfile, signIn } = useAuth();
+  const { data: signupData, reset: resetSignup, setFlowState } = useSignup();
   const [loading, setLoading] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [languageQuery, setLanguageQuery] = useState("");
-  const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [petsProfileCount, setPetsProfileCount] = useState(0);
   const [activePetHeads, setActivePetHeads] = useState<Array<{ id: string; name?: string | null; species?: string | null; photoUrl?: string | null }>>([]);
   const [selectedCountry, setSelectedCountry] = useState("");
@@ -175,25 +169,52 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const [phoneEditMode, setPhoneEditMode] = useState(false);
   const [phoneOtpRequested, setPhoneOtpRequested] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState("");
+  const [otpCountdown, setOtpCountdown] = useState(0);
+  const otpCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Clear the countdown timer on unmount to avoid state updates on dead components
+  useEffect(() => () => { if (otpCountdownRef.current) clearInterval(otpCountdownRef.current); }, []);
   const [phoneOtpVerified, setPhoneOtpVerified] = useState(false);
   const [phoneOriginalValue, setPhoneOriginalValue] = useState("");
   const [dobEditMode, setDobEditMode] = useState(false);
-  const [languagesEditMode, setLanguagesEditMode] = useState(false);
-  const languagesContainerRef = useRef<HTMLDivElement | null>(null);
   const [profileMode, setProfileMode] = useState<"edit" | "view">("edit");
   const isIdentityLocked = profile?.is_verified === true;
-  const verificationStatus = String(profile?.verification_status ?? "unverified").toLowerCase();
   const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [prefillHydrated, setPrefillHydrated] = useState(false);
 
   const resolveSetProfilePrefillKey = useCallback(() => {
-    const owner = onboardingMode ? signupData.email : user?.id;
-    const normalizedOwner = normalizeStorageOwner(owner || "");
+    if (!onboardingMode) return null;
+    // Accept either the signup-context email or the auth user's email as the owner,
+    // so the prefill key resolves correctly even when the user is already logged in.
+    const normalizedOwner = normalizeStorageOwner(signupData.email || user?.email || "");
     if (!normalizedOwner) return null;
     return buildScopedStorageKey(SETPROFILE_PREFILL_KEY, normalizedOwner);
-  }, [onboardingMode, signupData.email, user?.id]);
+  }, [onboardingMode, signupData.email, user?.email, user?.id]);
+
+  const clearOnboardingDraftKeys = useCallback((ownerHint?: string | null) => {
+    const owners = Array.from(
+      new Set(
+        [ownerHint, signupData.email, user?.id]
+          .map((value) => normalizeStorageOwner(value || ""))
+          .filter(Boolean),
+      ),
+    ) as string[];
+    try {
+      owners.forEach((owner) => {
+        localStorage.removeItem(buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner));
+        localStorage.removeItem(buildScopedStorageKey(SETPET_PREFILL_KEY, owner));
+        localStorage.removeItem(buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner));
+        sessionStorage.removeItem(buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner));
+        sessionStorage.removeItem(buildScopedStorageKey(SIGNUP_PENDING_VERIFICATION_KEY, owner));
+      });
+      sessionStorage.removeItem("huddle_vi_status");
+      sessionStorage.removeItem("signup_verify_submitted_v1");
+      sessionStorage.removeItem("signup_verify_docs_submitted");
+    } catch {
+      // best-effort cleanup only
+    }
+  }, [signupData.email, user?.id]);
 
   const [fieldErrors, setFieldErrors] = useState({
     legalName: "",
@@ -276,7 +297,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const getMissingRequiredFieldLabels = (): string[] => {
     const missing: string[] = [];
     const hasPets = petsProfileCount > 0 || formData.owns_pets;
-    if (!hasValidLegalName(formData.legal_name)) missing.push("Legal name");
     if (!formData.display_name.trim()) missing.push("Display/User Name");
     if (!formData.phone.trim()) missing.push("Phone");
     if (!formData.dob) missing.push("Date of Birth");
@@ -379,7 +399,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     clearPendingSignupVerification(signupData.email || user?.id || "");
     try {
-      sessionStorage.setItem(SIGNUP_VERIFY_SUBMITTED_KEY, "true");
+      sessionStorage.removeItem("huddle_vi_status");
+      sessionStorage.removeItem("signup_verify_submitted_v1");
+      sessionStorage.removeItem("signup_verify_docs_submitted");
     } catch {
       // no-op
     }
@@ -388,7 +410,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const validateRequiredFields = () => {
     const nextErrors: typeof fieldErrors = {
       ...fieldErrors,
-      legalName: hasValidLegalName(formData.legal_name) ? "" : LEGAL_NAME_RETRY_ERROR,
+      legalName: "",
       displayName: formData.display_name.trim() ? "" : REQUIRED_CONNECT_ERROR,
       phone: formData.phone.trim() ? "" : REQUIRED_CONNECT_ERROR,
       dob: formData.dob ? "" : REQUIRED_CONNECT_ERROR,
@@ -416,7 +438,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         Number(formData.experience_years) >= 0 &&
         Number(formData.experience_years) <= 99;
 
-      if (next.legalName && hasValidLegalName(formData.legal_name)) { next.legalName = ""; changed = true; }
+      if (next.legalName) { next.legalName = ""; changed = true; }
       if (next.displayName && formData.display_name.trim()) { next.displayName = ""; changed = true; }
       if (next.phone && formData.phone.trim()) { next.phone = ""; changed = true; }
       if (next.dob && formData.dob) { next.dob = ""; changed = true; }
@@ -434,7 +456,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       return changed ? next : prev;
     });
   }, [
-    formData.legal_name,
     formData.display_name,
     formData.phone,
     formData.dob,
@@ -447,19 +468,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     formData.owns_pets,
     petsProfileCount,
   ]);
-
-  useEffect(() => {
-    const onPointerDown = (event: MouseEvent) => {
-      if (!showLanguageMenu) return;
-      const target = event.target as Node | null;
-      if (!languagesContainerRef.current || (target && languagesContainerRef.current.contains(target))) return;
-      setShowLanguageMenu(false);
-      setLanguagesEditMode(false);
-      setLanguageQuery("");
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [showLanguageMenu]);
 
   // RULE 14 — keyboard-safe layout via visualViewport API
   useEffect(() => {
@@ -480,8 +488,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
   useEffect(() => {
     const prefillKey = resolveSetProfilePrefillKey();
+    // Allow reading from localStorage prefill in onboardingMode regardless of auth state,
+    // so the form is pre-populated even if SignupContext in-memory state was cleared.
+    const allowLocalPrefill = onboardingMode;
     const cachedPrefill = (() => {
-      if (!prefillKey) return {} as Record<string, unknown>;
+      if (!prefillKey || !allowLocalPrefill) return {} as Record<string, unknown>;
       try {
         const raw = localStorage.getItem(prefillKey) || "{}";
         return JSON.parse(raw) as Record<string, unknown>;
@@ -499,37 +510,50 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         return null;
       }
     })();
+    const expectedPrefillOwner = normalizeStorageOwner(signupData.email || user?.email || "");
+    const cachedPrefillOwner = normalizeStorageOwner(
+      typeof cachedPrefill.prefill_owner === "string" ? cachedPrefill.prefill_owner : "",
+    );
+    const trustedPrefill = Boolean(
+      expectedPrefillOwner &&
+      cachedPrefillOwner &&
+      expectedPrefillOwner === cachedPrefillOwner,
+    );
+    const safeCachedDraft = trustedPrefill ? cachedDraft : null;
+    const safeCachedPrefill = trustedPrefill ? cachedPrefill : ({} as Record<string, unknown>);
     const cachedValue = (key: string): string => {
-      if (cachedDraft && typeof cachedDraft[key] === "string") return String(cachedDraft[key] || "");
-      const legacy = cachedPrefill[key];
+      if (safeCachedDraft && typeof safeCachedDraft[key] === "string") return String(safeCachedDraft[key] || "");
+      const legacy = safeCachedPrefill[key];
       return typeof legacy === "string" ? legacy : "";
     };
     const cachedSocialAlbum = (() => {
-      if (cachedDraft?.social_album && Array.isArray(cachedDraft.social_album)) {
+      if (safeCachedDraft?.social_album && Array.isArray(safeCachedDraft.social_album)) {
         return canonicalizeSocialAlbumEntries(
-          (cachedDraft.social_album as unknown[]).filter((value): value is string => typeof value === "string"),
+          (safeCachedDraft.social_album as unknown[]).filter((value): value is string => typeof value === "string"),
         );
       }
       try {
-        const raw = typeof cachedPrefill.social_album === "string" ? cachedPrefill.social_album : "[]";
+        const raw = typeof safeCachedPrefill.social_album === "string" ? safeCachedPrefill.social_album : "[]";
         const parsed = JSON.parse(raw) as string[];
         return Array.isArray(parsed) ? canonicalizeSocialAlbumEntries(parsed) : [];
       } catch {
         return [] as string[];
       }
     })();
-    const signupDob = onboardingMode ? signupData.dob : "";
-    const signupDisplayName = onboardingMode ? signupData.display_name : "";
-    const signupSocialId = onboardingMode ? signupData.social_id : "";
-    const signupPhone = onboardingMode ? signupData.phone : "";
-    const signupLegalName = onboardingMode ? signupData.legal_name : "";
-
+    const signupSeedOwner = normalizeStorageOwner(signupData.email || "");
+    const authSeedOwner = normalizeStorageOwner(user?.email || user?.id || "");
+    const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
+    const signupDob = allowSignupSeed ? signupData.dob : "";
+    const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
+    const signupSocialId = allowSignupSeed ? signupData.social_id : "";
+    const signupPhone = allowSignupSeed ? signupData.phone : "";
     const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name");
-    const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name");
     const phone = profile?.phone || signupPhone || cachedValue("phone");
     const dob = profile?.dob || signupDob || cachedValue("dob");
     const bio = profile?.bio || cachedValue("bio");
-    const socialId = profile?.social_id || signupSocialId || cachedValue("social_id");
+    // Normalise to DB constraint: lowercase, only a-z 0-9 . _
+    const socialId = (profile?.social_id || signupSocialId || cachedValue("social_id"))
+      .toLowerCase().replace(/[^a-z0-9._]/g, "");
     const genderGenre = profile?.gender_genre || cachedValue("gender_genre");
     const orientation = profile?.orientation || cachedValue("orientation");
     const height = profile?.height?.toString() || cachedValue("height");
@@ -540,14 +564,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const affiliation = profile?.affiliation || cachedValue("affiliation");
     const occupation = profile?.occupation || cachedValue("occupation");
     const relationshipStatus = profile?.relationship_status || cachedValue("relationship_status");
-    const cachedLanguages = Array.isArray(cachedDraft?.languages)
-      ? (cachedDraft?.languages as unknown[]).filter((value): value is string => typeof value === "string")
+    const cachedLanguages = Array.isArray(safeCachedDraft?.languages)
+      ? (safeCachedDraft?.languages as unknown[]).filter((value): value is string => typeof value === "string")
       : [];
-    const cachedPetExperience = Array.isArray(cachedDraft?.pet_experience)
-      ? (cachedDraft?.pet_experience as unknown[]).filter((value): value is string => typeof value === "string")
+    const cachedPetExperience = Array.isArray(safeCachedDraft?.pet_experience)
+      ? (safeCachedDraft?.pet_experience as unknown[]).filter((value): value is string => typeof value === "string")
       : [];
-    const cachedAvailability = Array.isArray(cachedDraft?.availability_status)
-      ? (cachedDraft?.availability_status as unknown[]).map((v) => String(v)).filter(Boolean)
+    const cachedAvailability = Array.isArray(safeCachedDraft?.availability_status)
+      ? (safeCachedDraft?.availability_status as unknown[]).map((v) => String(v)).filter(Boolean)
       : [];
     const hasPetsFromProfile = Boolean(profile?.owns_pets);
     const normalizedAvailability = (profile?.availability_status || [])
@@ -555,7 +579,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       .filter((status): status is string => Boolean(status));
     const resolvedAvailability = enforceAvailabilityDefaults(
       normalizedAvailability.length > 0 ? normalizedAvailability : cachedAvailability,
-      hasPetsFromProfile || Boolean(cachedDraft?.owns_pets),
+      hasPetsFromProfile || Boolean(safeCachedDraft?.owns_pets),
     );
     const locationCountry = profile?.location_country || cachedValue("location_country");
     const locationDistrict = profile?.location_district || cachedValue("location_district");
@@ -567,7 +591,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     setFormData({
       display_name: displayName,
-      legal_name: legalName,
       phone,
       dob,
       bio,
@@ -583,46 +606,45 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       affiliation,
       occupation,
       relationship_status: relationshipStatus,
-      has_car: profile?.has_car || Boolean(cachedDraft?.has_car),
-      languages: profile?.languages || cachedLanguages,
+      has_car: profile?.has_car ?? Boolean(safeCachedDraft?.has_car),
+      languages: profile?.languages ?? cachedLanguages,
       location_name: locationName,
       location_country: locationCountry,
       location_district: locationDistrict,
-      pet_experience: profile?.pet_experience || cachedPetExperience,
+      pet_experience: profile?.pet_experience ?? cachedPetExperience,
       experience_years: profile?.experience_years?.toString() || cachedValue("experience_years"),
-      owns_pets: profile?.owns_pets || Boolean(cachedDraft?.owns_pets),
+      owns_pets: profile?.owns_pets ?? Boolean(safeCachedDraft?.owns_pets),
       non_social: resolvedAvailability.length === 0,
       availability_status: resolvedAvailability,
-      show_gender: profile?.show_gender ?? Boolean(cachedDraft?.show_gender ?? Boolean(genderGenre.trim())),
-      show_orientation: profile?.show_orientation ?? Boolean(cachedDraft?.show_orientation ?? Boolean(orientation.trim())),
-      show_age: profile?.show_age ?? Boolean(cachedDraft?.show_age ?? Boolean(dob)),
-      show_height: profile?.show_height ?? Boolean(cachedDraft?.show_height ?? Boolean(height)),
-      show_weight: profile?.show_weight ?? Boolean(cachedDraft?.show_weight ?? Boolean(weight)),
-      show_academic: profile?.show_academic ?? Boolean(cachedDraft?.show_academic ?? Boolean(degree.trim() || school.trim() || major.trim())),
-      show_affiliation: profile?.show_affiliation ?? Boolean(cachedDraft?.show_affiliation ?? Boolean(affiliation.trim())),
-      show_occupation: profile?.show_occupation ?? Boolean(cachedDraft?.show_occupation ?? Boolean(occupation.trim())),
-      show_bio: profile?.show_bio ?? Boolean(cachedDraft?.show_bio ?? Boolean(bio.trim())),
-      show_relationship_status: profile?.show_relationship_status ?? Boolean(cachedDraft?.show_relationship_status ?? Boolean(relationshipStatus.trim())),
-      show_languages: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? cachedDraft?.show_languages ?? false),
-      show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? cachedDraft?.show_location ?? false),
-      social_album: canonicalizeSocialAlbumEntries(profile?.social_album || cachedSocialAlbum),
+      show_gender: profile?.show_gender ?? Boolean(safeCachedDraft?.show_gender ?? Boolean(genderGenre.trim())),
+      show_orientation: profile?.show_orientation ?? Boolean(safeCachedDraft?.show_orientation ?? Boolean(orientation.trim())),
+      show_age: profile?.show_age ?? Boolean(safeCachedDraft?.show_age ?? Boolean(dob)),
+      show_height: profile?.show_height ?? Boolean(safeCachedDraft?.show_height ?? Boolean(height)),
+      show_weight: profile?.show_weight ?? Boolean(safeCachedDraft?.show_weight ?? Boolean(weight)),
+      show_academic: profile?.show_academic ?? Boolean(safeCachedDraft?.show_academic ?? Boolean(degree.trim() || school.trim() || major.trim())),
+      show_affiliation: profile?.show_affiliation ?? Boolean(safeCachedDraft?.show_affiliation ?? Boolean(affiliation.trim())),
+      show_occupation: profile?.show_occupation ?? Boolean(safeCachedDraft?.show_occupation ?? Boolean(occupation.trim())),
+      show_bio: profile?.show_bio ?? Boolean(safeCachedDraft?.show_bio ?? Boolean(bio.trim())),
+      show_relationship_status: profile?.show_relationship_status ?? Boolean(safeCachedDraft?.show_relationship_status ?? Boolean(relationshipStatus.trim())),
+      show_languages: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? safeCachedDraft?.show_languages ?? false),
+      show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false),
+      social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
     });
     setSelectedCountry(matchedCountry?.code || "");
     if (profile?.avatar_url) {
       setPhotoPreview(profile.avatar_url);
     } else if (
-      onboardingMode &&
-      typeof cachedPrefill.avatar_url === "string" &&
-      typeof cachedPrefill.prefill_owner === "string" &&
-      cachedPrefill.prefill_owner.trim().toLowerCase() === (signupData.email || "").trim().toLowerCase()
+      allowLocalPrefill &&
+      trustedPrefill &&
+      typeof safeCachedPrefill.avatar_url === "string"
     ) {
-      setPhotoPreview(cachedPrefill.avatar_url);
+      setPhotoPreview(safeCachedPrefill.avatar_url);
     } else {
       setPhotoPreview(null);
     }
     if (profile?.social_album && profile.social_album.length > 0) {
       refreshSocialAlbumUrls(canonicalizeSocialAlbumEntries(profile.social_album));
-    } else if (cachedSocialAlbum.length > 0) {
+    } else if (allowLocalPrefill && cachedSocialAlbum.length > 0) {
       refreshSocialAlbumUrls(canonicalizeSocialAlbumEntries(cachedSocialAlbum));
     }
     setPhoneOriginalValue(phone);
@@ -637,13 +659,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.display_name,
     signupData.dob,
     signupData.email,
-    signupData.legal_name,
     signupData.phone,
     signupData.social_id,
+    user?.id,
   ]);
 
   useEffect(() => {
-    if (!onboardingMode) return;
+    if (!onboardingMode || user?.id) return;
     if (!prefillHydrated) return;
     const prefillKey = resolveSetProfilePrefillKey();
     if (!prefillKey) return;
@@ -657,7 +679,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           social_id: formData.social_id,
           phone: formData.phone,
           dob: formData.dob,
-          legal_name: formData.legal_name,
           location_country: formData.location_country,
           location_district: formData.location_district,
           avatar_url: photoPreview || "",
@@ -743,7 +764,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, social_id: REQUIRED_CONNECT_ERROR }));
       return;
     }
-    if (!/^[A-Za-z0-9_.-]{6,15}$/.test(current)) {
+    if (!/^[a-z0-9._]{6,15}$/.test(current)) {
       setSocialIdStatus("idle");
       setFieldErrors((prev) => ({ ...prev, social_id: t("Social ID must be 6-15 characters") }));
       return;
@@ -972,22 +993,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     await refreshSocialAlbumUrls(next);
   };
 
-  const removeLanguage = (lang: string) => {
-    setFormData(prev => ({
-      ...prev,
-      languages: prev.languages.filter(l => l !== lang)
-    }));
-  };
-
-  const toggleLanguage = (lang: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      languages: prev.languages.includes(lang)
-        ? prev.languages.filter((item) => item !== lang)
-        : [...prev.languages, lang],
-    }));
-  };
-
   const requestPhoneOtp = async () => {
     if (!formData.phone.trim()) {
       setFieldErrors((prev) => ({ ...prev, phone: t("Phone number is required") }));
@@ -1004,6 +1009,19 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
     setPhoneOtpRequested(true);
     setPhoneOtpVerified(false);
+    // Start 60-second resend countdown
+    if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
+    setOtpCountdown(60);
+    otpCountdownRef.current = setInterval(() => {
+      setOtpCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(otpCountdownRef.current!);
+          otpCountdownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     toast.success(t("OTP sent to your phone"));
   };
 
@@ -1019,6 +1037,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     setPhoneOtpCode("");
     setPhoneEditMode(false);
     setPhoneOriginalValue(formData.phone.trim());
+    if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
+    setOtpCountdown(0);
     toast.success(t("Phone verified"));
   };
 
@@ -1060,9 +1080,68 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     );
   };
 
-  const openVerifyIdentity = () => {
-    const returnTo = onboardingMode ? "/set-profile" : "/edit-profile";
-    navigate("/verify-identity", { state: { returnTo } });
+  // ── Silent draft save (View tab) ────────────────────────────────────────────
+  const silentSave = async () => {
+    if (!user) return;
+    try {
+      const hasPets = petsProfileCount > 0 || formData.owns_pets;
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          display_name: formData.display_name,
+          phone: formData.phone || null,
+          social_id: formData.social_id || null,
+          bio: formData.bio,
+          gender_genre: formData.gender_genre || null,
+          orientation: formData.orientation || null,
+          dob: formData.dob || null,
+          height: formData.height ? parseInt(formData.height) : null,
+          weight: formData.weight ? parseFloat(formData.weight) : null,
+          weight_unit: formData.weight_unit,
+          degree: formData.degree || null,
+          school: formData.school || null,
+          major: formData.major || null,
+          affiliation: formData.affiliation || null,
+          occupation: formData.occupation || null,
+          relationship_status: formData.relationship_status || null,
+          has_car: formData.has_car,
+          languages: formData.languages.length > 0 ? formData.languages : null,
+          location_name: formData.location_name || null,
+          location_country: formData.location_country || null,
+          location_district: formData.location_district || null,
+          last_lat: locationCoords?.lat ?? (profile?.last_lat ?? null),
+          last_lng: locationCoords?.lng ?? (profile?.last_lng ?? null),
+          pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
+          experience_years:
+            formData.pet_experience.includes("None") || !formData.experience_years
+              ? null
+              : parseFloat(formData.experience_years),
+          owns_pets: petsProfileCount > 0 ? true : formData.owns_pets,
+          non_social: formData.availability_status.length === 0,
+          availability_status: enforceAvailabilityDefaults(formData.availability_status, hasPets),
+          show_gender: formData.show_gender,
+          show_orientation: formData.show_orientation,
+          show_age: true,
+          show_height: formData.show_height,
+          show_weight: formData.show_weight,
+          show_academic: formData.show_academic,
+          show_affiliation: formData.show_affiliation,
+          show_occupation: formData.show_occupation,
+          show_bio: formData.show_bio,
+          show_relationship_status: formData.show_relationship_status,
+          prefs: {
+            ...((profile?.prefs as Record<string, unknown> | null) || {}),
+            show_languages: formData.show_languages,
+            show_location: formData.show_location,
+          },
+          social_album: canonicalizeSocialAlbumEntries(formData.social_album),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+    } catch (err) {
+      console.warn("[EditProfile.silentSave]", err);
+    }
   };
 
   const handleSave = async () => {
@@ -1096,7 +1175,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           options: {
             data: {
               display_name: formData.display_name,
-              legal_name: formData.legal_name,
               dob: formData.dob,
               phone: formData.phone,
               social_id: formData.social_id,
@@ -1109,8 +1187,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
         let nextSessionUser = (await supabase.auth.getSession()).data.session?.user ?? null;
         if (!nextSessionUser) {
-          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-          if (signInError) throw signInError;
+          const signInResult = await signIn(email, password);
+          if (signInResult.error) throw signInResult.error;
+          if (signInResult.mfaRequired) {
+            throw new Error("Please complete sign-in verification on the login screen, then continue profile setup.");
+          }
           nextSessionUser = (await supabase.auth.getSession()).data.session?.user ?? null;
         }
 
@@ -1128,10 +1209,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
     }
 
-    if (!hasValidLegalName(formData.legal_name)) {
-      setFieldErrors((prev) => ({ ...prev, legalName: LEGAL_NAME_RETRY_ERROR }));
-      return;
-    }
     if (!formData.display_name.trim()) {
       setFieldErrors((prev) => ({ ...prev, displayName: REQUIRED_CONNECT_ERROR }));
       return;
@@ -1159,8 +1236,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, social_id: t("Social ID must be 6-15 characters") }));
       return;
     }
-    if (!/^[A-Za-z0-9_.-]+$/.test(formData.social_id.trim())) {
-      setFieldErrors((prev) => ({ ...prev, social_id: t("Only letters, numbers, dot, underscore, hyphen") }));
+    if (!/^[a-z0-9._]+$/.test(formData.social_id.trim())) {
+      setFieldErrors((prev) => ({ ...prev, social_id: t("Only lowercase letters, numbers, dot, underscore") }));
       return;
     }
     if (socialIdEditMode && socialIdStatus !== "available" && formData.social_id.trim().toLowerCase() !== (profile?.social_id || "").trim().toLowerCase()) {
@@ -1263,7 +1340,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
       const profilePayload = {
           display_name: formData.display_name,
-          legal_name: formData.legal_name,
           phone: formData.phone || null,
           social_id: formData.social_id || null,
           bio: formData.bio,
@@ -1317,7 +1393,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           updated_at: new Date().toISOString(),
       };
 
-      const profileWrite = await supabase
+      let profileWrite = await supabase
         .from("profiles")
         .upsert(
           {
@@ -1328,25 +1404,74 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           { onConflict: "id" },
         );
 
+      if (
+        profileWrite.error?.code === "PGRST204" &&
+        String(profileWrite.error.message || "").toLowerCase().includes("social_id")
+      ) {
+        const { social_id: _socialId, ...payloadWithoutSocialId } = profilePayload;
+        profileWrite = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: activeUser.id,
+              ...payloadWithoutSocialId,
+              onboarding_completed: onboardingMode ? true : profile?.onboarding_completed ?? false,
+            },
+            { onConflict: "id" },
+          );
+        if (!profileWrite.error) toast.info(PROFILE_WRITE_SCHEMA_DRIFT_ERROR);
+      }
+
       const error = profileWrite.error;
 
       if (error) throw error;
 
       if (onboardingMode) {
         await finalizePendingVerification(activeUser.id);
+
+        // Back-fill verification statuses: the edge-function UPDATE was a no-op
+        // because the profile row didn't exist at verification time.
+        // Now that the row exists, reconcile from the attempt tables.
+        const { data: passedHumanAttempt } = await supabase
+          .from("human_verification_attempts")
+          .select("created_at")
+          .eq("user_id", activeUser.id)
+          .eq("status", "passed")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (passedHumanAttempt) {
+          await supabase
+            .from("profiles")
+            .update({
+              human_verification_status: "passed",
+              human_verified_at: passedHumanAttempt.created_at,
+              is_verified: true,
+              verification_status: "verified",
+            })
+            .eq("id", activeUser.id);
+        }
+
+        // Sync card / overall verification_status via RPC
+        const { error: syncError } = await supabase.rpc(
+          "refresh_identity_verification_status",
+          { p_user_id: activeUser.id },
+        );
+        if (syncError) console.warn("[EditProfile] Failed to sync verification status:", syncError.message);
       }
 
       await refreshProfile();
+      try {
+        const prefillKey = resolveSetProfilePrefillKey();
+        if (prefillKey) {
+          localStorage.removeItem(prefillKey);
+        }
+      } catch {
+        // no-op
+      }
       if (onboardingMode) {
         resetSignup();
-        try {
-          const prefillKey = resolveSetProfilePrefillKey();
-          if (prefillKey) {
-            localStorage.removeItem(prefillKey);
-          }
-        } catch {
-          // no-op
-        }
+        clearOnboardingDraftKeys(activeUser.id);
       }
       if (!onboardingMode) {
         toast.success(t("Profile updated!"));
@@ -1356,7 +1481,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         if (!shouldSetPet) {
           toast.success("Welcome to Huddle! Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!");
         }
-        navigate(shouldSetPet ? "/set-pet" : "/");
+        navigate(shouldSetPet ? "/set-pet" : "/", {
+          state: shouldSetPet ? null : { fromSetProfileNoPet: true },
+          replace: true,
+        });
       } else {
         // Stay on Edit Profile after save (no auto-navigation bounce).
       }
@@ -1415,14 +1543,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           </button>
           <button
             type="button"
-            onClick={() => {
-              if (!validateRequiredFields()) {
-                const missingFields = getMissingRequiredFieldLabels();
-                toast.error(formatMissingFieldsToast(missingFields));
-                return;
-              }
-              setProfileMode("view");
-            }}
+            onClick={() => { void silentSave(); setProfileMode("view"); }}
             className={cn(
               "h-9 text-sm font-medium transition-colors border-b-2 -mb-px focus:outline-none",
               profileMode === "view" ? "text-brandText border-[rgba(66,73,101,0.22)]" : "text-muted-foreground border-transparent"
@@ -1449,51 +1570,25 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center">
                 <Camera className="w-4 h-4 text-accent-foreground" />
               </div>
-              <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoChange}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  opacity: 0,
+                  width: "100%",
+                  height: "100%",
+                  cursor: "pointer",
+                }}
+              />
             </label>
           </div>
 
           {/* BASIC INFO */}
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
-
-            {/* Legal Name */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">{t("Legal Name")}</label>
-              <div className={cn("form-field-rest relative flex items-center", isIdentityLocked && "opacity-60")}>
-                <input
-                  value={formData.legal_name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, legal_name: e.target.value }))}
-                  onBlur={() =>
-                    setFieldErrors((prev) => ({
-                      ...prev,
-                      legalName: hasValidLegalName(formData.legal_name) ? "" : LEGAL_NAME_SUBTEXT,
-                    }))
-                  }
-                  placeholder="First Name and Last Name"
-                  className="field-input-core pr-[88px]"
-                  required
-                  disabled={false}
-                  aria-invalid={Boolean(fieldErrors.legalName)}
-                />
-                {verificationStatus === "unverified" && (
-                  <NeuControl size="sm" variant="secondary" onClick={openVerifyIdentity} className="absolute right-2 top-1/2 -translate-y-1/2 h-8">
-                    Verify
-                  </NeuControl>
-                )}
-                {verificationStatus === "pending" && (
-                  <NeuControl size="sm" variant="secondary" disabled className="absolute right-2 top-1/2 -translate-y-1/2 h-8">
-                    Pending
-                  </NeuControl>
-                )}
-                {verificationStatus === "verified" && (
-                  <NeuControl size="sm" variant="secondary" disabled className="absolute right-2 top-1/2 -translate-y-1/2 h-8">
-                    Verified
-                  </NeuControl>
-                )}
-              </div>
-              {fieldErrors.legalName && <ErrorLabel message={fieldErrors.legalName} />}
-            </div>
 
             {/* Display Name */}
             <div>
@@ -1561,7 +1656,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <input
                     value={formData.social_id || ""}
                     onChange={(e) => {
-                      const normalized = e.target.value.toLowerCase().replace(/\s/g, "");
+                      // Strip anything the DB constraint rejects: only a-z 0-9 . _
+                      const normalized = e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, "");
                       setFormData((prev) => ({ ...prev, social_id: normalized }));
                     }}
                     onBlur={() => {
@@ -1616,35 +1712,54 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         setFormData((prev) => ({ ...prev, phone: e.target.value }));
                         setPhoneOtpVerified(e.target.value.trim() === phoneOriginalValue.trim());
                       }}
-                      className="field-input-core pr-24"
-                      placeholder="+852 1234 5678"
+                      className="field-input-core pr-28"
+                      placeholder=""
                       disabled={false}
                       aria-invalid={Boolean(fieldErrors.phone)}
                     />
                     {!phoneOtpVerified && (
-                      <NeuControl type="button" size="sm" variant="secondary" onClick={requestPhoneOtp} className="absolute right-2 top-1/2 -translate-y-1/2 h-8">
-                        SEND OTP
-                      </NeuControl>
+                      <button
+                        type="button"
+                        onClick={requestPhoneOtp}
+                        disabled={otpCountdown > 0}
+                        className={cn(
+                          "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
+                          otpCountdown > 0
+                            ? "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
+                            : "bg-brandBlue text-white active:opacity-80"
+                        )}
+                      >
+                        {otpCountdown > 0 ? `${otpCountdown}s` : "Send OTP"}
+                      </button>
                     )}
                   </div>
-                  {!phoneOtpVerified && (
-                    <div className="flex gap-2">
-                      {phoneOtpRequested && (
-                        <>
-                          <div className="form-field-rest relative flex items-center w-28">
-                            <input
-                              value={phoneOtpCode}
-                              onChange={(e) => setPhoneOtpCode(e.target.value.replace(/[^\d]/g, ""))}
-                              className="field-input-core text-center"
-                              maxLength={6}
-                              placeholder="OTP"
-                            />
-                          </div>
-                          <NeuControl type="button" size="sm" onClick={verifyPhoneOtp} className="h-10">
-                            Verify
-                          </NeuControl>
-                        </>
-                      )}
+                  {!phoneOtpVerified && phoneOtpRequested && (
+                    <div className="space-y-1.5">
+                      <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
+                      <div className="relative flex items-center">
+                        <input
+                          value={phoneOtpCode}
+                          onChange={(e) => setPhoneOtpCode(e.target.value.replace(/[^\d]/g, ""))}
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          className="w-full h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white pl-3 pr-[90px] text-[15px] text-[var(--text-primary,#424965)] outline-none focus:border-brandBlue tracking-[0.2em]"
+                          maxLength={6}
+                          placeholder="6-digit code"
+                        />
+                        <button
+                          type="button"
+                          onClick={verifyPhoneOtp}
+                          disabled={phoneOtpCode.length < 6}
+                          className={cn(
+                            "absolute right-2 h-[30px] px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
+                            phoneOtpCode.length >= 6
+                              ? "bg-brandBlue text-white active:opacity-80"
+                              : "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
+                          )}
+                        >
+                          Verify
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2014,62 +2129,46 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   />
                 </div>
               </div>
-              <div ref={languagesContainerRef} className="form-field-rest relative h-auto min-h-[52px] py-2">
-                <div className="flex flex-wrap items-center gap-2 w-full pr-10">
-                  {formData.languages.map((lang) => (
-                    <span
-                      key={lang}
-                      className="px-3 py-1.5 rounded-full text-xs font-medium bg-accent text-accent-foreground flex items-center gap-1"
+              <div className="space-y-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="form-field-rest w-full h-[44px] px-4 flex items-center justify-between text-[14px]"
                     >
-                      {lang}
-                      <button onClick={() => removeLanguage(lang)}>
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                  {languagesEditMode && (
-                    <input
-                      value={languageQuery}
-                      onChange={(e) => {
-                        setLanguageQuery(e.target.value);
-                        setShowLanguageMenu(true);
-                      }}
-                      onFocus={() => setShowLanguageMenu(true)}
-                      className="field-input-core h-8 min-w-[120px]"
-                      placeholder="Type language"
-                    />
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-brandText"
-                  onClick={() => {
-                    const next = !languagesEditMode;
-                    setLanguagesEditMode(next);
-                    setShowLanguageMenu(next);
-                    if (!next) setLanguageQuery("");
-                  }}
-                  aria-label="Edit languages"
-                >
-                  {showLanguageMenu ? <Check className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
-                </button>
-                {languagesEditMode && showLanguageMenu && (
-                  <div className="absolute top-[calc(100%+6px)] left-0 z-20 w-full rounded-xl border border-border bg-card shadow-card max-h-56 overflow-y-auto">
-                    {languageOptions
-                      .filter((lang) => lang.toLowerCase().includes(languageQuery.toLowerCase()))
-                      .map((lang) => (
+                      <span className={cn("truncate", formData.languages.length === 0 && "text-muted-foreground")}>
+                        {formData.languages.length > 0 ? formData.languages.join(", ") : "Select languages"}
+                      </span>
+                      <span className="text-muted-foreground">⌄</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    sideOffset={6}
+                    className="z-[95] w-[min(360px,calc(100vw-40px))] p-2 rounded-[14px] border border-brandText/10 bg-white"
+                  >
+                    <div className="max-h-[220px] overflow-y-auto pr-1">
+                      {languageOptions.map((lang) => (
                         <button
                           key={lang}
                           type="button"
-                          onClick={() => toggleLanguage(lang)}
-                          className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center justify-between"
+                          onClick={() =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              languages: prev.languages.includes(lang)
+                                ? prev.languages.filter((item) => item !== lang)
+                                : [...prev.languages, lang],
+                            }))
+                          }
+                          className="w-full flex items-center justify-between rounded-[10px] px-3 py-2 text-sm text-left hover:bg-muted/40"
                         >
                           <span>{lang}</span>
-                          {formData.languages.includes(lang) && <span className="text-primary">✓</span>}
+                          {formData.languages.includes(lang) ? <Check className="w-4 h-4 text-brandBlue" strokeWidth={2} /> : <span className="w-4 h-4" />}
                         </button>
                       ))}
-                  </div>
-                )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
@@ -2190,44 +2289,67 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             {/* Pet Experience Types */}
             <div>
               <label className="text-sm font-medium mb-2 block">{t("Experience with")}</label>
-              <div className="flex flex-wrap gap-2">
-                {petExperienceOptions.map((exp) => (
-                  <button
-                    key={exp}
-                    onClick={() => {
-                      const hasPets = petsProfileCount > 0 || formData.owns_pets;
-                      if (exp === "None" && hasPets) {
-                        setFieldErrors((prev) => ({ ...prev, petExperience: REQUIRED_CONNECT_ERROR }));
-                        return;
-                      }
-                      if (exp === "None") {
-                        setFormData((prev) => ({
-                          ...prev,
-                          pet_experience: prev.pet_experience.includes("None") ? [] : ["None"],
-                          experience_years: "",
-                        }));
-                        return;
-                      }
-                      setFormData((prev) => {
-                        const withoutNone = prev.pet_experience.filter((item) => item !== "None");
-                        const next = withoutNone.includes(exp)
-                          ? withoutNone.filter((item) => item !== exp)
-                          : [...withoutNone, exp];
-                        return { ...prev, pet_experience: next };
-                      });
-                    }}
-                    className={cn(
-                      "px-3 py-2 rounded-full text-sm font-medium transition-all",
-                      formData.pet_experience.includes(exp)
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80",
-                      (exp === "None" && (petsProfileCount > 0 || formData.owns_pets)) && "opacity-45 cursor-not-allowed"
-                    )}
-                    disabled={exp === "None" && (petsProfileCount > 0 || formData.owns_pets)}
+              <div className="space-y-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="form-field-rest w-full h-[44px] px-4 flex items-center justify-between text-[14px]"
+                    >
+                      <span className={cn("truncate", formData.pet_experience.length === 0 && "text-muted-foreground")}>
+                        {formData.pet_experience.length > 0 ? formData.pet_experience.join(", ") : "Select pet experience"}
+                      </span>
+                      <span className="text-muted-foreground">⌄</span>
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    sideOffset={6}
+                    className="z-[95] w-[min(360px,calc(100vw-40px))] p-2 rounded-[14px] border border-brandText/10 bg-white"
                   >
-                    {exp}
-                  </button>
-                ))}
+                    <div className="max-h-[220px] overflow-y-auto pr-1">
+                      {petExperienceOptions.map((exp) => {
+                        const hasPets = petsProfileCount > 0 || formData.owns_pets;
+                        const noneDisabled = exp === "None" && hasPets;
+                        return (
+                          <button
+                            key={exp}
+                            type="button"
+                            onClick={() => {
+                              if (noneDisabled) {
+                                setFieldErrors((prev) => ({ ...prev, petExperience: REQUIRED_CONNECT_ERROR }));
+                                return;
+                              }
+                              if (exp === "None") {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  pet_experience: prev.pet_experience.includes("None") ? [] : ["None"],
+                                  experience_years: "",
+                                }));
+                                return;
+                              }
+                              setFormData((prev) => {
+                                const withoutNone = prev.pet_experience.filter((item) => item !== "None");
+                                const next = withoutNone.includes(exp)
+                                  ? withoutNone.filter((item) => item !== exp)
+                                  : [...withoutNone, exp];
+                                return { ...prev, pet_experience: next };
+                              });
+                            }}
+                            disabled={noneDisabled}
+                            className={cn(
+                              "w-full flex items-center justify-between rounded-[10px] px-3 py-2 text-sm text-left hover:bg-muted/40",
+                              noneDisabled && "opacity-45 cursor-not-allowed",
+                            )}
+                          >
+                            <span>{exp}</span>
+                            {formData.pet_experience.includes(exp) ? <Check className="w-4 h-4 text-brandBlue" strokeWidth={2} /> : <span className="w-4 h-4" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               {fieldErrors.petExperience && <ErrorLabel message={fieldErrors.petExperience} />}
             </div>
@@ -2355,7 +2477,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         </div>
       </div>
       ) : (
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 pb-6">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4" style={{ paddingBottom: "calc(var(--nav-height, 64px) + env(safe-area-inset-bottom) + 20px)" }}>
         <PublicProfileView
           displayName={formData.display_name}
           bio={formData.bio}

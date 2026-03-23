@@ -1,36 +1,75 @@
 import { motion } from "framer-motion";
-import { PawPrint, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { PawPrint } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import firstJourneyImage from "@/assets/Notifications/Main Page (no Pet).png";
+import exploreImage from "@/assets/Notifications/Main Page_Cat.png";
 
 interface EmptyPetStateProps {
   onAddPet: () => void;
+  firstTimeFromSetProfile?: boolean;
 }
 
-export const EmptyPetState = ({ onAddPet }: EmptyPetStateProps) => {
+export const EmptyPetState = ({ onAddPet, firstTimeFromSetProfile = false }: EmptyPetStateProps) => {
   const { t } = useLanguage();
+  const title = firstTimeFromSetProfile
+    ? "Your journey into huddle starts here."
+    : "The best way to begin is simply to explore.";
+  const imageSrc = firstTimeFromSetProfile ? firstJourneyImage : exploreImage;
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-card rounded-2xl p-8 shadow-card text-center"
-    >
-      <div className="w-20 h-20 rounded-full bg-accent/20 flex items-center justify-center mx-auto mb-4">
-        <PawPrint className="w-10 h-10 text-accent" />
-      </div>
-      
-      <h2 className="text-xl font-bold mb-2">{t("Your Huddle is Empty")}</h2>
-      <p className="text-muted-foreground text-sm mb-6">
-        {t("Add your first pet to unlock full community features and connect with other pet lovers!")}
-      </p>
-      
-      <Button
-        onClick={onAddPet}
-        className="h-14 px-8 rounded-2xl bg-primary hover:bg-primary/90 text-white font-semibold"
+    <>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-card rounded-2xl p-6 shadow-card"
       >
-        <Plus className="w-6 h-6 mr-2" />
-        {t("Add Your First Pet")}
-      </Button>
-    </motion.div>
+        <h2 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965] mb-3">
+          {title}
+        </h2>
+
+        <img
+          src={imageSrc}
+          alt=""
+          aria-hidden
+          className="w-full object-contain"
+        />
+
+        {firstTimeFromSetProfile ? (
+          <>
+            <p className="mt-3 text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed">
+              Let&apos;s build a community where no pet is left behind—where we look out for the lost and the stray, while you prepare for your own first addition.
+            </p>
+            <p className="mt-2 text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed">
+              Jump into <strong className="font-[600] text-[#000000]">Chats</strong> to find your people, check the{" "}
+              <strong className="font-[600] text-[#000000]">Map</strong> to keep the community safe, or head to{" "}
+              <strong className="font-[600] text-[#000000]">Social</strong> to lend a hand.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed">
+              Huddle is built by more than just pet owners; it&apos;s built by trusted guardians.
+            </p>
+            <p className="mt-2 text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed">
+              Get verified to join the pack—protecting the lost on the <strong className="font-[600] text-[#000000]">Map</strong>, lending a hand in{" "}
+              <strong className="font-[600] text-[#000000]">Social</strong>, and finding your people in{" "}
+              <strong className="font-[600] text-[#000000]">Chats</strong>.
+            </p>
+            <p className="mt-2 text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed">
+              Every great story starts with a first step.
+            </p>
+          </>
+        )}
+      </motion.div>
+
+      <button
+        type="button"
+        onClick={onAddPet}
+        aria-label={t("Add Your First Pet")}
+        className="fixed right-5 bottom-[calc(64px+env(safe-area-inset-bottom)+35px)] z-30 h-14 w-14 rounded-full border border-white/40 bg-white/30 shadow-md backdrop-blur-md flex items-center justify-center transition-all duration-200"
+      >
+        <PawPrint className="w-6 h-6 text-[var(--text-secondary)]" />
+      </button>
+    </>
   );
 };

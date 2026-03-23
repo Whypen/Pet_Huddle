@@ -9,6 +9,10 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- RULE 10: Urbanist — self-hosted to avoid first-paint font swap -->
+    <link rel="preload" href="/src/assets/fonts/Urbanist-400.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/Urbanist-600.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/Urbanist-700.ttf" as="font" type="font/ttf" crossorigin />
 
     <meta property="og:title" content="huddle" />
     <meta property="og:description" content="Your pet care super-app" />
@@ -24,7 +28,7 @@
     <link rel="manifest" href="/manifest.json" />
   </head>
 
-  <body>
+  <body style="background-color:#D5DFEF;">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -21,6 +21,7 @@ interface Pet {
   weight_unit: string;
   dob: string | null;
   photo_url: string | null;
+  is_active: boolean;
 }
 
 // SPRINT 2: Species-specific huddle Wisdom tips
@@ -78,6 +79,7 @@ const formatSpeciesLabel = (value: string) =>
 
 const Index = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { profile, user } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
@@ -86,6 +88,7 @@ const Index = () => {
   const [loading, setLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
   const [selectedPetIndex, setSelectedPetIndex] = useState(0);
+  const [firstTimeNoPetView, setFirstTimeNoPetView] = useState(false);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
 
@@ -94,9 +97,9 @@ const Index = () => {
       if (!user?.id) return;
       const { data, error } = await supabase
         .from("pets")
-        .select("id, name, species, breed, weight, weight_unit, dob, photo_url")
+        .select("id, name, species, breed, weight, weight_unit, dob, photo_url, is_active")
         .eq("owner_id", user?.id)
-        .eq("is_active", true)
+        .order("is_active", { ascending: false })
         .order("created_at", { ascending: true });
 
       if (error) throw error;
@@ -116,6 +119,13 @@ const Index = () => {
       setLoading(false);
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if ((location.state as { fromSetProfileNoPet?: boolean } | null)?.fromSetProfileNoPet === true) {
+      setFirstTimeNoPetView(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
     if (user?.id) {
@@ -201,6 +211,10 @@ const Index = () => {
         setNextEventLabel("—");
         return;
       }
+      if (selectedPet.is_active === false) {
+        setNextEventLabel("—");
+        return;
+      }
       try {
         const todayISO = new Date().toISOString().slice(0, 10);
         const res = await supabase
@@ -232,6 +246,17 @@ const Index = () => {
 
   const displayName = profile?.display_name || t("Friend");
   const firstName = displayName.split(" ")[0];
+  const avatarUrl = profile?.avatar_url ? String(profile.avatar_url) : "";
+  const avatarInitial = firstName.trim().charAt(0).toUpperCase() || "U";
+  const socialRoleText = (() => {
+    const roles = Array.isArray(profile?.availability_status)
+      ? profile.availability_status
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean)
+        .map((entry) => (/^animal friend\s*\(no pet\)$/i.test(entry) ? "Animal Friend" : entry))
+      : [];
+    return roles.length > 0 ? roles.join(" · ") : "Animal Friend";
+  })();
 
   if (loading) {
     return (
@@ -249,84 +274,54 @@ const Index = () => {
       
       {/* Page header — editorial cadence, no hype copy */}
       <header className="px-5 pt-5 pb-2">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold text-brandText tracking-tight">
-            {firstName}
-          </h1>
-          <ProfileBadges
-            isVerified={profile?.is_verified === true}
-            hasCar={profile?.has_car}
-            size="md"
-          />
+        <div className="flex items-center gap-3">
+          <div
+            className={cn(
+              "h-[72px] w-[72px] shrink-0 overflow-hidden rounded-full border-2 bg-[rgba(33,69,207,0.10)]",
+              profile?.is_verified === true ? "border-brandBlue" : "border-[#C9CEDA]"
+            )}
+            aria-hidden
+          >
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-[26px] font-[700] text-[var(--color-brand,#2145CF)]">
+                {avatarInitial}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-2xl font-[700] leading-tight text-brandText tracking-tight">
+                {displayName}
+              </h1>
+              <ProfileBadges
+                isVerified={profile?.is_verified === true}
+                hasCar={profile?.has_car}
+                size="md"
+              />
+            </div>
+            <p className="mt-1 truncate text-[15px] font-[600] text-brandSubtext/80">
+              {socialRoleText}
+            </p>
+          </div>
         </div>
-        <p className="text-sm text-brandSubtext/60 mt-0.5">
-          {selectedPet ? selectedPet.name : "Your pets"}
-        </p>
       </header>
 
       {pets.length === 0 ? (
         /* Empty State */
-        <section className="px-5 py-8">
-          <EmptyPetState onAddPet={() => navigate("/edit-pet-profile")} />
+        <section className="px-5 pt-1 pb-24">
+          <EmptyPetState
+            onAddPet={() => navigate("/edit-pet-profile")}
+            firstTimeFromSetProfile={firstTimeNoPetView}
+          />
         </section>
       ) : (
         <>
-          {/* Pet Selector - Fixed border cropping */}
-          <section className="px-5 pt-3 pb-2">
-            <div className="flex items-center gap-3 overflow-x-auto overflow-y-visible scrollbar-hide pb-2 overflow-visible pt-1">
-              {pets.map((pet) => (
-                <motion.button
-                  key={pet.id}
-                  onClick={() => {
-                    const idx = pets.findIndex((candidate) => candidate.id === pet.id);
-                    if (idx >= 0) {
-                      setSelectedPetIndex(idx);
-                      scrollToPetIndex(idx);
-                    } else {
-                      setSelectedPet(pet);
-                    }
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                  className="relative flex-shrink-0 p-1" // Added padding to prevent border clipping
-                >
-                  <div className={cn(
-                    "w-16 h-16 rounded-full overflow-hidden ring-4 transition-all",
-                    selectedPet?.id === pet.id
-                      ? "ring-primary shadow-soft"
-                      : "ring-transparent hover:ring-muted"
-                  )}>
-                    {pet.photo_url ? (
-                      <img src={pet.photo_url} alt={pet.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full bg-muted flex items-center justify-center">
-                        <span className="text-lg font-bold text-muted-foreground">
-                          {pet.name.charAt(0)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {selectedPet?.id === pet.id && (
-                    <motion.div 
-                      layoutId="petHighlight"
-                      className="absolute inset-1 rounded-full bg-primary/20 pointer-events-none"
-                    />
-                  )}
-                </motion.button>
-              ))}
-              <button
-                onClick={() => navigate("/edit-pet-profile")}
-                className="neu-icon flex-shrink-0 w-16 h-16 ml-1"
-                aria-label="Add pet"
-              >
-                <Plus className="w-6 h-6 text-brandBlue" />
-              </button>
-            </div>
-          </section>
-
           {/* Selected Pet Card - SPRINT 3: Card navigates to Expanded Info */}
           {selectedPet && (
             <section className="pt-1 pb-3">
-              {pets.length > 1 ? (
+              {pets.length >= 1 ? (
                 <div
                   ref={carouselRef}
                   onScroll={handleCarouselScroll}
@@ -422,7 +417,7 @@ const Index = () => {
                               </span>
                             )}
                           </div>
-                          {index === selectedPetIndex && (
+                          {index === selectedPetIndex && pet.is_active !== false && (
                             <div className="mt-3 bg-primary-foreground/20 backdrop-blur-sm rounded-xl px-4 py-3">
                               <div className="flex items-center gap-2 text-primary-foreground">
                                 <Clock className="w-4 h-4" strokeWidth={1.75} />

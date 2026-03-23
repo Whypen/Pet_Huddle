@@ -4,6 +4,7 @@ import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart,
 import { cn } from "@/lib/utils";
 import { SPECIES_LIST } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { quotaConfig } from "@/config/quotaConfig";
 import type { FilterState } from "./filterTypes";
 
 interface FilterSheetProps {
@@ -336,7 +337,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
 
               {/* Plus Filters Section */}
               <div>
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-2 mb-2">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                     {t("Plus Filters")}
                   </h3>
@@ -345,6 +346,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                     {t("PRO")}
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground mb-4">{quotaConfig.copy.filters.locked}</p>
 
                 <div className="space-y-3">
                   {/* Verification */}

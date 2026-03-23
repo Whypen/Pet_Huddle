@@ -1,4 +1,75 @@
 /* ============================================
+   0. UI CONTRACT v3 — Design Tokens + Canvas + Glass
+   @import must precede all other rules (CSS spec)
+   ============================================ */
+@import './styles/tokens.css';
+@import './styles/global.css';
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-300.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 300;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-400.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-500.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-600.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-700.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-800.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 800;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-400Italic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Urbanist";
+  src: url("./assets/fonts/Urbanist-600Italic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 600;
+  font-display: block;
+}
+
+/* ============================================
    1. Tailwind base layer (resets & preflight)
    ============================================ */
 @tailwind base;
@@ -100,7 +171,7 @@
     --shadow-soft:      0 4px 20px -4px hsl(207 60% 50% / 0.15);
 
     /* ── Navigation ─────────────────────────── */
-    --nav-height:       5rem;
+    --nav-height:       64px;
     --nav-background:   0 0% 100%;
 
     /* ── Sidebar ─────────────────────────────── */
@@ -118,11 +189,11 @@
   body {
     font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: var(--font-body);
-    @apply text-brandText bg-background;
+    @apply text-brandText;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     @apply text-brandText;
   }
 
@@ -136,6 +207,7 @@
    4. Tailwind utilities layer — MUST BE LAST
    ============================================ */
 @tailwind utilities;
+
 
 /* ============================================
    5. Design system utilities
@@ -385,20 +457,32 @@
 
   /* ── Typography helpers (display font) ──── */
   .font-display {
-    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
   .text-hero-display {
-    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 60px;
     line-height: 1.1;
     font-weight: 600;
   }
   .text-hero-sm-display {
-    font-family: "Clash Display", "Satoshi", "General Sans", -apple-system, sans-serif;
+    font-family: "Urbanist", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 44px;
     line-height: 1.1;
     font-weight: 600;
   }
+}
+
+/* Date input alignment: keep native picker, force trigger to far-right. */
+input.huddle-date-input {
+  position: relative;
+}
+input.huddle-date-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
 }
 
 /* ============================================

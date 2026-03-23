@@ -9,20 +9,30 @@
  * - Creator can Edit/Remove (all alert types)
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   X,
   Heart,
-  Send,
   Flag,
   Ban,
   EyeOff,
   Pencil,
   Trash2,
   MoreHorizontal,
+  Camera,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,19 +40,41 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
-import { ShareSheet } from "@/components/social/ShareSheet";
+import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
+import { areUsersBlocked } from "@/lib/blocking";
+import { MediaThumb } from "@/components/media/MediaThumb";
 
-const DEMO_MODE = String(import.meta.env.VITE_DEMO_MODE ?? "prod_preview");
-const DEMO_SEEDED = DEMO_MODE === "seeded_threads";
+const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
 const MAX_TITLE_CHARS = 100;
 const MAX_DESC_CHARS = 500;
+const MAX_BROADCAST_MEDIA = 10;
+
+type EditableBroadcastMedia = {
+  id: string;
+  url: string;
+  file?: File;
+};
 
 const ALERT_TYPE_COLORS: Record<string, string> = {
-  Stray: "#EAB308",
-  Lost: "#EF4444",
-  Found: "#A1A4A9",
-  Others: "#A1A4A9",
+  Stray:   "#EAB308",
+  Lost:    "#EF4444",
+  Caution: "#2145CF",
+  Found:   "#A1A4A9",
+  Others:  "#A1A4A9",
+};
+
+const timeAgo = (iso: string) => {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const sec = Math.max(1, Math.floor((now - then) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
 };
 
 interface MapAlert {
@@ -53,6 +85,7 @@ interface MapAlert {
   title: string | null;
   description: string | null;
   photo_url: string | null;
+  media_urls?: string[] | null;
   support_count: number;
   report_count: number;
   created_at: string;
@@ -81,9 +114,10 @@ interface PinDetailModalProps {
   onClose: () => void;
   onHide: (id: string) => void;
   onRefresh: () => void;
+  onOpenProfile?: (userId: string, fallbackName: string) => void;
 }
 
-  const PinDetailModal = ({ alert, onClose, onHide, onRefresh }: PinDetailModalProps) => {
+  const PinDetailModal = ({ alert, onClose, onHide, onRefresh, onOpenProfile }: PinDetailModalProps) => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -94,43 +128,67 @@ interface PinDetailModalProps {
   const [showConfirmRemove, setShowConfirmRemove] = useState(false);
   const [liked, setLiked] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-
-
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [sharePayload, setSharePayload] = useState<{ url: string; text: string }>({ url: "", text: "" });
-
-  // Native Share API (WhatsApp, IG, FB etc.) with clipboard fallback
-  const handleShare = async () => {
-    if (!alert) return;
-    const alertTitle = typeof alert.title === "string" ? alert.title : "Huddle Alert";
-    const alertDesc = typeof alert.description === "string" ? alert.description : "";
-    const shareUrl = `https://huddle-preview.vercel.app/pin/${alert.id}`;
-    const shareTitle = "Check this out on Huddle!";
-    const shareText = `${alertTitle} - ${alertDesc} | View more on Huddle!`.trim();
-
-    if (navigator.share && window.isSecureContext) {
-      try {
-        await navigator.share({
-          title: shareTitle,
-          text: shareText,
-          url: shareUrl,
-        });
-      } catch (err) {
-        // User cancelled or share failed — silent
-        console.log("Share cancelled:", err);
-      }
-    } else {
-      setSharePayload({ url: shareUrl, text: shareText });
-      setShowShareModal(true);
-    }
-  };
+  const [confirmBlock, setConfirmBlock] = useState(false);
+  const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
 
   const [supportCount, setSupportCount] = useState(0);
 
   // Sync support count from alert prop
   useEffect(() => {
-    if (alert) setSupportCount(alert.support_count || 0);
+    if (alert) {
+      setSupportCount(alert.support_count || 0);
+    }
   }, [alert]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSupportState = async () => {
+      if (!alert || !user) {
+        if (!cancelled) setLiked(false);
+        return;
+      }
+      const { data } = await supabase
+        .from("broadcast_alert_interactions" as "profiles")
+        .select("id")
+        .eq("alert_id", alert.id)
+        .eq("user_id", user.id)
+        .eq("interaction_type", "support")
+        .maybeSingle();
+      if (!cancelled) setLiked(Boolean(data));
+    };
+    void loadSupportState();
+    return () => {
+      cancelled = true;
+    };
+  }, [alert, user]);
+
+  const syncSupportCount = useCallback(async () => {
+    if (!alert) return;
+    const { count } = await supabase
+      .from("broadcast_alert_interactions" as "profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("alert_id", alert.id)
+      .eq("interaction_type", "support");
+    setSupportCount(Number(count ?? 0));
+  }, [alert]);
+
+  const enqueueSupportNotification = useCallback(async () => {
+    if (!alert?.creator_id || !user?.id) return;
+    if (alert.creator_id === user.id) return;
+    await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+      "upsert_notification_window",
+      {
+        p_owner_user_id: alert.creator_id,
+        p_subject_id: alert.id,
+        p_subject_type: "alert",
+        p_kind: "alert_like",
+        p_category: "map",
+        p_href: "/map",
+        p_actor_id: user.id,
+        p_actor_name: profile?.display_name || "Someone",
+      }
+    );
+  }, [alert?.creator_id, alert?.id, profile?.display_name, user?.id]);
 
   // Support toggle: Single tap = +1. Tap again (when liked) = -1.
   const handleSupport = async () => {
@@ -138,19 +196,27 @@ interface PinDetailModalProps {
       toast.error("Please login to support alerts");
       return;
     }
+    if (alert.creator_id) {
+      const blocked = await areUsersBlocked(user.id, alert.creator_id);
+      if (blocked) {
+        toast.error("You cannot support this user.");
+        return;
+      }
+    }
 
     if (liked) {
       // Already liked → remove support
       try {
-        await supabase
-          .from("alert_interactions")
+        const { error } = await supabase
+          .from("broadcast_alert_interactions" as "profiles")
           .delete()
           .eq("alert_id", alert.id)
           .eq("user_id", user.id)
           .eq("interaction_type", "support");
+        if (error) throw error;
 
         setLiked(false);
-        setSupportCount((prev) => Math.max(0, prev - 1));
+        await syncSupportCount();
         onRefresh();
       } catch {
         toast.error("Failed to remove support");
@@ -160,23 +226,30 @@ interface PinDetailModalProps {
 
     // Not yet liked → add support
     try {
-      await supabase.from("alert_interactions").insert({
+      const { error } = await supabase.from("broadcast_alert_interactions" as "profiles").insert({
         alert_id: alert.id,
         user_id: user.id,
         interaction_type: "support",
       });
+      if (error) throw error;
 
       setLiked(true);
-      setSupportCount((prev) => prev + 1);
+      await syncSupportCount();
+      await enqueueSupportNotification();
       onRefresh();
     } catch (error: unknown) {
       const code =
         typeof error === "object" && error !== null && "code" in error
           ? String((error as Record<string, unknown>).code)
           : "";
-      if (code === "23505") {
+      const message =
+        typeof error === "object" && error !== null && "message" in error
+          ? String((error as Record<string, unknown>).message || "")
+          : "";
+      if (code === "23505" || message.includes("duplicate key") || message.includes("conflict")) {
         toast.info("You've already supported this alert");
         setLiked(true);
+        await syncSupportCount();
       } else {
         toast.error("Failed to support alert");
       }
@@ -189,13 +262,21 @@ interface PinDetailModalProps {
       toast.error("Please login to report alerts");
       return;
     }
+    if (alert.creator_id) {
+      const blocked = await areUsersBlocked(user.id, alert.creator_id);
+      if (blocked) {
+        toast.error("You cannot report this user.");
+        return;
+      }
+    }
     setShowMenu(false);
     try {
-      await supabase.from("alert_interactions").insert({
+      const { error } = await supabase.from("broadcast_alert_interactions" as "profiles").insert({
         alert_id: alert.id,
         user_id: user.id,
         interaction_type: "report",
       });
+      if (error) throw error;
 
       toast.success("Alert reported");
       onRefresh();
@@ -212,8 +293,20 @@ interface PinDetailModalProps {
     }
   };
 
-  const handleBlockUser = () => {
+  const handleBlockUser = async () => {
+    if (!alert?.creator_id) return;
+    const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+      "block_user",
+      { p_blocked_id: alert.creator_id }
+    );
+    if (error) {
+      toast.error(error.message || "Unable to block user right now");
+      return;
+    }
+    setConfirmBlock(false);
     setShowMenu(false);
+    onHide(alert.id);
+    onRefresh();
     onClose();
     toast.success("You won't see posts from this user");
   };
@@ -228,52 +321,138 @@ interface PinDetailModalProps {
   // Creator: Remove alert
   const handleRemoveAlert = async () => {
     if (!alert || !user) return;
-    try {
-      const query = supabase.from("map_alerts").delete().eq("id", alert.id);
-      if (!isAdmin) {
-        query.eq("creator_id", user.id);
+    const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+      "delete_broadcast_alert",
+      {
+        p_alert_id: alert.id,
       }
-      await query;
-      toast.success("Alert removed");
-      setShowConfirmRemove(false);
-      onClose();
-      onRefresh();
-    } catch {
-      toast.error("Failed to remove alert");
+    );
+    if (error) {
+      toast.error(error.message || "Failed to remove alert");
+      return;
     }
+
+    setShowConfirmRemove(false);
+    onRefresh();
+    onClose();
+    toast.success("Broadcast removed");
   };
 
   // Creator: Save edit
   const handleSaveEdit = async () => {
     if (!user || !alert) return;
-    try {
-      await supabase
-        .from("map_alerts")
-        .update({ title: editTitle.trim() || null, description: editDesc.trim() || null })
-        .eq("id", alert.id)
-        .eq("creator_id", user.id);
-      toast.success("Alert updated");
-      setIsEditing(false);
-      onClose();
-      onRefresh();
-    } catch {
-      toast.error("Failed to update alert");
+    const nextTitle = editTitle.trim();
+    const nextDesc = editDesc.trim();
+
+    if (!nextTitle) {
+      toast.error("Title is required");
+      return;
     }
+    if (nextTitle.length > MAX_TITLE_CHARS || nextDesc.length > MAX_DESC_CHARS) {
+      toast.error("Please shorten the alert details");
+      return;
+    }
+
+    const existingUrls = editMedia.filter((item) => !item.file).map((item) => item.url);
+    const newUploads = await Promise.all(
+      editMedia.filter((item) => item.file).map(async (item, index) => {
+        const file = item.file as File;
+        const fileExt = file.name.split(".").pop() || "jpg";
+        const fileName = `${user.id}/${Date.now()}-edit-${index}.${fileExt}`;
+        const upload = await supabase.storage.from("alerts").upload(fileName, file);
+        if (upload.error) throw upload.error;
+        return supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
+      })
+    );
+    const nextImages = [...existingUrls, ...newUploads].filter(Boolean);
+
+    const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: Record<string, unknown> | null; error: { message?: string } | null }>)(
+      "update_broadcast_alert",
+      {
+        p_alert_id: alert.id,
+        p_patch: {
+          title: nextTitle,
+          description: nextDesc,
+          photo_url: nextImages[0] || null,
+          images: nextImages,
+        },
+      }
+    );
+    if (error) {
+      toast.error(error.message || "Failed to update alert");
+      return;
+    }
+    if (!data) {
+      toast.error("Failed to update alert");
+      return;
+    }
+
+    await Promise.resolve(onRefresh());
+    setIsEditing(false);
+    toast.success("Broadcast updated");
   };
 
   const isCreator = user && alert?.creator_id === user.id;
   const isAdmin = String(profile?.role || "").toLowerCase() === "admin";
   const canRemove = Boolean(isCreator || isAdmin);
   const isSocial = Boolean(alert?.post_on_social || alert?.social_post_id || alert?.thread_id);
+  const socialThreadId = alert?.thread_id || (alert?.social_post_id ? String(alert.social_post_id) : null);
+
+  const removeEditMediaAt = (index: number) => {
+    setEditMedia((prev) => {
+      const target = prev[index];
+      if (target?.file) URL.revokeObjectURL(target.url);
+      return prev.filter((_, currentIndex) => currentIndex !== index);
+    });
+  };
+
+  const handleEditMediaChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const availableSlots = Math.max(0, MAX_BROADCAST_MEDIA - editMedia.length);
+    if (availableSlots <= 0) {
+      toast.error(`You can upload up to ${MAX_BROADCAST_MEDIA} photos.`);
+      event.target.value = "";
+      return;
+    }
+    const acceptedFiles = files.filter((file) => file.type.startsWith("image/")).slice(0, availableSlots);
+    if (acceptedFiles.length < files.length) {
+      toast.info(`Only the first ${MAX_BROADCAST_MEDIA} photos are kept.`);
+    }
+    setEditMedia((prev) => [
+      ...prev,
+      ...acceptedFiles.map((file, index) => ({
+        id: `new-${Date.now()}-${index}`,
+        url: URL.createObjectURL(file),
+        file,
+      })),
+    ]);
+    event.target.value = "";
+  };
+
+  useEffect(() => {
+    if (!isEditing || !alert) return;
+    const source = alert.media_urls?.length ? alert.media_urls : alert.photo_url ? [alert.photo_url] : [];
+    setEditMedia(source.map((url, index) => ({ id: `existing-${index}`, url })));
+  }, [alert, isEditing]);
+
+  useEffect(() => {
+    return () => {
+      editMedia.forEach((item) => {
+        if (item.file) URL.revokeObjectURL(item.url);
+      });
+    };
+  }, [editMedia]);
 
   return (
+    <>
     <AnimatePresence>
       {alert && !isEditing && !showConfirmRemove && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[2000] bg-black/50 flex items-end"
+          className="fixed inset-0 z-[5000] bg-black/50 flex items-end justify-center"
           onClick={onClose}
         >
           <motion.div
@@ -282,23 +461,57 @@ interface PinDetailModalProps {
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full bg-card rounded-t-3xl max-h-[75vh] overflow-auto flex flex-col"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex flex-col"
           >
             {/* Content area */}
-            <div className="p-6 flex-1">
+            <div className="p-6 pb-[calc(24px+env(safe-area-inset-bottom,0px))] flex-1 overflow-y-auto">
               {/* Header */}
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-4 gap-3">
                 <div className="flex items-center gap-2">
                   <span
                     className="px-3 py-1 rounded-full text-white text-sm font-medium"
                     style={{ backgroundColor: ALERT_TYPE_COLORS[alert.alert_type] || "#A1A4A9" }}
                   >
-                    {alert.alert_type}
+                    {alert.alert_type} · {timeAgo(alert.created_at)}
                   </span>
                 </div>
-                <button onClick={onClose}>
-                  <X className="w-6 h-6" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {(isCreator || isAdmin) && (
+                    <>
+                      {isCreator && (
+                        <NeuButton
+                          variant="secondary"
+                          onClick={() => {
+                            setIsEditing(true);
+                            setEditTitle(alert.title || "");
+                            setEditDesc(alert.description || "");
+                            setEditMedia((alert.media_urls?.length ? alert.media_urls : alert.photo_url ? [alert.photo_url] : []).map((url, index) => ({
+                              id: `existing-${index}`,
+                              url,
+                            })));
+                          }}
+                          className="h-9 w-9 rounded-full p-0"
+                          aria-label="Edit alert"
+                          title="Edit alert"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </NeuButton>
+                      )}
+                      <NeuButton
+                        variant="secondary"
+                        onClick={() => setShowConfirmRemove(true)}
+                        className="h-9 w-9 rounded-full p-0 text-red-500 border-red-200 hover:bg-red-50"
+                        aria-label="Remove alert"
+                        title="Remove alert"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </NeuButton>
+                    </>
+                  )}
+                  <button onClick={onClose}>
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
               </div>
 
               {/* Title */}
@@ -306,19 +519,34 @@ interface PinDetailModalProps {
                 <h3 className="text-lg font-bold text-brandText mb-2">{alert.title}</h3>
               )}
 
-              {/* Photo */}
-              {alert.photo_url && (
-                <img src={alert.photo_url} alt="" className="w-full rounded-xl mb-4 max-h-48 object-cover" />
-              )}
-
               {/* Description */}
               {alert.description && (
                 <p className="text-foreground mb-4">{alert.description}</p>
               )}
 
+              {/* Photo */}
+              {(alert.media_urls?.length || alert.photo_url) ? (
+                <div className="mb-4 w-full">
+                  <PostMediaCarousel
+                    items={(alert.media_urls?.length ? alert.media_urls : alert.photo_url ? [alert.photo_url] : []).map((src, index) => ({
+                      src,
+                      alt: `${alert.title || "Alert photo"} ${index + 1}`,
+                    }))}
+                  />
+                </div>
+              ) : null}
+
               {/* Creator info */}
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+              <button
+                type="button"
+                className="mb-4 flex items-center gap-2"
+                onClick={() => {
+                  const creatorId = alert.creator_id || null;
+                  if (!creatorId || !onOpenProfile) return;
+                  onOpenProfile(creatorId, alert.creator?.display_name || "User");
+                }}
+              >
+                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden">
                   {alert.creator?.avatar_url ? (
                     <img src={alert.creator.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
                   ) : (
@@ -327,66 +555,39 @@ interface PinDetailModalProps {
                     </span>
                   )}
                 </div>
-                <span className="text-sm font-medium">{alert.creator?.display_name || "Anonymous"}</span>
-                <span className="text-sm text-muted-foreground ml-auto">
-                  {supportCount || alert.support_count || 0} supports
-                </span>
-              </div>
+                <span className="text-sm font-medium underline-offset-2 hover:underline">{alert.creator?.display_name || "Anonymous"}</span>
+              </button>
 
-              {/* Creator controls — Edit + Remove */}
-              {(isCreator || isAdmin) && (
-                <div className="flex gap-2 mb-3">
-                  {isCreator && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setIsEditing(true);
-                        setEditTitle(alert.title || "");
-                        setEditDesc(alert.description || "");
-                      }}
-                      className="flex-1 h-10 rounded-xl"
-                    >
-                      <Pencil className="w-4 h-4 mr-2" />
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowConfirmRemove(true)}
-                    className="flex-1 h-10 rounded-xl text-red-500 border-red-200 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Remove
-                  </Button>
-                </div>
-              )}
-              {/* Social link moved to lower-left area (per feedback) */}
-              {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = alert.social_url || (alert.thread_id ? `/threads/${alert.thread_id}` : "");
-                      if (!url) return;
-                      if (url.startsWith("http")) window.open(url, "_blank", "noopener,noreferrer");
-                      else navigate(url);
-                    }}
-                    className="text-sm font-medium text-[#2145CF] underline underline-offset-2"
-                  >
-                    See more on Social
-                  </button>
-                </div>
-              ) : null}
             </div>
 
-            {/* Actions row (Support | Share | More) */}
-            <div className="border-t border-border px-6 py-3 flex items-center justify-end">
+            {/* Footer row (See on Social left, support + 3-dot menu right) */}
+            <div className="sticky bottom-0 border-t border-border bg-card px-6 pt-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)] flex items-center justify-end">
+              {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (socialThreadId) {
+                      navigate(`/threads?focus=${encodeURIComponent(socialThreadId)}`);
+                      return;
+                    }
+                    if (alert.social_url?.startsWith("/")) {
+                      navigate(alert.social_url);
+                    }
+                  }}
+                  className="mr-auto text-sm font-medium text-[#2145CF] underline underline-offset-2"
+                >
+                  See on Social
+                </button>
+              ) : (
+                <div className="mr-auto" />
+              )}
+
               <div className="flex items-center gap-1">
                 {/* Heart / Support */}
                 <button
                   onClick={handleSupport}
                   className={cn(
-                    "p-2 rounded-full transition-all",
+                    "inline-flex items-center gap-0.5 rounded-full px-2 py-2 transition-all",
                     liked ? "bg-red-50" : "hover:bg-muted"
                   )}
                   title="Support"
@@ -397,21 +598,13 @@ interface PinDetailModalProps {
                       liked ? "text-red-500 fill-red-500" : "text-muted-foreground"
                     )}
                   />
-                </button>
-
-                {/* Share — Paper Plane (Send icon, Instagram-style) */}
-                <button
-                  onClick={handleShare}
-                  className="p-2 rounded-full hover:bg-muted transition-colors"
-                  title="Share"
-                >
-                  <Send className="w-5 h-5 text-muted-foreground" />
+                  <span className="text-xs font-medium tabular-nums text-muted-foreground">{supportCount}</span>
                 </button>
 
                 {/* 3-dots menu (Report / Hide / Block) */}
                 <div className="relative">
                 <button
-                  onClick={() => setShowMenu(!showMenu)}
+                  onClick={() => { setShowMenu(!showMenu); setConfirmBlock(false); }}
                   className="p-2 rounded-full hover:bg-muted transition-colors"
                   title="More"
                 >
@@ -430,18 +623,18 @@ interface PinDetailModalProps {
                           onClick={handleReport}
                           className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
                         >
-                          <Flag className="w-4 h-4 text-red-500" />
-                          <span className="text-red-500">Report Abuse</span>
+                          <Flag className="w-4 h-4 text-muted-foreground" />
+                          <span>Report</span>
                         </button>
                         <button
                           onClick={handleHideAlert}
                           className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
                         >
                           <EyeOff className="w-4 h-4 text-muted-foreground" />
-                          <span>Hide Alert</span>
+                          <span>Hide alert</span>
                         </button>
                         <button
-                          onClick={handleBlockUser}
+                          onClick={() => { setConfirmBlock(true); setShowMenu(false); }}
                           className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
                         >
                           <Ban className="w-4 h-4 text-muted-foreground" />
@@ -454,12 +647,6 @@ interface PinDetailModalProps {
               </div>
             </div>
 
-            <ShareSheet
-              open={showShareModal}
-              onClose={() => setShowShareModal(false)}
-              url={sharePayload.url}
-              text={sharePayload.text}
-            />
           </motion.div>
         </motion.div>
       )}
@@ -478,7 +665,8 @@ interface PinDetailModalProps {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full bg-card rounded-t-3xl p-6"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl p-6 max-h-[calc(100svh-var(--nav-height,64px)-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto"
+            style={{ marginBottom: "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px))" }}
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-brandText">Edit Alert</h3>
@@ -487,35 +675,61 @@ interface PinDetailModalProps {
               </button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Title</label>
+              <div className="form-field-rest relative flex items-center">
                 <Input
                   value={editTitle}
                   onChange={(e) => {
                     if (e.target.value.length <= MAX_TITLE_CHARS) setEditTitle(e.target.value);
                   }}
-                  className="rounded-xl mt-1"
-                  maxLength={MAX_TITLE_CHARS}
+                  placeholder="Describe the situation"
+                  className="field-input-core h-auto rounded-none border-0 bg-transparent px-0 py-0 text-sm shadow-none outline-none focus-visible:ring-0"
                 />
-                <div className="flex justify-end text-xs text-muted-foreground mt-1">{editTitle.length}/{MAX_TITLE_CHARS}</div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Description</label>
+              <div className="form-field-rest relative h-auto min-h-[112px] py-3">
                 <Textarea
                   value={editDesc}
                   onChange={(e) => {
                     if (e.target.value.length <= MAX_DESC_CHARS) setEditDesc(e.target.value);
                   }}
-                  className="rounded-xl mt-1 min-h-[80px]"
+                  className="field-input-core min-h-[88px] resize-none rounded-none border-0 bg-transparent px-0 py-0 text-sm shadow-none outline-none focus-visible:ring-0"
+                  placeholder="Details help everyone stay connected"
                 />
-                <div className="flex justify-end text-xs text-muted-foreground mt-1">{editDesc.length}/{MAX_DESC_CHARS}</div>
               </div>
-              <Button
+              {editMedia.length > 0 ? (
+                <div className="mt-4 mb-3 flex items-start">
+                  <div className="flex flex-wrap items-start gap-3">
+                    {editMedia.map((item, index) => (
+                      <div key={item.id} className="relative h-[150px] w-[150px] shrink-0 overflow-hidden rounded-[24px]">
+                        <MediaThumb src={item.url} alt={`Broadcast preview ${index + 1}`} className="h-full w-full rounded-[24px]" />
+                        <button
+                          onClick={() => removeEditMediaAt(index)}
+                          className="absolute top-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
+                        >
+                          <X className="w-4 h-4 text-white" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="flex items-center gap-3">
+                <label className="inline-flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border bg-muted/60 hover:bg-muted">
+                  <Camera className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleEditMediaChange}
+                  />
+                </label>
+              </div>
+              <NeuButton
                 onClick={handleSaveEdit}
                 className="w-full h-12 rounded-xl bg-brandBlue hover:bg-brandBlue/90"
               >
                 Save Changes
-              </Button>
+              </NeuButton>
             </div>
           </motion.div>
         </motion.div>
@@ -539,27 +753,48 @@ interface PinDetailModalProps {
           >
             <h3 className="text-lg font-bold text-brandText mb-2">Remove Alert?</h3>
             <p className="text-sm text-muted-foreground mb-6">
-              This will permanently remove this alert from the map.
+              This will archive this alert from the map.
             </p>
             <div className="flex gap-3">
-              <Button
-                variant="outline"
+              <NeuButton
+                variant="secondary"
                 onClick={() => setShowConfirmRemove(false)}
                 className="flex-1 h-11 rounded-xl"
               >
                 Cancel
-              </Button>
-              <Button
+              </NeuButton>
+              <NeuButton
                 onClick={handleRemoveAlert}
                 className="flex-1 h-11 rounded-xl bg-red-500 hover:bg-red-600 text-white"
               >
                 Remove
-              </Button>
+              </NeuButton>
             </div>
           </motion.div>
         </motion.div>
       )}
     </AnimatePresence>
+
+    <AlertDialog open={confirmBlock} onOpenChange={(v) => !v && setConfirmBlock(false)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Block {alert?.creator?.display_name ?? "this user"}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            You will no longer see their posts or alerts, and they won't be able to interact with you.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setConfirmBlock(false)}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleBlockUser}
+            className="bg-destructive text-white hover:bg-destructive/90"
+          >
+            Block
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 };
 

@@ -64,7 +64,7 @@ export interface DemoThread {
   author: {
     display_name: string | null;
     avatar_url: string | null;
-    is_verified: boolean;
+    verification_status?: string | null;
   } | null;
 }
 
@@ -1006,7 +1006,11 @@ export const demoThreads: DemoThread[] = demoAlerts.map((alert) => {
     created_at: alert.createdAt,
     user_id: alert.creatorId,
     author: creator
-      ? { display_name: creator.name, avatar_url: creator.avatarUrl || null, is_verified: creator.isVerified }
+      ? {
+          display_name: creator.name,
+          avatar_url: creator.avatarUrl || null,
+          verification_status: creator.isVerified ? "verified" : "unverified",
+        }
       : null,
   };
 });

@@ -4,7 +4,7 @@ import { Camera, AlertTriangle, Info, CheckCircle, ArrowLeft, Loader2, Upload } 
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
 import imageCompression from "browser-image-compression";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -175,7 +175,7 @@ const HazardScanner = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-nav">
+    <div className="min-h-svh bg-background pb-nav">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-card border-b border-border">
         <div className="px-4 py-4 flex items-center gap-3">
@@ -238,15 +238,15 @@ const HazardScanner = () => {
               <img src={imagePreview} alt={t("Preview")} className="w-full rounded-xl" />
 
               <div className="flex gap-3">
-                <Button
-                  variant="outline"
+                <NeuButton
+                  variant="secondary"
                   onClick={resetScanner}
                   className="flex-1 h-12 rounded-xl"
                   disabled={scanning}
                 >
                   {t("Change Photo")}
-                </Button>
-                <Button
+                </NeuButton>
+                <NeuButton
                   onClick={scanImage}
                   disabled={scanning}
                   className="flex-1 h-12 rounded-xl"
@@ -262,7 +262,7 @@ const HazardScanner = () => {
                       {t("Scan for Hazards")}
                     </>
                   )}
-                </Button>
+                </NeuButton>
               </div>
             </motion.div>
           )}
@@ -286,21 +286,21 @@ const HazardScanner = () => {
               <p className="text-center font-medium">{t("Did your pet eat or ingest this?")}</p>
 
               <div className="grid grid-cols-2 gap-3">
-                <Button
+                <NeuButton
                   onClick={() => handleIntentSelection(false)}
-                  variant="outline"
+                  variant="secondary"
                   className="h-16 rounded-xl flex-col gap-1"
                 >
                   <Info className="w-6 h-6 text-primary" />
                   <span className="text-sm">{t("Just Curious")}</span>
-                </Button>
-                <Button
+                </NeuButton>
+                <NeuButton
                   onClick={() => handleIntentSelection(true)}
                   className="h-16 rounded-xl bg-destructive hover:bg-destructive/90 flex-col gap-1"
                 >
                   <AlertTriangle className="w-6 h-6" />
                   <span className="text-sm">{t("Ingested!")}</span>
-                </Button>
+                </NeuButton>
               </div>
             </motion.div>
           )}
@@ -340,9 +340,9 @@ const HazardScanner = () => {
                 </div>
               </div>
 
-              <Button onClick={resetScanner} className="w-full h-12 rounded-xl">
+              <NeuButton onClick={resetScanner} className="w-full h-12 rounded-xl">
                 {t("Scan Another Item")}
-              </Button>
+              </NeuButton>
             </motion.div>
           )}
 
@@ -390,16 +390,16 @@ const HazardScanner = () => {
                 </div>
               </div>
 
-              <Button
+              <NeuButton
                 onClick={() => window.open('tel:emergency-vet')}
                 className="w-full h-14 rounded-xl bg-destructive hover:bg-destructive/90 text-lg font-semibold"
               >
                 {t("Call Emergency Vet Now")}
-              </Button>
+              </NeuButton>
 
-              <Button onClick={resetScanner} variant="outline" className="w-full h-12 rounded-xl">
+              <NeuButton onClick={resetScanner} variant="secondary" className="w-full h-12 rounded-xl">
                 {t("Scan Another Item")}
-              </Button>
+              </NeuButton>
             </motion.div>
           )}
 
@@ -420,9 +420,9 @@ const HazardScanner = () => {
                 <p className="text-xs text-muted-foreground">{t("Photo saved to your history")}</p>
               </div>
 
-              <Button onClick={resetScanner} className="w-full h-12 rounded-xl">
+              <NeuButton onClick={resetScanner} className="w-full h-12 rounded-xl">
                 {t("Scan Another Item")}
-              </Button>
+              </NeuButton>
             </motion.div>
           )}
         </AnimatePresence>

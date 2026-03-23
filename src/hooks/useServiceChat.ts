@@ -1,0 +1,355 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import type {
+  ChatMessageRow,
+  ServiceChatRow,
+  ServiceCounterpart,
+  ServiceQuoteCard,
+  ServiceRequestCard,
+  ServiceRole,
+} from "@/components/service-chat/types";
+
+type UseServiceChatResult = {
+  serviceChat: ServiceChatRow | null;
+  messages: ChatMessageRow[];
+  counterpart: ServiceCounterpart | null;
+  role: ServiceRole | null;
+  loading: boolean;
+  sending: boolean;
+  canMarkFinished: boolean;
+  canDispute: boolean;
+  hasReviewed: boolean;
+  providerStripeReady: boolean;
+  reload: (silent?: boolean) => Promise<void>;
+  sendMessage: (text: string, attachments?: Array<{ url: string; mime: string; name: string }>) => Promise<void>;
+  sendRequest: (card: ServiceRequestCard) => Promise<void>;
+  withdrawRequest: () => Promise<void>;
+  sendQuote: (card: ServiceQuoteCard) => Promise<void>;
+  withdrawQuote: () => Promise<void>;
+  startService: () => Promise<void>;
+  markFinished: () => Promise<void>;
+  fileDispute: (category: string, description: string, evidenceUrls: string[]) => Promise<void>;
+  submitReview: (rating: number, tags: string[], text: string) => Promise<void>;
+};
+
+const asMessage = (message: string | undefined, fallback: string) => {
+  const normalized = String(message || "").trim();
+  return normalized || fallback;
+};
+
+export const useServiceChat = (roomId: string, userId: string): UseServiceChatResult => {
+  const [serviceChat, setServiceChat] = useState<ServiceChatRow | null>(null);
+  const [messages, setMessages] = useState<ChatMessageRow[]>([]);
+  const [counterpart, setCounterpart] = useState<ServiceCounterpart | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [hasReviewed, setHasReviewed] = useState(false);
+  const hasLoadedRef = useRef(false);
+  const reloadInFlightRef = useRef(false);
+
+  const role: ServiceRole | null = useMemo(() => {
+    if (!serviceChat || !userId) return null;
+    if (serviceChat.requester_id === userId) return "requester";
+    if (serviceChat.provider_id === userId) return "provider";
+    return null;
+  }, [serviceChat, userId]);
+
+  const providerStripeReady = Boolean(counterpart?.stripePayoutStatus === "complete" && counterpart?.stripeAccountId);
+
+  const canDispute = useMemo(() => {
+    if (!serviceChat) return false;
+    if (serviceChat.status === "booked" || serviceChat.status === "in_progress") return true;
+    if (serviceChat.status !== "completed" || !serviceChat.completed_at) return false;
+    const completedAt = new Date(serviceChat.completed_at).getTime();
+    if (!Number.isFinite(completedAt)) return false;
+    return Date.now() - completedAt <= 48 * 60 * 60 * 1000;
+  }, [serviceChat]);
+
+  const canMarkFinished = useMemo(() => {
+    if (!serviceChat || !role) return false;
+    if (!(serviceChat.status === "booked" || serviceChat.status === "in_progress")) return false;
+    if (role === "requester" && serviceChat.requester_mark_finished) return false;
+    if (role === "provider" && serviceChat.provider_mark_finished) return false;
+    const request = serviceChat.request_card;
+    if (!request) return true;
+    const requestedDates = Array.isArray(request.requestedDates) ? request.requestedDates : [];
+    const firstDate = requestedDates.length > 0 ? [...requestedDates].sort()[0] : String(request.requestedDate || "");
+    const endTime = String(request.endTime || "");
+    if (!firstDate || !endTime) return true;
+    const endAt = new Date(`${firstDate}T${endTime}:00`).getTime();
+    if (!Number.isFinite(endAt)) return true;
+    return Date.now() >= endAt;
+  }, [role, serviceChat]);
+
+  const reload = useCallback(
+    async (silent = false) => {
+      if (!roomId) {
+        setLoading(false);
+        hasLoadedRef.current = false;
+        setServiceChat(null);
+        setMessages([]);
+        setCounterpart(null);
+        setHasReviewed(false);
+        return;
+      }
+      if (!userId) return;
+      if (reloadInFlightRef.current) return;
+      reloadInFlightRef.current = true;
+      const shouldShowLoading = !silent || !hasLoadedRef.current;
+      if (shouldShowLoading) setLoading(true);
+      try {
+        await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
+        const [{ data: serviceData, error: serviceErr }, { data: messageRows, error: messageErr }] = await Promise.all([
+          supabase
+            .from("service_chats")
+            .select(
+              "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
+            )
+            .eq("chat_id", roomId)
+            .maybeSingle(),
+          supabase
+            .from("chat_messages")
+            .select("id,sender_id,content,created_at")
+            .eq("chat_id", roomId)
+            .order("created_at", { ascending: true }),
+        ]);
+        if (serviceErr) throw new Error(asMessage(serviceErr.message, "service_chat_load_failed"));
+        if (messageErr) throw new Error(asMessage(messageErr.message, "service_chat_messages_failed"));
+        if (!serviceData) throw new Error("service_chat_not_found");
+
+        const row = serviceData as unknown as ServiceChatRow;
+        setServiceChat(row);
+        setMessages(((messageRows || []) as ChatMessageRow[]).filter(Boolean));
+
+        const counterpartId = row.requester_id === userId ? row.provider_id : row.requester_id;
+        if (counterpartId) {
+          const [{ data: publicProfile }, { data: profileRow }, { data: pcpRow }] = await Promise.all([
+            supabase
+              .from("profiles_public")
+              .select("id,display_name,avatar_url,is_verified")
+              .eq("id", counterpartId)
+              .maybeSingle(),
+            supabase
+              .from("profiles")
+              .select("id,display_name,avatar_url,is_verified")
+              .eq("id", counterpartId)
+              .maybeSingle(),
+            supabase
+              .from("pet_care_profiles")
+              .select("stripe_payout_status,stripe_account_id")
+              .eq("user_id", counterpartId)
+              .maybeSingle(),
+          ]);
+          const merged = (publicProfile || profileRow || {}) as Record<string, unknown>;
+          setCounterpart({
+            id: counterpartId,
+            displayName: String(merged.display_name || "Service chat"),
+            avatarUrl: (merged.avatar_url as string | null) || null,
+            isVerified: merged.is_verified === true,
+            stripePayoutStatus: String((pcpRow as Record<string, unknown> | null)?.stripe_payout_status || "") || null,
+            stripeAccountId: String((pcpRow as Record<string, unknown> | null)?.stripe_account_id || "") || null,
+          });
+        } else {
+          setCounterpart(null);
+        }
+
+        if (row.status === "completed" && row.requester_id === userId) {
+          const { data: reviewRow } = await supabase
+            .from("service_reviews")
+            .select("id")
+            .eq("service_chat_id", row.chat_id)
+            .eq("reviewer_id", userId)
+            .maybeSingle();
+          setHasReviewed(Boolean(reviewRow?.id));
+        } else {
+          setHasReviewed(false);
+        }
+        hasLoadedRef.current = true;
+      } catch (error) {
+        toast.error(
+          String((error as { message?: string })?.message || "").includes("not_found")
+            ? "Service chat not found."
+            : "Unable to load service chat."
+        );
+      } finally {
+        reloadInFlightRef.current = false;
+        if (shouldShowLoading) setLoading(false);
+      }
+    },
+    [roomId, userId]
+  );
+
+  useEffect(() => {
+    hasLoadedRef.current = false;
+    if (!roomId) {
+      setLoading(false);
+      setServiceChat(null);
+      setMessages([]);
+      setCounterpart(null);
+      setHasReviewed(false);
+      return;
+    }
+    if (!userId) {
+      setLoading(true);
+      return;
+    }
+    void reload(false);
+  }, [reload, roomId, userId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    const tick = window.setInterval(() => {
+      void reload(true);
+    }, 8000);
+    return () => window.clearInterval(tick);
+  }, [reload, roomId]);
+
+  const sendMessage = useCallback(
+    async (text: string, attachments?: Array<{ url: string; mime: string; name: string }>) => {
+      if (!roomId || !userId || (!text.trim() && !(attachments && attachments.length > 0))) return;
+      setSending(true);
+      try {
+        const content = text.trim();
+        const payload: Record<string, unknown> = { text: content };
+        if (attachments && attachments.length > 0) {
+          payload.attachments = attachments;
+        }
+        const { error } = await supabase.from("chat_messages").insert({
+          chat_id: roomId,
+          sender_id: userId,
+          content: JSON.stringify(payload),
+        });
+        if (error) throw error;
+        await supabase.from("chats").update({ last_message_at: new Date().toISOString() }).eq("id", roomId);
+        await reload(true);
+      } catch (error) {
+        toast.error(asMessage((error as { message?: string })?.message, "Unable to send message."));
+      } finally {
+        setSending(false);
+      }
+    },
+    [reload, roomId, userId]
+  );
+
+  const rpcVoid = useCallback(
+    async (fn: string, params: Record<string, unknown>, fallback: string) => {
+      setSending(true);
+      try {
+        const { error } = await supabase.rpc(fn, params);
+        if (error) throw error;
+        await reload(true);
+      } catch (error) {
+        toast.error(asMessage((error as { message?: string })?.message, fallback));
+        throw error;
+      } finally {
+        setSending(false);
+      }
+    },
+    [reload]
+  );
+
+  const sendRequest = useCallback(
+    async (card: ServiceRequestCard) => {
+      await rpcVoid("send_service_request", { p_chat_id: roomId, p_request_card: card }, "Unable to send request.");
+    },
+    [roomId, rpcVoid]
+  );
+
+  const withdrawRequest = useCallback(async () => {
+    await rpcVoid("withdraw_service_request", { p_chat_id: roomId }, "Unable to withdraw request.");
+  }, [roomId, rpcVoid]);
+
+  const sendQuote = useCallback(
+    async (card: ServiceQuoteCard) => {
+      await rpcVoid("send_service_quote", { p_chat_id: roomId, p_quote_card: card }, "Unable to send quote.");
+    },
+    [roomId, rpcVoid]
+  );
+
+  const withdrawQuote = useCallback(async () => {
+    await rpcVoid("withdraw_service_quote", { p_chat_id: roomId }, "Unable to withdraw quote.");
+  }, [roomId, rpcVoid]);
+
+  const startService = useCallback(async () => {
+    if (!roomId) return;
+    setSending(true);
+    try {
+      const { error } = await supabase.rpc("start_service_now", { p_chat_id: roomId });
+      if (error) {
+        const missingStartNow = String(error.message || "").toLowerCase().includes("start_service_now");
+        if (!missingStartNow) throw error;
+        const { error: fallbackErr } = await supabase.rpc("start_service", { p_chat_id: roomId });
+        if (fallbackErr) throw fallbackErr;
+      }
+      await reload(true);
+      toast.success("Service started.");
+    } catch (error) {
+      toast.error(asMessage((error as { message?: string })?.message, "Unable to start service."));
+      throw error;
+    } finally {
+      setSending(false);
+    }
+  }, [reload, roomId]);
+
+  const markFinished = useCallback(async () => {
+    if (!roomId) return;
+    await rpcVoid("mark_service_finished", { p_chat_id: roomId }, "Unable to mark finished.");
+  }, [roomId, rpcVoid]);
+
+  const fileDispute = useCallback(
+    async (category: string, description: string, evidenceUrls: string[]) => {
+      await rpcVoid(
+        "file_service_dispute",
+        {
+          p_chat_id: roomId,
+          p_category: category,
+          p_description: description,
+          p_evidence_urls: evidenceUrls || [],
+        },
+        "Unable to submit dispute."
+      );
+    },
+    [roomId, rpcVoid]
+  );
+
+  const submitReview = useCallback(
+    async (rating: number, tags: string[], text: string) => {
+      await rpcVoid(
+        "submit_service_review",
+        {
+          p_chat_id: roomId,
+          p_rating: rating,
+          p_tags: tags || [],
+          p_review_text: text.trim(),
+        },
+        "Unable to submit review."
+      );
+      setHasReviewed(true);
+    },
+    [roomId, rpcVoid]
+  );
+
+  return {
+    serviceChat,
+    messages,
+    counterpart,
+    role,
+    loading,
+    sending,
+    canMarkFinished,
+    canDispute,
+    hasReviewed,
+    providerStripeReady,
+    reload,
+    sendMessage,
+    sendRequest,
+    withdrawRequest,
+    sendQuote,
+    withdrawQuote,
+    startService,
+    markFinished,
+    fileDispute,
+    submitReview,
+  };
+};

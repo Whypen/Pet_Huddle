@@ -26,6 +26,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -38,6 +39,7 @@ import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
+import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
 
 const tags = [
@@ -129,6 +131,27 @@ type MentionEntry = {
   end: number;
   mentionedUserId: string;
   socialIdAtTime: string;
+};
+
+type LinkPreview = {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  siteName?: string;
+  loading?: boolean;
+  failed?: boolean;
+  resolved?: boolean;
+  error?: string;
+};
+
+type LinkPreviewPayload = {
+  url?: unknown;
+  title?: unknown;
+  description?: unknown;
+  image?: unknown;
+  siteName?: unknown;
+  failed?: unknown;
 };
 
 type MentionSuggestion = {
@@ -236,6 +259,39 @@ const formatInlineMarkup = (value: string) => {
 };
 
 const mentionTokenMatcher = /@([A-Za-z0-9_.-]{2,24})\b/g;
+const urlMatcher = /\bhttps?:\/\/[^\s<>"')]+/gi;
+
+const normalizeHttpUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+const extractFirstHttpUrl = (value: string) => {
+  if (!value) return null;
+  const match = value.match(urlMatcher);
+  if (!match || match.length === 0) return null;
+  const trimmedCandidate = match[0].replace(/[|.,!?;:)\]]+$/g, "");
+  return normalizeHttpUrl(trimmedCandidate);
+};
+
+const formatUrlLabel = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    const compact = `${host}${path}`.replace(/\/+$/, "");
+    if (compact.length <= 44) return compact;
+    return `${compact.slice(0, 41)}...`;
+  } catch {
+    if (url.length <= 44) return url;
+    return `${url.slice(0, 41)}...`;
+  }
+};
 
 const findMentionOccurrences = (value: string, socialId: string) => {
   const matches: Array<{ start: number; end: number }> = [];
@@ -366,6 +422,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [hiddenComments, setHiddenComments] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+  const [confirmBlockId, setConfirmBlockId] = useState<string | null>(null);
+  const [confirmBlockName, setConfirmBlockName] = useState<string>("this user");
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
@@ -400,10 +458,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [mentionSeeds, setMentionSeeds] = useState<MentionSeed[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePayload, setSharePayload] = useState<{ threadId: string; url: string; text: string; title?: string; imageUrl?: string } | null>(null);
+  const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, LinkPreview>>({});
+  const [expandedContentIds, setExpandedContentIds] = useState<Set<string>>(new Set());
+  const [expandableContentById, setExpandableContentById] = useState<Record<string, boolean>>({});
   const pullTouchStartYRef = useRef<number | null>(null);
   const pullTouchEligibleRef = useRef(false);
   const pullTriggeredRef = useRef(false);
   const lastRefreshAtRef = useRef(0);
+  const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
+  const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
   const replyWordsUsed = useMemo(() => countWords(replyContent), [replyContent]);
@@ -1607,6 +1671,41 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     []
   );
 
+  const upsertNotificationWindow = useCallback(
+    async (args: {
+      ownerUserId: string;
+      subjectId: string;
+      subjectType: "thread" | "alert";
+      kind: "like" | "comment" | "reply" | "alert_like";
+      category: "social" | "map";
+      href: string;
+      actorId: string;
+      actorName: string;
+    }) => {
+      const result = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "upsert_notification_window",
+        {
+          p_owner_user_id: args.ownerUserId,
+          p_subject_id: args.subjectId,
+          p_subject_type: args.subjectType,
+          p_kind: args.kind,
+          p_category: args.category,
+          p_href: args.href,
+          p_actor_id: args.actorId,
+          p_actor_name: args.actorName,
+        }
+      );
+      if (result.error) {
+        console.error("[social.notification_window.failed]", {
+          kind: args.kind,
+          ownerUserId: args.ownerUserId,
+          error: result.error.message || result.error,
+        });
+      }
+    },
+    []
+  );
+
   const persistPostMentions = useCallback(async (postId: string, entries: MentionEntry[]) => {
     if (!postId || entries.length === 0) return;
     if (!mentionTablesAvailableRef.current) return;
@@ -1782,18 +1881,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     if (thread.user_id && thread.user_id !== user.id) {
-      const actorHandle = profile?.social_id || profile?.display_name || "user";
-      await enqueueSocialNotification({
-        userId: thread.user_id,
-        kind: "thread_comment",
-        title: "New comment",
-        body: `@${actorHandle} commented on your post.`,
-        href: `/threads?focus=${thread.id}`,
-        data: {
-          thread_id: thread.id,
-          actor_id: user.id,
-          comment_id: null,
-        },
+      await upsertNotificationWindow({
+        ownerUserId: thread.user_id,
+        subjectId: thread.id,
+        subjectType: "thread",
+        kind: "comment",
+        category: "social",
+        href: `/social?focus=${thread.id}`,
+        actorId: user.id,
+        actorName: profile?.display_name || "Someone",
       });
     }
 
@@ -1860,12 +1956,48 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     chunks.forEach((chunk, lineIndex) => {
       if (lineIndex > 0) nodes.push(<br key={`${keyPrefix}-br-${lineIndex}`} />);
       if (!chunk) return;
-      nodes.push(
-        <span
-          key={`${keyPrefix}-line-${lineIndex}`}
-          dangerouslySetInnerHTML={{ __html: formatInlineMarkup(chunk) }}
-        />
-      );
+      const lineNodes: ReactNode[] = [];
+      let cursor = 0;
+      let match: RegExpExecArray | null;
+      urlMatcher.lastIndex = 0;
+
+      while ((match = urlMatcher.exec(chunk)) !== null) {
+        const rawUrl = match[0];
+        const safeUrl = normalizeHttpUrl(rawUrl);
+        if (!safeUrl) continue;
+        if (match.index > cursor) {
+          const textPart = chunk.slice(cursor, match.index);
+          lineNodes.push(
+            <span
+              key={`${keyPrefix}-line-${lineIndex}-text-${cursor}`}
+              dangerouslySetInnerHTML={{ __html: formatInlineMarkup(textPart) }}
+            />
+          );
+        }
+        lineNodes.push(
+          <a
+            key={`${keyPrefix}-line-${lineIndex}-url-${match.index}`}
+            href={safeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="break-all text-brandBlue underline underline-offset-2"
+          >
+            {formatUrlLabel(safeUrl)}
+          </a>
+        );
+        cursor = match.index + rawUrl.length;
+      }
+
+      if (cursor < chunk.length) {
+        lineNodes.push(
+          <span
+            key={`${keyPrefix}-line-${lineIndex}-tail`}
+            dangerouslySetInnerHTML={{ __html: formatInlineMarkup(chunk.slice(cursor)) }}
+          />
+        );
+      }
+
+      nodes.push(<span key={`${keyPrefix}-line-${lineIndex}`}>{lineNodes}</span>);
     });
     return nodes;
   }, []);
@@ -2159,17 +2291,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         const resolvedCount = Number(count ?? 0);
         setNotices((prev) => prev.map((item) => (item.id === noticeId ? { ...item, likes: resolvedCount } : item)));
         if (!isRemoving && target.user_id !== user.id) {
-          const actorHandle = profile?.social_id || profile?.display_name || "user";
-          await enqueueSocialNotification({
-            userId: target.user_id,
-            kind: "thread_like",
-            title: "New like",
-            body: `@${actorHandle} liked your post.`,
+          await upsertNotificationWindow({
+            ownerUserId: target.user_id,
+            subjectId: noticeId,
+            subjectType: "thread",
+            kind: "like",
+            category: "social",
             href: `/social?focus=${noticeId}`,
-            data: {
-              thread_id: noticeId,
-              actor_id: user.id,
-            },
+            actorId: user.id,
+            actorName: profile?.display_name || "Someone",
           });
         }
         toast.success(isRemoving ? t("Support removed") : t("Thanks for your support!"));
@@ -2249,6 +2379,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (type === "Lost") return "bg-red-500 text-white border border-red-500";
     if (type === "Stray") return "bg-yellow-400 text-black border border-yellow-400";
     return "bg-primary text-white border border-primary";
+  };
+
+  const getPrimaryTag = (notice: Thread) => {
+    const rowTags = notice.tags || [];
+    const hasNewsTag = rowTags.some((tag) => String(tag).toLowerCase() === "news");
+    const isAlertDerived = Boolean(notice.alert_type || newsAlertTypeByThread[notice.id]);
+    const displayTags = hasNewsTag ? rowTags.slice(0, 1) : isAlertDerived ? ["News"] : rowTags.slice(0, 1);
+    return displayTags[0] || null;
   };
 
   const formatTimeAgo = (date: string) => {
@@ -2420,6 +2558,142 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return b.id.localeCompare(a.id);
     });
   }, [blockedUsers, commentsByThread, hiddenNotices, notices, pinnedNotices, savedNotices, searchQuery, sortMode, topicFilters]);
+  const createContentFirstUrl = useMemo(() => extractFirstHttpUrl(content || ""), [content]);
+  const createContentPreview = createContentFirstUrl ? linkPreviewByUrl[createContentFirstUrl] : null;
+  const COLLAPSED_CONTENT_MAX_HEIGHT = 120;
+
+  useEffect(() => {
+    linkPreviewMapRef.current = linkPreviewByUrl;
+  }, [linkPreviewByUrl]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const next: Record<string, boolean> = {};
+      visibleNotices.forEach((notice) => {
+        const node = contentRefs.current[notice.id];
+        if (!node) {
+          next[notice.id] = false;
+          return;
+        }
+        next[notice.id] = node.scrollHeight > COLLAPSED_CONTENT_MAX_HEIGHT + 2;
+      });
+      setExpandableContentById(next);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [visibleNotices, threadMentionsById]);
+
+  const ensureLinkPreview = useCallback(async (url: string) => {
+    if (!url) return;
+    const existing = linkPreviewMapRef.current[url];
+    if (existing && (existing.loading || existing.resolved)) return;
+    if (linkPreviewInFlightRef.current.has(url)) return;
+    linkPreviewInFlightRef.current.add(url);
+    setLinkPreviewByUrl((prev) => ({
+      ...prev,
+      [url]: { ...(prev[url] || { url }), url, loading: true, failed: false, resolved: false, error: undefined },
+    }));
+    if (import.meta.env.DEV) {
+      console.debug("[link-preview] fetch:start", { url });
+    }
+
+    try {
+      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", { body: { url } });
+      const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error("preview_timeout") }), 7000)
+      );
+      const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
+      if (error || !data || typeof data !== "object") {
+        const reason = error?.message || "invalid_payload";
+        console.error("[link-preview] fetch:failed", { url, reason });
+        setLinkPreviewByUrl((prev) => ({
+          ...prev,
+          [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+        }));
+        return;
+      }
+      const payload = data as LinkPreviewPayload;
+      const title = typeof payload.title === "string" ? payload.title.trim() : "";
+      const description = typeof payload.description === "string" ? payload.description.trim() : "";
+      const image = typeof payload.image === "string" ? payload.image.trim() : "";
+      const siteName = typeof payload.siteName === "string" ? payload.siteName.trim() : "";
+      const remoteFailed = payload.failed === true;
+      const hasMetadata = Boolean(title || description || image || siteName);
+      if (remoteFailed || !hasMetadata) {
+        const reason = remoteFailed ? "edge_marked_failed" : "empty_metadata";
+        console.error("[link-preview] fetch:empty", { url, reason, payload });
+        setLinkPreviewByUrl((prev) => ({
+          ...prev,
+          [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+        }));
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.debug("[link-preview] fetch:success", {
+          url,
+          title,
+          hasDescription: Boolean(description),
+          hasImage: Boolean(image),
+          siteName,
+        });
+      }
+      setLinkPreviewByUrl((prev) => ({
+        ...prev,
+        [url]: {
+          url,
+          title: title || undefined,
+          description: description || undefined,
+          image: image || undefined,
+          siteName: siteName || undefined,
+          loading: false,
+          failed: false,
+          resolved: true,
+          error: undefined,
+        },
+      }));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "unexpected_error";
+      console.error("[link-preview] fetch:exception", { url, reason, err });
+      setLinkPreviewByUrl((prev) => ({
+        ...prev,
+        [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+      }));
+    } finally {
+      linkPreviewInFlightRef.current.delete(url);
+    }
+  }, []);
+
+  useEffect(() => {
+    const urls = Array.from(
+      new Set(
+        visibleNotices
+          .map((notice) => extractFirstHttpUrl(notice.content || ""))
+          .filter((url): url is string => Boolean(url))
+      )
+    ).slice(0, 20);
+    if (urls.length === 0) return;
+    void Promise.all(urls.map((url) => ensureLinkPreview(url)));
+  }, [ensureLinkPreview, visibleNotices]);
+
+  useEffect(() => {
+    const draftUrl = extractFirstHttpUrl(content || "");
+    if (!draftUrl) return;
+    void ensureLinkPreview(draftUrl);
+  }, [content, ensureLinkPreview]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !createContentFirstUrl) return;
+    const preview = linkPreviewByUrl[createContentFirstUrl];
+    console.debug("[link-preview] compose:state", {
+      url: createContentFirstUrl,
+      loading: preview?.loading ?? false,
+      resolved: preview?.resolved ?? false,
+      failed: preview?.failed ?? false,
+      hasTitle: Boolean(preview?.title),
+      hasDescription: Boolean(preview?.description),
+      hasImage: Boolean(preview?.image),
+      error: preview?.error || null,
+    });
+  }, [createContentFirstUrl, linkPreviewByUrl]);
 
   const triggerPullRefresh = useCallback(async () => {
     if (pullRefreshing) return;
@@ -2564,13 +2838,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
             ) : visibleNotices.length === 0 ? (
-              <div className="bg-muted/50 rounded-xl p-6 text-center">
-                <MessageSquare className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No posts yet</p>
+              <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
+                <img
+                  src={emptyChatImage}
+                  alt="No posts yet"
+                  className="w-full max-w-[360px] object-contain"
+                />
+                <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
+                  Looks like the floor is yours. Post something fun, real, or random - every great discussion starts with one person.
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border/70">
-                {visibleNotices.map((notice) => (
+                {visibleNotices.map((notice) => {
+                  const primaryTag = getPrimaryTag(notice);
+                  const firstUrl = extractFirstHttpUrl(notice.content || "");
+                  const preview = firstUrl ? linkPreviewByUrl[firstUrl] : null;
+                  return (
                   <div
                     key={notice.id}
                     ref={(el) => {
@@ -2659,30 +2943,70 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               className="max-w-full text-sm"
                             />
                           </button>
-                          {(() => {
-                            const tags = notice.tags || [];
-                            const hasNewsTag = tags.some((tag) => String(tag).toLowerCase() === "news");
-                            const isAlertDerived = Boolean(notice.alert_type || newsAlertTypeByThread[notice.id]);
-                            const displayTags = hasNewsTag
-                              ? tags.slice(0, 1)
-                              : isAlertDerived
-                              ? ["News"]
-                              : tags.slice(0, 1);
-                            return displayTags;
-                          })().map((tag) => (
-                            <span
-                              key={tag}
-                              className={cn("px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0", getTagStyle(tag, notice.id))}
-                            >
-                              {t(tag)}
-                            </span>
-                          ))}
                         </div>
                         </div>
                         <p className="text-sm font-semibold break-words">{notice.title}</p>
-                        <div className="text-sm text-foreground break-words whitespace-pre-wrap">
+                        <div
+                          ref={(el) => {
+                            contentRefs.current[notice.id] = el;
+                          }}
+                          className={cn(
+                            "text-sm leading-6 text-foreground break-words whitespace-pre-wrap transition-[max-height] duration-200",
+                            expandedContentIds.has(notice.id) ? "max-h-none" : "max-h-[120px] overflow-hidden"
+                          )}
+                        >
                           {renderTextWithMentions(notice.content, threadMentionsById[notice.id], `thread-${notice.id}`)}
                         </div>
+                        {expandableContentById[notice.id] ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedContentIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(notice.id)) next.delete(notice.id);
+                                else next.add(notice.id);
+                                return next;
+                              })
+                            }
+                            className="mt-1 text-xs font-bold text-[rgba(74,73,101,0.72)]"
+                          >
+                            {expandedContentIds.has(notice.id) ? "See Less" : "Read More"}
+                          </button>
+                        ) : null}
+                        {firstUrl ? (
+                          <a
+                            href={firstUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="form-field-rest mt-2 block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
+                          >
+                            {preview?.image ? (
+                              <img src={preview.image} alt={preview.title || "Link preview"} className="h-44 w-full object-cover" />
+                            ) : null}
+                            <div className="space-y-1.5 px-3 py-2.5">
+                              <p className="text-xs text-[rgba(74,73,101,0.62)]">
+                                {preview?.siteName || (() => {
+                                  try {
+                                    return new URL(firstUrl).hostname.replace(/^www\./, "");
+                                  } catch {
+                                    return "External link";
+                                  }
+                                })()}
+                              </p>
+                              <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-brandText">
+                                {preview?.title || formatUrlLabel(firstUrl)}
+                              </p>
+                              {preview?.failed ? (
+                                <p className="text-xs text-[rgba(74,73,101,0.62)]">
+                                  Preview unavailable{import.meta.env.DEV && preview.error ? `: ${preview.error}` : ""}
+                                </p>
+                              ) : null}
+                              {preview?.loading ? (
+                                <p className="text-xs text-[rgba(74,73,101,0.62)]">Loading preview...</p>
+                              ) : null}
+                            </div>
+                          </a>
+                        ) : null}
                         {(notice.hashtags || []).length > 0 && (
                           <p className="text-xs text-muted-foreground mt-1">
                             {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
@@ -2698,9 +3022,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           />
                         )}
                         <div className="mt-3 flex items-center">
-                          <p className="text-xs text-[rgba(74,73,101,0.45)]">
-                            {formatTimeAgo(notice.created_at)}
-                          </p>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <p className="text-xs text-[rgba(74,73,101,0.45)]">
+                              {formatTimeAgo(notice.created_at)}
+                            </p>
+                            {primaryTag ? (
+                              <span className={cn("px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0", getTagStyle(primaryTag, notice.id))}>
+                                {t(primaryTag)}
+                              </span>
+                            ) : null}
+                          </div>
                           <div className="ml-auto flex items-center justify-end gap-0.5 min-w-[136px]">
                             <button
                               onClick={() => handleSupport(notice.id)}
@@ -2816,7 +3147,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                       {t("Hide")}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
-                                      onClick={() => handleBlockUser(notice.user_id)}
+                                      onClick={() => { setConfirmBlockId(notice.user_id); setConfirmBlockName(notice.author?.display_name ?? "this user"); }}
                                       className="text-destructive"
                                     >
                                       <Ban className="w-4 h-4 mr-2" />
@@ -3009,7 +3340,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         {t("Hide")}
                                       </DropdownMenuItem>
                                       <DropdownMenuItem
-                                        onClick={() => handleBlockUser(c.user_id)}
+                                        onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(c.author?.display_name ?? "this user"); }}
                                         className="text-destructive"
                                       >
                                         <Ban className="w-4 h-4 mr-2" />
@@ -3025,7 +3356,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
 
@@ -3097,9 +3428,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                 </div>
 
                 <div>
-                  <div className={cn("form-field-rest relative h-auto min-h-[112px] py-3", createErrors.content && "form-field-error")}>
-                    <div className="relative min-h-[88px]">
-                      <div className="pointer-events-none min-h-[88px] whitespace-pre-wrap break-words text-sm leading-5">
+                  <div className={cn("form-field-rest relative h-auto min-h-[132px] py-3", createErrors.content && "form-field-error")}>
+                    <div className="relative min-h-[108px]">
+                      <div className="pointer-events-none min-h-[108px] whitespace-pre-wrap break-words text-sm leading-5">
                         {renderComposerTextWithMentions(content, createMentions, t("What's on your mind?"), "create-composer")}
                       </div>
                       <Textarea
@@ -3111,11 +3442,49 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           setCreateComposerFocused(false);
                           window.setTimeout(() => setCreateMentionQuery(null), 120);
                         }}
-                        className="field-input-core absolute inset-x-0 top-0 bottom-0 min-h-[88px] resize-none rounded-none border-0 bg-transparent px-0 py-0 text-transparent caret-[var(--text-primary)] shadow-none outline-none focus-visible:ring-0"
+                        className="field-input-core absolute inset-x-0 top-0 bottom-0 min-h-[108px] resize-none rounded-none border-0 bg-transparent px-0 py-0 text-transparent caret-[var(--text-primary)] shadow-none outline-none focus-visible:ring-0"
                         aria-invalid={Boolean(createErrors.content)}
                       />
                     </div>
                   </div>
+                  {createContentFirstUrl ? (
+                    <a
+                      href={createContentFirstUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="form-field-rest mt-2 block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
+                    >
+                      {createContentPreview?.image ? (
+                        <img
+                          src={createContentPreview.image}
+                          alt={createContentPreview.title || "Link preview"}
+                          className="h-40 w-full object-cover"
+                        />
+                      ) : null}
+                      <div className="space-y-1.5 px-3 py-2.5">
+                        <p className="text-xs text-[rgba(74,73,101,0.62)]">
+                          {createContentPreview?.siteName || (() => {
+                            try {
+                              return new URL(createContentFirstUrl).hostname.replace(/^www\./, "");
+                            } catch {
+                              return "External link";
+                            }
+                          })()}
+                        </p>
+                        <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-brandText">
+                          {createContentPreview?.title || formatUrlLabel(createContentFirstUrl)}
+                        </p>
+                        {createContentPreview?.loading ? (
+                          <p className="text-xs text-[rgba(74,73,101,0.62)]">Loading preview...</p>
+                        ) : null}
+                        {createContentPreview?.failed ? (
+                          <p className="text-xs text-[rgba(74,73,101,0.62)]">
+                            Preview unavailable{import.meta.env.DEV && createContentPreview.error ? `: ${createContentPreview.error}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    </a>
+                  ) : null}
                   {MENTION_LIVE_SUGGESTIONS_ENABLED
                     ? renderMentionSuggestions(
                         createMentionSuggestions,
@@ -3162,7 +3531,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               )}
 
               {/* Actions */}
-              <div className="flex items-center gap-3">
+              <div className="mt-3 flex items-center gap-3 pb-2">
                 <label className="p-2 rounded-full bg-muted cursor-pointer hover:bg-muted/80">
                   <Image className="w-5 h-5 text-muted-foreground" />
                   <input
@@ -3213,6 +3582,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           onShareAction={() => void recordShareClick(sharePayload.threadId)}
         />
       )}
+
+    <AlertDialog open={!!confirmBlockId} onOpenChange={(v) => !v && setConfirmBlockId(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Block {confirmBlockName}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            You will no longer see their posts or alerts, and they won't be able to interact with you.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => setConfirmBlockId(null)}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => { if (confirmBlockId) void handleBlockUser(confirmBlockId); setConfirmBlockId(null); }}
+            className="bg-destructive text-white hover:bg-destructive/90"
+          >
+            Block
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
     </div>
   );

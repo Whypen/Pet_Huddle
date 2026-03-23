@@ -9,14 +9,6 @@ interface PasswordStrengthBarProps {
   className?: string;
 }
 
-const helperText = (passed: number): string => {
-  if (passed === 0) return "Enter a password to get started";
-  if (passed === 1) return "Too weak — try adding more variety";
-  if (passed === 2) return "Getting there — add a symbol or number";
-  if (passed === 3) return "Almost — one more rule to go";
-  return "Strong enough";
-};
-
 const barColor = (passed: number, index: number): string => {
   if (index >= passed) return "bg-gray-200";
   if (passed <= 1) return "bg-brandError";
@@ -29,7 +21,7 @@ export function PasswordStrengthBar({ checks, className }: PasswordStrengthBarPr
   const passed = [checks.length, checks.upper, checks.number, checks.special].filter(Boolean).length;
 
   return (
-    <div className={cn("space-y-1.5", className)}>
+    <div className={cn("space-y-0", className)}>
       {/* 4-segment bar */}
       <div className="flex gap-1.5" role="meter" aria-valuenow={passed} aria-valuemin={0} aria-valuemax={4} aria-label="Password strength">
         {[0, 1, 2, 3].map((i) => (
@@ -42,14 +34,6 @@ export function PasswordStrengthBar({ checks, className }: PasswordStrengthBarPr
           />
         ))}
       </div>
-
-      {/* Single helper line */}
-      <p className={cn(
-        "text-helper",
-        passed === 4 ? "text-brandSuccess" : passed >= 2 ? "text-brandAmber" : passed >= 1 ? "text-brandError" : "text-muted-foreground",
-      )}>
-        {helperText(passed)}
-      </p>
     </div>
   );
 }

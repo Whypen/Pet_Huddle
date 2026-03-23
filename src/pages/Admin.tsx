@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { Button } from "@/components/ui/button";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 
 interface VerificationRow {
@@ -19,10 +19,19 @@ interface VerificationRow {
   document_type?: string | null;
 }
 
+interface UserReportRow {
+  id: string;
+  created_at: string;
+  user_id: string;
+  subject: string | null;
+  message: string | null;
+}
+
 const Admin = () => {
   const { profile } = useAuth();
   const { t } = useLanguage();
   const [rows, setRows] = useState<VerificationRow[]>([]);
+  const [reportRows, setReportRows] = useState<UserReportRow[]>([]);
   const [comment, setComment] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [signedUrls, setSignedUrls] = useState<Record<string, { selfie?: string; doc?: string }>>({});
@@ -90,6 +99,15 @@ const Admin = () => {
       }
     }
     setSignedUrls(urlMap);
+
+    const { data: reportsData } = await supabase
+      .from("support_requests")
+      .select("id, created_at, user_id, subject, message")
+      .eq("category", "user_report")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    setReportRows(((reportsData || []) as UserReportRow[]));
+
     setLoading(false);
   };
 
@@ -101,24 +119,24 @@ const Admin = () => {
     }
   }, [profile?.user_role]);
 
-  const review = async (id: string, status: "approved" | "rejected", uploadId?: string) => {
+  const review = async (id: string, status: "verified" | "unverified", uploadId?: string) => {
     const target = rows.find((row) => row.id === id);
     await supabase
       .from("profiles")
       .update({
         verification_status: status,
         verification_comment: comment[id] || null,
-        is_verified: status === "approved",
       })
       .eq("id", id);
     if (uploadId) {
+      const uploadStatus = status === "verified" ? "verified" : "unverified";
       await supabase
         .from("verification_uploads" as "profiles")
         .update({
-          status,
+          status: uploadStatus,
           reviewed_at: new Date().toISOString(),
           reviewed_by: profile?.id || null,
-          rejection_reason: status === "rejected" ? comment[id] || null : null,
+          rejection_reason: status === "unverified" ? comment[id] || null : null,
         } as Record<string, unknown>)
         .eq("id" as "created_at", uploadId);
     }
@@ -182,15 +200,38 @@ const Admin = () => {
             onChange={(e) => setComment((prev) => ({ ...prev, [row.id]: e.target.value }))}
           />
           <div className="flex gap-2">
-            <Button className="bg-[#3283ff]" onClick={() => review(row.id, "approved", row.upload_id)}>
+            <NeuButton className="bg-[#3283ff]" onClick={() => review(row.id, "verified", row.upload_id)}>
               {t("Approve")}
-            </Button>
-            <Button variant="outline" onClick={() => review(row.id, "rejected", row.upload_id)}>
+            </NeuButton>
+            <NeuButton variant="secondary" onClick={() => review(row.id, "unverified", row.upload_id)}>
               {t("Reject")}
-            </Button>
+            </NeuButton>
           </div>
         </div>
       ))}
+      <div className="pt-2">
+        <h2 className="text-base font-semibold">{t("User reports")}</h2>
+        {reportRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("No reports yet")}</p>
+        ) : (
+          <div className="space-y-2 mt-2">
+            {reportRows.map((report) => (
+              <div key={report.id} className="border rounded-xl p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium truncate">{report.subject || "User report"}</p>
+                  <span className="text-[11px] text-muted-foreground">
+                    {new Date(report.created_at).toLocaleString("en-GB", { hour12: false })}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground break-all">Reporter: {report.user_id}</p>
+                <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-muted/35 p-2 text-xs text-brandText">
+                  {report.message || ""}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

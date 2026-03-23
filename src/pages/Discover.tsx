@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Star, X, Loader2, Lock, SlidersHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { PremiumUpsell } from "@/components/social/PremiumUpsell";
+import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { FilterSheet } from "@/components/social/FilterSheet";
 import { defaultFilters, type FilterState } from "@/components/social/filterTypes";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,7 +18,8 @@ import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
-import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { getQuotaCapsForTier, quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
+import { startStripeCheckout } from "@/lib/stripeCheckout";
 
 type DiscoveryPet = {
   species?: string | null;
@@ -121,12 +122,36 @@ const Discover = () => {
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [premiumTier, setPremiumTier] = useState<"plus" | "gold">("plus");
+  const [premiumBilling, setPremiumBilling] = useState<QuotaBillingCycle>("monthly");
+  const [premiumLoading, setPremiumLoading] = useState(false);
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<FilterState>(defaultFilters);
 
   const openPremiumForTier = (tier: "plus" | "gold") => {
     setPremiumTier(tier);
+    setPremiumBilling("monthly");
     setIsPremiumOpen(true);
+  };
+
+  const handlePremiumUpgrade = async () => {
+    if (premiumLoading) return;
+    setPremiumLoading(true);
+    try {
+      const plan = quotaConfig.stripePlans[premiumTier][premiumBilling === "annual" ? "annual" : "monthly"];
+      const url = await startStripeCheckout({
+        mode: "subscription",
+        type: `${premiumTier}_${premiumBilling === "annual" ? "annual" : "monthly"}`,
+        lookupKey: plan.lookupKey,
+        priceId: plan.priceId,
+        successUrl: `${window.location.origin}/premium`,
+        cancelUrl: window.location.href,
+      });
+      window.location.assign(url);
+    } catch {
+      toast.error("Unable to start checkout right now.");
+    } finally {
+      setPremiumLoading(false);
+    }
   };
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -435,7 +460,7 @@ const Discover = () => {
               className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
             >
               <option value="Any">{t("Any Gender")}</option>
-              {["Male", "Female", "Non-binary", "PNA"].map((gender) => (
+              {["Male", "Female", "Non-binary"].map((gender) => (
                 <option key={gender} value={gender}>{gender}</option>
               ))}
             </select>
@@ -730,7 +755,15 @@ const Discover = () => {
         onApply={(f) => setAdvancedFilters(f)}
         onPremiumClick={(tier) => { setFilterSheetOpen(false); openPremiumForTier(tier); }}
       />
-      <PremiumUpsell isOpen={isPremiumOpen} tier={premiumTier} onClose={() => setIsPremiumOpen(false)} />
+      <StarUpgradeSheet
+        isOpen={isPremiumOpen}
+        tier={premiumTier}
+        billing={premiumBilling}
+        loading={premiumLoading}
+        onClose={() => { if (!premiumLoading) setIsPremiumOpen(false); }}
+        onBillingChange={setPremiumBilling}
+        onUpgrade={handlePremiumUpgrade}
+      />
       <UpsellModal
         isOpen={upsellModal.isOpen}
         type={upsellModal.type}

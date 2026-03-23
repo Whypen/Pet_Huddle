@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Bell,
   Users,
-  Store,
   PenSquare,
 } from "lucide-react";
 import privacyImage from "@/assets/Notifications/Privacy.jpg";
@@ -28,7 +27,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { useUpsell } from "@/hooks/useUpsell";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 import BroadcastModal from "@/components/map/BroadcastModal";
 import PinDetailModal from "@/components/map/PinDetailModal";
@@ -40,7 +39,6 @@ import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/Fr
 import { getEventActorId, loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
-import { MAP_PIN_STORAGE_KEY, buildScopedStorageKey } from "@/lib/signupOnboarding";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -94,6 +92,7 @@ interface FriendPin {
   display_name: string | null;
   avatar_url: string | null;
   is_verified?: boolean | null;
+  is_invisible?: boolean | null;
   dob: string | null;
   relationship_status: string | null;
   owns_pets: boolean | null;
@@ -181,6 +180,7 @@ function formatOpeningHours(hours: string): string {
 const MapPage = () => {
   const { user, profile, refreshProfile } = useAuth();
   const { t } = useLanguage();
+  const location = useLocation();
   const navigate = useNavigate();
   const { showUpsellBanner } = useUpsellBanner();
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -198,7 +198,7 @@ const MapPage = () => {
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [showAlerts, setShowAlerts] = useState(true);
   const [showFriends, setShowFriends] = useState(true);
-  const [showVets, setShowVets] = useState(true);
+  const [showVets] = useState(false);
   const [visibleEnabled, setVisibleEnabled] = useState(false);
   const [dbAlerts, setDbAlerts] = useState<MapAlert[]>([]);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
@@ -221,7 +221,7 @@ const MapPage = () => {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewPin, setBroadcastPreviewPin] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewAddress, setBroadcastPreviewAddress] = useState<string | null>(null);
-  const [draftBroadcastType, setDraftBroadcastType] = useState<"Stray" | "Lost" | "Others">("Stray");
+  const [draftBroadcastType, setDraftBroadcastType] = useState<"Stray" | "Lost" | "Caution" | "Others">("Stray");
   useEffect(() => {
     if (import.meta.env.DEV) console.debug("[USER_PIN]", userLocation);
   }, [userLocation]);
@@ -277,11 +277,6 @@ const MapPage = () => {
   const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
   // Invisible mode — Eye toggle
   const [isInvisible, setIsInvisible] = useState(false);
-  const pinStorageKey = useMemo(
-    () => buildScopedStorageKey(MAP_PIN_STORAGE_KEY, user?.id || ""),
-    [user?.id]
-  );
-
   useEffect(() => {
     (window as typeof window & { __HUDDLE_MAP__?: { initialized: boolean; fallback: boolean } }).__HUDDLE_MAP__ = {
       initialized: mapLoaded && !mapFallback,
@@ -289,38 +284,13 @@ const MapPage = () => {
     };
   }, [mapFallback, mapLoaded]);
 
-  // ============================================================
-  // PIN PERSISTENCE: Restore pin from localStorage on mount
-  // Spec: Pin survives tab switches and is permanent until unpinned.
-  // ============================================================
-  useEffect(() => {
-    if (!user?.id) return;
-    try {
-      const stored = localStorage.getItem(pinStorageKey);
-      if (!stored) return;
-      const pin = JSON.parse(stored) as { lat: number; lng: number; pinnedAt?: string; address?: string };
-      if (typeof pin.lat === "number" && typeof pin.lng === "number") {
-        if (import.meta.env.DEV) console.debug("[PIN] Restored pin from localStorage:", pin);
-        setUserLocation({ lat: pin.lat, lng: pin.lng });
-        setVisibleEnabled(true);
-        if (typeof pin.pinnedAt === "string") setPinPersistedAt(pin.pinnedAt);
-        if (typeof pin.address === "string") setPinAddressSnapshot(pin.address);
-      }
-    } catch {
-      // Corrupted data
-      localStorage.removeItem(pinStorageKey);
-    }
-  }, [pinStorageKey, user?.id]);
-
-  // Fallback: restore pin from DB if localStorage missing
+  // Restore persisted pin only from DB for authenticated sessions.
   useEffect(() => {
     if (!user) return;
-    const stored = localStorage.getItem(pinStorageKey);
-    if (stored) return;
     (async () => {
       const { data, error } = await supabase
         .from("pins")
-        .select("lat,lng,address,created_at")
+        .select("lat,lng,created_at")
         .eq("user_id", user.id)
         .is("thread_id", null)
         .order("created_at", { ascending: false })
@@ -332,24 +302,9 @@ const MapPage = () => {
         setVisibleEnabled(true);
         setIsInvisible(hideFromMap);
         if (typeof data.created_at === "string") setPinPersistedAt(data.created_at);
-        if (typeof data.address === "string") setPinAddressSnapshot(data.address);
       }
     })();
-  }, [hideFromMap, pinStorageKey, user]);
-
-  // Persist pin to localStorage whenever it changes
-  useEffect(() => {
-    if (userLocation && user?.id) {
-      const pinData = {
-        lat: userLocation.lat,
-        lng: userLocation.lng,
-        pinnedAt: pinPersistedAt || new Date().toISOString(),
-        address: pinAddressSnapshot || undefined,
-      };
-      localStorage.setItem(pinStorageKey, JSON.stringify(pinData));
-      if (import.meta.env.DEV) console.debug("[PIN] Saved pin to localStorage:", pinData);
-    }
-  }, [pinPersistedAt, pinAddressSnapshot, pinStorageKey, user?.id, userLocation]);
+  }, [hideFromMap, user]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
@@ -400,6 +355,10 @@ const MapPage = () => {
           p_pin_hours: 24 * 365 * 10,
           p_retention_hours: 24 * 365 * 10,
           p_address: pinAddressSnapshot,
+        }).then(({ error }) => {
+          if (error && import.meta.env.DEV) {
+            console.error("[PIN] live-follow set_user_location failed", error);
+          }
         });
       },
       () => {
@@ -458,16 +417,16 @@ const MapPage = () => {
     setIsInvisible(hideFromMap);
   }, [hideFromMap]);
 
-  // URL param: open broadcast mode
+  // URL params: open broadcast mode / deep-link alert focus.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     if (params.get("mode") === "broadcast") {
       setPinningActive(true);
     }
     const alertIdFromUrl = params.get("alert");
     setAlertFocusId(alertIdFromUrl && alertIdFromUrl.trim() ? alertIdFromUrl.trim() : null);
     alertFocusRetriesRef.current = 0;
-  }, []);
+  }, [location.search]);
 
   // Default center (Hong Kong)
 
@@ -546,27 +505,59 @@ const MapPage = () => {
   // ============================================================
   const applyPinLocation = useCallback(async (lat: number, lng: number, source: string) => {
     if (import.meta.env.DEV) console.debug(`[PIN] applyPinLocation — source=${source}, lat=${lat}, lng=${lng}`);
-    const pinnedAt = new Date().toISOString();
+    if (!user?.id) {
+      toast.error("Please login to pin location");
+      setPinning(false);
+      return;
+    }
+
+    const resolvedAddress = pinAddressSnapshot || (await lookupBroadcastAddress(lat, lng)) || null;
+    if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
+
+    if (import.meta.env.DEV) console.debug("[PIN] Saving to DB — set_user_location RPC...");
+    const { error: profileVisibilityError } = await supabase
+      .from("profiles")
+      .update({ hide_from_map: false } as Record<string, unknown>)
+      .eq("id", user.id);
+    if (profileVisibilityError) {
+      if (import.meta.env.DEV) console.error("[PIN] profile hide_from_map update failed", profileVisibilityError);
+      setPinning(false);
+      toast.error("Failed to pin location");
+      return;
+    }
+
+    const { error: setLocationError } = await supabase.rpc("set_user_location", {
+      p_lat: lat,
+      p_lng: lng,
+      p_pin_hours: 24 * 365 * 10,
+      p_retention_hours: 24 * 365 * 10,
+      p_address: resolvedAddress,
+    });
+    if (setLocationError) {
+      if (import.meta.env.DEV) console.error("[PIN] set_user_location failed", setLocationError);
+      setPinning(false);
+      toast.error("Failed to pin location");
+      return;
+    }
+
+    const { data: persistedPin, error: persistedPinError } = await supabase
+      .from("pins")
+      .select("lat,lng,created_at")
+      .eq("user_id", user.id)
+      .is("thread_id", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (persistedPinError || !persistedPin) {
+      if (import.meta.env.DEV) console.error("[PIN] persisted pin readback failed", persistedPinError);
+      setPinning(false);
+      toast.error("Failed to pin location");
+      return;
+    }
+
+    const pinnedAt = typeof persistedPin.created_at === "string" ? persistedPin.created_at : new Date().toISOString();
     setPinPersistedAt(pinnedAt);
     if (import.meta.env.DEV) console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
-
-    if (user) {
-      const resolvedAddress = pinAddressSnapshot || (await lookupBroadcastAddress(lat, lng)) || null;
-      if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
-      if (import.meta.env.DEV) console.debug("[PIN] Saving to DB — set_user_location RPC...");
-      await supabase
-        .from("profiles")
-        .update({ hide_from_map: false } as Record<string, unknown>)
-        .eq("id", user.id);
-      await supabase.rpc("set_user_location", {
-        p_lat: lat,
-        p_lng: lng,
-        p_pin_hours: 24 * 365 * 10,
-        p_retention_hours: 24 * 365 * 10,
-        p_address: resolvedAddress,
-      });
-      if (import.meta.env.DEV) console.debug("[PIN] DB save complete.");
-    }
 
     flyToWithDebug("pin.apply", { center: [lng, lat], zoom: 15.5 });
 
@@ -575,7 +566,7 @@ const MapPage = () => {
     setPinning(false);
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [flyToWithDebug, lookupBroadcastAddress, pinAddressSnapshot, user]);
+  }, [flyToWithDebug, lookupBroadcastAddress, pinAddressSnapshot, user?.id]);
 
   const fallbackToLastKnownLocation = useCallback(async () => {
     const fallback =
@@ -695,9 +686,6 @@ const MapPage = () => {
     setBroadcastPreviewPin(null);
     setPinningActive(false);
     setPinAddressSnapshot(null);
-    localStorage.removeItem(pinStorageKey);
-    localStorage.removeItem(MAP_PIN_STORAGE_KEY);
-    if (import.meta.env.DEV) console.debug("[PIN] Unpinned — cleared localStorage");
     setVisibleEnabled(false);
     toast.success("Unpinned");
   };
@@ -726,9 +714,9 @@ const MapPage = () => {
     void fetchFriendPins();
     void fetchAlerts();
     if (newInvisible) {
-      toast.info("You are now invisible on the map");
+      toast.info("Masked as Incognito");
     } else {
-      toast.success("You are now visible on the map");
+      toast.success("Incognito disabled");
     }
   };
 
@@ -1134,7 +1122,7 @@ const MapPage = () => {
     }
     const { data, error } = await supabase
       .from("pins")
-      .select("lat,lng,address,created_at")
+      .select("lat,lng,created_at")
       .eq("user_id", user.id)
       .is("thread_id", null)
       .order("created_at", { ascending: false })
@@ -1145,23 +1133,6 @@ const MapPage = () => {
       return userLocation;
     }
     if (!data || typeof data.lat !== "number" || typeof data.lng !== "number") {
-      try {
-        const stored = localStorage.getItem(pinStorageKey);
-        if (stored) {
-          const parsed = JSON.parse(stored) as { lat?: number; lng?: number; pinnedAt?: string; address?: string };
-          if (typeof parsed.lat === "number" && typeof parsed.lng === "number") {
-            const next = { lat: parsed.lat, lng: parsed.lng };
-            setUserLocation(next);
-            setVisibleEnabled(true);
-            setPinPersistedAt(typeof parsed.pinnedAt === "string" ? parsed.pinnedAt : pinPersistedAt);
-            setPinAddressSnapshot(typeof parsed.address === "string" ? parsed.address : pinAddressSnapshot);
-            setIsInvisible(hideFromMap);
-            return next;
-          }
-        }
-      } catch {
-        // fall through to current in-memory state
-      }
       if (userLocation) {
         setVisibleEnabled(true);
         setIsInvisible(hideFromMap);
@@ -1179,9 +1150,8 @@ const MapPage = () => {
     setVisibleEnabled(true);
     setIsInvisible(hideFromMap);
     setPinPersistedAt(typeof data.created_at === "string" ? data.created_at : null);
-    setPinAddressSnapshot(typeof data.address === "string" ? data.address : null);
     return next;
-  }, [hideFromMap, pinAddressSnapshot, pinPersistedAt, pinStorageKey, user?.id, userLocation]);
+  }, [hideFromMap, user?.id, userLocation]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1322,6 +1292,7 @@ const MapPage = () => {
         lng: p.last_lng,
         avatarUrl: p.avatar_url,
         isVerified: Boolean(p.is_verified),
+        isInvisible: Boolean(p.is_invisible),
       });
     });
     return pins;
@@ -1455,15 +1426,6 @@ const MapPage = () => {
               >
                 <Users />
               </NeuControl>
-              <NeuControl
-                size="icon-md"
-                variant={showVets ? "primary" : "tertiary"}
-                selected={showVets}
-                aria-label="Vets"
-                onClick={() => setShowVets((v) => !v)}
-              >
-                <Store />
-              </NeuControl>
             </div>
             <div className="ml-2 flex items-center pointer-events-auto">
               <button
@@ -1481,7 +1443,7 @@ const MapPage = () => {
                   className={cn(
                     "w-11 h-11 rounded-full bg-white/30 backdrop-blur-md border border-white/40 shadow-md flex items-center justify-center touch-manipulation transition-colors"
                   )}
-                  aria-label={isInvisible ? "Invisible (tap to become visible)" : "Visible (tap to go invisible)"}
+                  aria-label={isInvisible ? "Incognito enabled (tap to disable)" : "Incognito disabled (tap to enable)"}
                 >
                   {isInvisible ? (
                     <EyeOff className="w-5 h-5 text-[var(--text-secondary)]" />
@@ -1517,7 +1479,7 @@ const MapPage = () => {
         {isInvisible && (isPinned || visibleEnabled) && !pinningActive && (
           <div className="absolute top-16 right-4 z-[1650] pointer-events-auto">
             <span className="text-xs bg-white/80 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-sm text-muted-foreground">
-              You are invisible.
+              Masked as Incognito
             </span>
           </div>
         )}
@@ -1628,7 +1590,7 @@ const MapPage = () => {
         selectedLocation={broadcastPreviewPin}
         selectedAddress={broadcastPreviewAddress}
         alertType={draftBroadcastType}
-        onAlertTypeChange={(next) => setDraftBroadcastType((next === "Lost" || next === "Others") ? next : "Stray")}
+        onAlertTypeChange={(next) => setDraftBroadcastType((next === "Lost" || next === "Caution" || next === "Others") ? next : "Stray")}
         onRequestPinLocation={() => {
           if (!map.current) {
             const fallback = userLocation ?? { lat: defaultCenter[1], lng: defaultCenter[0] };
