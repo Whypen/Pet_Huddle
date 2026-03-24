@@ -42,9 +42,12 @@ type OnboardingStep =
 type ActivityBucket = "active" | "inactive_7d" | "inactive_30d";
 
 // ─── Brevo attribute definitions ─────────────────────────────────────────────
-// 33 attributes. Provisioned idempotently at cold start.
-// BREVO_SYNC_REQUIRED / BREVO_SYNC_REASON / LAST_ACTIVE_SYNCED_AT
-// are app DB only and are NOT in this list.
+// 29 attributes. Provisioned idempotently at cold start.
+// App-DB-only fields NOT in this list:
+//   BREVO_SYNC_REQUIRED, BREVO_SYNC_REASON, LAST_ACTIVE_SYNCED_AT
+// Deliberately excluded:
+//   CITY — app stores location_country + location_district only; no city field
+//   SUPER_HUDDLE_BALANCE — star model lives in user_quotas; mapping TBD
 
 const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" | "float" }> = [
   { name: "APP_USER_ID",          type: "text" },
@@ -52,7 +55,6 @@ const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" 
   { name: "SOCIAL_ID",            type: "text" },
   { name: "PHONE",                type: "text" },
   { name: "COUNTRY",              type: "text" },
-  // CITY intentionally omitted: app does not reliably store city
   { name: "DISTRICT",             type: "text" },
   { name: "PET_TYPES",            type: "text" },   // comma-sep e.g. "DOG,CAT"
   { name: "HAS_PET",              type: "boolean" },
@@ -77,7 +79,6 @@ const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" 
   { name: "EMAIL_ENABLED",        type: "boolean" },
   { name: "USER_CREATED_AT",      type: "date" },
   { name: "PROFILE_COMPLETED_AT", type: "date" },
-  // SUPER_HUDDLE_BALANCE omitted: real star field TBD (see user_quotas.extras_stars)
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -363,37 +364,32 @@ async function handlePetProfileCompleted(userId: string): Promise<void> {
 }
 
 async function handleVerificationCompleted(userId: string): Promise<void> {
+  // Use the same signal sources as refresh_identity_verification_status RPC:
+  //   phone = profile.phone non-empty OR auth.users.phone_confirmed_at
+  //   device = row in device_fingerprint_history
+  //   human = profile.human_verification_status = 'passed'
+  //   card  = profile.card_verification_status  = 'passed'
   const { data: profile } = await supabase
     .from("profiles")
-    .select("email, verification_status, phone, card_verification_status")
+    .select(
+      "email, verification_status, phone, " +
+      "human_verification_status, card_verification_status",
+    )
     .eq("id", userId)
     .single();
 
   if (!profile?.email) return;
 
-  // Read device fingerprint / human challenge results from verification tables if they exist
-  const { data: verData } = await supabase
-    .from("identity_verifications")
-    .select("status")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Device fingerprint: row presence in device_fingerprint_history (mirrors RPC)
+  const { count: fpCount } = await supabase
+    .from("device_fingerprint_history")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
 
-  const humanVerified = verData?.status === "approved";
-  const phoneVerified = Boolean(profile.phone);
-  const cardVerified = profile.card_verification_status === "verified";
-
-  // Device fingerprint: check verify_device_fingerprint results
-  const { data: fpData } = await supabase
-    .from("consent_logs")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("event_type", "device_fingerprint_passed")
-    .limit(1)
-    .maybeSingle();
-
-  const deviceVerified = Boolean(fpData);
+  const phoneVerified = Boolean(profile.phone?.trim());
+  const deviceVerified = (fpCount ?? 0) > 0;
+  const humanVerified = profile.human_verification_status === "passed";
+  const cardVerified = profile.card_verification_status === "passed";
 
   const { score, tier } = computeTrust({
     device_fingerprint_verified: deviceVerified,
