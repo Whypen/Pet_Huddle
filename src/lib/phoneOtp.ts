@@ -33,16 +33,24 @@ export async function requestPhoneOtp(phone: string): Promise<{ ok: boolean; err
   }
 
   try {
+    // Email-signup users have phone in user_metadata only, not in auth.users.phone.
+    // signInWithOtp({shouldCreateUser: false}) fails for them ("User not found").
+    // When a session is active, use updateUser({phone}) instead — Supabase sends the
+    // OTP automatically and the verify step uses type "phone_change", which also
+    // writes phone_confirmed_at on success (no session replacement).
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const { error } = await supabase.auth.updateUser({ phone: normalized });
+      if (error) return { ok: false, error: error.message || "Failed to send OTP." };
+      return { ok: true };
+    }
+
+    // Fallback for phone-login users (phone already in auth.users.phone).
     const { error } = await supabase.auth.signInWithOtp({
       phone: normalized,
-      options: {
-        channel: "sms",
-        shouldCreateUser: false,
-      },
+      options: { channel: "sms", shouldCreateUser: false },
     });
-    if (error) {
-      return { ok: false, error: error.message || "Failed to send OTP." };
-    }
+    if (error) return { ok: false, error: error.message || "Failed to send OTP." };
   } catch {
     return { ok: false, error: "Unable to reach OTP service. Please try again." };
   }
@@ -65,10 +73,14 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<{ ok
   }
 
   try {
+    // Use phone_change type when session exists (matches updateUser OTP send path).
+    // Use sms type for sessionless phone-login OTP (signInWithOtp send path).
+    const { data: { session } } = await supabase.auth.getSession();
+    const otpType = session?.access_token ? "phone_change" : "sms";
     const { error } = await supabase.auth.verifyOtp({
       phone: normalizedPhone,
       token: normalizedToken,
-      type: "sms",
+      type: otpType,
     });
     if (error) {
       return { ok: false, error: error.message || "Invalid code" };
