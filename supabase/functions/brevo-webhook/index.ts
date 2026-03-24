@@ -12,13 +12,14 @@
  * On any of these: set profiles.marketing_consent = false
  *                  set profiles.marketing_unsubscribed_at = now()
  *
- * Signature verification: Brevo signs webhook payloads with an HMAC-SHA256
- * signature in the X-Brevo-Signature header using the webhook secret.
+ * Auth: Brevo Token Authentication. Token is checked from:
+ *   1. ?token=<value> query parameter (Brevo appends this when Token Auth is configured)
+ *   2. Authorization: Bearer <value> header (fallback)
+ * Set BREVO_WEBHOOK_SECRET to the token value configured in Brevo.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { hmac } from "https://deno.land/x/hmac@v2.0.1/mod.ts";
 
 const BREVO_WEBHOOK_SECRET = Deno.env.get("BREVO_WEBHOOK_SECRET") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -39,16 +40,19 @@ serve(async (req: Request) => {
 
   const rawBody = await req.text();
 
-  // Verify HMAC signature if secret is configured
+  // Token authentication: check ?token= query param (Brevo Token Auth) or Authorization header
   if (BREVO_WEBHOOK_SECRET) {
-    const sig = req.headers.get("X-Brevo-Signature") ?? req.headers.get("x-brevo-signature") ?? "";
-    const expected = hmac("sha256", BREVO_WEBHOOK_SECRET, rawBody, "utf8", "hex");
-    if (sig !== expected) {
-      console.warn("[brevo-webhook] signature mismatch — rejecting");
+    const url = new URL(req.url);
+    const queryToken = url.searchParams.get("token") ?? "";
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    const receivedToken = queryToken || bearerToken;
+    if (!receivedToken || receivedToken !== BREVO_WEBHOOK_SECRET) {
+      console.warn("[brevo-webhook] token mismatch — rejecting");
       return json({ error: "unauthorized" }, 401);
     }
   } else {
-    console.warn("[brevo-webhook] BREVO_WEBHOOK_SECRET not set — skipping signature check");
+    console.warn("[brevo-webhook] BREVO_WEBHOOK_SECRET not set — skipping auth check");
   }
 
   let events: Array<{ event?: string; email?: string }>;
