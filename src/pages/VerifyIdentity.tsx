@@ -965,9 +965,13 @@ export function VerifyIdentity({
       data: { session: liveSession },
     } = await supabase.auth.getSession();
     if (liveSession?.access_token) return true;
-    setHumanErrorMessage("Please sign in to continue verification.");
-    setCardErrorMessage("Please sign in to continue verification.");
-    navigate("/auth", { replace: true, state: { from: "/verify-identity" } });
+    if (flowState !== "idle") {
+      navigate("/signup/verify", { replace: true });
+    } else {
+      setHumanErrorMessage("Please sign in to continue verification.");
+      setCardErrorMessage("Please sign in to continue verification.");
+      navigate("/auth", { replace: true, state: { from: "/verify-identity" } });
+    }
     return false;
   };
 
