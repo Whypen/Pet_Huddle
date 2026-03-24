@@ -10,7 +10,7 @@
   src: url("./assets/fonts/Urbanist-300.ttf") format("truetype");
   font-style: normal;
   font-weight: 300;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -18,7 +18,7 @@
   src: url("./assets/fonts/Urbanist-400.ttf") format("truetype");
   font-style: normal;
   font-weight: 400;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -26,7 +26,7 @@
   src: url("./assets/fonts/Urbanist-500.ttf") format("truetype");
   font-style: normal;
   font-weight: 500;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -34,7 +34,7 @@
   src: url("./assets/fonts/Urbanist-600.ttf") format("truetype");
   font-style: normal;
   font-weight: 600;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -42,7 +42,7 @@
   src: url("./assets/fonts/Urbanist-700.ttf") format("truetype");
   font-style: normal;
   font-weight: 700;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -50,7 +50,7 @@
   src: url("./assets/fonts/Urbanist-800.ttf") format("truetype");
   font-style: normal;
   font-weight: 800;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -58,7 +58,7 @@
   src: url("./assets/fonts/Urbanist-400Italic.ttf") format("truetype");
   font-style: italic;
   font-weight: 400;
-  font-display: block;
+  font-display: swap;
 }
 
 @font-face {
@@ -66,7 +66,7 @@
   src: url("./assets/fonts/Urbanist-600Italic.ttf") format("truetype");
   font-style: italic;
   font-weight: 600;
-  font-display: block;
+  font-display: swap;
 }
 
 /* ============================================

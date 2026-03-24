@@ -7,20 +7,14 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 import signupVerifyImg from "@/assets/Sign up/Signup_verify.png";
 import { useSignup } from "@/contexts/SignupContext";
-import { humanizeError } from "@/lib/humanizeError";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { SETPROFILE_PREFILL_KEY, SIGNUP_VERIFY_SUBMITTED_KEY } from "@/lib/signupOnboarding";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const AUTH_UPSTREAM_DOWN_ERROR =
-  "Our servers are temporarily unavailable. Please try again shortly.";
 
 const SIGNUP_VERIFY_RETURN_TO = "/set-profile";
 
@@ -30,7 +24,6 @@ const SignupVerify = () => {
   const navigate = useNavigate();
   const { data, setFlowState } = useSignup();
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [verificationSubmitted, setVerificationSubmitted] = useState(false);
 
@@ -65,70 +58,31 @@ const SignupVerify = () => {
     }
   };
 
-  // ── Account creation ─────────────────────────────────────────────────────────
+  // ── Start verification ───────────────────────────────────────────────────────
+  // signUp() was already called at step 2 (SignupCredentials), so session is
+  // live. These handlers only need to snapshot prefill data and navigate.
 
-  const doSignup = async (): Promise<void> => {
-    const { error } = await supabase.auth.signUp({
-      email: data.email,
-      password: data.password,
-      options: {
-        data: {
-          display_name: data.display_name,
-          phone: data.phone,
-          dob: data.dob,
-        },
+  const startVerificationSignup = () => {
+    snapshotSetProfilePrefill();
+    setFlowState("signup"); // safety net in case user arrived out-of-order
+    navigate("/verify-identity", {
+      state: {
+        returnTo: SIGNUP_VERIFY_RETURN_TO,
+        backTo: "/signup/verify",
       },
     });
-    // "already registered" means the user re-arrived here after a prior attempt —
-    // treat as success and let the session/route guard handle access.
-    if (error && !error.message.toLowerCase().includes("already registered")) {
-      throw error;
-    }
   };
 
-  // ── Start verification ───────────────────────────────────────────────────────
-
-  const startVerificationSignup = async () => {
+  const goToSetProfile = () => {
     snapshotSetProfilePrefill();
-    setLoading(true);
-    try {
-      // Set flowState before signUp so ProtectedRoute allows /verify-identity
-      // even when email-confirmation is enabled and no immediate session exists.
-      setFlowState("signup");
-      await doSignup();
-      navigate("/verify-identity", {
-        state: {
-          returnTo: SIGNUP_VERIFY_RETURN_TO,
-          backTo: "/signup/verify",
-        },
-      });
-    } catch (err: unknown) {
-      setFlowState("idle");
-      toast.error(humanizeError(err) || AUTH_UPSTREAM_DOWN_ERROR);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const goToSetProfile = async () => {
-    snapshotSetProfilePrefill();
-    setLoading(true);
-    try {
-      setFlowState("signup");
-      await doSignup();
-      navigate("/set-profile");
-    } catch (err: unknown) {
-      setFlowState("idle");
-      toast.error(humanizeError(err) || AUTH_UPSTREAM_DOWN_ERROR);
-    } finally {
-      setLoading(false);
-    }
+    setFlowState("signup"); // safety net
+    navigate("/set-profile");
   };
 
   // ── Skip verification ────────────────────────────────────────────────────────
 
-  const skipVerificationSignup = async () => {
-    await goToSetProfile();
+  const skipVerificationSignup = () => {
+    goToSetProfile();
     setShowSkipConfirm(false);
   };
 
@@ -144,20 +98,18 @@ const SignupVerify = () => {
             <Button
               variant="primary"
               type="button"
-              disabled={loading}
               onClick={startVerificationSignup}
               className="w-full h-12"
             >
-              {loading ? "Processing…" : "Start Verification"}
+              Start Verification
             </Button>
             {/* Ghost: Skip */}
             <Button
               variant={verificationSubmitted ? "secondary" : "ghost"}
               type="button"
-              disabled={loading}
               onClick={() => {
                 if (verificationSubmitted) {
-                  void goToSetProfile();
+                  goToSetProfile();
                   return;
                 }
                 setShowSkipConfirm(true);
@@ -224,10 +176,9 @@ const SignupVerify = () => {
             <Button
               variant="primary"
               className="w-full h-12"
-              disabled={loading}
               onClick={skipVerificationSignup}
             >
-              {loading ? "Processing…" : "Yes, skip verification"}
+              Yes, skip verification
             </Button>
           </div>
         </DialogContent>

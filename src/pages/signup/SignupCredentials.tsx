@@ -9,10 +9,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
+import { humanizeError } from "@/lib/humanizeError";
 import { getClientEnv } from "@/lib/env";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { FormField, NeuCheckbox } from "@/components/ui";
@@ -37,7 +39,7 @@ const shouldBypassDuplicateCheck =
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
-  const { data, update } = useSignup();
+  const { data, update, setFlowState } = useSignup();
   const [isExiting, setIsExiting] = useState(false);
 
   const goTo = (to: string) => {
@@ -162,6 +164,7 @@ const SignupCredentials = () => {
   const onSubmit = async () => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
+      setFlowState("signup");
       goTo("/signup/name");
       return;
     }
@@ -181,10 +184,25 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
+      // Create the auth account here (step 2) so a live session exists before
+      // reaching /verify-identity. display_name is not yet collected; it will
+      // be set when the user saves their profile on /set-profile.
+      setFlowState("signup");
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { phone: phone.trim(), dob: data.dob } },
+      });
+      if (signUpError && !signUpError.message.toLowerCase().includes("already registered")) {
+        setFlowState("idle");
+        toast.error(humanizeError(signUpError) || "Account creation failed. Please try again.");
+        return;
+      }
       goTo("/signup/name");
     } catch (err) {
-      console.error("Duplicate check failed:", err);
-      setDuplicateCheckError("Could not verify account details right now. Please retry.");
+      console.error("Signup failed:", err);
+      setFlowState("idle");
+      toast.error("Account creation failed. Please try again.");
     } finally {
       setSubmitting(false);
     }

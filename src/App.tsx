@@ -401,23 +401,11 @@ const App = () => (
                   />
                   <Route
                     path="/privacy"
-                    element={
-                      <ProtectedRoute>
-                        <AppShell>
-                          <Privacy />
-                        </AppShell>
-                      </ProtectedRoute>
-                    }
+                    element={<Privacy />}
                   />
                   <Route
                     path="/terms"
-                    element={
-                      <ProtectedRoute>
-                        <AppShell>
-                          <Terms />
-                        </AppShell>
-                      </ProtectedRoute>
-                    }
+                    element={<Terms />}
                   />
                   <Route
                     path="/community-guidelines"
@@ -461,13 +449,7 @@ const App = () => (
                   />
                   <Route
                     path="/privacy-choices"
-                    element={
-                      <ProtectedRoute>
-                        <AppShell>
-                          <PrivacyChoices />
-                        </AppShell>
-                      </ProtectedRoute>
-                    }
+                    element={<PrivacyChoices />}
                   />
                   <Route
                     path="/admin"
