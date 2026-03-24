@@ -10,15 +10,21 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ShieldCheck, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import signupVerifyImg from "@/assets/Sign up/Signup_verify.png";
 import { verifySchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
+import { humanizeError } from "@/lib/humanizeError";
+import { supabase } from "@/integrations/supabase/client";
 import { Button, FormField } from "@/components/ui";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { SETPROFILE_PREFILL_KEY, SIGNUP_VERIFY_SUBMITTED_KEY } from "@/lib/signupOnboarding";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+const AUTH_UPSTREAM_DOWN_ERROR =
+  "Our servers are temporarily unavailable. Please try again shortly.";
 
 const FORM_ID = "signup-verify-form";
 const hasValidLegalName = (value: string): boolean => {
@@ -35,7 +41,7 @@ const SIGNUP_VERIFY_RETURN_TO = "/set-profile";
 
 const SignupVerify = () => {
   const navigate = useNavigate();
-  const { data, update } = useSignup();
+  const { data, update, setFlowState } = useSignup();
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
@@ -101,19 +107,53 @@ const SignupVerify = () => {
     }
   };
 
-  // ── Start verification (unchanged) ──────────────────────────────────────────
+  // ── Account creation helper ──────────────────────────────────────────────────
+
+  const doSignup = async (): Promise<boolean> => {
+    const { error } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          display_name: data.display_name,
+          phone: data.phone,
+          dob: data.dob,
+        },
+      },
+    });
+    // "already registered" means the user somehow re-arrived here after a prior
+    // attempt — treat as success and let the session/route guard handle access.
+    if (error && !error.message.toLowerCase().includes("already registered")) {
+      throw error;
+    }
+    return true;
+  };
+
+  // ── Start verification ───────────────────────────────────────────────────────
 
   const startVerificationSignup = async (legalName?: string) => {
     const resolvedLegalName = legalName || data.legal_name || "";
     if (!preflightOk(resolvedLegalName)) return;
     update({ legal_name: resolvedLegalName });
     snapshotSetProfilePrefill(resolvedLegalName);
-    navigate("/verify-identity", {
-      state: {
-        returnTo: SIGNUP_VERIFY_RETURN_TO,
-        backTo: "/signup/verify",
-      },
-    });
+    setLoading(true);
+    try {
+      // Set flowState before signUp so ProtectedRoute allows /verify-identity
+      // even when email-confirmation is enabled and no immediate session exists.
+      setFlowState("signup");
+      await doSignup();
+      navigate("/verify-identity", {
+        state: {
+          returnTo: SIGNUP_VERIFY_RETURN_TO,
+          backTo: "/signup/verify",
+        },
+      });
+    } catch (err: unknown) {
+      setFlowState("idle");
+      toast.error(humanizeError(err) || AUTH_UPSTREAM_DOWN_ERROR);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onStartVerification = (values: { legal_name: string }) => {
@@ -122,11 +162,15 @@ const SignupVerify = () => {
 
   const ensureAccountAndGoSetProfile = async (legalName: string) => {
     if (!preflightOk(legalName)) return;
+    setLoading(true);
     try {
       snapshotSetProfilePrefill(legalName || data.legal_name || "");
+      setFlowState("signup");
+      await doSignup();
       navigate("/set-profile");
     } catch (err: unknown) {
       console.error("[SignupVerify] ensureAccountAndGoSetProfile failed", err);
+      setFlowState("idle");
       const rawMessage = humanizeError(err);
       const message =
         !rawMessage || rawMessage === "{}" || rawMessage.includes("upstream server")
