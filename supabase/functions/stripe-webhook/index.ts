@@ -347,6 +347,17 @@ async function handleSubscriptionDeleted(
 
   console.log(`[SUBSCRIPTION DELETED] User ${profile.id} subscription canceled`);
 
+  // Brevo CRM sync — fire-and-forget, fail open
+  const brevoSyncUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/brevo-sync`;
+  fetch(brevoSyncUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier: "free", subscription_status: "canceled" }),
+  }).catch((err) => console.warn("[stripe-webhook] brevo-sync subscription_changed failed silently", err));
+
   return {
     success: true,
     message: "Subscription deleted",
@@ -408,6 +419,17 @@ async function handleSubscriptionUpdated(
     .eq("id", profile.id);
 
   console.log(`[SUBSCRIPTION UPDATED] User ${profile.id} tier: ${tier}, status: ${status}`);
+
+  // Brevo CRM sync — fire-and-forget, fail open
+  const brevoSyncUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/brevo-sync`;
+  fetch(brevoSyncUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ event: "subscription_changed", user_id: profile.id, tier, subscription_status: status }),
+  }).catch((err) => console.warn("[stripe-webhook] brevo-sync subscription_changed failed silently", err));
 
   return {
     success: true,

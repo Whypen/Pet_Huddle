@@ -942,6 +942,13 @@ export function VerifyIdentity({
           .then(() => {/* best-effort */});
       }
       await refreshProfile();
+      // Brevo CRM sync — fire-and-forget, reflects pending status immediately.
+      // Note: approval/rejection sync requires a DB trigger (admin flow is server-side).
+      if (user?.id) {
+        void supabase.functions.invoke("brevo-sync", {
+          body: { event: "verification_completed", user_id: user.id },
+        }).catch((err) => console.warn("[brevo-sync] verification_completed failed silently", err));
+      }
     })();
   }, [overallVerificationStatus, refreshProfile, user?.id]);
 

@@ -466,6 +466,10 @@ const CarerProfile: React.FC = () => {
       if (error) throw error;
       setMode("view");
       toast.success("Pet Carer Profile saved.");
+      // Brevo CRM sync — fire-and-forget, never blocks the user flow
+      void supabase.functions.invoke("brevo-sync", {
+        body: { event: "service_profile_completed", user_id: user!.id },
+      }).catch((err) => console.warn("[brevo-sync] service_profile_completed failed silently", err));
     } catch (err) {
       console.error("[CarerProfile.save_failed]", err);
       toast.error("Couldn't save profile. Please retry.");
