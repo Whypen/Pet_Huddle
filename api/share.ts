@@ -18,6 +18,23 @@ type AlertRow = {
 };
 
 const first = (value: MaybeString) => (Array.isArray(value) ? value[0] || "" : value || "");
+const firstHeaderToken = (value: MaybeString) =>
+  first(value)
+    .split(",")[0]
+    ?.trim() || "";
+
+const normalizeProto = (value: MaybeString) => {
+  const token = firstHeaderToken(value).toLowerCase();
+  return token === "http" || token === "https" ? token : "https";
+};
+
+const normalizeHost = (value: MaybeString) => {
+  const token = firstHeaderToken(value)
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+  return token || "huddle.pet";
+};
 
 const escapeHtml = (value: string) =>
   value
@@ -168,8 +185,8 @@ const parseShareQuery = (req: RequestShape) => {
 };
 
 export default async function handler(req: RequestShape, res: ResponseShape) {
-  const host = first(req.headers?.["x-forwarded-host"]) || first(req.headers?.host) || "huddle.pet";
-  const proto = first(req.headers?.["x-forwarded-proto"]) || "https";
+  const host = normalizeHost(req.headers?.["x-forwarded-host"] || req.headers?.host);
+  const proto = normalizeProto(req.headers?.["x-forwarded-proto"]);
   const origin = `${proto}://${host}`;
 
   const parsed = parseShareQuery(req);
