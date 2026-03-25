@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -14,14 +14,8 @@ import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { OfflineBanner } from "@/components/network/OfflineBanner";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { AppShell } from "@/components/layout/AppShell";
+import { Loader2 } from "lucide-react";
 import Index from "./pages/Index";
-import Social from "./pages/Social";
-import Discover from "./pages/Discover";
-import Chats from "./pages/Chats";
-import ChatDialogue from "./pages/ChatDialogue";
-import ServiceChat from "./pages/ServiceChat";
-import AIVet from "./pages/AIVet";
-import MapPage from "./pages/Map";
 import Auth from "./pages/Auth";
 import SignupDob from "./pages/signup/SignupDob";
 import SignupName from "./pages/signup/SignupName";
@@ -31,12 +25,8 @@ import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
-import PetDetails from "./pages/PetDetails";
 import SetProfile from "./pages/SetProfile";
 import SetPetProfile from "./pages/SetPetProfile";
-import Settings from "./pages/Settings";
-import SecuritySettings from "./pages/SecuritySettings";
-import Premium from "./pages/Premium";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
@@ -45,20 +35,32 @@ import CookiesPolicy from "./pages/CookiesPolicy";
 import PrivacyChoices from "./pages/PrivacyChoices";
 import ServiceAgreement from "./pages/ServiceAgreement";
 import BookingTerms from "./pages/BookingTerms";
-import Notifications from "./pages/Notifications";
-import Admin from "./pages/Admin";
 import VerifyIdentity from "./pages/VerifyIdentity";
-import CarerProfile from "./pages/CarerProfile";
-import Marketplace from "./pages/Marketplace";
-import Service from "./pages/Service";
 import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
 import CarerStripeReturn from "./pages/carerprofile/StripeReturn";
 import CarerStripeRefresh from "./pages/carerprofile/StripeRefresh";
-import AdminDisputes from "./screens/AdminDisputes";
-import AdminKYCReview from "./pages/admin/AdminKYCReview";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
+
+const Social = lazy(() => import("./pages/Social"));
+const Discover = lazy(() => import("./pages/Discover"));
+const Chats = lazy(() => import("./pages/Chats"));
+const ChatDialogue = lazy(() => import("./pages/ChatDialogue"));
+const ServiceChat = lazy(() => import("./pages/ServiceChat"));
+const AIVet = lazy(() => import("./pages/AIVet"));
+const MapPage = lazy(() => import("./pages/Map"));
+const PetDetails = lazy(() => import("./pages/PetDetails"));
+const Settings = lazy(() => import("./pages/Settings"));
+const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
+const Premium = lazy(() => import("./pages/Premium"));
+const Notifications = lazy(() => import("./pages/Notifications"));
+const Admin = lazy(() => import("./pages/Admin"));
+const AdminKYCReview = lazy(() => import("./pages/admin/AdminKYCReview"));
+const CarerProfile = lazy(() => import("./pages/CarerProfile"));
+const Marketplace = lazy(() => import("./pages/Marketplace"));
+const Service = lazy(() => import("./pages/Service"));
+const AdminDisputes = lazy(() => import("./screens/AdminDisputes"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,6 +71,18 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+const RouteSuspense = ({ children }: { children: React.ReactNode }) => (
+  <Suspense
+    fallback={
+      <div className="min-h-svh flex items-center justify-center bg-background">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    }
+  >
+    {children}
+  </Suspense>
+);
 
 const AuthCacheIsolation = () => {
   const { user } = useAuth();
@@ -136,7 +150,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Social />
+                          <RouteSuspense><Social /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -147,7 +161,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Discover />
+                          <RouteSuspense><Discover /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -158,7 +172,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Social />
+                          <RouteSuspense><Social /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -169,7 +183,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Chats />
+                          <RouteSuspense><Chats /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -180,7 +194,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <ChatDialogue />
+                          <RouteSuspense><ChatDialogue /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -191,7 +205,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <ServiceChat />
+                          <RouteSuspense><ServiceChat /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -201,7 +215,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <AIVet />
+                          <RouteSuspense><AIVet /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -212,7 +226,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <MapPage />
+                          <RouteSuspense><MapPage /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -223,7 +237,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Notifications />
+                          <RouteSuspense><Notifications /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -234,7 +248,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Marketplace />
+                          <RouteSuspense><Marketplace /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -245,7 +259,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Service />
+                          <RouteSuspense><Service /></RouteSuspense>
                           <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
@@ -286,7 +300,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <EditProfile />
+                          <RouteSuspense><EditProfile /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -296,7 +310,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <EditPetProfile />
+                          <RouteSuspense><EditPetProfile /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -306,7 +320,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <PetDetails />
+                          <RouteSuspense><PetDetails /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -318,7 +332,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Settings />
+                          <RouteSuspense><Settings /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -328,7 +342,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <SecuritySettings />
+                          <RouteSuspense><SecuritySettings /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -346,7 +360,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Premium />
+                          <RouteSuspense><Premium /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -374,7 +388,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <CarerProfile />
+                          <RouteSuspense><CarerProfile /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -456,7 +470,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <Admin />
+                          <RouteSuspense><Admin /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -466,7 +480,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <AdminKYCReview />
+                          <RouteSuspense><AdminKYCReview /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -476,7 +490,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <AdminDisputes />
+                          <RouteSuspense><AdminDisputes /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
