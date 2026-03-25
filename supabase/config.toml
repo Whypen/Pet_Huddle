@@ -1,1 +1,10 @@
 project_id = "ztrbourwcnhrpmzwlrcn"
+
+[functions.verify-device-fingerprint]
+verify_jwt = false
+
+[functions.verify-human-challenge]
+verify_jwt = false
+
+[functions.create-identity-setup-intent]
+verify_jwt = false

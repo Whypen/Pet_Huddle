@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidPhoneNumber } from "react-phone-number-input";
 
 const parseDob = (value: string) => {
   if (!value) return null;
@@ -88,7 +89,19 @@ export const nameSchema = z.object({
 export const credentialsSchema = z
   .object({
     email: z.string().email("Invalid email format"),
-    phone: z.string().regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format"),
+    phone: z
+      .string()
+      .regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format")
+      // Full structural validity check via libphonenumber (ships with react-phone-number-input).
+      // isValidPhoneNumber matches against actual national-number patterns, not just length ranges.
+      // isPossiblePhoneNumber (length-range only) accepted partial inputs for many countries
+      // where the possible-length list has a range (e.g. HK [5,6,7,8,9,11]) — isValidPhoneNumber
+      // checks actual national-number patterns and rejects any number not yet structurally complete.
+      // "valid" = structurally complete for the country. NOT OTP-verified ownership.
+      .refine(
+        (val) => { try { return isValidPhoneNumber(val); } catch { return false; } },
+        "Phone number is not complete or valid for the selected country"
+      ),
     password: z
       .string()
       .min(8, "Minimum 8 characters")
@@ -96,9 +109,6 @@ export const credentialsSchema = z
       .regex(/[0-9]/, "Must include number")
       .regex(/[!@#$%^&*]/, "Must include special character"),
     confirmPassword: z.string(),
-    agreedToTerms: z.literal(true, {
-      errorMap: () => ({ message: "You must agree to continue" }),
-    }),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",

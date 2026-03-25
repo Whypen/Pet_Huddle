@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
-import PhoneInput from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Json } from "@/integrations/supabase/types";
@@ -501,6 +501,17 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
 
   const petPhoneClass = "w-full pl-10 pr-4 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none";
 
+  // Live soft warning for vet clinic phone — grey, non-blocking.
+  // isValidPhoneNumber checks national-number patterns (not just length), rejecting partial inputs.
+  useEffect(() => {
+    const phone = formData.phone_no.trim();
+    if (!phone || isValidPhoneNumber(phone)) {
+      setPhoneNoWarning("");
+    } else {
+      setPhoneNoWarning(t("Phone number is not complete or valid for the selected country"));
+    }
+  }, [formData.phone_no, t]);
+
   const [formData, setFormData] = useState<PetFormData>({
     name: "",
     species: "",
@@ -554,6 +565,9 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
     weight: "",
     microchipId: "",
   });
+  // Vet clinic phone — soft warning only (not a blocking error).
+  // phone_no is an optional external contact; saving with a partial number is allowed.
+  const [phoneNoWarning, setPhoneNoWarning] = useState("");
 
   const hasErrors = Object.values(fieldErrors).some(Boolean);
   const hasRequiredFields =
@@ -1011,6 +1025,12 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       return;
     }
 
+    // Vet clinic phone — soft warning only, not a save blocker.
+    // Uniqueness check is intentionally EXEMPT:
+    //   • pets.phone_no is an external business contact (vet clinic), not a user account identifier.
+    //   • Multiple users legitimately share the same vet clinic number — uniqueness is meaningless.
+    // The live useEffect above handles showing/clearing the grey warning as the user types.
+
     setSaving(true);
 
     try {
@@ -1105,6 +1125,11 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       } catch {
         // no-op
       }
+
+      // Brevo CRM sync — fire-and-forget, never blocks the user flow
+      void supabase.functions.invoke("brevo-sync", {
+        body: { event: "pet_profile_completed", user_id: activeUser.id },
+      }).catch((err) => console.warn("[brevo-sync] pet_profile_completed failed silently", err));
 
       const shouldGoHome = onboardingMode || location.pathname === "/set-pet";
       if (shouldGoHome) {
@@ -1535,6 +1560,11 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                 placeholder={t("Clinic phone (+XXX)")}
               />
             </div>
+            {phoneNoWarning && (
+              <p className="text-[12px] font-medium text-[var(--text-tertiary)] pl-1 mt-1" aria-live="polite">
+                {phoneNoWarning}
+              </p>
+            )}
           </div>
 
           <div className="space-y-4">

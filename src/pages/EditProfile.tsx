@@ -18,6 +18,8 @@ import { useSignup } from "@/contexts/SignupContext";
 import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import {
@@ -40,7 +42,6 @@ const relationshipOptions = ["Single", "In a relationship", "Open relationship",
 const petExperienceOptions = [...CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS];
 const languageOptions = ["English", "Cantonese", "Mandarin", "Spanish", "French", "Japanese", "Korean", "German", "Portuguese", "Italian", "Arabic", "Hindi", "Bengali", "Urdu", "Russian", "Turkish", "Thai", "Vietnamese", "Indonesian", "Malay", "Tamil", "Telugu", "Polish", "Dutch", "Swedish"];
 const availabilityOptions = [...CANONICAL_SOCIAL_ROLE_OPTIONS];
-const E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
 const NUMERIC_ONLY_REGEX = /^\d+$/;
 const DECIMAL_NUMBER_REGEX = /^\d+(?:\.\d+)?$/;
 const REQUIRED_CONNECT_ERROR = "Required to help others connect with you";
@@ -175,6 +176,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   useEffect(() => () => { if (otpCountdownRef.current) clearInterval(otpCountdownRef.current); }, []);
   const [phoneOtpVerified, setPhoneOtpVerified] = useState(false);
   const [phoneOriginalValue, setPhoneOriginalValue] = useState("");
+  // Duplicate-phone detection for the edit-phone flow.
+  // Only runs when the user has changed the phone from its saved value.
+  const [phoneDuplicate, setPhoneDuplicate] = useState(false);
+  const [phoneDuplicateChecking, setPhoneDuplicateChecking] = useState(false);
+  const phoneDuplicateCheckRef = useRef(0);
   const [dobEditMode, setDobEditMode] = useState(false);
   const [profileMode, setProfileMode] = useState<"edit" | "view">("edit");
   const isIdentityLocked = profile?.is_verified === true;
@@ -848,6 +854,38 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     };
   }, [locationQuery, selectedCountry]);
 
+  // Debounced phone duplicate check for the edit-phone flow.
+  // Only fires when: user is editing (phoneEditMode), the new number differs from the
+  // saved value (skip own number), and the format is country-valid (skip garbage input).
+  // Passes p_email:"" so the RPC only matches on phone — no false-positive on own email.
+  // NOT OTP ownership verification — only uniqueness across auth.users.phone.
+  useEffect(() => {
+    const phone = formData.phone.trim();
+    if (!phoneEditMode || phone === phoneOriginalValue.trim() || !isValidPhoneNumber(phone)) {
+      setPhoneDuplicate(false);
+      setPhoneDuplicateChecking(false);
+      return;
+    }
+    const checkId = ++phoneDuplicateCheckRef.current;
+    const timer = setTimeout(async () => {
+      setPhoneDuplicateChecking(true);
+      try {
+        const { data, error } = await supabase.rpc("check_identifier_registered", {
+          p_email: "",   // empty — skip email check; target phone uniqueness only
+          p_phone: phone,
+        });
+        if (checkId !== phoneDuplicateCheckRef.current) return;
+        setPhoneDuplicate(!error && Boolean(data?.registered));
+      } catch {
+        if (checkId !== phoneDuplicateCheckRef.current) return;
+        setPhoneDuplicate(false);
+      } finally {
+        if (checkId === phoneDuplicateCheckRef.current) setPhoneDuplicateChecking(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [formData.phone, phoneEditMode, phoneOriginalValue]);
+
   const refreshSocialAlbumUrls = async (paths: string[]) => {
     const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
     if (!normalizedPaths.length) {
@@ -998,8 +1036,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: t("Phone number is required") }));
       return;
     }
-    if (!E164_PHONE_REGEX.test(formData.phone.trim())) {
-      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number must include country code, e.g. +85212345678") }));
+    if (!isValidPhoneNumber(formData.phone.trim())) {
+      // country-aware digit-count check — NOT OTP ownership
+      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number length is not valid for the selected country") }));
+      return;
+    }
+    if (phoneDuplicate) {
+      setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
       return;
     }
     const result = await requestPhoneOtpCode(formData.phone.trim());
@@ -1217,11 +1260,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: REQUIRED_CONNECT_ERROR }));
       return;
     }
-    if (!E164_PHONE_REGEX.test(formData.phone.trim())) {
+    if (!isValidPhoneNumber(formData.phone.trim())) {
+      // country-aware digit-count check — NOT OTP ownership
       setFieldErrors((prev) => ({
         ...prev,
-        phone: t("Phone number must include country code, e.g. +85212345678"),
+        phone: t("Phone number length is not valid for the selected country"),
       }));
+      return;
+    }
+    if (phoneDuplicate) {
+      setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
       return;
     }
     if (phoneEditMode || (formData.phone.trim() !== phoneOriginalValue.trim() && !phoneOtpVerified)) {
@@ -1473,6 +1521,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         resetSignup();
         clearOnboardingDraftKeys(activeUser.id);
       }
+      // Brevo CRM sync — fire-and-forget, never blocks the user flow
+      void supabase.functions.invoke("brevo-sync", {
+        body: { event: "profile_completed", user_id: activeUser.id },
+      }).catch((err) => console.warn("[brevo-sync] profile_completed failed silently", err));
       if (!onboardingMode) {
         toast.success(t("Profile updated!"));
       }
@@ -1705,26 +1757,34 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               ) : (
                 <div className="space-y-2">
                   <div className={cn("form-field-rest relative flex items-center bg-white", fieldErrors.phone && "form-field-error")}>
-                    <input
-                      type="tel"
+                    <PhoneInput
+                      international
+                      defaultCountry={(inferCountryCodeFromPhone(formData.phone) || "HK") as never}
                       value={formData.phone}
-                      onChange={(e) => {
-                        setFormData((prev) => ({ ...prev, phone: e.target.value }));
-                        setPhoneOtpVerified(e.target.value.trim() === phoneOriginalValue.trim());
+                      onChange={(value) => {
+                        const v = value || "";
+                        setFormData((prev) => ({ ...prev, phone: v }));
+                        setPhoneOtpVerified(v.trim() === phoneOriginalValue.trim());
                       }}
-                      className="field-input-core pr-28"
-                      placeholder=""
-                      disabled={false}
+                      className="w-full pr-28 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
                       aria-invalid={Boolean(fieldErrors.phone)}
                     />
                     {!phoneOtpVerified && (
                       <button
                         type="button"
                         onClick={requestPhoneOtp}
-                        disabled={otpCountdown > 0}
+                        disabled={
+                          otpCountdown > 0 ||
+                          phoneDuplicate ||
+                          phoneDuplicateChecking ||
+                          (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
+                        }
                         className={cn(
                           "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
-                          otpCountdown > 0
+                          (otpCountdown > 0 ||
+                            phoneDuplicate ||
+                            phoneDuplicateChecking ||
+                            (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone)))
                             ? "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
                             : "bg-brandBlue text-white active:opacity-80"
                         )}
@@ -1733,6 +1793,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       </button>
                     )}
                   </div>
+                  {/* Duplicate-phone inline error — shown before OTP entry */}
+                  {phoneDuplicate && (
+                    <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                      This phone number is already used by another account
+                    </p>
+                  )}
                   {!phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">
                       <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
