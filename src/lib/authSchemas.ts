@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPossiblePhoneNumber } from "react-phone-number-input";
 
 const parseDob = (value: string) => {
   if (!value) return null;
@@ -88,7 +89,15 @@ export const nameSchema = z.object({
 export const credentialsSchema = z
   .object({
     email: z.string().email("Invalid email format"),
-    phone: z.string().regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format"),
+    phone: z
+      .string()
+      .regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format")
+      // Country-aware digit-count check via libphonenumber (ships with react-phone-number-input).
+      // "possible" = correct length for the selected country. NOT OTP-verified ownership.
+      .refine(
+        (val) => { try { return isPossiblePhoneNumber(val); } catch { return false; } },
+        "Phone number length is not valid for the selected country"
+      ),
     password: z
       .string()
       .min(8, "Minimum 8 characters")

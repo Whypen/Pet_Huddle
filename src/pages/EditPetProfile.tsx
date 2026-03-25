@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
-import PhoneInput from "react-phone-number-input";
+import PhoneInput, { isPossiblePhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Json } from "@/integrations/supabase/types";
@@ -553,6 +553,8 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
     petDob: "",
     weight: "",
     microchipId: "",
+    // Vet clinic phone — format-only check (not account phone; no duplicate check)
+    phoneNo: "",
   });
 
   const hasErrors = Object.values(fieldErrors).some(Boolean);
@@ -1010,6 +1012,14 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       setMedicationError("Dosage cannot be negative");
       return;
     }
+
+    // Vet clinic phone — format-only check (country-aware), no duplicate check.
+    // Field is optional; only validate when non-empty.
+    if (formData.phone_no && !isPossiblePhoneNumber(formData.phone_no)) {
+      setFieldErrors((prev) => ({ ...prev, phoneNo: t("Phone number length is not valid for the selected country") }));
+      return;
+    }
+    setFieldErrors((prev) => ({ ...prev, phoneNo: "" }));
 
     setSaving(true);
 
@@ -1540,6 +1550,11 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                 placeholder={t("Clinic phone (+XXX)")}
               />
             </div>
+            {fieldErrors.phoneNo && (
+              <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1 mt-1" aria-live="polite">
+                {fieldErrors.phoneNo}
+              </p>
+            )}
           </div>
 
           <div className="space-y-4">
