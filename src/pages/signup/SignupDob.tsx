@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
-import { dobSchema, isAtLeast16, isNotFuture, isValidDate } from "@/lib/authSchemas";
+import { dobSchema, isAtLeast13, isNotFuture, isValidDate } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui";
@@ -75,7 +75,7 @@ const SignupDob = () => {
   const assembledDob = allSelected ? `${dobYear}-${pad2(dobMonth)}-${pad2(dobDay)}` : "";
 
   const currentYear = new Date().getFullYear();
-  const maxYear = currentYear - 16;
+  const maxYear = currentYear - 13;
   const yearOptions = useMemo(
     () => Array.from({ length: maxYear - 1900 + 1 }, (_, i) => maxYear - i),
     [maxYear],
@@ -83,14 +83,14 @@ const SignupDob = () => {
 
   const isCalendarValid = allSelected ? isValidDate(assembledDob) : false;
   const isFutureValid   = allSelected ? isNotFuture(assembledDob) : false;
-  const isUnder16       = allSelected && isCalendarValid && isFutureValid ? !isAtLeast16(assembledDob) : false;
+  const isUnder13       = allSelected && isCalendarValid && isFutureValid ? !isAtLeast13(assembledDob) : false;
   const isInvalidDate   = allSelected ? !isCalendarValid || !isFutureValid : false;
-  const dobError = isUnder16
-    ? "Some functions in this app are only available to users above 16 years old"
+  const dobError = isUnder13
+    ? "You must be at least 13 years old to use Huddle."
     : isInvalidDate
       ? "Invalid date"
       : errors.dob_day?.message;
-  const canContinue = allSelected && isCalendarValid && isFutureValid && !isUnder16;
+  const canContinue = allSelected && isCalendarValid && isFutureValid && !isUnder13;
 
   const fieldErrorClass = dobError ? "border-red-500 focus:border-red-500" : "";
 
@@ -229,8 +229,8 @@ const SignupDob = () => {
           )}
         </div>
 
-        {/* Under-16 return link (body, not CTA bar) */}
-        {isUnder16 && (
+        {/* Under-13 return link (body, not CTA bar) */}
+        {isUnder13 && (
           <button
             type="button"
             onClick={() => goTo("/auth")}

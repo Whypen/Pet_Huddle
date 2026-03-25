@@ -36,6 +36,16 @@ export const isNotFuture = (value: string) => {
   return d.getTime() <= Date.now();
 };
 
+export const isAtLeast13 = (value: string) => {
+  const d = parseDob(value);
+  if (!d) return false;
+  const now = new Date();
+  const years = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  const age = m < 0 || (m === 0 && now.getDate() < d.getDate()) ? years - 1 : years;
+  return age >= 13;
+};
+
 export const isAtLeast16 = (value: string) => {
   const d = parseDob(value);
   if (!d) return false;

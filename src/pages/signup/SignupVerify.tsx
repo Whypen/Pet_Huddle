@@ -7,8 +7,10 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import signupVerifyImg from "@/assets/Sign up/Signup_verify.png";
 import { useSignup } from "@/contexts/SignupContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
@@ -26,6 +28,7 @@ const SignupVerify = () => {
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [verificationSubmitted, setVerificationSubmitted] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -59,12 +62,39 @@ const SignupVerify = () => {
   };
 
   // ── Start verification ───────────────────────────────────────────────────────
-  // signUp() was already called at step 2 (SignupCredentials), so session is
-  // live. These handlers only need to snapshot prefill data and navigate.
+  // signUp() was called at step 2 (SignupCredentials). The auto_confirm trigger
+  // ensures a live session is returned. We verify that here before navigating,
+  // and fall back to signInWithPassword if the session is somehow absent (e.g.
+  // race on first-ever load, or account already existed from a prior attempt).
 
-  const startVerificationSignup = () => {
+  const startVerificationSignup = async () => {
     snapshotSetProfilePrefill();
-    setFlowState("signup"); // safety net in case user arrived out-of-order
+    setFlowState("signup");
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      const email = data.email?.trim();
+      const password = data.password?.trim();
+      if (!email || !password) {
+        // Credentials not in context — navigate anyway; VerifyIdentity will
+        // redirect to /auth if truly unauthenticated outside signup flow.
+        navigate("/verify-identity", {
+          state: { returnTo: SIGNUP_VERIFY_RETURN_TO, backTo: "/signup/verify" },
+        });
+        return;
+      }
+      setStarting(true);
+      try {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          toast.error("Session not ready. Please try again in a moment.");
+          return;
+        }
+      } finally {
+        setStarting(false);
+      }
+    }
+
     navigate("/verify-identity", {
       state: {
         returnTo: SIGNUP_VERIFY_RETURN_TO,
@@ -99,9 +129,10 @@ const SignupVerify = () => {
               variant="primary"
               type="button"
               onClick={startVerificationSignup}
+              disabled={starting}
               className="w-full h-12"
             >
-              Start Verification
+              {starting ? "Starting…" : "Start Verification"}
             </Button>
             {/* Ghost: Skip */}
             <Button

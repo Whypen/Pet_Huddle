@@ -185,15 +185,33 @@ const SignupCredentials = () => {
         return;
       }
       // Create the auth account here (step 2) so a live session exists before
-      // reaching /verify-identity. display_name is not yet collected; it will
-      // be set when the user saves their profile on /set-profile.
+      // reaching /verify-identity. The auto_confirm_email_on_signup trigger
+      // ensures signUp() returns a session immediately (no email-confirm gate).
+      // display_name is collected at /set-profile, not here.
       setFlowState("signup");
       const { error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: { data: { phone: phone.trim(), dob: data.dob } },
       });
-      if (signUpError && !signUpError.message.toLowerCase().includes("already registered")) {
+      if (signUpError) {
+        const msg = signUpError.message.toLowerCase();
+        if (msg.includes("already registered") || msg.includes("user already registered")) {
+          // Account exists from a prior attempt — sign in to reuse the session
+          // rather than calling signUp() again (prevents repeated signup calls).
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+          if (signInError) {
+            // Password mismatch or other issue — surface the sign-in dialog.
+            setSigninEmail(email.trim());
+            setShowSignInModal(true);
+            return;
+          }
+          goTo("/signup/name");
+          return;
+        }
         setFlowState("idle");
         toast.error(humanizeError(signUpError) || "Account creation failed. Please try again.");
         return;
