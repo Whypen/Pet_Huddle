@@ -8,10 +8,11 @@ import { SharePerksModal } from "./SharePerksModal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { normalizeQuotaTier } from "@/config/quotaConfig";
 
 const BRAND_BLUE = "#2145CF";
 const SWIPE_THRESHOLD = -60;
-const MAX_MEMBERS = 3;
+const MAX_MEMBERS = 4;
 
 interface FamilyMember {
   id: string;
@@ -99,15 +100,18 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
   const [showSearch, setShowSearch] = useState(false);
   const [showSlotModal, setShowSlotModal] = useState(false);
 
-  const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
-  const familySlots = profile?.family_slots ?? 0;
+  const tier = normalizeQuotaTier(profile?.effective_tier || profile?.tier || "free");
+  const rawPurchasedSlots = Number(profile?.family_slots ?? 0);
+  const purchasedFamilySlots =
+    Number.isFinite(rawPurchasedSlots) && rawPurchasedSlots > 0 ? Math.floor(rawPurchasedSlots) : 0;
+  const includedSlots = tier === "free" ? 0 : 1;
 
   const memberRow = members.find((m) => m.invitee_user_id === profile?.id);
   const ownerMembers = members.filter((m) => m.inviter_user_id === profile?.id);
   const isOwner = ownerMembers.length > 0 || !memberRow;
   const acceptedCount = ownerMembers.filter((m) => m.status !== "declined").length;
   const usedSlots = acceptedCount;
-  const totalSlots = Math.min(familySlots, MAX_MEMBERS);
+  const totalSlots = Math.min(MAX_MEMBERS, includedSlots + purchasedFamilySlots);
 
   const linkedIds = ownerMembers.map((m) => m.invitee_user_id);
 
@@ -174,10 +178,10 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
   }
 
   function handleAddPress() {
-    if (familySlots === 0) {
+    if (totalSlots === 0) {
       // No slots purchased — open upsell
       setShowSlotModal(true);
-    } else if (acceptedCount < Math.min(familySlots, MAX_MEMBERS)) {
+    } else if (acceptedCount < totalSlots) {
       // Has capacity — invite someone
       setShowSearch(true);
     } else {

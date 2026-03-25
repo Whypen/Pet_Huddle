@@ -27,7 +27,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
-import { quotaConfig } from "@/config/quotaConfig";
+import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
@@ -122,7 +122,7 @@ function discountPct(monthlyAmt: number, annualTotal: number): number {
 export default function PremiumPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<PlanTab>("gold");
@@ -134,6 +134,7 @@ export default function PremiumPage() {
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const normalizedTier = normalizeQuotaTier(profile?.effective_tier || profile?.tier || "free");
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
   const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
@@ -218,7 +219,23 @@ export default function PremiumPage() {
     [selectedAddonItems, livePrices]
   );
 
+  const isPlanBlockedForTier = (targetPlan: "plus" | "gold"): boolean => {
+    if (targetPlan === "plus") return normalizedTier === "plus" || normalizedTier === "gold";
+    return normalizedTier === "gold";
+  };
+
+  const getPlanCtaLabel = (targetPlan: "plus" | "gold"): string => {
+    if (targetPlan === "plus") {
+      if (normalizedTier === "gold") return "You're on Huddle Gold";
+      if (normalizedTier === "plus") return "You're on Huddle+";
+      return "Get Huddle+";
+    }
+    if (normalizedTier === "gold") return "You're on Huddle Gold";
+    return "Get Huddle Gold";
+  };
+
   const startPlanCheckout = async (tier: "plus" | "gold") => {
+    if (isPlanBlockedForTier(tier)) return;
     if (!user) { navigate("/auth"); return; }
     if (isCheckingOut) return;
 
@@ -303,7 +320,8 @@ export default function PremiumPage() {
     const setBilling = tier === "plus" ? setPlusBilling : setGoldBilling;
     const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
     const isAnnual = billing === "annual";
-    const ctaLabel = tier === "plus" ? "Get Huddle+" : "Get Huddle Gold";
+    const ctaLabel = getPlanCtaLabel(tier);
+    const blockedPlan = isPlanBlockedForTier(tier);
 
     return (
       <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
@@ -429,7 +447,7 @@ export default function PremiumPage() {
               color: theme.bg,
               opacity: isCheckingOut ? 0.6 : 1,
             }}
-            disabled={isCheckingOut}
+            disabled={isCheckingOut || blockedPlan}
             onClick={() => void startPlanCheckout(tier)}
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
