@@ -501,6 +501,17 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
 
   const petPhoneClass = "w-full pl-10 pr-4 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none";
 
+  // Live soft warning for vet clinic phone — grey, non-blocking.
+  // isValidPhoneNumber checks national-number patterns (not just length), rejecting partial inputs.
+  useEffect(() => {
+    const phone = formData.phone_no.trim();
+    if (!phone || isValidPhoneNumber(phone)) {
+      setPhoneNoWarning("");
+    } else {
+      setPhoneNoWarning(t("Phone number is not complete or valid for the selected country"));
+    }
+  }, [formData.phone_no, t]);
+
   const [formData, setFormData] = useState<PetFormData>({
     name: "",
     species: "",
@@ -553,9 +564,10 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
     petDob: "",
     weight: "",
     microchipId: "",
-    // Vet clinic phone — format-only check (not account phone; no duplicate check)
-    phoneNo: "",
   });
+  // Vet clinic phone — soft warning only (not a blocking error).
+  // phone_no is an optional external contact; saving with a partial number is allowed.
+  const [phoneNoWarning, setPhoneNoWarning] = useState("");
 
   const hasErrors = Object.values(fieldErrors).some(Boolean);
   const hasRequiredFields =
@@ -1013,18 +1025,11 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       return;
     }
 
-    // Vet clinic phone — format check only (country-aware length via isValidPhoneNumber).
-    // Uniqueness check is intentionally EXEMPT for this field:
+    // Vet clinic phone — soft warning only, not a save blocker.
+    // Uniqueness check is intentionally EXEMPT:
     //   • pets.phone_no is an external business contact (vet clinic), not a user account identifier.
     //   • Multiple users legitimately share the same vet clinic number — uniqueness is meaningless.
-    //   • check_identifier_registered queries auth.users.phone, which never contains clinic numbers,
-    //     so a duplicate RPC call would always return false and provide zero safety value.
-    // Full policy (normalize E.164 + isValidPhoneNumber) still applied; OTP not required.
-    if (formData.phone_no && !isValidPhoneNumber(formData.phone_no)) {
-      setFieldErrors((prev) => ({ ...prev, phoneNo: t("Phone number length is not valid for the selected country") }));
-      return;
-    }
-    setFieldErrors((prev) => ({ ...prev, phoneNo: "" }));
+    // The live useEffect above handles showing/clearing the grey warning as the user types.
 
     setSaving(true);
 
@@ -1555,9 +1560,9 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                 placeholder={t("Clinic phone (+XXX)")}
               />
             </div>
-            {fieldErrors.phoneNo && (
-              <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1 mt-1" aria-live="polite">
-                {fieldErrors.phoneNo}
+            {phoneNoWarning && (
+              <p className="text-[12px] font-medium text-[var(--text-tertiary)] pl-1 mt-1" aria-live="polite">
+                {phoneNoWarning}
               </p>
             )}
           </div>
