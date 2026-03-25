@@ -9,7 +9,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 import { dobSchema, isAtLeast13, isNotFuture, isValidDate } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui";
 import { SignupShell } from "@/components/signup/SignupShell";
@@ -62,7 +61,6 @@ const FORM_ID = "signup-dob-form";
 const SignupDob = () => {
   const navigate = useNavigate();
   const { data, update } = useSignup();
-  const { user } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
 
   const goTo = (to: string) => {
@@ -111,9 +109,7 @@ const SignupDob = () => {
   const onSubmit = () => {
     if (!canContinue) return;
     update({ dob: assembledDob });
-    // OAuth users (Google/Apple) are already authenticated — skip credentials
-    // and go straight to set-profile. Email signup users continue normally.
-    goTo(user ? "/set-profile" : "/signup/credentials");
+    goTo("/signup/credentials");
   };
 
   return (

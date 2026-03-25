@@ -14,6 +14,8 @@ import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { humanizeError } from "@/lib/humanizeError";
 import { getClientEnv } from "@/lib/env";
 import { NeuButton } from "@/components/ui/NeuButton";
@@ -39,8 +41,22 @@ const shouldBypassDuplicateCheck =
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
-  const { data, update, setFlowState } = useSignup();
+  const { data, update, setFlowState, flowState } = useSignup();
+  const { user, profile } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
+
+  // Strict OAuth onboarding detection — ALL four conditions must hold:
+  // 1. Already authenticated (session exists via OAuth provider)
+  // 2. Provider is OAuth (Google / Apple), not email / password
+  // 3. Signup flow is explicitly active (set by AuthCallback on this path)
+  // 4. Onboarding not yet complete
+  // Cannot match: a completed user (cond 4), a normal idle session (cond 3),
+  // or an email-signup user who hasn't called signUp() yet (cond 2).
+  const isOAuthOnboarding =
+    Boolean(user) &&
+    user?.app_metadata?.provider !== "email" &&
+    flowState === "signup" &&
+    !isRegisteredUserProfile(profile ?? null);
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -73,7 +89,8 @@ const SignupCredentials = () => {
     resolver: zodResolver(credentialsSchema),
     mode: "onChange",
     defaultValues: {
-      email: data.email,
+      // OAuth onboarding: pre-fill email from provider; do not allow entry
+      email: data.email || (user?.app_metadata?.provider !== "email" ? user?.email ?? "" : ""),
       phone: data.phone,
       password: data.password,
       confirmPassword: data.password,
@@ -109,7 +126,24 @@ const SignupCredentials = () => {
     setDismissedDuplicateKey(null);
   }, [email, phone]);
 
+  // Sync email from OAuth provider metadata after first render (in case auth
+  // context wasn't ready when defaultValues was computed).
   useEffect(() => {
+    if (isOAuthOnboarding && user?.email && !email) {
+      setValue("email", user.email, { shouldValidate: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOAuthOnboarding]);
+
+  useEffect(() => {
+    // OAuth onboarding users are already authenticated — skip the duplicate
+    // check entirely (their email WILL appear registered, which is expected).
+    if (isOAuthOnboarding) {
+      setCheckingDuplicate(false);
+      setDuplicateDetected(false);
+      setDuplicateCheckError(null);
+      return;
+    }
     if (shouldBypassDuplicateCheck) {
       setCheckingDuplicate(false);
       setDuplicateDetected(false);
@@ -155,7 +189,7 @@ const SignupCredentials = () => {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey]);
+  }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey, isOAuthOnboarding]);
 
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
@@ -164,6 +198,16 @@ const SignupCredentials = () => {
   const onSubmit = async () => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
+      setFlowState("signup");
+      goTo("/signup/name");
+      return;
+    }
+    // Strict OAuth onboarding path — already authenticated via Google / Apple,
+    // incomplete onboarding, signup flow active. Do NOT call signUp() again.
+    // Save email (from provider) + phone (user-entered) to context, preserve
+    // flowState, and continue to the next signup step.
+    if (isOAuthOnboarding) {
+      update({ email: user?.email || email, phone });
       setFlowState("signup");
       goTo("/signup/name");
       return;
@@ -253,12 +297,15 @@ const SignupCredentials = () => {
 
   // ── Hint text helper ────────────────────────────────────────────────────────
 
-  const ctaDisabled =
-    !isValid ||
-    duplicateDetected ||
-    checkingDuplicate ||
-    submitting ||
-    (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError));
+  // For OAuth onboarding users: only phone needs to be valid (no password required).
+  // For all other users: existing full-form validation is unchanged.
+  const ctaDisabled = isOAuthOnboarding
+    ? !phone || phoneInvalid || submitting
+    : !isValid ||
+      duplicateDetected ||
+      checkingDuplicate ||
+      submitting ||
+      (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError));
   const hintText = duplicateDetected
     ? "This email or phone number is already registered"
     : checkingDuplicate
@@ -301,14 +348,15 @@ const SignupCredentials = () => {
         </p>
 
         <form id={FORM_ID} onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-6 pb-[calc(env(safe-area-inset-bottom,0px)+84px)]">
-          {/* Email */}
+          {/* Email — read-only for OAuth users (tied to provider account) */}
           <FormField
             type="email"
             label="Email"
             leadingIcon={<Mail size={16} strokeWidth={1.75} />}
             autoComplete="email"
             error={errors.email?.message as string | undefined}
-            autoFocus
+            autoFocus={!isOAuthOnboarding}
+            disabled={isOAuthOnboarding}
             {...register("email")}
           />
 
@@ -343,25 +391,27 @@ const SignupCredentials = () => {
             )}
           </div>
 
-          {/* Password */}
-          <div>
-            <FormField
-              type="password"
-              label="Password"
-              leadingIcon={<Lock size={16} strokeWidth={1.75} />}
-              error={errors.password?.message as string | undefined}
-              {...register("password")}
-            />
-          </div>
-
-          {/* Confirm Password */}
-          <FormField
-            type="password"
-            label="Confirm Password"
-            leadingIcon={<Lock size={16} strokeWidth={1.75} />}
-            error={confirmMismatch ? "Passwords do not match" : (errors.confirmPassword?.message as string | undefined)}
-            {...register("confirmPassword")}
-          />
+          {/* Password / Confirm — hidden for OAuth users (they authenticate via provider) */}
+          {!isOAuthOnboarding && (
+            <>
+              <div>
+                <FormField
+                  type="password"
+                  label="Password"
+                  leadingIcon={<Lock size={16} strokeWidth={1.75} />}
+                  error={errors.password?.message as string | undefined}
+                  {...register("password")}
+                />
+              </div>
+              <FormField
+                type="password"
+                label="Confirm Password"
+                leadingIcon={<Lock size={16} strokeWidth={1.75} />}
+                error={confirmMismatch ? "Passwords do not match" : (errors.confirmPassword?.message as string | undefined)}
+                {...register("confirmPassword")}
+              />
+            </>
+          )}
 
           {/* Legal consent copy */}
           <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
