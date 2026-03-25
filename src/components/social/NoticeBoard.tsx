@@ -2454,7 +2454,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const title = buildSharePreviewTitle(notice.author?.display_name, notice.author?.social_id);
     const description = buildSharePreviewDescription(notice.content);
-    const url = `${origin}/api/share?thread=${encodeURIComponent(notice.id)}`;
+    const url = `${origin}/share/${encodeURIComponent(notice.id)}`;
 
     setSharePayload({
       threadId: notice.id,

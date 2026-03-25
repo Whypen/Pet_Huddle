@@ -111,6 +111,7 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
   const title = preview?.title || "Post on huddle";
   const description = preview?.description || "See this post on huddle.";
   const image = `${origin}/huddle-logo.jpg`;
+  const shareUrl = threadId ? `${origin}/share/${encodeURIComponent(threadId)}` : `${origin}/share`;
   const destination = threadId ? `${origin}/threads?focus=${encodeURIComponent(threadId)}` : `${origin}/threads`;
 
   const safeTitle = escapeHtml(title);
@@ -128,6 +129,7 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     <meta property="og:title" content="${safeTitle}" />
     <meta property="og:description" content="${safeDescription}" />
     <meta property="og:type" content="article" />
+    <meta property="og:url" content="${escapeHtml(shareUrl)}" />
     <meta property="og:image" content="${safeImage}" />
     <meta property="og:image:secure_url" content="${safeImage}" />
     <meta property="og:image:width" content="1200" />
@@ -136,6 +138,9 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     <meta name="twitter:title" content="${safeTitle}" />
     <meta name="twitter:description" content="${safeDescription}" />
     <meta name="twitter:image" content="${safeImage}" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/huddle-favicon-32.png?v=2" />
+    <link rel="icon" type="image/png" href="/huddle-favicon.png?v=2" />
+    <link rel="apple-touch-icon" href="/huddle-apple-touch-icon.png?v=2" />
     <meta http-equiv="refresh" content="0; url=${safeDestination}" />
     <style>
       :root { color-scheme: light; }

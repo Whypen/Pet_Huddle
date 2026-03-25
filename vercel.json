@@ -1,6 +1,10 @@
 {
   "routes": [
     {
+      "src": "^/share/([^/]+)$",
+      "dest": "/api/share?thread=$1"
+    },
+    {
       "handle": "filesystem"
     },
     {
