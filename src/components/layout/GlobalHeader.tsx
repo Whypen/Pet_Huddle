@@ -6,6 +6,7 @@ import {
   Bell,
   BookOpen,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   FileText,
   Heart,
@@ -131,8 +132,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
   const [supportEmailOptIn, setSupportEmailOptIn] = useState(true);
-  const [legalExpanded, setLegalExpanded] = useState(false);
-  const [petCareExpanded, setPetCareExpanded] = useState(false);
+  const [drawerView, setDrawerView] = useState<"main" | "legal">("main");
 
   // ── Notification drawer state ──────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -576,7 +576,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
             <X size={20} strokeWidth={1.75} aria-hidden />
           </NeuControl>
         ) : (
-          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+          <Sheet
+            open={menuOpen}
+            onOpenChange={(open) => {
+              setMenuOpen(open);
+              if (!open) setDrawerView("main");
+            }}
+          >
             <SheetTrigger asChild>
               <NeuControl
                 size="icon-md"
@@ -600,6 +606,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 <SheetDescription>{t("Settings drawer")}</SheetDescription>
               </SheetHeader>
 
+              {drawerView === "main" && (
+              <>
               {/* 1. User identity row */}
               <SheetClose asChild>
                 <button
@@ -754,24 +762,29 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   }}
                 />
                 <InsetDivider />
-                <button
-                  type="button"
-                  onClick={() => setLegalExpanded((v) => !v)}
-                  className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
-                >
-                  <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
-                    <FileText size={16} strokeWidth={1.75} />
-                  </span>
-                  <span className="flex-1 text-[14px] font-[500] text-[var(--text-primary)]">Legal Information</span>
-                  <ChevronDown
-                    size={16}
-                    strokeWidth={1.75}
-                    className={`text-[var(--text-tertiary)] transition-transform duration-200 ${legalExpanded ? "rotate-180" : ""}`}
-                  />
-                </button>
-                {legalExpanded && (
-                  <>
-                    <InsetDivider />
+                <InsetRow
+                  label="Legal Information"
+                  icon={<FileText size={16} strokeWidth={1.75} />}
+                  variant="nav"
+                  onClick={() => setDrawerView("legal")}
+                />
+              </InsetPanel>
+              </>
+              )}
+
+              {/* ── Legal sub-screen ─────────────────────────────────────── */}
+              {drawerView === "legal" && (
+                <div className="flex flex-col gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setDrawerView("main")}
+                    className="flex items-center gap-1.5 px-1 py-1 -mx-1 rounded-lg text-left text-[var(--text-primary)] active:bg-black/5"
+                  >
+                    <ChevronLeft size={18} strokeWidth={1.75} className="text-[var(--text-secondary)] shrink-0" />
+                    <span className="text-[15px] font-semibold">Legal Information</span>
+                  </button>
+
+                  <InsetPanel>
                     <SheetClose asChild>
                       <InsetRow
                         label="Privacy Policy"
@@ -798,47 +811,27 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         onClick={() => navigate("/community-guidelines")}
                       />
                     </SheetClose>
-                    <InsetDivider />
-                    <button
-                      type="button"
-                      onClick={() => setPetCareExpanded((v) => !v)}
-                      className="w-full flex items-center gap-3 px-4 py-[13px] text-left"
-                    >
-                      <span className="w-5 flex-shrink-0 flex items-center justify-center text-[var(--text-secondary)]">
-                        <FileText size={16} strokeWidth={1.75} />
-                      </span>
-                      <span className="flex-1 text-[14px] font-[500] text-[var(--text-primary)]">Pet Care Services</span>
-                      <ChevronDown
-                        size={16}
-                        strokeWidth={1.75}
-                        className={`text-[var(--text-tertiary)] transition-transform duration-200 ${petCareExpanded ? "rotate-180" : ""}`}
+                    <div className="h-px bg-border/60 mx-3 my-1" />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Service Provider Agreement"
+                        icon={<FileText size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/service-agreement")}
                       />
-                    </button>
-                    {petCareExpanded && (
-                      <>
-                        <InsetDivider />
-                        <SheetClose asChild>
-                          <InsetRow
-                            label="Service Agreement"
-                            icon={<FileText size={16} strokeWidth={1.75} />}
-                            variant="nav"
-                            onClick={() => navigate("/service-agreement")}
-                          />
-                        </SheetClose>
-                        <InsetDivider />
-                        <SheetClose asChild>
-                          <InsetRow
-                            label="Booking Terms"
-                            icon={<BookOpen size={16} strokeWidth={1.75} />}
-                            variant="nav"
-                            onClick={() => navigate("/booking-terms")}
-                          />
-                        </SheetClose>
-                      </>
-                    )}
-                  </>
-                )}
-              </InsetPanel>
+                    </SheetClose>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Service Booking Terms"
+                        icon={<BookOpen size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/booking-terms")}
+                      />
+                    </SheetClose>
+                  </InsetPanel>
+                </div>
+              )}
 
             </SheetContent>
           </Sheet>
