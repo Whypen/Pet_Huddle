@@ -45,7 +45,8 @@ import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
-import { buildSharePreviewDescription, buildSharePreviewTitle } from "@/lib/sharePreview";
+import { buildShareModel } from "@/lib/shareModel";
+import { getThreadShareCount, recordThreadShareClick } from "@/lib/shareCount";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
@@ -139,6 +140,7 @@ interface PinDetailModalProps {
   const [shareTitle, setShareTitle] = useState("");
   const [shareDescription, setShareDescription] = useState("");
   const [shareImageUrl, setShareImageUrl] = useState("");
+  const [shareCount, setShareCount] = useState<number>(0);
 
   const [supportCount, setSupportCount] = useState(0);
 
@@ -410,17 +412,50 @@ interface PinDetailModalProps {
   const openShareSheet = useCallback(() => {
     if (!alert?.id) return;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = socialThreadId
-      ? `${origin}/share/${encodeURIComponent(socialThreadId)}`
-      : `${origin}/map?alert=${encodeURIComponent(alert.id)}`;
-    const title = buildSharePreviewTitle(alert?.creator?.display_name, alert?.creator?.social_id);
-    const description = buildSharePreviewDescription(alert?.description || alert?.title || null);
-    setShareUrl(url);
-    setShareTitle(title);
-    setShareDescription(description);
-    setShareImageUrl(`${origin}/huddle-logo.jpg`);
+    const model = buildShareModel({
+      origin,
+      contentType: socialThreadId ? "thread" : "alert",
+      contentId: socialThreadId || alert.id,
+      displayName: alert?.creator?.display_name,
+      socialId: alert?.creator?.social_id,
+      contentSnippet: alert?.description || alert?.title || null,
+    });
+    setShareUrl(model.url);
+    setShareTitle(model.title);
+    setShareDescription(model.description);
+    setShareImageUrl(model.imageUrl);
     setShareOpen(true);
   }, [alert?.creator?.display_name, alert?.creator?.social_id, alert?.description, alert?.id, alert?.title, socialThreadId]);
+
+  const handleShareAction = useCallback(async () => {
+    if (!socialThreadId) return;
+    setShareCount((prev) => Math.max(0, prev + 1));
+    try {
+      const count = await recordThreadShareClick(socialThreadId);
+      if (typeof count === "number") {
+        setShareCount(Math.max(0, count));
+      }
+    } catch {
+      // Keep optimistic count if RPC is unavailable.
+    }
+  }, [socialThreadId]);
+
+  useEffect(() => {
+    if (!socialThreadId) {
+      setShareCount(0);
+      return;
+    }
+    let canceled = false;
+    void (async () => {
+      const count = await getThreadShareCount(socialThreadId);
+      if (!canceled && typeof count === "number") {
+        setShareCount(Math.max(0, count));
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [socialThreadId]);
 
   const removeEditMediaAt = (index: number) => {
     setEditMedia((prev) => {
@@ -633,6 +668,9 @@ interface PinDetailModalProps {
                   title="Share"
                 >
                   <Share2 className="w-5 h-5 text-muted-foreground" />
+                  {shareCount > 0 ? (
+                    <span className="text-xs font-medium tabular-nums text-muted-foreground">{shareCount}</span>
+                  ) : null}
                 </button>
 
                 {/* 3-dots menu (Report / Hide / Block) */}
@@ -816,6 +854,7 @@ interface PinDetailModalProps {
       title={shareTitle}
       description={shareDescription}
       imageUrl={shareImageUrl}
+      onShareAction={() => void handleShareAction()}
     />
 
     <AlertDialog open={confirmBlock} onOpenChange={(v) => !v && setConfirmBlock(false)}>

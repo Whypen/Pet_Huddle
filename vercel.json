@@ -2,7 +2,7 @@
   "routes": [
     {
       "src": "^/share/([^/]+)$",
-      "dest": "/api/share?thread=$1"
+      "dest": "/api/share?id=$1"
     },
     {
       "handle": "filesystem"

@@ -1,9 +1,18 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { Copy, Send, X } from "lucide-react";
+import { Check, Copy, Loader2, X } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { buildSocialShareLinks } from "@/lib/socialShare";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+
+type ChatShareTarget = {
+  chatId: string;
+  label: string;
+  avatarUrl: string | null;
+  lastMessageAt: string | null;
+};
 
 interface ShareSheetProps {
   open: boolean;
@@ -15,18 +24,27 @@ interface ShareSheetProps {
   onShareAction?: () => void;
 }
 
-export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, onShareAction }: ShareSheetProps) => {
-  const navigate = useNavigate();
+export const ShareSheet = ({ open, onClose, url, imageUrl, onShareAction }: ShareSheetProps) => {
   const links = buildSocialShareLinks(url);
   const payloadText = url.trim();
+  const { profile } = useAuth();
+
+  const [chatPickerOpen, setChatPickerOpen] = useState(false);
+  const [chatTargets, setChatTargets] = useState<ChatShareTarget[]>([]);
+  const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(new Set());
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+
+  const sortedChatTargets = useMemo(
+    () => [...chatTargets].sort((a, b) => (b.lastMessageAt || "").localeCompare(a.lastMessageAt || "")),
+    [chatTargets]
+  );
 
   const handleSystemShare = async () => {
     if (!navigator.share) return false;
     try {
       const basePayload: ShareData = {
-        title: title || "Huddle",
-        text: description || undefined,
-        url,
+        url: payloadText,
       };
 
       if (imageUrl && typeof navigator.canShare === "function" && typeof File !== "undefined") {
@@ -61,14 +79,135 @@ export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, o
     }
   };
 
-  const copyLink = async () => {
+  const copyLink = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(payloadText);
       toast.success("Link copied");
+      return true;
     } catch {
       toast.error("Failed to copy link");
+      return false;
     }
-  };
+  }, [payloadText]);
+
+  const loadChatTargets = useCallback(async () => {
+    if (!profile?.id) {
+      toast.error("Sign in required");
+      return;
+    }
+
+    setChatLoading(true);
+    try {
+      const { data: memberships, error: membershipError } = await supabase
+        .from("chat_room_members")
+        .select("chat_id")
+        .eq("user_id", profile.id);
+      if (membershipError) throw membershipError;
+
+      const chatIds = Array.from(
+        new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))
+      );
+
+      if (!chatIds.length) {
+        setChatTargets([]);
+        setChatPickerOpen(true);
+        return;
+      }
+
+      const { data: chatRows, error: chatRowsError } = await supabase
+        .from("chats")
+        .select("id,name,last_message_at")
+        .in("id", chatIds);
+      if (chatRowsError) throw chatRowsError;
+
+      const { data: memberRows, error: memberRowsError } = await supabase
+        .from("chat_room_members")
+        .select("chat_id,user_id,profiles!chat_room_members_user_id_fkey(display_name,avatar_url)")
+        .in("chat_id", chatIds)
+        .neq("user_id", profile.id);
+      if (memberRowsError) throw memberRowsError;
+
+      const memberByChatId = new Map<string, { label: string; avatarUrl: string | null }>();
+      (memberRows || []).forEach((row: { chat_id: string; profiles?: { display_name?: string | null; avatar_url?: string | null } | null }) => {
+        if (!row.chat_id || memberByChatId.has(row.chat_id)) return;
+        const peer = row.profiles || null;
+        const label = String(peer?.display_name || "Conversation").trim() || "Conversation";
+        const avatarUrl = peer?.avatar_url || null;
+        memberByChatId.set(row.chat_id, { label, avatarUrl });
+      });
+
+      const targets: ChatShareTarget[] = (chatRows || []).map((chat: { id: string; name?: string | null; last_message_at?: string | null }) => {
+        const peer = memberByChatId.get(chat.id);
+        return {
+          chatId: chat.id,
+          label: peer?.label || String(chat.name || "Conversation"),
+          avatarUrl: peer?.avatarUrl || null,
+          lastMessageAt: chat.last_message_at || null,
+        };
+      });
+
+      setChatTargets(targets);
+      setSelectedChatIds(new Set());
+      setChatPickerOpen(true);
+    } catch {
+      toast.error("Unable to load chats right now");
+    } finally {
+      setChatLoading(false);
+    }
+  }, [profile?.id]);
+
+  const sendToSelectedChats = useCallback(async () => {
+    if (!profile?.id) {
+      toast.error("Sign in required");
+      return;
+    }
+    const chatIds = Array.from(selectedChatIds);
+    if (!chatIds.length) {
+      toast.info("Select at least one chat");
+      return;
+    }
+
+    setChatSending(true);
+    try {
+      const payload = chatIds.map((chatId) => ({
+        chat_id: chatId,
+        sender_id: profile.id,
+        content: payloadText,
+      }));
+
+      const { error } = await supabase.from("chat_messages").insert(payload as Record<string, unknown>[]);
+      if (error) throw error;
+
+      onShareAction?.();
+      toast.success(`Shared to ${chatIds.length} chat${chatIds.length > 1 ? "s" : ""}`);
+      setChatPickerOpen(false);
+      onClose();
+    } catch {
+      toast.error("Unable to share to chats");
+    } finally {
+      setChatSending(false);
+    }
+  }, [onClose, onShareAction, payloadText, profile?.id, selectedChatIds]);
+
+  const toggleChatSelection = useCallback((chatId: string) => {
+    setSelectedChatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chatId)) {
+        next.delete(chatId);
+      } else {
+        next.add(chatId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleInstagramFallback = useCallback(async () => {
+    onShareAction?.();
+    await copyLink();
+    window.open("https://www.instagram.com/", "_blank", "noopener,noreferrer");
+    toast.info("Instagram web does not support direct Story creation. Link copied.");
+    onClose();
+  }, [copyLink, onClose, onShareAction]);
 
   return (
     <AnimatePresence>
@@ -89,62 +228,136 @@ export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, o
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-base font-semibold text-brandText">Share</h3>
-              <button onClick={onClose} className="rounded-full p-1 hover:bg-muted">
+              <button onClick={onClose} className="rounded-full p-1 hover:bg-muted" type="button">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 mb-3">
-              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.whatsapp} target="_blank" rel="noreferrer" onClick={onShareAction}>
-                WhatsApp
-              </a>
-              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.facebook} target="_blank" rel="noreferrer" onClick={onShareAction}>
-                Facebook
-              </a>
-              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.threads} target="_blank" rel="noreferrer" onClick={onShareAction}>
-                Threads
-              </a>
-              <a className="neu-rest rounded-xl p-3 text-center text-xs" href={links.instagram} target="_blank" rel="noreferrer" onClick={onShareAction}>
-                Instagram
-              </a>
-              <button
-                type="button"
-                className="neu-rest rounded-xl p-3 text-center text-xs"
-                onClick={() => {
-                  onShareAction?.();
-                  navigate(`/chats?shareUrl=${encodeURIComponent(url)}`);
-                  onClose();
-                }}
-              >
-                Huddle Chats
-              </button>
-              <button
-                type="button"
-                className="neu-rest rounded-xl p-3 text-center text-xs"
-                onClick={() => {
-                  onShareAction?.();
-                  void copyLink();
-                }}
-              >
-                Copy Link
-              </button>
-            </div>
+            {!chatPickerOpen ? (
+              <div className="grid grid-cols-3 gap-2">
+                <a
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  href={links.whatsapp}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => {
+                    onShareAction?.();
+                    onClose();
+                  }}
+                >
+                  WhatsApp
+                </a>
+                <a
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  href={links.facebook}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => {
+                    onShareAction?.();
+                    onClose();
+                  }}
+                >
+                  Facebook
+                </a>
+                <a
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  href={links.threads}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => {
+                    onShareAction?.();
+                    onClose();
+                  }}
+                >
+                  Threads
+                </a>
+                <button
+                  type="button"
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  onClick={() => {
+                    void handleInstagramFallback();
+                  }}
+                >
+                  Instagram
+                </button>
+                <button
+                  type="button"
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  disabled={chatLoading}
+                  onClick={() => {
+                    void loadChatTargets();
+                  }}
+                >
+                  {chatLoading ? "Loading..." : "Huddle Chats"}
+                </button>
+                <button
+                  type="button"
+                  className="neu-rest rounded-xl p-3 text-center text-xs"
+                  onClick={() => {
+                    onShareAction?.();
+                    void copyLink();
+                    onClose();
+                  }}
+                >
+                  Copy Link
+                </button>
+                <button
+                  type="button"
+                  className="neu-rest rounded-xl p-3 text-center text-xs col-span-3"
+                  onClick={async () => {
+                    onShareAction?.();
+                    const usedSystem = await handleSystemShare();
+                    if (!usedSystem) {
+                      await copyLink();
+                    }
+                    onClose();
+                  }}
+                >
+                  Native Share
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                  {sortedChatTargets.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No chats available yet.</p>
+                  ) : (
+                    sortedChatTargets.map((target) => {
+                      const selected = selectedChatIds.has(target.chatId);
+                      return (
+                        <button
+                          key={target.chatId}
+                          type="button"
+                          className="w-full flex items-center gap-3 rounded-xl border border-border px-3 py-2 text-left"
+                          onClick={() => toggleChatSelection(target.chatId)}
+                        >
+                          <span className="h-8 w-8 rounded-full bg-muted overflow-hidden flex items-center justify-center text-xs font-semibold">
+                            {target.avatarUrl ? (
+                              <img src={target.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              (target.label || "C").charAt(0).toUpperCase()
+                            )}
+                          </span>
+                          <span className="flex-1 truncate text-sm font-medium text-brandText">{target.label}</span>
+                          <span className={`h-5 w-5 rounded-full border flex items-center justify-center ${selected ? "bg-brandBlue border-brandBlue text-white" : "border-border"}`}>
+                            {selected ? <Check className="w-3 h-3" /> : null}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
 
-            <NeuButton
-              variant="secondary"
-              className="w-full"
-              onClick={async () => {
-                onShareAction?.();
-                const usedSystem = await handleSystemShare();
-                if (!usedSystem) {
-                  await copyLink();
-                }
-                onClose();
-              }}
-            >
-              <Send className="w-4 h-4" />
-              Share
-            </NeuButton>
+                <div className="mt-3 flex items-center gap-2">
+                  <NeuButton variant="secondary" className="flex-1" onClick={() => setChatPickerOpen(false)}>
+                    Back
+                  </NeuButton>
+                  <NeuButton className="flex-1" onClick={() => void sendToSelectedChats()} disabled={chatSending}>
+                    {chatSending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send"}
+                  </NeuButton>
+                </div>
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}
