@@ -501,17 +501,6 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
 
   const petPhoneClass = "w-full pl-10 pr-4 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none";
 
-  // Live soft warning for vet clinic phone — grey, non-blocking.
-  // isValidPhoneNumber checks national-number patterns (not just length), rejecting partial inputs.
-  useEffect(() => {
-    const phone = formData.phone_no.trim();
-    if (!phone || isValidPhoneNumber(phone)) {
-      setPhoneNoWarning("");
-    } else {
-      setPhoneNoWarning(t("Phone number is not complete or valid for the selected country"));
-    }
-  }, [formData.phone_no, t]);
-
   const [formData, setFormData] = useState<PetFormData>({
     name: "",
     species: "",
@@ -568,6 +557,17 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
   // Vet clinic phone — soft warning only (not a blocking error).
   // phone_no is an optional external contact; saving with a partial number is allowed.
   const [phoneNoWarning, setPhoneNoWarning] = useState("");
+
+  // Live soft warning for vet clinic phone — grey, non-blocking.
+  // isValidPhoneNumber checks national-number patterns (not just length), rejecting partial inputs.
+  useEffect(() => {
+    const phone = formData.phone_no.trim();
+    if (!phone || isValidPhoneNumber(phone)) {
+      setPhoneNoWarning("");
+    } else {
+      setPhoneNoWarning(t("Phone number is not complete or valid for the selected country"));
+    }
+  }, [formData.phone_no, t]);
 
   const hasErrors = Object.values(fieldErrors).some(Boolean);
   const hasRequiredFields =
