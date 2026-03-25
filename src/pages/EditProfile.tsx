@@ -18,6 +18,8 @@ import { useSignup } from "@/contexts/SignupContext";
 import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import {
@@ -1709,16 +1711,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               ) : (
                 <div className="space-y-2">
                   <div className={cn("form-field-rest relative flex items-center bg-white", fieldErrors.phone && "form-field-error")}>
-                    <input
-                      type="tel"
+                    <PhoneInput
+                      international
+                      defaultCountry={(inferCountryCodeFromPhone(formData.phone) || "HK") as never}
                       value={formData.phone}
-                      onChange={(e) => {
-                        setFormData((prev) => ({ ...prev, phone: e.target.value }));
-                        setPhoneOtpVerified(e.target.value.trim() === phoneOriginalValue.trim());
+                      onChange={(value) => {
+                        const v = value || "";
+                        setFormData((prev) => ({ ...prev, phone: v }));
+                        setPhoneOtpVerified(v.trim() === phoneOriginalValue.trim());
                       }}
-                      className="field-input-core pr-28"
-                      placeholder=""
-                      disabled={false}
+                      className="w-full pr-28 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
                       aria-invalid={Boolean(fieldErrors.phone)}
                     />
                     {!phoneOtpVerified && (
