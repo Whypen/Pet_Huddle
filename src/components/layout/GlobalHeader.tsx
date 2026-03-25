@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Bell,
   BookOpen,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   FileText,
