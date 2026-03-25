@@ -1,13 +1,14 @@
-const CACHE_NAME = "huddle-shell-v3";
+const CACHE_NAME = "huddle-shell-v4";
 const OFFLINE_ASSETS = [
   "/",
   "/index.html",
   "/manifest.json",
-  "/favicon.png",
-  "/favicon-32.png",
-  "/apple-touch-icon.png",
-  "/icon-192.png",
-  "/icon-512.png",
+  "/huddle-favicon-v5.png",
+  "/huddle-favicon-32-v5.png",
+  "/huddle-apple-touch-icon-v5.png",
+  "/huddle-icon-192-v5.png",
+  "/huddle-icon-512-v5.png",
+  "/huddle-logo.jpg",
 ];
 
 self.addEventListener("install", (event) => {

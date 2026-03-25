@@ -16,7 +16,7 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
     new URLSearchParams(location.search).get("oauth_onboarding") === "1";
   const allowSignupFlowWithSession =
     location.pathname.startsWith("/signup/") && (flowState !== "idle" || isOAuthOnboarding);
-  const onboardingIncomplete = Boolean(user) && !isRegisteredUserProfile(profile ?? null);
+  const onboardingIncomplete = Boolean(user && profile && !isRegisteredUserProfile(profile));
   if (loading) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">

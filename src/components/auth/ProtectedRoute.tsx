@@ -64,9 +64,12 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         </div>
       );
     }
-    if (!allowOnboardingRoutes) {
+    const isSignupOnboardingFlow = flowState !== "idle";
+    if (isSignupOnboardingFlow && !allowOnboardingRoutes) {
       return <Navigate to="/set-profile" replace />;
     }
+    // Existing users can transiently miss profile hydration; do not force
+    // /set-profile unless explicitly in signup/onboarding flow.
     return <>{children}</>;
   }
 
