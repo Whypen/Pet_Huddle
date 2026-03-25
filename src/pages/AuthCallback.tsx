@@ -4,11 +4,18 @@ import { Input } from "@/components/ui/input";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { useSignup } from "@/contexts/SignupContext";
+import {
+  SETPROFILE_PREFILL_KEY,
+  buildScopedStorageKey,
+  normalizeStorageOwner,
+} from "@/lib/signupOnboarding";
 
 const AuthCallback = () => {
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
+  const { setFlowState } = useSignup();
 
   useEffect(() => {
     const run = async () => {
@@ -29,14 +36,49 @@ const AuthCallback = () => {
           navigate("/auth");
           return;
         }
-        // Deterministic route ownership lives in ProtectedRoute/AuthContext.
+
+        // Check if this is a brand-new OAuth user (no profile row yet).
+        const isOAuth = user.app_metadata?.provider !== "email";
+        if (isOAuth) {
+          const { data: profileRow } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          if (!profileRow) {
+            // New OAuth user — pre-fill display_name from provider metadata and
+            // route through the DOB step before landing on set-profile.
+            const fullName =
+              (user.user_metadata?.full_name as string | undefined) ||
+              (user.user_metadata?.name as string | undefined) ||
+              "";
+            const email = user.email || "";
+            try {
+              const owner = normalizeStorageOwner(email);
+              localStorage.setItem(
+                buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner),
+                JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "" }),
+              );
+              // Remember email so SignupContext can find the scoped draft.
+              localStorage.setItem("auth_login_identifier", email);
+            } catch {
+              // best-effort
+            }
+            setFlowState("signup");
+            navigate("/signup/dob?oauth_onboarding=1");
+            return;
+          }
+        }
+
+        // Existing user — ProtectedRoute handles onboarding routing.
         navigate("/");
         return;
       }
       setReady(true);
     };
     void run();
-  }, [navigate]);
+  }, [navigate, setFlowState]);
 
   const updatePassword = async () => {
     const { error } = await supabase.auth.updateUser({ password });

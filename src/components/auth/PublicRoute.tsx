@@ -9,8 +9,13 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, session, profile, loading, mfaPending } = useAuth();
   const { flowState } = useSignup();
   const location = useLocation();
+  // oauth_onboarding=1 is set by AuthCallback for new Google/Apple users being
+  // routed through /signup/dob. The query param acts as a synchronous bypass
+  // so the DOB page renders before the React flowState update settles.
+  const isOAuthOnboarding =
+    new URLSearchParams(location.search).get("oauth_onboarding") === "1";
   const allowSignupFlowWithSession =
-    location.pathname.startsWith("/signup/") && flowState !== "idle";
+    location.pathname.startsWith("/signup/") && (flowState !== "idle" || isOAuthOnboarding);
   const onboardingIncomplete = Boolean(user) && !isRegisteredUserProfile(profile ?? null);
   if (loading) {
     return (
