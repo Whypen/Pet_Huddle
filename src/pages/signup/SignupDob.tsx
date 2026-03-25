@@ -20,6 +20,17 @@ type DobForm = { dob_day: string; dob_month: string; dob_year: string };
 
 const pad2 = (value: string) => value.padStart(2, "0");
 
+const isAtLeast16FromDate = (value: string) => {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  const years = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  const age = m < 0 || (m === 0 && now.getDate() < d.getDate()) ? years - 1 : years;
+  return age >= 16;
+};
+
 const fromStoredDob = (value: string) => {
   if (!value) return { dob_day: "", dob_month: "", dob_year: "" };
   if (value.includes("-")) {
@@ -84,6 +95,7 @@ const SignupDob = () => {
   const isCalendarValid = allSelected ? isValidDate(assembledDob) : false;
   const isFutureValid   = allSelected ? isNotFuture(assembledDob) : false;
   const isUnder13       = allSelected && isCalendarValid && isFutureValid ? !isAtLeast13(assembledDob) : false;
+  const isUnder16But13  = allSelected && isCalendarValid && isFutureValid && !isUnder13 ? !isAtLeast16FromDate(assembledDob) : false;
   const isInvalidDate   = allSelected ? !isCalendarValid || !isFutureValid : false;
   const dobError = isUnder13
     ? "You must be at least 13 years old to use Huddle."
@@ -225,6 +237,11 @@ const SignupDob = () => {
           {dobError && (
             <p className="text-[12px] text-[#EF4444] mt-2" aria-live="polite">
               {dobError}
+            </p>
+          )}
+          {!dobError && isUnder16But13 && (
+            <p className="text-[12px] text-[rgba(74,73,101,0.55)] mt-2" aria-live="polite">
+              You must be 16+ to access Discover feature on Chats.
             </p>
           )}
         </div>
