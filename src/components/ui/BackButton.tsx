@@ -15,7 +15,7 @@ export function BackButton({ className }: { className?: string }) {
         const state = location.state as Record<string, unknown> | null;
         if (state?.openDrawer && state?.from) {
           navigate(state.from as string, {
-            state: { openDrawer: true, drawerView: state.drawerView ?? "legal" },
+            state: { openDrawer: true, drawerView: state.drawerView ?? "legal", from: state.from },
           });
         } else {
           navigate(-1);
