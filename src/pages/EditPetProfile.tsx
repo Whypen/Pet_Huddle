@@ -1013,8 +1013,13 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       return;
     }
 
-    // Vet clinic phone — format-only check (country-aware), no duplicate check.
-    // Field is optional; only validate when non-empty.
+    // Vet clinic phone — format check only (country-aware length via isPossiblePhoneNumber).
+    // Uniqueness check is intentionally EXEMPT for this field:
+    //   • pets.phone_no is an external business contact (vet clinic), not a user account identifier.
+    //   • Multiple users legitimately share the same vet clinic number — uniqueness is meaningless.
+    //   • check_identifier_registered queries auth.users.phone, which never contains clinic numbers,
+    //     so a duplicate RPC call would always return false and provide zero safety value.
+    // Full policy (normalize E.164 + isPossiblePhoneNumber) still applied; OTP not required.
     if (formData.phone_no && !isPossiblePhoneNumber(formData.phone_no)) {
       setFieldErrors((prev) => ({ ...prev, phoneNo: t("Phone number length is not valid for the selected country") }));
       return;
