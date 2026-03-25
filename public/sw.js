@@ -1,4 +1,4 @@
-const CACHE_NAME = "huddle-shell-v4";
+const CACHE_NAME = "huddle-shell-v5";
 const OFFLINE_ASSETS = [
   "/",
   "/index.html",
@@ -31,7 +31,9 @@ self.addEventListener("fetch", (event) => {
   if (requestUrl.origin !== self.location.origin) return;
 
   const isNavigation = event.request.mode === "navigate";
-  const isStaticAsset = ["script", "style", "image", "font"].includes(event.request.destination);
+  const destination = event.request.destination;
+  const isStaticAsset = ["script", "style", "image", "font"].includes(destination);
+  const shouldNetworkFirst = destination === "script" || destination === "style";
 
   // Navigation must be network-first to avoid serving stale shells after new deploys.
   if (isNavigation) {
@@ -49,6 +51,19 @@ self.addEventListener("fetch", (event) => {
 
   if (!isStaticAsset) {
     event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+    return;
+  }
+
+  if (shouldNetworkFirst) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 

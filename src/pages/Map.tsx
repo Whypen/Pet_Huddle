@@ -83,6 +83,7 @@ interface MapAlert {
   is_demo?: boolean;
   creator: {
     display_name: string | null;
+    social_id?: string | null;
     avatar_url: string | null;
   } | null;
 }
@@ -143,6 +144,7 @@ type VisibleMapAlertRow = {
   location_street: string | null;
   location_district: string | null;
   creator_display_name: string | null;
+  creator_social_id: string | null;
   creator_avatar_url: string | null;
   marker_state: "active" | "expired_dot" | "hidden" | null;
 };
@@ -1003,7 +1005,11 @@ const MapPage = () => {
         range_km: row.range_km,
         location_street: row.location_street,
         location_district: row.location_district,
-        creator: { display_name: row.creator_display_name, avatar_url: row.creator_avatar_url },
+        creator: {
+          display_name: row.creator_display_name,
+          social_id: row.creator_social_id,
+          avatar_url: row.creator_avatar_url,
+        },
         expires_at: row.expires_at,
         range_meters: row.range_meters,
         marker_state: row.marker_state === "expired_dot" ? "expired_dot" : "active",

@@ -108,6 +108,7 @@ interface MapAlert {
   location_district?: string | null;
   creator: {
     display_name: string | null;
+    social_id?: string | null;
     avatar_url: string | null;
   } | null;
 }
@@ -412,12 +413,12 @@ interface PinDetailModalProps {
     }
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const url = `${origin}/share/${encodeURIComponent(socialThreadId)}`;
-    const title = buildSharePreviewTitle(alert?.creator?.display_name, undefined);
+    const title = buildSharePreviewTitle(alert?.creator?.display_name, alert?.creator?.social_id);
     setShareUrl(url);
     setShareTitle(title);
     setShareImageUrl(`${origin}/huddle-logo.jpg`);
     setShareOpen(true);
-  }, [alert?.creator?.display_name, socialThreadId]);
+  }, [alert?.creator?.display_name, alert?.creator?.social_id, socialThreadId]);
 
   const removeEditMediaAt = (index: number) => {
     setEditMedia((prev) => {
@@ -482,10 +483,10 @@ interface PinDetailModalProps {
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex flex-col"
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex min-h-0 flex-col"
           >
             {/* Content area */}
-            <div className="p-6 pb-[calc(24px+env(safe-area-inset-bottom,0px))] flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 pb-4 overscroll-contain">
               {/* Header */}
               <div className="flex items-center justify-between mb-4 gap-3">
                 <div className="flex items-center gap-2">
@@ -582,7 +583,7 @@ interface PinDetailModalProps {
             </div>
 
             {/* Footer row (See on Social left, support + 3-dot menu right) */}
-            <div className="sticky bottom-0 border-t border-border bg-card px-6 pt-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)] flex items-center justify-end">
+            <div className="sticky bottom-0 border-t border-border bg-card px-6 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] flex items-center justify-end">
               {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
                 <button
                   type="button"
@@ -604,15 +605,6 @@ interface PinDetailModalProps {
               )}
 
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={openShareSheet}
-                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-2 transition-all hover:bg-muted"
-                  title="Share"
-                >
-                  <Share2 className="w-5 h-5 text-muted-foreground" />
-                </button>
-
                 {/* Heart / Support */}
                 <button
                   onClick={handleSupport}
@@ -629,6 +621,16 @@ interface PinDetailModalProps {
                     )}
                   />
                   <span className="text-xs font-medium tabular-nums text-muted-foreground">{supportCount}</span>
+                </button>
+
+                {/* Share (between support and action) */}
+                <button
+                  type="button"
+                  onClick={openShareSheet}
+                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-2 transition-all hover:bg-muted"
+                  title="Share"
+                >
+                  <Share2 className="w-5 h-5 text-muted-foreground" />
                 </button>
 
                 {/* 3-dots menu (Report / Hide / Block) */}
