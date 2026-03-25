@@ -810,7 +810,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         onClick={() => navigate("/community-guidelines")}
                       />
                     </SheetClose>
-                    <div className="h-px bg-border/60 mx-3 my-1" />
+                  </InsetPanel>
+
+                  <InsetPanel>
                     <SheetClose asChild>
                       <InsetRow
                         label="Service Provider Agreement"
