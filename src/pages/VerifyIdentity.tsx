@@ -581,6 +581,12 @@ function CardVerificationCard({
         <CardStatusBadge state={state} />
       </button>
 
+      {!isPassed && (
+        <p className="text-[12px] text-[rgba(74,73,101,0.55)] px-4 pb-3 leading-relaxed">
+          🔒 Instead of collecting your personal data, we use your bank&apos;s security checks to verify you&apos;re a real person. Your card details stay encrypted and masked — never stored, never charged.
+        </p>
+      )}
+
       {isPassed && (
         <>
           <InsetDivider />
