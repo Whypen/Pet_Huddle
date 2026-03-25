@@ -9,8 +9,32 @@ type ResponseShape = {
 };
 type ThreadRow = { id?: string; content?: string | null; user_id?: string | null };
 type ProfileRow = { display_name?: string | null; social_id?: string | null };
+type AlertRow = {
+  id?: string;
+  title?: string | null;
+  description?: string | null;
+  creator_id?: string | null;
+  thread_id?: string | null;
+};
 
 const first = (value: MaybeString) => (Array.isArray(value) ? value[0] || "" : value || "");
+const firstHeaderToken = (value: MaybeString) =>
+  first(value)
+    .split(",")[0]
+    ?.trim() || "";
+
+const normalizeProto = (value: MaybeString) => {
+  const token = firstHeaderToken(value).toLowerCase();
+  return token === "http" || token === "https" ? token : "https";
+};
+
+const normalizeHost = (value: MaybeString) => {
+  const token = firstHeaderToken(value)
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .trim();
+  return token || "huddle.pet";
+};
 
 const escapeHtml = (value: string) =>
   value
@@ -57,17 +81,19 @@ const buildDescription = (content?: string | null) => {
 
 const resolveSupabaseConfig = () => {
   const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
+  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
   const anonKey = String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "").trim();
-  if (!url || !anonKey) return null;
-  return { url: url.replace(/\/+$/, ""), anonKey };
+  const apiKey = serviceRoleKey || anonKey;
+  if (!url || !apiKey) return null;
+  return { url: url.replace(/\/+$/, ""), apiKey };
 };
 
-const fetchJson = async <T>(url: string, anonKey: string): Promise<T | null> => {
+const fetchJson = async <T>(url: string, apiKey: string): Promise<T | null> => {
   try {
     const response = await fetch(url, {
       headers: {
-        apikey: anonKey,
-        authorization: `Bearer ${anonKey}`,
+        apikey: apiKey,
+        authorization: `Bearer ${apiKey}`,
         accept: "application/json",
       },
     });
@@ -83,7 +109,7 @@ const fetchThreadPreviewData = async (threadId: string) => {
   if (!config || !threadId) return null;
 
   const threadUrl = `${config.url}/rest/v1/threads?select=id,content,user_id&id=eq.${encodeURIComponent(threadId)}&limit=1`;
-  const threadRows = await fetchJson<ThreadRow[]>(threadUrl, config.anonKey);
+  const threadRows = await fetchJson<ThreadRow[]>(threadUrl, config.apiKey);
   const thread = Array.isArray(threadRows) ? threadRows[0] : null;
   if (!thread?.id) return null;
 
@@ -92,30 +118,97 @@ const fetchThreadPreviewData = async (threadId: string) => {
   const authorId = String(thread.user_id || "").trim();
   if (authorId) {
     const profileUrl = `${config.url}/rest/v1/profiles?select=display_name,social_id&id=eq.${encodeURIComponent(authorId)}&limit=1`;
-    const profileRows = await fetchJson<ProfileRow[]>(profileUrl, config.anonKey);
+    const profileRows = await fetchJson<ProfileRow[]>(profileUrl, config.apiKey);
     const profile = Array.isArray(profileRows) ? profileRows[0] : null;
     displayName = String(profile?.display_name || "").trim();
     socialId = String(profile?.social_id || "").trim();
   }
 
   return {
+    shareType: "thread" as const,
+    contentId: String(thread.id),
     title: buildTitle(displayName, socialId),
     description: buildDescription(thread.content),
   };
 };
 
+const fetchAlertPreviewData = async (alertId: string) => {
+  const config = resolveSupabaseConfig();
+  if (!config || !alertId) return null;
+
+  const alertUrl = `${config.url}/rest/v1/broadcast_alerts?select=id,title,description,creator_id,thread_id&id=eq.${encodeURIComponent(alertId)}&limit=1`;
+  const alertRows = await fetchJson<AlertRow[]>(alertUrl, config.apiKey);
+  const alert = Array.isArray(alertRows) ? alertRows[0] : null;
+  if (!alert?.id) return null;
+
+  const linkedThreadId = String(alert.thread_id || "").trim();
+  if (linkedThreadId) {
+    const threadPreview = await fetchThreadPreviewData(linkedThreadId);
+    if (threadPreview) return threadPreview;
+  }
+
+  let displayName = "";
+  let socialId = "";
+  const creatorId = String(alert.creator_id || "").trim();
+  if (creatorId) {
+    const profileUrl = `${config.url}/rest/v1/profiles?select=display_name,social_id&id=eq.${encodeURIComponent(creatorId)}&limit=1`;
+    const profileRows = await fetchJson<ProfileRow[]>(profileUrl, config.apiKey);
+    const profile = Array.isArray(profileRows) ? profileRows[0] : null;
+    displayName = String(profile?.display_name || "").trim();
+    socialId = String(profile?.social_id || "").trim();
+  }
+
+  const fallbackSnippet = String(alert.description || alert.title || "").trim();
+  return {
+    shareType: "alert" as const,
+    contentId: String(alert.id),
+    title: buildTitle(displayName, socialId),
+    description: buildDescription(fallbackSnippet),
+  };
+};
+
+const parseShareQuery = (req: RequestShape) => {
+  const idFromPath = first(req.query?.id).trim();
+  if (idFromPath) {
+    if (idFromPath.startsWith("alert_")) {
+      const alertId = idFromPath.slice("alert_".length).trim();
+      if (alertId) return { shareType: "alert" as const, contentId: alertId };
+      return null;
+    }
+    return { shareType: "thread" as const, contentId: idFromPath };
+  }
+
+  // Backward compatibility for older rewrite format.
+  const legacyThread = first(req.query?.thread).trim();
+  if (legacyThread) return { shareType: "thread" as const, contentId: legacyThread };
+  return null;
+};
+
 export default async function handler(req: RequestShape, res: ResponseShape) {
-  const host = first(req.headers?.["x-forwarded-host"]) || first(req.headers?.host) || "huddle.pet";
-  const proto = first(req.headers?.["x-forwarded-proto"]) || "https";
+  const host = normalizeHost(req.headers?.["x-forwarded-host"] || req.headers?.host);
+  const proto = normalizeProto(req.headers?.["x-forwarded-proto"]);
   const origin = `${proto}://${host}`;
 
-  const threadId = first(req.query?.thread).trim();
-  const preview = threadId ? await fetchThreadPreviewData(threadId) : null;
+  const parsed = parseShareQuery(req);
+  const preview = !parsed
+    ? null
+    : parsed.shareType === "thread"
+      ? await fetchThreadPreviewData(parsed.contentId)
+      : await fetchAlertPreviewData(parsed.contentId);
   const title = preview?.title || "Post on huddle";
   const description = preview?.description || "See this post on huddle.";
   const image = `${origin}/huddle-logo.jpg`;
-  const shareUrl = threadId ? `${origin}/share/${encodeURIComponent(threadId)}` : `${origin}/share`;
-  const destination = threadId ? `${origin}/threads?focus=${encodeURIComponent(threadId)}` : `${origin}/threads`;
+  const shareId = !preview
+    ? ""
+    : preview.shareType === "alert"
+      ? `alert_${preview.contentId}`
+      : preview.contentId;
+  const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
+  const destination = !preview
+    ? `${origin}/threads`
+    : preview.shareType === "alert"
+      ? `${origin}/map`
+      : `${origin}/threads?focus=${encodeURIComponent(preview.contentId)}`;
 
   const html = `<!doctype html>
 <html lang="en">
