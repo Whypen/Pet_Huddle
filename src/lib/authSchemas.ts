@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isPossiblePhoneNumber } from "react-phone-number-input";
+import { isValidPhoneNumber } from "react-phone-number-input";
 
 const parseDob = (value: string) => {
   if (!value) return null;
@@ -92,11 +92,15 @@ export const credentialsSchema = z
     phone: z
       .string()
       .regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format")
-      // Country-aware digit-count check via libphonenumber (ships with react-phone-number-input).
-      // "possible" = correct length for the selected country. NOT OTP-verified ownership.
+      // Full structural validity check via libphonenumber (ships with react-phone-number-input).
+      // isValidPhoneNumber matches against actual national-number patterns, not just length ranges.
+      // isPossiblePhoneNumber (length-range only) accepted partial inputs for many countries
+      // where the possible-length list has a range (e.g. HK [5,6,7,8,9,11]) — isValidPhoneNumber
+      // checks actual national-number patterns and rejects any number not yet structurally complete.
+      // "valid" = structurally complete for the country. NOT OTP-verified ownership.
       .refine(
-        (val) => { try { return isPossiblePhoneNumber(val); } catch { return false; } },
-        "Phone number length is not valid for the selected country"
+        (val) => { try { return isValidPhoneNumber(val); } catch { return false; } },
+        "Phone number is not complete or valid for the selected country"
       ),
     password: z
       .string()

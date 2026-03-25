@@ -10,7 +10,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import PhoneInput, { isPossiblePhoneNumber } from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
@@ -110,12 +110,14 @@ const SignupCredentials = () => {
   // Email signup path: Zod schema validation (E.164 structural regex).
   const phoneInvalid = Boolean(errors.phone);
 
-  // OAuth onboarding path: country-aware possible-number check via libphonenumber
-  // (shipped with react-phone-number-input). Returns true when the digit count is
-  // impossible for the selected country — independent of Zod.
-  // "possible" means correct length for the country, NOT ownership-verified.
-  // No OTP is sent or required here.
-  const phoneNotPossible = Boolean(phone) && !isPossiblePhoneNumber(phone);
+  // OAuth onboarding path: full structural validity check via libphonenumber
+  // (shipped with react-phone-number-input).
+  // isValidPhoneNumber checks actual national-number patterns, not just length ranges.
+  // isPossiblePhoneNumber (length-range only) accepted partial inputs for any country whose
+  // possible-length list spans a range — isValidPhoneNumber checks actual national-number
+  // patterns and rejects any number not yet structurally complete for its country.
+  // "valid" = structurally complete for the country, NOT OTP-verified ownership.
+  const phoneNotValid = Boolean(phone) && !isValidPhoneNumber(phone);
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
@@ -150,7 +152,7 @@ const SignupCredentials = () => {
       // Only check phone uniqueness: pass empty string for p_email so the RPC
       // matches on phone only. Phone is compared in normalized E.164 — no false
       // collisions from formatting differences.
-      if (!phone || !isPossiblePhoneNumber(phone)) {
+      if (!phone || !isValidPhoneNumber(phone)) {
         // No valid phone yet — clear state, nothing to check.
         setCheckingDuplicate(false);
         setDuplicateDetected(false);
@@ -250,7 +252,7 @@ const SignupCredentials = () => {
     if (isOAuthOnboarding) {
       // Final submit-time guards (belt-and-suspenders in case CTA was somehow
       // enabled with a stale state snapshot).
-      if (!phone || !isPossiblePhoneNumber(phone) || duplicateDetected) return;
+      if (!phone || !isValidPhoneNumber(phone) || duplicateDetected) return;
       update({ email: user?.email || email, phone });
       setFlowState("signup");
       goTo("/signup/name");
@@ -343,12 +345,12 @@ const SignupCredentials = () => {
 
   // OAuth onboarding CTA requirements (all must pass):
   //   • phone non-empty
-  //   • isPossiblePhoneNumber === true  (country-aware digit-count check, NOT OTP ownership)
+  //   • isValidPhoneNumber === true  (structural pattern check against selected country, NOT OTP ownership)
   //   • no duplicate phone collision with another user's account
   //   • not mid-check, not mid-submit
   // Email signup CTA: unchanged.
   const ctaDisabled = isOAuthOnboarding
-    ? !phone || phoneNotPossible || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
+    ? !phone || phoneNotValid || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
     : !isValid ||
       duplicateDetected ||
       checkingDuplicate ||
@@ -362,7 +364,7 @@ const SignupCredentials = () => {
           ? "Checking phone…"
           : duplicateCheckError
             ? "Could not verify phone. Retry."
-            : phoneNotPossible
+            : phoneNotValid
               ? "Phone number length is not valid for the selected country"
               : "Enter your phone number to continue")
     : (duplicateDetected
@@ -423,7 +425,7 @@ const SignupCredentials = () => {
           <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Phone Number</label>
             <div className={`form-field-rest relative flex items-center ${
-              isOAuthOnboarding ? (phoneNotPossible || duplicateDetected ? "form-field-error" : "") : (errors.phone ? "form-field-error" : "")
+              isOAuthOnboarding ? (phoneNotValid || duplicateDetected ? "form-field-error" : "") : (errors.phone ? "form-field-error" : "")
             }`}>
               <Phone className="absolute left-4 h-4 w-4 text-[var(--text-tertiary)] pointer-events-none" />
               <PhoneInput
@@ -448,12 +450,12 @@ const SignupCredentials = () => {
             {isOAuthOnboarding ? (
               <>
                 {/* Country-aware digit-count validation — not OTP ownership */}
-                {phoneNotPossible && (
+                {phoneNotValid && (
                   <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                     Phone number length is not valid for the selected country
                   </p>
                 )}
-                {!phoneNotPossible && duplicateDetected && (
+                {!phoneNotValid && duplicateDetected && (
                   <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                     This phone number is already used by another account
                   </p>

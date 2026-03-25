@@ -18,7 +18,7 @@ import { useSignup } from "@/contexts/SignupContext";
 import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
-import PhoneInput, { isPossiblePhoneNumber } from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
@@ -861,7 +861,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   // NOT OTP ownership verification — only uniqueness across auth.users.phone.
   useEffect(() => {
     const phone = formData.phone.trim();
-    if (!phoneEditMode || phone === phoneOriginalValue.trim() || !isPossiblePhoneNumber(phone)) {
+    if (!phoneEditMode || phone === phoneOriginalValue.trim() || !isValidPhoneNumber(phone)) {
       setPhoneDuplicate(false);
       setPhoneDuplicateChecking(false);
       return;
@@ -1036,7 +1036,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: t("Phone number is required") }));
       return;
     }
-    if (!isPossiblePhoneNumber(formData.phone.trim())) {
+    if (!isValidPhoneNumber(formData.phone.trim())) {
       // country-aware digit-count check — NOT OTP ownership
       setFieldErrors((prev) => ({ ...prev, phone: t("Phone number length is not valid for the selected country") }));
       return;
@@ -1260,7 +1260,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: REQUIRED_CONNECT_ERROR }));
       return;
     }
-    if (!isPossiblePhoneNumber(formData.phone.trim())) {
+    if (!isValidPhoneNumber(formData.phone.trim())) {
       // country-aware digit-count check — NOT OTP ownership
       setFieldErrors((prev) => ({
         ...prev,
@@ -1777,14 +1777,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                           otpCountdown > 0 ||
                           phoneDuplicate ||
                           phoneDuplicateChecking ||
-                          (Boolean(formData.phone) && !isPossiblePhoneNumber(formData.phone))
+                          (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
                         }
                         className={cn(
                           "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
                           (otpCountdown > 0 ||
                             phoneDuplicate ||
                             phoneDuplicateChecking ||
-                            (Boolean(formData.phone) && !isPossiblePhoneNumber(formData.phone)))
+                            (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone)))
                             ? "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
                             : "bg-brandBlue text-white active:opacity-80"
                         )}

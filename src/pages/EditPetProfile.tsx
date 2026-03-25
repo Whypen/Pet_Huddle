@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
-import PhoneInput, { isPossiblePhoneNumber } from "react-phone-number-input";
+import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Json } from "@/integrations/supabase/types";
@@ -1013,14 +1013,14 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       return;
     }
 
-    // Vet clinic phone — format check only (country-aware length via isPossiblePhoneNumber).
+    // Vet clinic phone — format check only (country-aware length via isValidPhoneNumber).
     // Uniqueness check is intentionally EXEMPT for this field:
     //   • pets.phone_no is an external business contact (vet clinic), not a user account identifier.
     //   • Multiple users legitimately share the same vet clinic number — uniqueness is meaningless.
     //   • check_identifier_registered queries auth.users.phone, which never contains clinic numbers,
     //     so a duplicate RPC call would always return false and provide zero safety value.
-    // Full policy (normalize E.164 + isPossiblePhoneNumber) still applied; OTP not required.
-    if (formData.phone_no && !isPossiblePhoneNumber(formData.phone_no)) {
+    // Full policy (normalize E.164 + isValidPhoneNumber) still applied; OTP not required.
+    if (formData.phone_no && !isValidPhoneNumber(formData.phone_no)) {
       setFieldErrors((prev) => ({ ...prev, phoneNo: t("Phone number length is not valid for the selected country") }));
       return;
     }
