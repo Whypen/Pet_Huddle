@@ -9,10 +9,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
+import { humanizeError } from "@/lib/humanizeError";
 import { getClientEnv } from "@/lib/env";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { FormField, NeuCheckbox } from "@/components/ui";
@@ -20,15 +22,10 @@ import { LegalModal } from "@/components/modals/LegalModal";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { requestPhoneOtp, verifyPhoneOtp } from "@/lib/phoneOtp";
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
 const appEnv = String(import.meta.env.VITE_APP_ENV ?? "").toLowerCase();
-const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL ?? "").toLowerCase();
-const isLocalSupabaseEndpoint =
-  supabaseUrl.includes("127.0.0.1:54321") || supabaseUrl.includes("localhost:54321");
 const shouldBypassDuplicateCheck =
   import.meta.env.PROD === false &&
   (
@@ -42,7 +39,7 @@ const shouldBypassDuplicateCheck =
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
-  const { data, update } = useSignup();
+  const { data, update, setFlowState } = useSignup();
   const [isExiting, setIsExiting] = useState(false);
 
   const goTo = (to: string) => {
@@ -50,12 +47,6 @@ const SignupCredentials = () => {
     setTimeout(() => navigate(to), 180);
   };
 
-  // ── All original state (unchanged) ──────────────────────────────────────────
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpValue, setOtpValue] = useState("");
-  const [otpError, setOtpError] = useState<string | null>(null);
-  const [otpVerified, setOtpVerified] = useState(data.otp_verified);
-  const [resendIn, setResendIn] = useState(0);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [duplicateDetected, setDuplicateDetected] = useState(false);
@@ -71,15 +62,12 @@ const SignupCredentials = () => {
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
-  const e164Regex = /^\+[1-9]\d{1,14}$/;
 
   const {
     register,
     handleSubmit,
     setValue,
     watch,
-    trigger,
-    setError,
     formState: { errors, isValid },
   } = useForm({
     resolver: zodResolver(credentialsSchema),
@@ -89,7 +77,6 @@ const SignupCredentials = () => {
       phone: data.phone,
       password: data.password,
       confirmPassword: data.password,
-      agreedToTerms: false,
     },
   });
 
@@ -104,30 +91,19 @@ const SignupCredentials = () => {
   const confirmPassword = watch("confirmPassword") || "";
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
   const phoneInvalid = Boolean(errors.phone);
-  const otpRequirementMet = otpVerified;
 
-  // ── Effects (all unchanged) ──────────────────────────────────────────────────
+  // ── Effects ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const hasChanges =
-      data.email !== email || data.phone !== phone ||
-      data.password !== password || data.otp_verified !== otpVerified;
+    const hasChanges = data.email !== email || data.phone !== phone || data.password !== password;
     if (!hasChanges) return;
-    update({ email, phone, password, otp_verified: otpVerified });
-  }, [data.email, data.phone, data.password, data.otp_verified, email, phone, password, otpVerified, update]);
+    update({ email, phone, password });
+  }, [data.email, data.phone, data.password, email, phone, password, update]);
 
   useEffect(() => {
     if (!getClientEnv().isDev) return;
     console.debug(errors, isValid);
   }, [errors, isValid]);
-
-  useEffect(() => {
-    setOtpSent(false);
-    setOtpVerified(false);
-    setOtpValue("");
-    setOtpError(null);
-    setResendIn(0);
-  }, [phone]);
 
   useEffect(() => {
     setDismissedDuplicateKey(null);
@@ -181,49 +157,14 @@ const SignupCredentials = () => {
     return () => clearTimeout(timer);
   }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey]);
 
-  useEffect(() => {
-    if (!resendIn) return;
-    const timer = setInterval(() => setResendIn((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(timer);
-  }, [resendIn]);
-
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
-  // ── Handlers (unchanged) ────────────────────────────────────────────────────
-
-  const sendOtp = async () => {
-    if (!phone || !e164Regex.test(phone)) {
-      setError("phone", { type: "manual", message: "Your phone number is invalid" });
-      return;
-    }
-    const result = await requestPhoneOtp(phone);
-    if (!result.ok) {
-      setOtpError(result.error || "Unable to send OTP.");
-      return;
-    }
-    setOtpSent(true);
-    setResendIn(60);
-    setOtpVerified(false);
-    setOtpValue("");
-    setOtpError(null);
-  };
-
-  const verifyOtp = async () => {
-    if (otpValue.length !== 6) { setOtpError("Invalid code"); setOtpVerified(false); return; }
-    const result = await verifyPhoneOtp(phone, otpValue);
-    if (!result.ok) {
-      setOtpError(result.error || "Invalid code");
-      setOtpVerified(false);
-      return;
-    }
-    setOtpVerified(true);
-    setOtpError(null);
-    void trigger();
-  };
+  // ── Handlers ────────────────────────────────────────────────────────────────
 
   const onSubmit = async () => {
-    if (!otpRequirementMet || duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
+    if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
+      setFlowState("signup");
       goTo("/signup/name");
       return;
     }
@@ -243,10 +184,43 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
+      // Create the auth account here (step 2) so a live session exists before
+      // reaching /verify-identity. The auto_confirm_email_on_signup trigger
+      // ensures signUp() returns a session immediately (no email-confirm gate).
+      // display_name is collected at /set-profile, not here.
+      setFlowState("signup");
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: { data: { phone: phone.trim(), dob: data.dob } },
+      });
+      if (signUpError) {
+        const msg = signUpError.message.toLowerCase();
+        if (msg.includes("already registered") || msg.includes("user already registered")) {
+          // Account exists from a prior attempt — sign in to reuse the session
+          // rather than calling signUp() again (prevents repeated signup calls).
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+          if (signInError) {
+            // Password mismatch or other issue — surface the sign-in dialog.
+            setSigninEmail(email.trim());
+            setShowSignInModal(true);
+            return;
+          }
+          goTo("/signup/name");
+          return;
+        }
+        setFlowState("idle");
+        toast.error(humanizeError(signUpError) || "Account creation failed. Please try again.");
+        return;
+      }
       goTo("/signup/name");
     } catch (err) {
-      console.error("Duplicate check failed:", err);
-      setDuplicateCheckError("Could not verify account details right now. Please retry.");
+      console.error("Signup failed:", err);
+      setFlowState("idle");
+      toast.error("Account creation failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -281,7 +255,6 @@ const SignupCredentials = () => {
 
   const ctaDisabled =
     !isValid ||
-    !otpRequirementMet ||
     duplicateDetected ||
     checkingDuplicate ||
     submitting ||
@@ -290,17 +263,9 @@ const SignupCredentials = () => {
     ? "This email or phone number is already registered"
     : checkingDuplicate
       ? "Checking account details…"
-    : !watch("agreedToTerms")
-      ? "Agree to Terms to continue"
       : phoneInvalid
         ? "Enter a valid phone number"
-        : otpSent && otpError
-          ? "Invalid code"
-          : otpSent && otpValue.length < 6
-            ? "Enter the 6-digit code"
-            : !otpRequirementMet
-              ? "Verify your phone number"
-              : "Complete all required fields to continue";
+        : "Complete all required fields to continue";
 
   return (
     <>
@@ -347,7 +312,7 @@ const SignupCredentials = () => {
             {...register("email")}
           />
 
-          {/* Phone + OTP send */}
+          {/* Phone */}
           <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Phone Number</label>
             <div className={`form-field-rest relative flex items-center ${errors.phone ? "form-field-error" : ""}`}>
@@ -357,7 +322,7 @@ const SignupCredentials = () => {
                 international
                 value={phone}
                 onChange={(value) => setValue("phone", value || "", { shouldValidate: true, shouldTouch: true })}
-                className="w-full pl-10 pr-[120px] [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none"
+                className="w-full pl-10 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none"
                 inputStyle={{
                   width: "100%",
                   height: "100%",
@@ -370,16 +335,6 @@ const SignupCredentials = () => {
                   outline: "none",
                 }}
               />
-              <NeuButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute right-3 z-10 h-8 px-2.5 text-[12px] text-[#2145CF] hover:bg-transparent shrink-0"
-                onClick={sendOtp}
-                disabled={resendIn > 0}
-              >
-                {resendIn > 0 ? `Resend in ${resendIn}s` : "Send Code"}
-              </NeuButton>
             </div>
             {errors.phone && (
               <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
@@ -387,44 +342,6 @@ const SignupCredentials = () => {
               </p>
             )}
           </div>
-
-          {/* OTP verification */}
-          {otpSent && (
-            <div>
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1 block" style={{ marginBottom: "var(--field-gap-lc, 6px)" }}>
-                Verification code
-              </label>
-              <div className="form-field-rest relative flex items-center">
-                <input
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder="6-digit code"
-                  autoComplete="one-time-code"
-                  className="field-input-core pl-4 pr-[88px] focus:outline-none peer tracking-[0.18em]"
-                  value={otpValue}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, "").slice(0, 6);
-                    setOtpValue(val);
-                    setOtpError(null);
-                  }}
-                />
-                <NeuButton
-                  type="button"
-                  size="sm"
-                  onClick={verifyOtp}
-                  disabled={otpVerified || otpValue.length !== 6}
-                  className={`absolute right-2 ${otpVerified ? "bg-brandSuccess hover:bg-brandSuccess text-white" : ""}`}
-                >
-                  {otpVerified ? "Verified ✓" : "Verify"}
-                </NeuButton>
-              </div>
-              {otpError && (
-                <p className="text-[12px] text-[#EF4444] mt-2" aria-live="polite">
-                  {otpError}
-                </p>
-              )}
-            </div>
-          )}
 
           {/* Password */}
           <div>
@@ -446,36 +363,26 @@ const SignupCredentials = () => {
             {...register("confirmPassword")}
           />
 
-          {/* Terms checkbox */}
-          <div className="flex items-start gap-3">
-            <NeuCheckbox
-              className="mt-[1px]"
-              checked={Boolean(watch("agreedToTerms"))}
-              onCheckedChange={(v) => setValue("agreedToTerms", Boolean(v), { shouldValidate: true })}
-            />
-            <span className="text-[13px] text-[rgba(74,73,101,0.70)]">
-              I have read and agree to the{" "}
-              <button
-                type="button"
-                className="text-[#2145CF] underline"
-                onClick={() => setLegalModal("terms")}
-              >
-                Terms of Service
-              </button>{" "}
-              and{" "}
-              <button
-                type="button"
-                className="text-[#2145CF] underline"
-                onClick={() => setLegalModal("privacy")}
-              >
-                Privacy Policy
-              </button>
-              .
-            </span>
-          </div>
-          {errors.agreedToTerms && (
-            <p className="text-[12px] text-[#EF4444]">{errors.agreedToTerms.message as string}</p>
-          )}
+          {/* Legal consent copy */}
+          <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
+            By tapping Continue, you agree to our{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("terms")}
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("privacy")}
+            >
+              Privacy Policy
+            </button>
+            , and to receive community safety alerts, pet care tips, and Huddle updates. You can unsubscribe anytime from any email.
+          </p>
 
           <div className="h-[calc(env(safe-area-inset-bottom,0px)+8px)]" aria-hidden="true" />
         </form>
