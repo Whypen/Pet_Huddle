@@ -24,6 +24,7 @@ import {
 import {
   X,
   Heart,
+  Share2,
   Flag,
   Ban,
   EyeOff,
@@ -41,8 +42,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
+import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
+import { buildSharePreviewTitle } from "@/lib/sharePreview";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
@@ -130,6 +133,10 @@ interface PinDetailModalProps {
   const [showMenu, setShowMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareTitle, setShareTitle] = useState("");
+  const [shareImageUrl, setShareImageUrl] = useState("");
 
   const [supportCount, setSupportCount] = useState(0);
 
@@ -398,6 +405,20 @@ interface PinDetailModalProps {
   const isSocial = Boolean(alert?.post_on_social || alert?.social_post_id || alert?.thread_id);
   const socialThreadId = alert?.thread_id || (alert?.social_post_id ? String(alert.social_post_id) : null);
 
+  const openShareSheet = useCallback(() => {
+    if (!socialThreadId) {
+      toast.info("Share is available after this alert is posted to Social.");
+      return;
+    }
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/share/${encodeURIComponent(socialThreadId)}`;
+    const title = buildSharePreviewTitle(alert?.creator?.display_name, undefined);
+    setShareUrl(url);
+    setShareTitle(title);
+    setShareImageUrl(`${origin}/huddle-logo.jpg`);
+    setShareOpen(true);
+  }, [alert?.creator?.display_name, socialThreadId]);
+
   const removeEditMediaAt = (index: number) => {
     setEditMedia((prev) => {
       const target = prev[index];
@@ -583,6 +604,15 @@ interface PinDetailModalProps {
               )}
 
               <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openShareSheet}
+                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-2 transition-all hover:bg-muted"
+                  title="Share"
+                >
+                  <Share2 className="w-5 h-5 text-muted-foreground" />
+                </button>
+
                 {/* Heart / Support */}
                 <button
                   onClick={handleSupport}
@@ -774,6 +804,14 @@ interface PinDetailModalProps {
         </motion.div>
       )}
     </AnimatePresence>
+
+    <ShareSheet
+      open={shareOpen}
+      onClose={() => setShareOpen(false)}
+      url={shareUrl}
+      title={shareTitle}
+      imageUrl={shareImageUrl}
+    />
 
     <AlertDialog open={confirmBlock} onOpenChange={(v) => !v && setConfirmBlock(false)}>
       <AlertDialogContent>
