@@ -553,6 +553,7 @@ function CardVerificationCard({
   const showSubmitCta = showMountedForm && state !== "pending" && state !== "failed";
 
   return (
+    <>
     <InsetPanel>
       <button
         type="button"
@@ -580,12 +581,6 @@ function CardVerificationCard({
         </span>
         <CardStatusBadge state={state} />
       </button>
-
-      {!isPassed && (
-        <p className="text-[12px] text-[rgba(74,73,101,0.55)] px-4 pb-3 leading-relaxed">
-          🔒 Instead of collecting your personal data, we use your bank&apos;s security checks to verify you&apos;re a real person. Your card details stay encrypted and masked — never stored, never charged.
-        </p>
-      )}
 
       {isPassed && (
         <>
@@ -720,6 +715,12 @@ function CardVerificationCard({
         </>
       )}
     </InsetPanel>
+    {!isPassed && (
+      <p className="text-[12px] text-[rgba(74,73,101,0.55)] px-4 pt-2 pb-1 leading-relaxed">
+        🔒 Instead of collecting your personal data, we use your bank&apos;s security checks to verify you&apos;re a real person. Your card details stay encrypted and masked — never stored, never charged.
+      </p>
+    )}
+    </>
   );
 }
 
