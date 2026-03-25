@@ -240,7 +240,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   // ── Re-open drawer when returning from a legal page ──────────────────────────
   useEffect(() => {
     const state = location.state as Record<string, unknown> | null;
-    if (state?.openDrawer) {
+    if (state?.openDrawer && location.pathname === state.from) {
       setMenuOpen(true);
       setDrawerView((state.drawerView as "main" | "legal") ?? "legal");
       // Clear the flag so a page refresh doesn't reopen the drawer.
