@@ -36,7 +36,7 @@ import BroadcastMarker from "@/components/map/BroadcastMarker";
 import AlertMarkersOverlay from "@/components/map/AlertMarkersOverlay";
 import VetMarkersOverlay from "@/components/map/VetMarkersOverlay";
 import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/FriendMarkersOverlay";
-import { getEventActorId, loadBlockedUserIdsFor } from "@/lib/blocking";
+import { loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 
@@ -889,7 +889,7 @@ const MapPage = () => {
       map.current = null;
       setMapLoaded(false);
     };
-  }, [defaultCenter, flyToWithDebug, mapInitNonce, userLocation, userLocation?.lat, userLocation?.lng]);
+  }, [defaultCenter, flyToWithDebug, mapInitNonce]);
 
   const handleFallbackClick = useCallback(() => {
     if (!isPickingBroadcastLocation) return;
@@ -1036,22 +1036,10 @@ const MapPage = () => {
   // Fetch vet clinics on mount
   useEffect(() => { fetchVetClinics(); }, [fetchVetClinics]);
 
-  // Fetch dbAlerts + realtime subscription
+  // Fetch dbAlerts on entry; keep map static unless user refreshes.
   useEffect(() => {
     void fetchAlerts();
-    const channel = supabase
-      .channel("broadcast_alerts")
-      .on("postgres_changes", { event: "*", schema: "public", table: "broadcast_alerts" }, (payload) => {
-        const actorId = getEventActorId(payload as { new?: Record<string, unknown> | null; old?: Record<string, unknown> | null });
-        if (actorId && blockedUserIds.has(actorId)) {
-          setDbAlerts((prev) => prev.filter((alert) => alert.creator_id !== actorId));
-          return;
-        }
-        void fetchAlerts();
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [blockedUserIds, fetchAlerts]);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // UX fix: keep modal inputs interactive while disabling map gestures behind modal.
   useEffect(() => {
@@ -1206,10 +1194,6 @@ const MapPage = () => {
     }
     setSelectedAlert(null);
   }, [dbAlerts, selectedAlert]);
-
-  useEffect(() => {
-    void fetchAlerts();
-  }, [fetchAlerts]);
 
   const refreshMapData = useCallback(async () => {
     setPullRefreshing(true);

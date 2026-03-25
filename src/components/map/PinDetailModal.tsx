@@ -45,7 +45,7 @@ import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
-import { buildSharePreviewTitle } from "@/lib/sharePreview";
+import { buildSharePreviewDescription, buildSharePreviewTitle } from "@/lib/sharePreview";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
@@ -137,6 +137,7 @@ interface PinDetailModalProps {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
   const [shareTitle, setShareTitle] = useState("");
+  const [shareDescription, setShareDescription] = useState("");
   const [shareImageUrl, setShareImageUrl] = useState("");
 
   const [supportCount, setSupportCount] = useState(0);
@@ -407,18 +408,19 @@ interface PinDetailModalProps {
   const socialThreadId = alert?.thread_id || (alert?.social_post_id ? String(alert.social_post_id) : null);
 
   const openShareSheet = useCallback(() => {
-    if (!socialThreadId) {
-      toast.info("Share is available after this alert is posted to Social.");
-      return;
-    }
+    if (!alert?.id) return;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/share/${encodeURIComponent(socialThreadId)}`;
+    const url = socialThreadId
+      ? `${origin}/share/${encodeURIComponent(socialThreadId)}`
+      : `${origin}/map?alert=${encodeURIComponent(alert.id)}`;
     const title = buildSharePreviewTitle(alert?.creator?.display_name, alert?.creator?.social_id);
+    const description = buildSharePreviewDescription(alert?.description || alert?.title || null);
     setShareUrl(url);
     setShareTitle(title);
+    setShareDescription(description);
     setShareImageUrl(`${origin}/huddle-logo.jpg`);
     setShareOpen(true);
-  }, [alert?.creator?.display_name, alert?.creator?.social_id, socialThreadId]);
+  }, [alert?.creator?.display_name, alert?.creator?.social_id, alert?.description, alert?.id, alert?.title, socialThreadId]);
 
   const removeEditMediaAt = (index: number) => {
     setEditMedia((prev) => {
@@ -812,6 +814,7 @@ interface PinDetailModalProps {
       onClose={() => setShareOpen(false)}
       url={shareUrl}
       title={shareTitle}
+      description={shareDescription}
       imageUrl={shareImageUrl}
     />
 

@@ -25,6 +25,7 @@ export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, o
     try {
       const basePayload: ShareData = {
         title: title || "Huddle",
+        text: description || undefined,
         url,
       };
 
@@ -76,7 +77,7 @@ export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, o
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[4000] bg-black/50 flex items-center justify-center px-4"
+          className="fixed inset-0 z-[7000] bg-black/50 flex items-center justify-center px-4"
           onClick={onClose}
         >
           <motion.div
