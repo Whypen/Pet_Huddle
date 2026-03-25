@@ -39,6 +39,8 @@ import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
+import { buildSharePreviewDescription, buildSharePreviewTitle } from "@/lib/sharePreview";
+import huddleShareLogo from "@/assets/huddle logo.jpg";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
 
@@ -457,7 +459,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const mentionDirectoryRef = useRef<Record<string, MentionSuggestion>>({});
   const [mentionSeeds, setMentionSeeds] = useState<MentionSeed[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
-  const [sharePayload, setSharePayload] = useState<{ threadId: string; url: string; text: string; title?: string; imageUrl?: string } | null>(null);
+  const [sharePayload, setSharePayload] = useState<{
+    threadId: string;
+    url: string;
+    title: string;
+    description: string;
+    imageUrl?: string;
+  } | null>(null);
   const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, LinkPreview>>({});
   const [expandedContentIds, setExpandedContentIds] = useState<Set<string>>(new Set());
   const [expandableContentById, setExpandableContentById] = useState<Record<string, boolean>>({});
@@ -2444,16 +2452,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const openShareSheet = useCallback((notice: Thread) => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/threads?focus=${notice.id}`;
-    const titleText = (notice.title || "").trim();
-    const text = titleText || "Check this post on Huddle";
+    const title = buildSharePreviewTitle(notice.author?.display_name, notice.author?.social_id);
+    const description = buildSharePreviewDescription(notice.content);
+    const url = `${origin}/api/share?thread=${encodeURIComponent(notice.id)}`;
 
     setSharePayload({
       threadId: notice.id,
       url,
-      text,
-      title: notice.title || "Huddle",
-      imageUrl: notice.images?.[0] || undefined,
+      title,
+      description,
+      imageUrl: huddleShareLogo,
     });
     setShareOpen(true);
   }, []);
@@ -3576,8 +3584,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           open={shareOpen}
           onClose={() => setShareOpen(false)}
           url={sharePayload.url}
-          text={sharePayload.text}
           title={sharePayload.title}
+          description={sharePayload.description}
           imageUrl={sharePayload.imageUrl}
           onShareAction={() => void recordShareClick(sharePayload.threadId)}
         />

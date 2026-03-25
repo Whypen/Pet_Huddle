@@ -9,23 +9,23 @@ interface ShareSheetProps {
   open: boolean;
   onClose: () => void;
   url: string;
-  text: string;
   title?: string;
+  description?: string;
   imageUrl?: string;
   onShareAction?: () => void;
 }
 
-export const ShareSheet = ({ open, onClose, url, text, title, imageUrl, onShareAction }: ShareSheetProps) => {
+export const ShareSheet = ({ open, onClose, url, title, description, imageUrl, onShareAction }: ShareSheetProps) => {
   const navigate = useNavigate();
-  const links = buildSocialShareLinks(url, text);
-  const payloadText = `${text} ${url}`.trim();
+  const links = buildSocialShareLinks(url);
+  const payloadText = url.trim();
 
   const handleSystemShare = async () => {
     if (!navigator.share) return false;
     try {
       const basePayload: ShareData = {
         title: title || "Huddle",
-        text,
+        text: description,
         url,
       };
 
@@ -44,7 +44,7 @@ export const ShareSheet = ({ open, onClose, url, text, title, imageUrl, onShareA
             }
           }
         } catch {
-          // Fall back to text+url sharing if file fetch fails
+          // Fall back to metadata + URL sharing if file fetch fails
         }
       }
 
