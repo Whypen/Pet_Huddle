@@ -10,7 +10,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import PhoneInput from "react-phone-number-input";
+import PhoneInput, { isPossiblePhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { credentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
@@ -107,7 +107,15 @@ const SignupCredentials = () => {
   const password = watch("password") || "";
   const confirmPassword = watch("confirmPassword") || "";
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
+  // Email signup path: Zod schema validation (E.164 structural regex).
   const phoneInvalid = Boolean(errors.phone);
+
+  // OAuth onboarding path: country-aware possible-number check via libphonenumber
+  // (shipped with react-phone-number-input). Returns true when the digit count is
+  // impossible for the selected country — independent of Zod.
+  // "possible" means correct length for the country, NOT ownership-verified.
+  // No OTP is sent or required here.
+  const phoneNotPossible = Boolean(phone) && !isPossiblePhoneNumber(phone);
 
   // ── Effects ──────────────────────────────────────────────────────────────────
 
@@ -136,13 +144,46 @@ const SignupCredentials = () => {
   }, [isOAuthOnboarding]);
 
   useEffect(() => {
-    // OAuth onboarding users are already authenticated — skip the duplicate
-    // check entirely (their email WILL appear registered, which is expected).
     if (isOAuthOnboarding) {
-      setCheckingDuplicate(false);
-      setDuplicateDetected(false);
-      setDuplicateCheckError(null);
-      return;
+      // OAuth users are already authenticated — their email IS registered (expected).
+      // Skip the email part of the duplicate check entirely.
+      // Only check phone uniqueness: pass empty string for p_email so the RPC
+      // matches on phone only. Phone is compared in normalized E.164 — no false
+      // collisions from formatting differences.
+      if (!phone || !isPossiblePhoneNumber(phone)) {
+        // No valid phone yet — clear state, nothing to check.
+        setCheckingDuplicate(false);
+        setDuplicateDetected(false);
+        setDuplicateCheckError(null);
+        return;
+      }
+      const checkId = ++duplicateCheckRef.current;
+      const timer = setTimeout(async () => {
+        try {
+          setCheckingDuplicate(true);
+          setDuplicateCheckError(null);
+          const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
+            p_email: "",        // empty — skip email uniqueness (their email is already registered)
+            p_phone: phone,     // normalized E.164 from PhoneInput
+          });
+          if (checkId !== duplicateCheckRef.current) return;
+          if (checkError) {
+            setDuplicateDetected(false);
+            setDuplicateCheckError("Could not verify phone right now. Please retry.");
+            return;
+          }
+          setDuplicateDetected(Boolean(checkResult?.registered));
+          // Do NOT open the sign-in dialog for OAuth users — collision is on
+          // phone, not their own email. Error is shown inline on the field.
+        } catch {
+          if (checkId !== duplicateCheckRef.current) return;
+          setDuplicateDetected(false);
+          setDuplicateCheckError("Could not verify phone right now. Please retry.");
+        } finally {
+          if (checkId === duplicateCheckRef.current) setCheckingDuplicate(false);
+        }
+      }, 400);
+      return () => clearTimeout(timer);
     }
     if (shouldBypassDuplicateCheck) {
       setCheckingDuplicate(false);
@@ -207,6 +248,9 @@ const SignupCredentials = () => {
     // Save email (from provider) + phone (user-entered) to context, preserve
     // flowState, and continue to the next signup step.
     if (isOAuthOnboarding) {
+      // Final submit-time guards (belt-and-suspenders in case CTA was somehow
+      // enabled with a stale state snapshot).
+      if (!phone || !isPossiblePhoneNumber(phone) || duplicateDetected) return;
       update({ email: user?.email || email, phone });
       setFlowState("signup");
       goTo("/signup/name");
@@ -297,22 +341,37 @@ const SignupCredentials = () => {
 
   // ── Hint text helper ────────────────────────────────────────────────────────
 
-  // For OAuth onboarding users: only phone needs to be valid (no password required).
-  // For all other users: existing full-form validation is unchanged.
+  // OAuth onboarding CTA requirements (all must pass):
+  //   • phone non-empty
+  //   • isPossiblePhoneNumber === true  (country-aware digit-count check, NOT OTP ownership)
+  //   • no duplicate phone collision with another user's account
+  //   • not mid-check, not mid-submit
+  // Email signup CTA: unchanged.
   const ctaDisabled = isOAuthOnboarding
-    ? !phone || phoneInvalid || submitting
+    ? !phone || phoneNotPossible || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
     : !isValid ||
       duplicateDetected ||
       checkingDuplicate ||
       submitting ||
       (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError));
-  const hintText = duplicateDetected
-    ? "This email or phone number is already registered"
-    : checkingDuplicate
-      ? "Checking account details…"
-      : phoneInvalid
-        ? "Enter a valid phone number"
-        : "Complete all required fields to continue";
+
+  const hintText = isOAuthOnboarding
+    ? (duplicateDetected
+        ? "This phone number is already used by another account"
+        : checkingDuplicate
+          ? "Checking phone…"
+          : duplicateCheckError
+            ? "Could not verify phone. Retry."
+            : phoneNotPossible
+              ? "Phone number length is not valid for the selected country"
+              : "Enter your phone number to continue")
+    : (duplicateDetected
+        ? "This email or phone number is already registered"
+        : checkingDuplicate
+          ? "Checking account details…"
+          : phoneInvalid
+            ? "Enter a valid phone number"
+            : "Complete all required fields to continue");
 
   return (
     <>
@@ -363,7 +422,9 @@ const SignupCredentials = () => {
           {/* Phone */}
           <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Phone Number</label>
-            <div className={`form-field-rest relative flex items-center ${errors.phone ? "form-field-error" : ""}`}>
+            <div className={`form-field-rest relative flex items-center ${
+              isOAuthOnboarding ? (phoneNotPossible || duplicateDetected ? "form-field-error" : "") : (errors.phone ? "form-field-error" : "")
+            }`}>
               <Phone className="absolute left-4 h-4 w-4 text-[var(--text-tertiary)] pointer-events-none" />
               <PhoneInput
                 defaultCountry={defaultCountry as never}
@@ -384,10 +445,26 @@ const SignupCredentials = () => {
                 }}
               />
             </div>
-            {errors.phone && (
-              <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
-                Your phone number is invalid
-              </p>
+            {isOAuthOnboarding ? (
+              <>
+                {/* Country-aware digit-count validation — not OTP ownership */}
+                {phoneNotPossible && (
+                  <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                    Phone number length is not valid for the selected country
+                  </p>
+                )}
+                {!phoneNotPossible && duplicateDetected && (
+                  <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                    This phone number is already used by another account
+                  </p>
+                )}
+              </>
+            ) : (
+              errors.phone && (
+                <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                  Your phone number is invalid
+                </p>
+              )
             )}
           </div>
 
