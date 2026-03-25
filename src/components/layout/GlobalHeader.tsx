@@ -237,6 +237,20 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     if (user) fetchPets();
   }, [user, fetchPets]);
 
+  // ── Re-open drawer when returning from a legal page ──────────────────────────
+  useEffect(() => {
+    const state = location.state as Record<string, unknown> | null;
+    if (state?.openDrawer) {
+      setMenuOpen(true);
+      setDrawerView((state.drawerView as "main" | "legal") ?? "legal");
+      // Clear the flag so a page refresh doesn't reopen the drawer.
+      window.history.replaceState(
+        { ...window.history.state, usr: { ...((window.history.state?.usr as object) ?? {}), openDrawer: false } },
+        "",
+      );
+    }
+  }, [location.key]);
+
   // ── Unread badge: real-time subscription ────────────────────────────────────
   useEffect(() => {
     if (!user) {
@@ -789,7 +803,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         label="Privacy Policy"
                         icon={<ShieldAlert size={16} strokeWidth={1.75} />}
                         variant="nav"
-                        onClick={() => navigate("/privacy")}
+                        onClick={() => navigate("/privacy", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
                     <InsetDivider />
@@ -798,7 +812,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         label="Terms of Service"
                         icon={<FileText size={16} strokeWidth={1.75} />}
                         variant="nav"
-                        onClick={() => navigate("/terms")}
+                        onClick={() => navigate("/terms", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
                     <InsetDivider />
@@ -807,7 +821,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         label="Community Guidelines"
                         icon={<BookOpen size={16} strokeWidth={1.75} />}
                         variant="nav"
-                        onClick={() => navigate("/community-guidelines")}
+                        onClick={() => navigate("/community-guidelines", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
                   </InsetPanel>
@@ -818,7 +832,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         label="Service Provider Agreement"
                         icon={<FileText size={16} strokeWidth={1.75} />}
                         variant="nav"
-                        onClick={() => navigate("/service-agreement")}
+                        onClick={() => navigate("/service-agreement", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
                     <InsetDivider />
@@ -827,7 +841,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         label="Service Booking Terms"
                         icon={<BookOpen size={16} strokeWidth={1.75} />}
                         variant="nav"
-                        onClick={() => navigate("/booking-terms")}
+                        onClick={() => navigate("/booking-terms", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
                   </InsetPanel>

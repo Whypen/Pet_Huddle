@@ -1247,12 +1247,9 @@ const MapPage = () => {
 
   // Reset on mount
   useEffect(() => {
-    setDbAlerts([]);
-    setVetClinics([]);
     setHiddenAlerts(new Set());
     setSelectedAlert(null);
     setSelectedVet(null);
-    setLoading(true);
   }, []);
 
   // ==========================================================================
