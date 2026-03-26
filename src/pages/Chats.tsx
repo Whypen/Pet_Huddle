@@ -5618,7 +5618,7 @@ const Chats = () => {
 
       {/* Discovery Filter Modal */}
       <GlassModal
-        isOpen={isFilterModalOpen}
+        isOpen={isFilterModalOpen && !starUpgradeTier}
         onClose={() => { setIsFilterModalOpen(false); setActiveFilterRow(null); }}
         title={activeFilterRow ? undefined : t("Filters")}
         maxWidth="max-w-lg"

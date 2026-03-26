@@ -262,36 +262,12 @@ serve(async (req) => {
     const usernameSlug = slugify(socialId || displayName || user.id);
     const { firstName, lastName } = splitLegalName(legalName);
 
+    // Keep creation payload minimal to avoid Stripe country/account capability
+    // mismatches that can hard-fail onboarding link creation.
     const accountPayloadBase: Stripe.AccountCreateParams = {
       type: "express",
-      business_type: "individual",
       email: userEmail || undefined,
       country: countryIso2 || undefined,
-      default_currency: marketCurrency || undefined,
-      individual: {
-        email: userEmail || undefined,
-        phone: phone || undefined,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
-      },
-      business_profile: {
-        mcc: "0752",
-        url: `https://huddle.pet/u/${usernameSlug}`,
-        product_description: "Pet care provider on Huddle’s Service marketplace.",
-        support_email: "support@huddle.pet",
-        support_url: "https://huddle.pet/support",
-      },
-      settings: {
-        payouts: {
-          schedule: {
-            interval: "manual",
-          },
-        },
-      },
-      capabilities: {
-        transfers: { requested: true },
-        card_payments: { requested: true },
-      },
       metadata: {
         huddle_user_id: socialId || user.id,
         huddle_username: socialId || displayName || user.id,

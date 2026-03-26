@@ -749,7 +749,7 @@ const Discover = () => {
       </AnimatePresence>
 
       <FilterSheet
-        isOpen={filterSheetOpen}
+        isOpen={filterSheetOpen && !isPremiumOpen}
         onClose={() => setFilterSheetOpen(false)}
         filters={advancedFilters}
         onApply={(f) => setAdvancedFilters(f)}

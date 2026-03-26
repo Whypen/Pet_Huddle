@@ -138,7 +138,12 @@ export async function invokeAuthedFunction<T = unknown>(
       });
       const payload = await res.json().catch(() => null) as unknown;
       if (!res.ok) {
-        const errMsg = (payload as { error?: string } | null)?.error || `http_${res.status}`;
+        const typed = (payload as { error?: string; detail?: string; code?: string; type?: string } | null) || null;
+        const errorText = String(typed?.error || "").trim();
+        const detailText = String(typed?.detail || "").trim();
+        const codeText = String(typed?.code || "").trim();
+        const reason = [errorText, detailText, codeText].filter(Boolean).join(" | ");
+        const errMsg = reason || `http_${res.status}`;
         return { data: null, error: new Error(errMsg) };
       }
       return { data: payload, error: null };
