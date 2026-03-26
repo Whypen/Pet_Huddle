@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
+import { createPortal } from "react-dom";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
@@ -73,6 +74,7 @@ export function StarUpgradeSheet({
   const highlights = tier === "plus" ? PLUS_HIGHLIGHTS : GOLD_HIGHLIGHTS;
 
   const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
+  const modalRoot = typeof document !== "undefined" ? document.body : null;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -87,14 +89,16 @@ export function StarUpgradeSheet({
   const annualPerMo = annualTotal / 12;
   const discountPct = Math.round((1 - annualPerMo / monthlyAmt) * 100);
 
-  return (
+  if (!modalRoot) return null;
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <>
           {/* ── Overlay ── */}
           <motion.div
             key="star-upgrade-overlay"
-            className="fixed inset-0 z-[5200] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
+            className="fixed inset-0 z-[12100] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -103,7 +107,7 @@ export function StarUpgradeSheet({
           />
 
           {/* ── Centered modal ── */}
-          <div className="fixed inset-0 z-[5201] flex items-center justify-center px-5 pointer-events-none">
+          <div className="fixed inset-0 z-[12110] flex items-center justify-center px-5 pointer-events-none">
             <motion.div
               key="star-upgrade-modal"
               className="w-full max-w-[390px] pointer-events-auto"
@@ -232,6 +236,7 @@ export function StarUpgradeSheet({
           </div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    modalRoot,
   );
 }
