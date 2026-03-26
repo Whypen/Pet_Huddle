@@ -125,6 +125,32 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
 
   useEffect(() => { if (isOpen) loadMembers(); }, [isOpen, loadMembers]);
 
+  useEffect(() => {
+    if (!isOpen || !profile?.id) return;
+
+    const channel = supabase
+      .channel(`manage-family:${profile.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "family_members", filter: `inviter_user_id=eq.${profile.id}` },
+        () => {
+          void loadMembers();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "family_members", filter: `invitee_user_id=eq.${profile.id}` },
+        () => {
+          void loadMembers();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isOpen, loadMembers, profile?.id]);
+
   async function removeMember(rowId: string) {
     const { error } = await supabase
       .from("family_members" as never)

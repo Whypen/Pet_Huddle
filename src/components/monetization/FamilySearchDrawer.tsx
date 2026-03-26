@@ -1,7 +1,7 @@
 // src/components/monetization/FamilySearchDrawer.tsx
 import { useState, useEffect } from "react";
 import { Search, UserPlus } from "lucide-react";
-import { GlassSheet } from "@/components/ui/GlassSheet";
+import { GlassModal } from "@/components/ui/GlassModal";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -87,15 +87,16 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
   }
 
   return (
-    <GlassSheet
+    <GlassModal
       isOpen={isOpen}
       onClose={onClose}
       title="Search user"
-      backdropClassName="z-[9700]"
-      className="z-[9710]"
-      contentClassName="overflow-y-auto overflow-x-visible"
+      maxWidth="max-w-md"
+      backdropClassName="z-[9800]"
+      containerClassName="z-[9810]"
+      className="max-h-[min(82vh,calc(100svh-56px))] overflow-y-auto"
     >
-      <div className="px-4 pb-4 pt-5 space-y-3">
+      <div className="px-4 pb-4 pt-7 space-y-3">
         {/* Search field */}
         <div className="relative z-20 focus-within:z-30">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" strokeWidth={1.75} />
@@ -103,7 +104,7 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="@Username or @SocialID"
+            placeholder="Username / Social ID"
             className="w-full pl-9 pr-4 py-3 rounded-[12px] bg-[var(--surface-neu)] text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none border border-transparent focus:border-[var(--brand-blue)]"
           />
         </div>
@@ -141,6 +142,6 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
           </p>
         )}
       </div>
-    </GlassSheet>
+    </GlassModal>
   );
 }
