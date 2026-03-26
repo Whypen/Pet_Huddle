@@ -1,7 +1,6 @@
 // src/components/monetization/ManageFamilySheet.tsx
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { motion, useMotionValue, useTransform, animate } from "framer-motion";
+import { Minus, Plus, UserMinus } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { FamilySearchDrawer } from "./FamilySearchDrawer";
 import { SharePerksModal } from "./SharePerksModal";
@@ -9,9 +8,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { normalizeQuotaTier } from "@/config/quotaConfig";
+import { NeuIconButton } from "@/components/ui/NeuIconButton";
 
 const BRAND_BLUE = "#2145CF";
-const SWIPE_THRESHOLD = -60;
 const MAX_MEMBERS = 4;
 
 interface FamilyMember {
@@ -36,57 +35,29 @@ function MemberRow({
   isOwner: boolean;
   onRemove: (id: string) => void;
 }) {
-  const x = useMotionValue(0);
-  const trashOpacity = useTransform(x, [0, SWIPE_THRESHOLD], [0, 1]);
-  const [swiped, setSwiped] = useState(false);
-
-  function handleDragEnd() {
-    if (x.get() <= SWIPE_THRESHOLD) {
-      setSwiped(true);
-      animate(x, SWIPE_THRESHOLD);
-    } else {
-      animate(x, 0, { type: "spring", stiffness: 400, damping: 30 });
-      setSwiped(false);
-    }
-  }
-
   return (
-    <div className="relative overflow-hidden">
-      {isOwner && (
-        <motion.div
-          className="absolute inset-y-0 right-0 flex items-center justify-center w-14 bg-red-500"
-          style={{ opacity: trashOpacity }}
-        >
-          <Trash2 size={16} color="#fff" strokeWidth={1.75} />
-        </motion.div>
-      )}
-      <motion.div
-        drag={isOwner ? "x" : false}
-        dragConstraints={{ left: SWIPE_THRESHOLD, right: 0 }}
-        dragElastic={0.1}
-        onDragEnd={handleDragEnd}
-        style={{ x }}
-        className="relative flex items-center gap-3 py-3"
-      >
-        <img
-          src={member.peer.avatar_url ?? "/placeholder.svg"}
-          alt={member.peer.display_name ?? ""}
-          className="w-9 h-9 rounded-full object-cover flex-shrink-0"
-        />
-        <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
+    <div className="flex items-center gap-3 py-3">
+      <img
+        src={member.peer.avatar_url ?? "/placeholder.svg"}
+        alt={member.peer.display_name ?? ""}
+        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
           {member.peer.display_name}
-        </span>
-        <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
-          Member
-        </span>
-        {swiped && isOwner && (
-          <button
-            onClick={() => onRemove(member.id)}
-            className="absolute inset-0 opacity-0"
-            aria-label="Confirm remove"
-          />
-        )}
-      </motion.div>
+        </p>
+        <p className="text-[11px] text-[var(--text-tertiary)]">Member</p>
+      </div>
+      {isOwner && (
+        <NeuIconButton
+          onClick={() => onRemove(member.id)}
+          aria-label="Remove member"
+          destructive
+          className="w-9 h-9"
+        >
+          <Minus size={16} strokeWidth={2.25} />
+        </NeuIconButton>
+      )}
     </div>
   );
 }
@@ -190,17 +161,12 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
     }
   }
 
+  const title = isOwner ? `Family Account (${usedSlots}/${totalSlots})` : "Family Account";
+
   return (
     <>
-      <GlassModal isOpen={isOpen} onClose={onClose} title="Family Account" maxWidth="max-w-sm">
+      <GlassModal isOpen={isOpen} onClose={onClose} title={title} maxWidth="max-w-sm">
         <div className="px-1 pb-2">
-          {/* Slot count subtitle */}
-          {isOwner && (
-            <p className="text-[12px] text-[var(--text-secondary)] mb-4">
-              {usedSlots} of {totalSlots} Slots
-            </p>
-          )}
-
           {/* Owner row */}
           <div className="flex items-center gap-3 py-3">
             <img
@@ -208,12 +174,12 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
               alt="you"
               className="w-9 h-9 rounded-full object-cover flex-shrink-0"
             />
-            <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
-              {profile?.display_name}
-            </span>
-            <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
-              Owner
-            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
+                {profile?.display_name}
+              </p>
+              <p className="text-[11px] text-[var(--text-tertiary)]">Owner</p>
+            </div>
           </div>
 
           {/* Member rows (owner's invited members) */}
@@ -233,12 +199,20 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
                 alt={memberRow.peer.display_name ?? ""}
                 className="w-9 h-9 rounded-full object-cover flex-shrink-0"
               />
-              <span className="flex-1 min-w-0 text-[13px] font-[500] text-[var(--text-primary)] truncate">
-                {memberRow.peer.display_name}
-              </span>
-              <span className="text-[12px] text-[var(--text-tertiary)] flex-shrink-0">
-                Owner
-              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-[500] text-[var(--text-primary)] truncate">
+                  {memberRow.peer.display_name}
+                </p>
+                <p className="text-[11px] text-[var(--text-tertiary)]">Owner</p>
+              </div>
+              <NeuIconButton
+                onClick={leaveFamily}
+                aria-label="Leave family"
+                destructive
+                className="w-9 h-9"
+              >
+                <UserMinus size={16} strokeWidth={2.1} />
+              </NeuIconButton>
             </div>
           )}
 
@@ -261,15 +235,6 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
             </div>
           )}
 
-          {/* Leave family (member view) */}
-          {memberRow && (
-            <button
-              onClick={leaveFamily}
-              className="mt-4 w-full text-center text-[13px] font-[500] text-red-500"
-            >
-              Leave Family
-            </button>
-          )}
         </div>
       </GlassModal>
 

@@ -5,6 +5,7 @@ import { GlassSheet } from "@/components/ui/GlassSheet";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { NeuIconButton } from "@/components/ui/NeuIconButton";
 
 interface SearchResult {
   id: string;
@@ -86,10 +87,17 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
   }
 
   return (
-    <GlassSheet isOpen={isOpen} onClose={onClose} title="Search user" className="z-[5300]">
+    <GlassSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Search user"
+      backdropClassName="z-[9300]"
+      className="z-[9310]"
+      contentClassName="overflow-y-auto overflow-x-visible"
+    >
       <div className="px-4 pb-4 space-y-3">
         {/* Search field */}
-        <div className="relative">
+        <div className="relative z-20 focus-within:z-30">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" strokeWidth={1.75} />
           <input
             autoFocus
@@ -116,15 +124,14 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
                 <p className="text-[11px] text-[var(--text-tertiary)]">@{r.social_id}</p>
               )}
             </div>
-            <button
+            <NeuIconButton
               onClick={() => sendInvite(r)}
               disabled={inviting === r.id}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-[10px] text-[12px] font-[600] text-white"
-              style={{ background: "#2145CF" }}
+              aria-label={inviting === r.id ? "Inviting" : `Invite ${r.display_name ?? "user"}`}
+              className="w-9 h-9 text-[#2145CF]"
             >
               <UserPlus size={12} strokeWidth={2} />
-              {inviting === r.id ? "…" : "Invite"}
-            </button>
+            </NeuIconButton>
           </div>
         ))}
 

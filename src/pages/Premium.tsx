@@ -441,17 +441,20 @@ export default function PremiumPage() {
 
           {/* CTA — white bg, themed text */}
           <button
-            className="mt-5 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+            className="mt-5 relative overflow-hidden w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
             style={{
               background: "#FFFFFF",
-              color: theme.bg,
+              color: blockedPlan ? "#94A3B8" : theme.bg,
               opacity: isCheckingOut ? 0.6 : 1,
             }}
             disabled={isCheckingOut || blockedPlan}
             onClick={() => void startPlanCheckout(tier)}
           >
-            <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
-            {isCheckingOut ? "Loading…" : ctaLabel}
+            {blockedPlan && <span className="absolute inset-0 bg-white/65" aria-hidden />}
+            <span className="relative z-10 flex items-center justify-center gap-2">
+              <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
+              {isCheckingOut ? "Loading…" : ctaLabel}
+            </span>
           </button>
         </div>
       </div>

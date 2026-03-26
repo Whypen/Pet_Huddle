@@ -18,6 +18,8 @@ interface GlassSheetProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /** Additional class on the backdrop */
+  backdropClassName?: string;
   /** Additional class on the sheet panel */
   className?: string;
   /** Additional class on the internal body container */
@@ -31,6 +33,7 @@ export function GlassSheet({
   isOpen,
   onClose,
   title,
+  backdropClassName,
   className,
   contentClassName,
   children,
@@ -47,7 +50,7 @@ export function GlassSheet({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
-            className="fixed inset-0 z-[4200] bg-foreground/20 backdrop-blur-sm"
+            className={cn("fixed inset-0 z-[4200] bg-foreground/20 backdrop-blur-sm", backdropClassName)}
             onClick={onClose}
           />
 
