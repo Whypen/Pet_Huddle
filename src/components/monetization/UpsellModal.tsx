@@ -4,6 +4,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Star, AlertTriangle, Camera, Users, Sparkles } from "lucide-react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -61,8 +62,10 @@ export const UpsellModal = ({
 
   const Icon = ICON_MAP[type];
   const colors = COLOR_MAP[type];
+  const modalRoot = typeof document !== "undefined" ? document.body : null;
 
-  return (
+  if (!modalRoot) return null;
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <>
@@ -72,7 +75,7 @@ export const UpsellModal = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[10000]"
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[12000]"
           />
 
           {/* Modal */}
@@ -80,7 +83,7 @@ export const UpsellModal = ({
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto bg-card border border-border rounded-2xl p-6 z-[10010] shadow-2xl"
+            className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto bg-card border border-border rounded-2xl p-6 z-[12010] shadow-2xl"
           >
             {/* Close Button */}
             <button
@@ -139,6 +142,7 @@ export const UpsellModal = ({
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    modalRoot,
   );
 };
