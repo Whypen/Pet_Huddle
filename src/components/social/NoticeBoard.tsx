@@ -40,6 +40,7 @@ import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel } from "@/lib/shareModel";
+import type { SharePayload } from "@/lib/shareModel";
 import { recordThreadShareClick } from "@/lib/shareCount";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
@@ -459,7 +460,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const mentionDirectoryRef = useRef<Record<string, MentionSuggestion>>({});
   const [mentionSeeds, setMentionSeeds] = useState<MentionSeed[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
-  const [sharePayload, setSharePayload] = useState<{ threadId: string; url: string; title: string; description: string; imageUrl?: string } | null>(null);
+  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
   const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, LinkPreview>>({});
   const [expandedContentIds, setExpandedContentIds] = useState<Set<string>>(new Set());
   const [expandableContentById, setExpandableContentById] = useState<Record<string, boolean>>({});
@@ -2455,13 +2456,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       contentSnippet: notice.content,
     });
 
-    setSharePayload({
-      threadId: notice.id,
-      url: model.url,
-      title: model.title,
-      description: model.description,
-      imageUrl: model.imageUrl,
-    });
+    setSharePayload(model);
     setShareOpen(true);
   }, []);
 
@@ -3578,11 +3573,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         <ShareSheet
           open={shareOpen}
           onClose={() => setShareOpen(false)}
-          url={sharePayload.url}
-          title={sharePayload.title}
-          description={sharePayload.description}
-          imageUrl={sharePayload.imageUrl}
-          onShareAction={() => void recordShareClick(sharePayload.threadId)}
+          share={sharePayload}
+          onShareAction={() => void recordShareClick(sharePayload.contentId)}
         />
       )}
 

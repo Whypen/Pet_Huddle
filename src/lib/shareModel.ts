@@ -23,6 +23,8 @@ export type ShareModel = {
   countThreadId: string | null;
 };
 
+export type SharePayload = ShareModel;
+
 const normalizeOrigin = (origin: string) => origin.replace(/\/+$/, "");
 
 export const buildCanonicalShareId = (contentType: ShareContentType, contentId: string) => {

@@ -24,7 +24,7 @@ import {
 import {
   X,
   Heart,
-  Share2,
+  Send,
   Flag,
   Ban,
   EyeOff,
@@ -46,6 +46,7 @@ import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { buildShareModel } from "@/lib/shareModel";
+import type { SharePayload } from "@/lib/shareModel";
 import { getThreadShareCount, recordThreadShareClick } from "@/lib/shareCount";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
@@ -136,10 +137,7 @@ interface PinDetailModalProps {
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
-  const [shareUrl, setShareUrl] = useState("");
-  const [shareTitle, setShareTitle] = useState("");
-  const [shareDescription, setShareDescription] = useState("");
-  const [shareImageUrl, setShareImageUrl] = useState("");
+  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
   const [shareCount, setShareCount] = useState<number>(0);
 
   const [supportCount, setSupportCount] = useState(0);
@@ -420,10 +418,7 @@ interface PinDetailModalProps {
       socialId: alert?.creator?.social_id,
       contentSnippet: alert?.description || alert?.title || null,
     });
-    setShareUrl(model.url);
-    setShareTitle(model.title);
-    setShareDescription(model.description);
-    setShareImageUrl(model.imageUrl);
+    setSharePayload(model);
     setShareOpen(true);
   }, [alert?.creator?.display_name, alert?.creator?.social_id, alert?.description, alert?.id, alert?.title, socialThreadId]);
 
@@ -667,7 +662,7 @@ interface PinDetailModalProps {
                   className="inline-flex items-center gap-0.5 rounded-full px-2 py-2 transition-all hover:bg-muted"
                   title="Share"
                 >
-                  <Share2 className="w-5 h-5 text-muted-foreground" />
+                  <Send className="w-4 h-4 text-muted-foreground" />
                   {shareCount > 0 ? (
                     <span className="text-xs font-medium tabular-nums text-muted-foreground">{shareCount}</span>
                   ) : null}
@@ -847,15 +842,14 @@ interface PinDetailModalProps {
       )}
     </AnimatePresence>
 
-    <ShareSheet
-      open={shareOpen}
-      onClose={() => setShareOpen(false)}
-      url={shareUrl}
-      title={shareTitle}
-      description={shareDescription}
-      imageUrl={shareImageUrl}
-      onShareAction={() => void handleShareAction()}
-    />
+    {sharePayload && (
+      <ShareSheet
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        share={sharePayload}
+        onShareAction={() => void handleShareAction()}
+      />
+    )}
 
     <AlertDialog open={confirmBlock} onOpenChange={(v) => !v && setConfirmBlock(false)}>
       <AlertDialogContent>

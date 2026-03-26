@@ -1,3 +1,6 @@
+import { buildCanonicalShareId } from "../src/lib/shareModel";
+import { buildSharePreviewDescription, buildSharePreviewTitle } from "../src/lib/sharePreview";
+
 type MaybeString = string | string[] | undefined;
 type RequestShape = {
   headers?: Record<string, MaybeString>;
@@ -43,41 +46,6 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
-
-const normalizeSocialId = (value: string | null | undefined) =>
-  String(value || "")
-    .trim()
-    .replace(/^@+/, "");
-
-const cleanContent = (value: string | null | undefined) =>
-  String(value || "")
-    .replace(/\bhttps?:\/\/[^\s<>"')]+/gi, " ")
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-const truncateSoft = (value: string, minChars = 120, maxChars = 160) => {
-  if (value.length <= maxChars) return value;
-  const candidate = value.slice(0, maxChars + 1);
-  const boundary = candidate.lastIndexOf(" ");
-  const cut = boundary >= minChars ? boundary : maxChars;
-  return `${candidate.slice(0, cut).trim()}...`;
-};
-
-const buildTitle = (displayName?: string | null, socialId?: string | null) => {
-  const name = String(displayName || "").trim();
-  const social = normalizeSocialId(socialId);
-  if (name && social) return `${name} (@${social}) on huddle`;
-  if (name) return `${name} on huddle`;
-  if (social) return `@${social} on huddle`;
-  return "Post on huddle";
-};
-
-const buildDescription = (content?: string | null) => {
-  const cleaned = cleanContent(content);
-  if (!cleaned) return "See this post on huddle.";
-  return truncateSoft(cleaned);
-};
 
 const resolveSupabaseConfig = () => {
   const url = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
@@ -127,8 +95,8 @@ const fetchThreadPreviewData = async (threadId: string) => {
   return {
     shareType: "thread" as const,
     contentId: String(thread.id),
-    title: buildTitle(displayName, socialId),
-    description: buildDescription(thread.content),
+    title: buildSharePreviewTitle(displayName, socialId),
+    description: buildSharePreviewDescription(thread.content),
   };
 };
 
@@ -162,8 +130,8 @@ const fetchAlertPreviewData = async (alertId: string) => {
   return {
     shareType: "alert" as const,
     contentId: String(alert.id),
-    title: buildTitle(displayName, socialId),
-    description: buildDescription(fallbackSnippet),
+    title: buildSharePreviewTitle(displayName, socialId),
+    description: buildSharePreviewDescription(fallbackSnippet),
   };
 };
 
@@ -198,11 +166,7 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
   const title = preview?.title || "Post on huddle";
   const description = preview?.description || "See this post on huddle.";
   const image = `${origin}/huddle-logo.jpg`;
-  const shareId = !preview
-    ? ""
-    : preview.shareType === "alert"
-      ? `alert_${preview.contentId}`
-      : preview.contentId;
+  const shareId = !preview ? "" : buildCanonicalShareId(preview.shareType, preview.contentId);
   const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
   const destination = !preview
     ? `${origin}/threads`

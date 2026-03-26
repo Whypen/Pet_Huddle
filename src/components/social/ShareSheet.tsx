@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy, Loader2, X } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { buildSocialShareLinks } from "@/lib/socialShare";
+import type { SharePayload } from "@/lib/shareModel";
 import { toast } from "sonner";
 import { useCallback, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,16 +18,13 @@ type ChatShareTarget = {
 interface ShareSheetProps {
   open: boolean;
   onClose: () => void;
-  url: string;
-  title?: string;
-  description?: string;
-  imageUrl?: string;
+  share: SharePayload;
   onShareAction?: () => void;
 }
 
-export const ShareSheet = ({ open, onClose, url, imageUrl, onShareAction }: ShareSheetProps) => {
-  const links = buildSocialShareLinks(url);
-  const payloadText = url.trim();
+export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetProps) => {
+  const links = buildSocialShareLinks(share.url);
+  const payloadText = share.url.trim();
   const { profile } = useAuth();
 
   const [chatPickerOpen, setChatPickerOpen] = useState(false);
@@ -44,12 +42,14 @@ export const ShareSheet = ({ open, onClose, url, imageUrl, onShareAction }: Shar
     if (!navigator.share) return false;
     try {
       const basePayload: ShareData = {
+        title: share.title,
+        text: share.description,
         url: payloadText,
       };
 
-      if (imageUrl && typeof navigator.canShare === "function" && typeof File !== "undefined") {
+      if (share.imageUrl && typeof navigator.canShare === "function" && typeof File !== "undefined") {
         try {
-          const response = await fetch(imageUrl);
+          const response = await fetch(share.imageUrl);
           if (response.ok) {
             const blob = await response.blob();
             const ext = blob.type.split("/")[1] || "jpg";
