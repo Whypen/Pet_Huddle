@@ -13,6 +13,7 @@ export type ShareModelInput = {
   socialId?: string | null;
   contentSnippet?: string | null;
   imagePath?: string | null;
+  nativeShareText?: string | null;
 };
 
 export type ShareModel = {
@@ -27,6 +28,7 @@ export type ShareModel = {
   imageUrl: string;
   chatHeadline: string;
   countThreadId: string | null;
+  nativeShareText: string;
 };
 
 type ChatShareEnvelope = {
@@ -115,6 +117,7 @@ export const buildShareModel = ({
   socialId,
   contentSnippet,
   imagePath = "/huddle-logo.jpg",
+  nativeShareText,
 }: ShareModelInput): ShareModel => {
   const cleanOrigin = normalizeOrigin(origin);
   const shareId = buildCanonicalShareId(contentType, contentId);
@@ -132,6 +135,10 @@ export const buildShareModel = ({
   const imageUrl = isAbsoluteHttpUrl(normalizedImagePath)
     ? normalizedImagePath
     : `${cleanOrigin}${normalizedImagePath.startsWith("/") ? normalizedImagePath : `/${normalizedImagePath}`}`;
+  const normalizedNativeShareText = String(nativeShareText || "").trim();
+  const defaultNativeShareText = surface === "Map"
+    ? "See this alert to help look out for the pet community!"
+    : "See this post on huddle.";
 
   return {
     contentType,
@@ -145,6 +152,7 @@ export const buildShareModel = ({
     imageUrl,
     chatHeadline: buildChatShareHeadline(displayName, socialId, surface),
     countThreadId: contentType === "thread" ? contentId : null,
+    nativeShareText: normalizedNativeShareText || defaultNativeShareText,
   };
 };
 
@@ -222,6 +230,9 @@ export const parseChatShareMessage = (rawContent: string | null | undefined): Sh
       imageUrl: String(share.imageUrl),
       chatHeadline: normalizeChatHeadline(share.chatHeadline, String(share.title), normalizedSurface),
       countThreadId: share.countThreadId ? String(share.countThreadId) : null,
+      nativeShareText: String(share.nativeShareText || (normalizedSurface === "Map"
+        ? "See this alert to help look out for the pet community!"
+        : "See this post on huddle.")),
     };
   } catch {
     return null;

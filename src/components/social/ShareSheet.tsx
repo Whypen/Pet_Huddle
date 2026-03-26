@@ -271,6 +271,8 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
   const handleNativeShare = useCallback(async () => {
     onShareAction?.();
     const payload: ShareData = {
+      title: share.title,
+      text: share.nativeShareText,
       url: share.canonicalUrl,
     };
 
@@ -296,7 +298,7 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
       }
       toast.error("Unable to share right now");
     }
-  }, [onClose, onShareAction, share.canonicalUrl]);
+  }, [onClose, onShareAction, share.canonicalUrl, share.nativeShareText, share.title]);
 
   const handleShareToChat = useCallback(async () => {
     if (!profile?.id) {

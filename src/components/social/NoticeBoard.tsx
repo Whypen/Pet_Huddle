@@ -2495,6 +2495,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         socialId: notice.author?.social_id,
         contentSnippet: notice.content,
         imagePath: firstImage,
+        nativeShareText: String(notice.title || "").trim() || undefined,
       }),
     );
     setShareOpen(true);
