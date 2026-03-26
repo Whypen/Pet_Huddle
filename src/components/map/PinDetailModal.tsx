@@ -457,8 +457,8 @@ interface PinDetailModalProps {
     setSharePayload(
       buildShareModel({
         origin,
-        contentType: socialThreadId ? "thread" : "alert",
-        contentId: socialThreadId || alert.id,
+        contentType: "alert",
+        contentId: alert.id,
         surface: "Map",
         appContentId: alert.id,
         displayName,

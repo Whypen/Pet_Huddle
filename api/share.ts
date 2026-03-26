@@ -153,7 +153,14 @@ const fetchAlertPreviewData = async (alertId: string) => {
   const linkedThreadId = String(alert.thread_id || "").trim();
   if (linkedThreadId) {
     const threadPreview = await fetchThreadPreviewData(linkedThreadId);
-    if (threadPreview) return threadPreview;
+    if (threadPreview) {
+      return {
+        shareType: "alert" as const,
+        contentId: String(alert.id),
+        title: threadPreview.title,
+        description: threadPreview.description,
+      };
+    }
   }
 
   let displayName = "";
@@ -204,16 +211,20 @@ export default async function handler(req: RequestShape, res: ResponseShape) {
     : parsed.shareType === "thread"
       ? await fetchThreadPreviewData(parsed.contentId)
       : await fetchAlertPreviewData(parsed.contentId);
-  const title = preview?.title || "Post on huddle";
-  const description = preview?.description || "See this post on huddle.";
+  const effectiveType = preview?.shareType || parsed?.shareType || "thread";
+  const effectiveContentId = preview?.contentId || parsed?.contentId || "";
+  const title = preview?.title || (effectiveType === "alert" ? "Map Alert on huddle" : "Social Post on huddle");
+  const description = preview?.description || (effectiveType === "alert"
+    ? "See this alert on huddle map."
+    : "See this post on huddle social.");
   const image = `${origin}/huddle-logo.jpg`;
-  const shareId = !preview ? "" : buildCanonicalShareId(preview.shareType, preview.contentId);
+  const shareId = effectiveContentId ? buildCanonicalShareId(effectiveType, effectiveContentId) : "";
   const shareUrl = shareId ? `${origin}/share/${encodeURIComponent(shareId)}` : `${origin}/share`;
-  const destination = !preview
+  const destination = !effectiveContentId
     ? `${origin}/threads`
-    : preview.shareType === "alert"
-      ? `${origin}/map`
-      : `${origin}/threads?focus=${encodeURIComponent(preview.contentId)}`;
+    : effectiveType === "alert"
+      ? `${origin}/map?alert=${encodeURIComponent(effectiveContentId)}`
+      : `${origin}/threads?focus=${encodeURIComponent(effectiveContentId)}`;
 
   const html = `<!doctype html>
 <html lang="en">
