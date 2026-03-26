@@ -56,7 +56,7 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
         .insert({
           inviter_user_id: profile.id,
           invitee_user_id: target.id,
-          status: "pending",
+          status: "accepted",
         } as never)
         .select("id")
         .single() as unknown as { data: { id: string } | null; error: unknown };

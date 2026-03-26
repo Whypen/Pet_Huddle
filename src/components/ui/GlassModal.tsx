@@ -46,12 +46,12 @@ export function GlassModal({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
-            className="fixed inset-0 z-[3000] bg-foreground/30 backdrop-blur-sm"
+            className="fixed inset-0 z-[9500] bg-foreground/30 backdrop-blur-sm"
             onClick={onClose}
           />
 
           {/* Modal surface — E3 glass */}
-          <div className="fixed inset-0 z-[3001] flex items-center justify-center px-4 py-6 pointer-events-none">
+          <div className="fixed inset-0 z-[9510] flex items-center justify-center px-4 py-6 pointer-events-none">
             <motion.div
               key="glass-modal-content"
               initial={{ opacity: 0, scale: 0.97, y: 8 }}

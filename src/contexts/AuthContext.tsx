@@ -5,6 +5,7 @@ import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
 import { isPasskeySupportedBrowser, listPasskeyFactors } from "@/lib/passkey";
 import { trackDeviceFingerprint } from "@/lib/deviceFingerprint";
 import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
+import { normalizeQuotaTier } from "@/config/quotaConfig";
 import {
   clearSignupScopedStorage,
   SIGNUP_PASSWORD_SESSION_KEY,
@@ -286,7 +287,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      let effectiveTier = data.tier || "free";
+      const profileTier = normalizeQuotaTier(data.tier || "free");
+      let effectiveTier = profileTier;
       let familyOwnerId: string | null = null;
       const { data: family } = await supabase
         .from("family_members" as "profiles")
@@ -305,7 +307,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           .maybeSingle() as unknown as { data: { tier?: string } | null };
         if (!isHydrationRunCurrent(runId)) return;
         if (inviter?.tier) {
-          effectiveTier = inviter.tier;
+          const inviterTier = normalizeQuotaTier(inviter.tier);
+          const tierRank = { free: 0, plus: 1, gold: 2 } as const;
+          effectiveTier = tierRank[inviterTier] > tierRank[profileTier] ? inviterTier : profileTier;
         }
       }
 
