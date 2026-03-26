@@ -161,14 +161,28 @@ export const parseChatShareMessage = (rawContent: string | null | undefined): Sh
   const raw = String(rawContent || "").trim();
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<ChatShareEnvelope> | Record<string, unknown>;
+    let parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "string") {
+      const nested = String(parsed || "").trim();
+      if (nested.startsWith("{") || nested.startsWith("[")) {
+        try {
+          parsed = JSON.parse(nested) as unknown;
+        } catch {
+          // Keep original parsed string fallback path.
+        }
+      }
+    }
+    const parsedObject = (parsed && typeof parsed === "object")
+      ? (parsed as Partial<ChatShareEnvelope> | Record<string, unknown>)
+      : null;
+    if (!parsedObject) return null;
     const payloadShare = (() => {
-      if ((parsed as Partial<ChatShareEnvelope>)?.kind === "huddle_share" && (parsed as Partial<ChatShareEnvelope>)?.share) {
-        return (parsed as Partial<ChatShareEnvelope>).share as Partial<ShareModel>;
+      if ((parsedObject as Partial<ChatShareEnvelope>)?.kind === "huddle_share" && (parsedObject as Partial<ChatShareEnvelope>)?.share) {
+        return (parsedObject as Partial<ChatShareEnvelope>).share as Partial<ShareModel>;
       }
       // Backward compatibility: accept direct share object payloads from older builds.
-      if (parsed && typeof parsed === "object" && ("contentType" in parsed || "shareId" in parsed || "canonicalUrl" in parsed || "url" in parsed)) {
-        return parsed as Partial<ShareModel>;
+      if ("contentType" in parsedObject || "shareId" in parsedObject || "canonicalUrl" in parsedObject || "url" in parsedObject) {
+        return parsedObject as Partial<ShareModel>;
       }
       return null;
     })();

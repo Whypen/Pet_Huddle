@@ -40,7 +40,6 @@ import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
 
@@ -2619,9 +2618,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [visibleNotices, threadMentionsById]);
 
   const ensureLinkPreview = useCallback(async (url: string) => {
-    if (!url || !user?.id) return;
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData.session?.access_token) return;
+    if (!url) return;
     const existing = linkPreviewMapRef.current[url];
     if (existing && (existing.loading || existing.resolved)) return;
     if (linkPreviewInFlightRef.current.has(url)) return;
@@ -2635,7 +2632,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     try {
-      const invokePromise = invokeAuthedFunction<LinkPreviewPayload>("link-preview", { body: { url } });
+      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", { body: { url } });
       const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
         setTimeout(() => resolve({ data: null, error: new Error("preview_timeout") }), 7000)
       );
@@ -2698,7 +2695,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     } finally {
       linkPreviewInFlightRef.current.delete(url);
     }
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     const urls = Array.from(
