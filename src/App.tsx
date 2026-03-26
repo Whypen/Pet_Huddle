@@ -22,6 +22,7 @@ import SignupName from "./pages/signup/SignupName";
 import SignupCredentials from "./pages/signup/SignupCredentials";
 import SignupVerify from "./pages/signup/SignupVerify";
 import SignupEmailConfirmation from "./pages/signup/SignupEmailConfirmation";
+import SignupMarketingConfirmed from "./pages/signup/SignupMarketingConfirmed";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
 import EditProfile from "./pages/EditProfile";
@@ -53,6 +54,7 @@ const AIVet = lazy(() => import("./pages/AIVet"));
 const MapPage = lazy(() => import("./pages/Map"));
 const PetDetails = lazy(() => import("./pages/PetDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
+const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 const Premium = lazy(() => import("./pages/Premium"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Admin = lazy(() => import("./pages/Admin"));
@@ -133,6 +135,7 @@ const App = () => (
                   <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
                   <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
                   <Route path="/signup/email-confirmation" element={<PublicRoute><SignupEmailConfirmation /></PublicRoute>} />
+                  <Route path="/signup/marketing-confirmed" element={<PublicRoute><SignupMarketingConfirmed /></PublicRoute>} />
 
                   {/* Protected Routes */}
                   <Route
@@ -342,7 +345,9 @@ const App = () => (
                     path="/settings/security"
                     element={
                       <ProtectedRoute>
-                        <Navigate to="/settings" replace />
+                        <AppShell>
+                          <RouteSuspense><SecuritySettings /></RouteSuspense>
+                        </AppShell>
                       </ProtectedRoute>
                     }
                   />

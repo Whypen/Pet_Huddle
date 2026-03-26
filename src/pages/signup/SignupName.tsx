@@ -90,13 +90,18 @@ const SignupName = () => {
           toast.error("Account creation failed. Please try again.");
           return;
         }
-        // Fire verify email (fire-and-forget)
+        // Fire account verify email + optional marketing DOI email (both fire-and-forget)
         const { data: sessionData } = await supabase.auth.getSession();
         const newUserId = sessionData.session?.user?.id;
         if (newUserId) {
           void supabase.functions
             .invoke("send-signup-verify-email", { body: { user_id: newUserId } })
             .catch((err) => console.warn("[signup-name] verify email failed silently", err));
+          if (emailOptIn) {
+            void supabase.functions
+              .invoke("send-marketing-doi-email", { body: { user_id: newUserId } })
+              .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
+          }
         }
         if (emailOptIn) {
           toast.message("We’ll send you a separate email to confirm your subscription.");

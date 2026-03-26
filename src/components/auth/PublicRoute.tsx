@@ -17,8 +17,10 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const allowSignupFlowWithSession =
     location.pathname.startsWith("/signup/") && (flowState !== "idle" || isOAuthOnboarding);
   const onboardingIncomplete = Boolean(user && profile && !isRegisteredUserProfile(profile));
-  const isEmailConfirmationPath = location.pathname === "/signup/email-confirmation";
-  if (isEmailConfirmationPath) {
+  const isTokenGatedPath =
+    location.pathname === "/signup/email-confirmation" ||
+    location.pathname === "/signup/marketing-confirmed";
+  if (isTokenGatedPath) {
     // Always allow — token in URL is the auth; user may arrive from inbox days later
     return <>{children}</>;
   }
