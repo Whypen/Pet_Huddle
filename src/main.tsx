@@ -24,6 +24,25 @@ if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
 
 createRoot(document.getElementById("root")!).render(<App />);
 
+const SW_RESET_GUARD = "huddle:sw-reset-v1";
+const resetServiceWorkerCachesOnce = async () => {
+  if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
+  try {
+    if (sessionStorage.getItem(SW_RESET_GUARD) === "1") return;
+    sessionStorage.setItem(SW_RESET_GUARD, "1");
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+    window.location.reload();
+  } catch (error) {
+    console.warn("Service worker reset failed:", error);
+  }
+};
+void resetServiceWorkerCachesOnce();
+
 const CHUNK_RELOAD_GUARD = "huddle:chunk-reload-once";
 const shouldReloadForChunkFailure = (input: unknown): boolean => {
   const text = String(input ?? "");
@@ -58,9 +77,5 @@ window.addEventListener("unhandledrejection", (event) => {
 // Service worker caching can cause stale bundles and broken network handshakes during dev.
 // Only register it for production builds.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((err) => {
-      console.warn("Service worker registration failed:", err);
-    });
-  });
+  // Intentionally disabled for now to avoid stale bundle loops in production webviews.
 }

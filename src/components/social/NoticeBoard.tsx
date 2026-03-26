@@ -325,6 +325,11 @@ const buildFallbackLinkPreview = (url: string, error?: string): LinkPreview => {
 };
 
 const linkPreviewAnonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const linkPreviewFunctionUrl = (() => {
+  const base = String(import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  return `${base}/functions/v1/link-preview`;
+})();
 
 const findMentionOccurrences = (value: string, socialId: string) => {
   const matches: Array<{ start: number; end: number }> = [];
@@ -2634,15 +2639,25 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     try {
-      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", {
-        body: { url },
-        headers: linkPreviewAnonKey
-          ? {
-              apikey: linkPreviewAnonKey,
-              authorization: `Bearer ${linkPreviewAnonKey}`,
-            }
-          : undefined,
-      });
+      const invokePromise = (async () => {
+        if (!linkPreviewFunctionUrl || !linkPreviewAnonKey) {
+          return { data: null, error: new Error("link_preview_env_missing") };
+        }
+        const response = await fetch(linkPreviewFunctionUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: linkPreviewAnonKey,
+            authorization: `Bearer ${linkPreviewAnonKey}`,
+          },
+          body: JSON.stringify({ url }),
+        });
+        if (!response.ok) {
+          return { data: null, error: new Error(`http_${response.status}`) };
+        }
+        const payload = (await response.json()) as LinkPreviewPayload;
+        return { data: payload, error: null };
+      })();
       const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
         setTimeout(() => resolve({ data: null, error: new Error("preview_timeout") }), 7000)
       );
