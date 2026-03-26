@@ -324,6 +324,8 @@ const buildFallbackLinkPreview = (url: string, error?: string): LinkPreview => {
   }
 };
 
+const linkPreviewAnonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+
 const findMentionOccurrences = (value: string, socialId: string) => {
   const matches: Array<{ start: number; end: number }> = [];
   if (!socialId) return matches;
@@ -2632,7 +2634,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     try {
-      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", { body: { url } });
+      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", {
+        body: { url },
+        headers: linkPreviewAnonKey
+          ? {
+              apikey: linkPreviewAnonKey,
+              authorization: `Bearer ${linkPreviewAnonKey}`,
+            }
+          : undefined,
+      });
       const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
         setTimeout(() => resolve({ data: null, error: new Error("preview_timeout") }), 7000)
       );
