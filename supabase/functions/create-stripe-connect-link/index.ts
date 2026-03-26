@@ -174,7 +174,7 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization") ?? "";
-    const accessToken = authHeader.replace("Bearer ", "").trim();
+    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) {
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
     }

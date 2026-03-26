@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 const StripeReturn = () => {
   const navigate = useNavigate();
@@ -10,9 +10,10 @@ const StripeReturn = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke("create-stripe-connect-link", {
-          body: { action: "check_status" },
-        });
+        const { data, error } = await invokeAuthedFunction<{ status?: string }>(
+          "create-stripe-connect-link",
+          { body: { action: "check_status" } },
+        );
         if (error) throw error;
         const status = String((data as { status?: string })?.status || "pending");
         if (status === "complete") {

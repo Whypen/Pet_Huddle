@@ -47,10 +47,17 @@ const ADDON_DEFAULTS: Record<string, number> = {
 
 const requiredSubscriptionTypes = new Set(["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"]);
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 
 async function resolveStripePrice(type: string, required: boolean) {
@@ -113,6 +120,10 @@ async function validateExplicitPriceId(priceId: string, mode: "subscription" | "
 }
 
 serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
   try {
     console.log(`[CHECKOUT] Stripe mode=${stripeMode}`);
 
@@ -135,24 +146,15 @@ serve(async (req: Request) => {
     const u = await supabase.auth.getUser(accessToken);
     const authedUserId = u.data?.user?.id || null;
     if (!authedUserId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json" },
-      });
+      return json({ error: "Unauthorized" }, 401);
     }
 
     if (!mode || (!type && !items)) {
-      return new Response(
-        JSON.stringify({ error: "Missing required parameters" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return json({ error: "Missing required parameters" }, 400);
     }
 
     if (bodyUserId && bodyUserId !== authedUserId) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      });
+      return json({ error: "Forbidden" }, 403);
     }
 
     const userId = authedUserId;
@@ -260,10 +262,7 @@ serve(async (req: Request) => {
 
       if (amount) {
         if (fallbackTotal && amount !== fallbackTotal) {
-          return new Response(
-            JSON.stringify({ error: "Invalid amount for add-on" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
-          );
+          return json({ error: "Invalid amount for add-on" }, 400);
         }
       }
 

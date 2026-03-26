@@ -22,13 +22,13 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ export default function PremiumPage() {
           const a = ADD_ONS.find((x) => x.id === item.id);
           return sum + (a?.price ?? 0) * item.qty;
         }, 0);
-        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+        const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "payment",
@@ -257,7 +257,7 @@ export default function PremiumPage() {
         );
       }
 
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "subscription",
@@ -288,7 +288,7 @@ export default function PremiumPage() {
 
     try {
       setIsCheckingOut(true);
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "payment",

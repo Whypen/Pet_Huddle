@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 type StartStripeCheckoutParams = {
   mode: "subscription" | "payment";
@@ -11,7 +11,7 @@ type StartStripeCheckoutParams = {
 };
 
 export async function startStripeCheckout(params: StartStripeCheckoutParams): Promise<string> {
-  const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+  const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
     body: {
       ...params,
       successUrl: params.successUrl ?? `${window.location.origin}/premium`,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuToggle } from "@/components/ui/NeuToggle";
@@ -380,9 +381,10 @@ const CarerProfile: React.FC = () => {
         const row = data as Record<string, unknown>;
         if (row.stripe_account_id) {
           void (async () => {
-            const { data: statusData } = await supabase.functions.invoke("create-stripe-connect-link", {
-              body: { action: "check_status" },
-            });
+            const { data: statusData } = await invokeAuthedFunction<{ status?: string }>(
+              "create-stripe-connect-link",
+              { body: { action: "check_status" } },
+            );
             const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
             if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
               setFormData((prev) => ({ ...prev, stripePayoutStatus: nextStatus as CarerProfileData["stripePayoutStatus"] }));
@@ -595,9 +597,10 @@ const CarerProfile: React.FC = () => {
     try {
       const returnUrl = `${window.location.origin}/carerprofile/stripe-return`;
       const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
-      const { data, error } = await supabase.functions.invoke("create-stripe-connect-link", {
-        body: { action: "create_link", returnUrl, refreshUrl },
-      });
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>(
+        "create-stripe-connect-link",
+        { body: { action: "create_link", returnUrl, refreshUrl } },
+      );
       if (error) throw error;
       const targetUrl = String((data as { url?: string } | null)?.url || "").trim();
       if (!targetUrl) {
