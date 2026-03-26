@@ -96,6 +96,7 @@ serve(async (req: Request) => {
         .from("profiles")
         .update({
           marketing_consent:         false,
+          marketing_subscribed:      false,
           marketing_unsubscribed_at: new Date().toISOString(),
         })
         .eq("id", authUser);
@@ -108,6 +109,7 @@ serve(async (req: Request) => {
       .from("profiles")
       .update({
         marketing_consent:         false,
+        marketing_subscribed:      false,
         marketing_unsubscribed_at: new Date().toISOString(),
       })
       .eq("id", profile.id);

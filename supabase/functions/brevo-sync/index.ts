@@ -50,11 +50,11 @@ type ActivityBucket = "active" | "inactive_7d" | "inactive_30d";
 //   SUPER_HUDDLE_BALANCE — star model lives in user_quotas; mapping TBD
 
 const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" | "float" }> = [
-  { name: "APP_USER_ID",          type: "text" },
-  { name: "DISPLAY_NAME",         type: "text" },
-  { name: "SOCIAL_ID",            type: "text" },
-  { name: "PHONE",                type: "text" },
-  { name: "COUNTRY",              type: "text" },
+  { name: "APP_USER_ID",              type: "text" },
+  { name: "DISPLAY_NAME",             type: "text" },
+  { name: "SOCIAL_ID",                type: "text" },
+  { name: "PHONE",                    type: "text" },
+  { name: "COUNTRY",                  type: "text" },
   { name: "DISTRICT",             type: "text" },
   { name: "PET_TYPES",            type: "text" },   // comma-sep e.g. "DOG,CAT"
   { name: "HAS_PET",              type: "boolean" },
@@ -74,11 +74,15 @@ const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" 
   { name: "LAST_BOOKING_AT",      type: "date" },
   { name: "LAST_BROADCAST_AT",    type: "date" },
   { name: "LAST_CHAT_AT",         type: "date" },
-  { name: "MARKETING_CONSENT",    type: "boolean" },
-  { name: "MARKETING_CONSENT_AT", type: "date" },
-  { name: "EMAIL_ENABLED",        type: "boolean" },
-  { name: "USER_CREATED_AT",      type: "date" },
-  { name: "PROFILE_COMPLETED_AT", type: "date" },
+  { name: "MARKETING_CONSENT",         type: "boolean" },
+  { name: "MARKETING_CONSENT_AT",      type: "date" },
+  { name: "MARKETING_OPT_IN",          type: "boolean" },  // stage-1: form checkbox
+  { name: "MARKETING_OPT_IN_AT",       type: "date" },
+  { name: "MARKETING_DOI_CONFIRMED",   type: "boolean" },  // stage-2: email click
+  { name: "MARKETING_DOI_CONFIRMED_AT",type: "date" },
+  { name: "EMAIL_ENABLED",             type: "boolean" },
+  { name: "USER_CREATED_AT",           type: "date" },
+  { name: "PROFILE_COMPLETED_AT",      type: "date" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -261,8 +265,9 @@ async function handleProfileCompleted(userId: string): Promise<void> {
     .from("profiles")
     .select(
       "id, email, display_name, social_id, phone, location_country, location_district, " +
-      "tier, verification_status, marketing_consent, marketing_consent_at, last_active_at, " +
-      "created_at",
+      "tier, verification_status, marketing_consent, marketing_consent_at, " +
+      "marketing_opt_in_checked, marketing_opt_in_checked_at, " +
+      "marketing_doi_confirmed, marketing_doi_confirmed_at, last_active_at, created_at",
     )
     .eq("id", userId)
     .single();
@@ -298,9 +303,13 @@ async function handleProfileCompleted(userId: string): Promise<void> {
       TIER:                 profile.tier ?? "free",
       VERIFICATION_STATUS:  profile.verification_status ?? "unverified",
       ONBOARDING_STEP:      "profile_complete" satisfies OnboardingStep,
-      MARKETING_CONSENT:    Boolean(profile.marketing_consent),
-      MARKETING_CONSENT_AT: profile.marketing_consent_at ?? null,
-      EMAIL_ENABLED:        Boolean(profile.marketing_consent),
+      MARKETING_CONSENT:          Boolean(profile.marketing_consent),
+      MARKETING_CONSENT_AT:       profile.marketing_consent_at ?? null,
+      MARKETING_OPT_IN:           Boolean(profile.marketing_opt_in_checked),
+      MARKETING_OPT_IN_AT:        profile.marketing_opt_in_checked_at ?? null,
+      MARKETING_DOI_CONFIRMED:    Boolean(profile.marketing_doi_confirmed),
+      MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
+      EMAIL_ENABLED:              Boolean(profile.marketing_consent),
       USER_CREATED_AT:      profile.created_at ?? null,
       PROFILE_COMPLETED_AT: now,
       LAST_ACTIVE_AT:       profile.last_active_at ?? now,
@@ -459,6 +468,35 @@ async function handleSubscriptionChanged(
   console.log("[brevo-sync] subscription_changed synced", userId, { tier, subscriptionStatus });
 }
 
+async function handleMarketingDoiConfirmed(userId: string): Promise<void> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(
+      "email, marketing_consent, marketing_consent_at, " +
+      "marketing_opt_in_checked, marketing_opt_in_checked_at, " +
+      "marketing_doi_confirmed, marketing_doi_confirmed_at",
+    )
+    .eq("id", userId)
+    .single();
+
+  if (!profile?.email) return;
+
+  await upsertContact({
+    email:    profile.email,
+    ext_id:   userId,
+    attributes: {
+      MARKETING_CONSENT:          Boolean(profile.marketing_consent),
+      MARKETING_CONSENT_AT:       profile.marketing_consent_at ?? null,
+      MARKETING_OPT_IN:           Boolean(profile.marketing_opt_in_checked),
+      MARKETING_OPT_IN_AT:        profile.marketing_opt_in_checked_at ?? null,
+      MARKETING_DOI_CONFIRMED:    Boolean(profile.marketing_doi_confirmed),
+      MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
+      EMAIL_ENABLED:              Boolean(profile.marketing_consent),
+    },
+  });
+  console.log("[brevo-sync] marketing_doi_confirmed synced", userId);
+}
+
 async function handleImportantUserActivity(userId: string): Promise<void> {
   // Guardrail: throttled. Never sync on every app open.
   const { data: profile } = await supabase
@@ -560,6 +598,9 @@ serve(async (req: Request) => {
         break;
       case "important_user_activity":
         await handleImportantUserActivity(user_id);
+        break;
+      case "marketing_doi_confirmed":
+        await handleMarketingDoiConfirmed(user_id);
         break;
       default:
         console.warn("[brevo-sync] unknown event", event);
