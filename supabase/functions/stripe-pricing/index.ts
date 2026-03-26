@@ -28,13 +28,24 @@ const DEFAULTS: Record<string, { amount: number; currency: string; interval?: st
   vet_media: { amount: 3.99, currency: "usd" },
 };
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+};
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 
-serve(async () => {
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
   try {
     const required = ["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"];
     for (const key of required) {
