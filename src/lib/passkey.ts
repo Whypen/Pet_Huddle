@@ -41,6 +41,22 @@ export type PasskeyFactorSummary = {
 };
 
 type PasskeyErrorLike = { message?: string; status?: number; code?: string } | null | undefined;
+type WebAuthnConfig = { rpId: string; rpOrigins: string[] };
+
+const resolveWebAuthnConfig = (): WebAuthnConfig => {
+  if (typeof window === "undefined") {
+    return { rpId: "huddle.pet", rpOrigins: ["https://huddle.pet", "https://www.huddle.pet"] };
+  }
+  const host = window.location.hostname.toLowerCase();
+  const origin = window.location.origin;
+  if (host === "huddle.pet" || host === "www.huddle.pet") {
+    return { rpId: "huddle.pet", rpOrigins: ["https://huddle.pet", "https://www.huddle.pet"] };
+  }
+  if (host === "localhost") {
+    return { rpId: "localhost", rpOrigins: [origin] };
+  }
+  return { rpId: host, rpOrigins: [origin] };
+};
 
 export const isPasskeySupportedBrowser = async (): Promise<boolean> => {
   if (typeof window === "undefined") return false;
@@ -105,31 +121,33 @@ export const clearUnverifiedPasskeyFactors = async (supabase: SupabaseClient): P
 };
 
 export const enrollPasskey = async (supabase: SupabaseClient, friendlyName: string): Promise<void> => {
+  const webauthn = resolveWebAuthnConfig();
   const api = (
     supabase.auth as unknown as {
       mfa?: {
         webauthn?: {
-          register: (args: { friendlyName: string }) => Promise<{ error: Error | null }>;
+          register: (args: { friendlyName: string; webauthn?: WebAuthnConfig }) => Promise<{ error: Error | null }>;
         };
       };
     }
   ).mfa?.webauthn;
   if (!api?.register) throw new Error("passkey_api_unavailable");
-  const { error } = await api.register({ friendlyName });
+  const { error } = await api.register({ friendlyName, webauthn });
   if (error) throw error;
 };
 
 export const verifyPasskeyFactor = async (supabase: SupabaseClient, factorId: string): Promise<void> => {
+  const webauthn = resolveWebAuthnConfig();
   const api = (
     supabase.auth as unknown as {
       mfa?: {
         webauthn?: {
-          authenticate: (args: { factorId: string }) => Promise<{ error: Error | null }>;
+          authenticate: (args: { factorId: string; webauthn?: WebAuthnConfig }) => Promise<{ error: Error | null }>;
         };
       };
     }
   ).mfa?.webauthn;
   if (!api?.authenticate) throw new Error("passkey_api_unavailable");
-  const { error } = await api.authenticate({ factorId });
+  const { error } = await api.authenticate({ factorId, webauthn });
   if (error) throw error;
 };
