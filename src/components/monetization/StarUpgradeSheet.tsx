@@ -94,7 +94,7 @@ export function StarUpgradeSheet({
           {/* ── Overlay ── */}
           <motion.div
             key="star-upgrade-overlay"
-            className="fixed inset-0 z-[5200] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
+            className="fixed inset-0 z-[10020] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -103,7 +103,7 @@ export function StarUpgradeSheet({
           />
 
           {/* ── Centered modal ── */}
-          <div className="fixed inset-0 z-[5201] flex items-center justify-center px-5 pointer-events-none">
+          <div className="fixed inset-0 z-[10030] flex items-center justify-center px-5 pointer-events-none">
             <motion.div
               key="star-upgrade-modal"
               className="w-full max-w-[390px] pointer-events-auto"
