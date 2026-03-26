@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Camera, Loader2, Check, Save, Car, X, Pencil, MapPin, Plus, Eye, Calendar, ArrowLeft } from "lucide-react";
+import { Camera, Loader2, Check, Save, Car, X, Pencil, MapPin, Plus, Eye, Calendar, ArrowLeft, Mail } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { NeuButton } from "@/components/ui/NeuButton";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuDropdown } from "@/components/ui/NeuDropdown";
@@ -964,6 +965,15 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
   }, [formData.pet_experience]);
 
+  // Refresh profile on window focus so email_verified updates if user verified
+  // in another tab (e.g., clicked the link in their inbox).
+  useEffect(() => {
+    if (!onboardingMode) return;
+    const onFocus = () => { void refreshProfile(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [onboardingMode, refreshProfile]);
+
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1252,6 +1262,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
     }
 
+    // Gate: email must be verified before completing onboarding
+    if (onboardingMode && !profile?.email_verified) {
+      toast.error("Please verify your email before completing your profile.");
+      return;
+    }
+
     if (!formData.display_name.trim()) {
       setFieldErrors((prev) => ({ ...prev, displayName: REQUIRED_CONNECT_ERROR }));
       return;
@@ -1521,10 +1537,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         resetSignup();
         clearOnboardingDraftKeys(activeUser.id);
       }
-      // Brevo CRM sync — fire-and-forget, never blocks the user flow
-      void supabase.functions.invoke("brevo-sync", {
-        body: { event: "profile_completed", user_id: activeUser.id },
-      }).catch((err) => console.warn("[brevo-sync] profile_completed failed silently", err));
+      // Welcome email — fire once on onboarding completion
+      if (onboardingMode) {
+        void supabase.functions.invoke("send-welcome-email", {
+          body: { user_id: activeUser.id },
+        }).catch((err) => console.warn("[send-welcome-email] failed silently", err));
+      }
       if (!onboardingMode) {
         toast.success(t("Profile updated!"));
       }
@@ -1544,6 +1562,42 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       const message = describeSupabaseWriteError(error);
       console.error("[EditProfile.save_failed]", error);
       toast.error(humanizeNumericDbError(message || t("Failed to update profile")));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    // Same as handleSave but does NOT set onboarding_completed = true.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const activeUser = user ?? sessionData.session?.user ?? null;
+    if (!activeUser?.id) return;
+
+    setLoading(true);
+    try {
+      await supabase
+        .from("profiles")
+        .upsert(
+          {
+            id: activeUser.id,
+            display_name: formData.display_name || null,
+            bio: formData.bio || null,
+            gender_genre: formData.gender_genre || null,
+            dob: formData.dob || null,
+            phone: formData.phone || null,
+            location_name: formData.location_name || null,
+            location_country: formData.location_country || null,
+            legal_name: formData.legal_name || null,
+            social_id: formData.social_id || null,
+            // onboarding_completed intentionally NOT set here
+          },
+          { onConflict: "id" },
+        );
+      toast.success("Draft saved");
+      await refreshProfile();
+    } catch (err) {
+      console.warn("[EditProfile.saveDraft]", err);
+      toast.error("Could not save draft. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -1607,6 +1661,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       </div>
 
       {profileMode === "edit" ? (
+      <>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-6" style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset + 24}px` : undefined }}>
         <div className="space-y-6">
           {/* Photo Upload */}
@@ -1731,6 +1786,44 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               )}
               {fieldErrors.social_id && <ErrorLabel message={fieldErrors.social_id} />}
             </div>
+
+            {/* ── Email field (read-only + verification badge) ── */}
+            {onboardingMode && (
+              <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
+                <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">
+                  Email
+                </label>
+                <div className="form-field-rest relative flex items-center justify-between px-4">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Mail className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <span className="text-[15px] text-[var(--text-primary,#424965)] truncate">
+                      {user?.email ?? profile?.email ?? "—"}
+                    </span>
+                  </div>
+
+                  {profile?.email_verified ? (
+                    <span className="neu-chip text-[11px] font-semibold text-[rgba(74,73,101,0.45)] shrink-0 ml-2">
+                      Verified
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="neu-chip text-[11px] font-semibold text-[#2145CF] shrink-0 ml-2"
+                      onClick={async () => {
+                        const userId = user?.id;
+                        if (!userId) return;
+                        void supabase.functions
+                          .invoke("send-signup-verify-email", { body: { user_id: userId } })
+                          .catch(() => {/* silent */});
+                        navigate("/signup/email-confirmation");
+                      }}
+                    >
+                      Resend
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Phone */}
             <div>
@@ -2542,6 +2635,37 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           </div>
         </div>
       </div>
+
+      {/* Onboarding CTA footer */}
+      {onboardingMode && (
+        <div className="sticky bottom-0 left-0 right-0 bg-background border-t border-border/20 px-4 py-3 space-y-2"
+             style={{ paddingBottom: "calc(env(safe-area-inset-bottom,0px) + 12px)" }}>
+          <NeuButton
+            variant="primary"
+            className="w-full h-12"
+            disabled={loading || !profile?.email_verified}
+            onClick={handleSave}
+          >
+            {loading ? "Saving…" : "Complete profile"}
+          </NeuButton>
+
+          {!profile?.email_verified && (
+            <p className="text-[11px] text-[rgba(74,73,101,0.55)] text-center">
+              Please verify your email before completing your profile.
+            </p>
+          )}
+
+          <NeuButton
+            variant="ghost"
+            className="w-full h-11"
+            disabled={loading}
+            onClick={handleSaveDraft}
+          >
+            Save draft
+          </NeuButton>
+        </div>
+      )}
+      </>
       ) : (
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4" style={{ paddingBottom: "calc(var(--nav-height, 64px) + env(safe-area-inset-bottom) + 20px)" }}>
         <PublicProfileView

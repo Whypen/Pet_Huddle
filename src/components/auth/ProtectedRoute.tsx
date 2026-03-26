@@ -77,6 +77,13 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <Navigate to="/set-profile" replace />;
   }
 
+  // Defense-in-depth: if profile is loaded and email not verified,
+  // user cannot leave onboarding routes.
+  const emailVerified = (profile as { email_verified?: boolean } | null)?.email_verified ?? true;
+  if (!emailVerified && !allowOnboardingRoutes) {
+    return <Navigate to="/set-profile" replace />;
+  }
+
   // Account state enforcement
   const accountStatus = (profile as unknown as { account_status?: string })?.account_status;
   const suspensionExpiresAt = (profile as unknown as { suspension_expires_at?: string | null })?.suspension_expires_at;

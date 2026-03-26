@@ -5,8 +5,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useSignup } from "@/contexts/SignupContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button, FormField } from "@/components/ui";
+import { LegalModal } from "@/components/modals/LegalModal";
 import { supabase } from "@/integrations/supabase/client";
 import { SignupShell } from "@/components/signup/SignupShell";
 import signupNameImg from "@/assets/Sign up/Signup_Name.png";
@@ -20,12 +23,16 @@ const FORM_ID = "signup-name-form";
 
 const SignupName = () => {
   const navigate = useNavigate();
-  const { data, update } = useSignup();
+  const { data, update, setFlowState } = useSignup();
+  const { user } = useAuth();
   const [displayName, setDisplayName] = useState(data.display_name || "");
   const [socialId, setSocialId]       = useState(data.social_id || "");
   const [socialError, setSocialError] = useState("");
   const [availabilityState, setAvailabilityState] = useState<"idle" | "checking" | "available" | "taken" | "failed">("idle");
   const [checkNonce, setCheckNonce] = useState(0);
+  const [emailOptIn, setEmailOptIn] = useState(false);
+  const [showEmailOptInNote, setShowEmailOptInNote] = useState(false);
+  const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [submitting, setSubmitting]   = useState(false);
   const [isExiting, setIsExiting]     = useState(false);
   const normalizedSocialId = useMemo(() => socialId.trim(), [socialId]);
@@ -46,6 +53,7 @@ const SignupName = () => {
       return;
     }
 
+    setShowEmailOptInNote(emailOptIn);
     setSubmitting(true);
     setAvailabilityState("checking");
     setSocialError("");
@@ -64,11 +72,50 @@ const SignupName = () => {
       }
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
+      if (!user) {
+        // New user — create account now that we have display name + social ID
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: data.email.trim(),
+          password: data.password,
+          options: {
+            data: {
+              phone: data.phone?.trim(),
+              dob: data.dob,
+              marketing_email_opt_in: emailOptIn,
+            },
+          },
+        });
+        if (signUpError) {
+          setFlowState("idle");
+          toast.error("Account creation failed. Please try again.");
+          return;
+        }
+        // Fire verify email (fire-and-forget)
+        const { data: sessionData } = await supabase.auth.getSession();
+        const newUserId = sessionData.session?.user?.id;
+        if (newUserId) {
+          void supabase.functions
+            .invoke("send-signup-verify-email", { body: { user_id: newUserId } })
+            .catch((err) => console.warn("[signup-name] verify email failed silently", err));
+        }
+        if (emailOptIn) {
+          toast.message("We’ll send you a separate email to confirm your subscription.");
+        }
+        goTo("/signup/email-confirmation");
+        return;
+      }
+      if (emailOptIn) {
+        toast.message("We’ll send you a separate email to confirm your subscription.");
+      }
       goTo("/signup/verify");
     } catch {
       setAvailabilityState("available");
       setSocialError("");
       update({ display_name: name, social_id: social });
+      if (!user) {
+        toast.error("Could not check availability. Please try again.");
+        return;
+      }
       goTo("/signup/verify");
     } finally {
       setSubmitting(false);
@@ -202,7 +249,50 @@ const SignupName = () => {
             Retry check
           </button>
         )}
+
+        <div className="space-y-3 pt-2">
+          <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
+            By tapping Continue, you agree to our{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("terms")}
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              className="text-[#2145CF] underline"
+              onClick={() => setLegalModal("privacy")}
+            >
+              Privacy Policy
+            </button>
+            .
+          </p>
+
+          <label className="flex items-start gap-2 text-[12px] text-[rgba(74,73,101,0.80)] leading-relaxed">
+            <input
+              type="checkbox"
+              checked={emailOptIn}
+              onChange={(event) => setEmailOptIn(event.target.checked)}
+              className="mt-[2px] h-4 w-4 rounded border-[rgba(74,73,101,0.35)]"
+            />
+            <span>
+              I agree to receive emails from huddle for pet care, community news, and product updates.
+            </span>
+          </label>
+
+          {showEmailOptInNote && (
+            <p className="text-[12px] text-[rgba(74,73,101,0.60)]">
+              We’ll send you a separate email to confirm your subscription.
+            </p>
+          )}
+        </div>
       </form>
+
+      <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
+      <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
     </SignupShell>
   );
 };

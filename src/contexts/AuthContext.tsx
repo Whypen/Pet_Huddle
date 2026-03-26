@@ -5,7 +5,6 @@ import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
 import { isPasskeySupportedBrowser, listPasskeyFactors } from "@/lib/passkey";
 import { trackDeviceFingerprint } from "@/lib/deviceFingerprint";
 import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
-import { normalizeQuotaTier } from "@/config/quotaConfig";
 import {
   clearSignupScopedStorage,
   SIGNUP_PASSWORD_SESSION_KEY,
@@ -57,6 +56,7 @@ export interface Profile {
   media_credits?: number | null;
   family_slots?: number | null;
   onboarding_completed: boolean;
+  email_verified: boolean;
   owns_pets: boolean;
   non_social?: boolean | null;
   availability_status: string[];
@@ -160,6 +160,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "media_credits",
     "family_slots",
     "onboarding_completed",
+    "email_verified",
     "owns_pets",
     "non_social",
     "availability_status",
@@ -287,8 +288,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      const profileTier = normalizeQuotaTier(data.tier || "free");
-      let effectiveTier = profileTier;
+      let effectiveTier = data.tier || "free";
       let familyOwnerId: string | null = null;
       const { data: family } = await supabase
         .from("family_members" as "profiles")
@@ -307,9 +307,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           .maybeSingle() as unknown as { data: { tier?: string } | null };
         if (!isHydrationRunCurrent(runId)) return;
         if (inviter?.tier) {
-          const inviterTier = normalizeQuotaTier(inviter.tier);
-          const tierRank = { free: 0, plus: 1, gold: 2 } as const;
-          effectiveTier = tierRank[inviterTier] > tierRank[profileTier] ? inviterTier : profileTier;
+          effectiveTier = inviter.tier;
         }
       }
 
@@ -582,31 +580,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem("pending_addon");
   };
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = async () => {
     if (user) {
       const runId = beginHydrationRun();
       await fetchProfile(user.id, runId);
     }
-  }, [beginHydrationRun, fetchProfile, user]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const channel = supabase
-      .channel(`family-members:${user.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "family_members", filter: `invitee_user_id=eq.${user.id}` },
-        () => {
-          void refreshProfile();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [refreshProfile, user?.id]);
+  };
 
   return (
     <AuthContext.Provider

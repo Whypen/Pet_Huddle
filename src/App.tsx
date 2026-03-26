@@ -21,6 +21,7 @@ import SignupDob from "./pages/signup/SignupDob";
 import SignupName from "./pages/signup/SignupName";
 import SignupCredentials from "./pages/signup/SignupCredentials";
 import SignupVerify from "./pages/signup/SignupVerify";
+import SignupEmailConfirmation from "./pages/signup/SignupEmailConfirmation";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
 import EditProfile from "./pages/EditProfile";
@@ -131,6 +132,7 @@ const App = () => (
                   <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />
                   <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
                   <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
+                  <Route path="/signup/email-confirmation" element={<PublicRoute><SignupEmailConfirmation /></PublicRoute>} />
 
                   {/* Protected Routes */}
                   <Route

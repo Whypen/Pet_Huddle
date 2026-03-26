@@ -274,39 +274,13 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
-      // Create the auth account here (step 2) so a live session exists before
-      // reaching /verify-identity. The auto_confirm_email_on_signup trigger
-      // ensures signUp() returns a session immediately (no email-confirm gate).
-      // display_name is collected at /set-profile, not here.
+      // Store credentials — signUp() is deferred to /signup/name so the user's
+      // display name and social ID are collected before the account is created.
+      // This prevents orphaned accounts when users abandon mid-flow.
+      update({ email: email.trim(), password, phone: phone.trim() });
       setFlowState("signup");
-      const { error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: { data: { phone: phone.trim(), dob: data.dob } },
-      });
-      if (signUpError) {
-        const msg = signUpError.message.toLowerCase();
-        if (msg.includes("already registered") || msg.includes("user already registered")) {
-          // Account exists from a prior attempt — sign in to reuse the session
-          // rather than calling signUp() again (prevents repeated signup calls).
-          const { error: signInError } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
-            password,
-          });
-          if (signInError) {
-            // Password mismatch or other issue — surface the sign-in dialog.
-            setSigninEmail(email.trim());
-            setShowSignInModal(true);
-            return;
-          }
-          goTo("/signup/name");
-          return;
-        }
-        setFlowState("idle");
-        toast.error(humanizeError(signUpError) || "Account creation failed. Please try again.");
-        return;
-      }
       goTo("/signup/name");
+      return;
     } catch (err) {
       console.error("Signup failed:", err);
       setFlowState("idle");
