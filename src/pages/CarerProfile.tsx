@@ -627,9 +627,7 @@ const CarerProfile: React.FC = () => {
   const statusCopy =
     formData.stripePayoutStatus === "complete"
       ? "Payouts ready"
-      : formData.stripePayoutStatus === "needs_action"
-      ? "More details needed"
-      : "Set up payouts";
+      : "Set up Payout Method";
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -1867,14 +1865,7 @@ const CarerProfile: React.FC = () => {
                     </p>
                   )}
 
-                {/* ── CTA ────────────────────────────────────────────────────── */}
-                <button
-                  type="button"
-                  onClick={() => toast.info("Messaging coming soon.")}
-                  className="neu-primary w-full h-14 rounded-2xl text-white text-[16px] font-bold tracking-[0.01em]"
-                >
-                  Request a Service
-                </button>
+                {/* View mode is self-profile only; external service request CTA belongs to public service profile modal. */}
               </>
             );
           })()}

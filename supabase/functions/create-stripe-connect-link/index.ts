@@ -298,41 +298,6 @@ serve(async (req) => {
       },
     };
 
-    const accountUpdatePayload: Stripe.AccountUpdateParams = {
-      business_type: "individual",
-      email: userEmail || undefined,
-      country: countryIso2 || undefined,
-      default_currency: marketCurrency || undefined,
-      individual: {
-        email: userEmail || undefined,
-        phone: phone || undefined,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
-      },
-      business_profile: {
-        mcc: "0752",
-        url: `https://huddle.pet/u/${usernameSlug}`,
-        product_description: "Pet care provider on Huddle’s Service marketplace.",
-        support_email: "support@huddle.pet",
-        support_url: "https://huddle.pet/support",
-      },
-      settings: {
-        payouts: {
-          schedule: {
-            interval: "manual",
-          },
-        },
-      },
-      capabilities: {
-        transfers: { requested: true },
-        card_payments: { requested: true },
-      },
-      metadata: {
-        huddle_user_id: socialId || user.id,
-        huddle_username: socialId || displayName || user.id,
-      },
-    };
-
     if (action === "create_link") {
       if (!returnUrl || !refreshUrl) {
         return Response.json({ error: "returnUrl and refreshUrl required" }, { status: 400, headers: corsHeaders });
@@ -362,25 +327,6 @@ serve(async (req) => {
       try {
         const link = accountId
           ? await (async () => {
-              try {
-                await stripe.accounts.update(accountId as string, accountUpdatePayload);
-              } catch (updateError) {
-                const message = updateError instanceof Error ? updateError.message.toLowerCase() : String(updateError).toLowerCase();
-                if (
-                  message.includes("invalid") ||
-                  message.includes("country") ||
-                  message.includes("default_currency")
-                ) {
-                  const relaxedUpdatePayload: Stripe.AccountUpdateParams = {
-                    ...accountUpdatePayload,
-                    country: undefined,
-                    default_currency: undefined,
-                  };
-                  await stripe.accounts.update(accountId as string, relaxedUpdatePayload);
-                } else {
-                  throw updateError;
-                }
-              }
               const refreshedAccount = await stripe.accounts.retrieve(accountId as string);
               await syncStripeStatus(supabase, user.id, accountId as string, refreshedAccount);
               return await stripe.accountLinks.create({
