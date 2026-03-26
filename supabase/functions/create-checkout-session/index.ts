@@ -53,11 +53,34 @@ const COUNTRY_TO_CURRENCY: Record<string, string> = {
   SG: "sgd",
   AU: "aud",
   CA: "cad",
+  CH: "chf",
+  ID: "idr",
+  IN: "inr",
   JP: "jpy",
+  KR: "krw",
+  SE: "sek",
   TW: "twd",
   CN: "cny",
   MO: "mop",
 };
+
+const SUPPORTED_CURRENCIES = new Set([
+  "aud",
+  "cad",
+  "chf",
+  "cny",
+  "eur",
+  "gbp",
+  "hkd",
+  "idr",
+  "inr",
+  "jpy",
+  "krw",
+  "sek",
+  "sgd",
+  "twd",
+  "usd",
+]);
 
 const COUNTRY_ALIASES: Record<string, string> = {
   HKG: "HK",
@@ -99,7 +122,8 @@ const json = (body: unknown, status = 200) =>
 
 const normalizeCurrency = (value: unknown): string | null => {
   const text = String(value || "").trim().toLowerCase();
-  return /^[a-z]{3}$/.test(text) ? text : null;
+  if (!/^[a-z]{3}$/.test(text)) return null;
+  return SUPPORTED_CURRENCIES.has(text) ? text : null;
 };
 
 const normalizeCountryIso2 = (value: unknown): string | null => {
@@ -107,6 +131,16 @@ const normalizeCountryIso2 = (value: unknown): string | null => {
   if (!text) return null;
   if (/^[A-Z]{2}$/.test(text)) return text;
   if (COUNTRY_ALIASES[text]) return COUNTRY_ALIASES[text];
+  if (text.includes("HONG KONG")) return "HK";
+  if (text.includes("UNITED KINGDOM") || text.includes("GREAT BRITAIN")) return "GB";
+  if (text.includes("UNITED STATES")) return "US";
+  if (text.includes("SINGAPORE")) return "SG";
+  if (text.includes("AUSTRALIA")) return "AU";
+  if (text.includes("CANADA")) return "CA";
+  if (text.includes("JAPAN")) return "JP";
+  if (text.includes("TAIWAN")) return "TW";
+  if (text.includes("CHINA")) return "CN";
+  if (text.includes("MACAU")) return "MO";
   return null;
 };
 

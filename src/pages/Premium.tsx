@@ -28,7 +28,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -134,6 +134,8 @@ export default function PremiumPage() {
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [pricingCountry, setPricingCountry] = useState<string | null>(null);
+  const [pricingCurrency, setPricingCurrency] = useState<string | null>(null);
   const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
@@ -141,9 +143,23 @@ export default function PremiumPage() {
 
   useEffect(() => {
     let active = true;
-    fetchLivePrices(getStripeLocaleHints()).then((prices) => { if (active) setLivePrices(prices); });
+    (async () => {
+      const hints = await resolvePricingHints({
+        userId: profile?.id,
+        profileCountry: profile?.location_country,
+        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+      });
+      if (!active) return;
+      setPricingCountry(hints.country ?? null);
+      setPricingCurrency(hints.currency ?? null);
+      const prices = await fetchLivePrices({
+        country: hints.country,
+        currency: hints.currency,
+      });
+      if (active) setLivePrices(prices);
+    })();
     return () => { active = false; };
-  }, []);
+  }, [profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
 
   // ── Sequential checkout: detect ?plan_done=1 ────────────────────────────────
   useEffect(() => {
@@ -184,7 +200,8 @@ export default function PremiumPage() {
             amount: Math.round(total * 100),
             successUrl: `${window.location.origin}/premium?addon_done=1`,
             cancelUrl: `${window.location.origin}/premium`,
-            ...getStripeLocaleHints(),
+            currency: pricingCurrency || undefined,
+            country: pricingCountry || undefined,
           },
         });
         if (error) throw error;
@@ -253,7 +270,8 @@ export default function PremiumPage() {
           priceId: plan.priceId,
           successUrl,
           cancelUrl: `${window.location.origin}/premium`,
-          ...getStripeLocaleHints(),
+          currency: pricingCurrency || undefined,
+          country: pricingCountry || undefined,
         },
       });
       if (error) throw error;
@@ -284,7 +302,8 @@ export default function PremiumPage() {
           amount: Math.round(addonTotal * 100),
           successUrl: `${window.location.origin}/premium?addon_done=1`,
           cancelUrl: `${window.location.origin}/premium`,
-          ...getStripeLocaleHints(),
+          currency: pricingCurrency || undefined,
+          country: pricingCountry || undefined,
         },
       });
       if (error) throw error;
