@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { GlassModal } from "@/components/ui/GlassModal";
 import strayCatImage from "@/assets/Notifications/Stray Cat.jpg";
 import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
+import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -60,6 +61,7 @@ const Settings: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [starsRemaining, setStarsRemaining] = useState<number>(0);
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
@@ -77,9 +79,8 @@ const Settings: React.FC = () => {
       : effectiveTier === "plus"
         ? "bg-[#5BA4F5] text-white"
         : "bg-[#E9ECF3] text-[#7E8599]";
-  const starsCount = Math.max(0, Number((p.stars_count as number | null) ?? 0));
   const starsPillClass =
-    starsCount > 0
+    starsRemaining > 0
       ? "border border-[#E4E8F2] bg-white text-[#4A4965]"
       : "border border-[#C6CAD6] bg-transparent text-[#98A0B8]";
   const isVerified = p.is_verified === true;
@@ -94,6 +95,27 @@ const Settings: React.FC = () => {
         return age >= 16;
       })()
     : true;
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    const loadStars = async () => {
+      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
+      if (snapshot.error) {
+        if (!cancelled) setStarsRemaining(0);
+        return;
+      }
+      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
+      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
+      if (!cancelled) setStarsRemaining(getRemainingStarsFromSnapshot(profile?.tier as string | null | undefined, typed));
+    };
+
+    void loadStars();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.id, profile?.tier]);
   const speciesSource = [p.pet_species, p.pet_experience, p.species, p.pets]
     .flatMap((value) => {
       if (Array.isArray(value)) {
@@ -431,7 +453,7 @@ const Settings: React.FC = () => {
                   navigate("/premium");
                 }}
               >
-                {starsCount} ⭐
+                {starsRemaining} ⭐
               </button>
             </div>
           </div>

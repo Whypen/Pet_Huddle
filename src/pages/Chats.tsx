@@ -34,6 +34,7 @@ import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
@@ -1419,16 +1420,12 @@ const Chats = () => {
     if (snapshot.error) throw snapshot.error;
     const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
     const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-    const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
-    const cap = getQuotaCapsForTier(userTier).starsPerMonth;
-    const used = Number(typed.stars_used_cycle || 0);
-    const extra = Number(typed.extra_stars || 0);
-    return Math.max(0, cap - used) + Math.max(0, extra);
-  }, [profile?.effective_tier, profile?.tier]);
+    return getRemainingStarsFromSnapshot(profile?.tier, typed);
+  }, [profile?.tier]);
 
   async function runStarAction(target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> {
     if (!profile?.id) return { sent: false, roomId: null };
-    const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    const tier = resolveStarQuotaTier(profile?.tier);
     if (tier === "free") {
       openStarUpgradeSheet("plus");
       return { sent: false, roomId: null };

@@ -31,7 +31,7 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
-import { getQuotaCapsForTier } from "@/config/quotaConfig";
+import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
@@ -123,10 +123,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [carerGateOpen, setCarerGateOpen] = useState(false);
   const [familySheetOpen, setFamilySheetOpen] = useState(false);
   const [familyUsedCount, setFamilyUsedCount] = useState(0);
-  const [starsRemaining, setStarsRemaining] = useState<number | null>(() => {
-    const initial = Number(profile?.stars_count);
-    return Number.isFinite(initial) ? Math.max(0, initial) : null;
-  });
+  const [starsRemaining, setStarsRemaining] = useState<number | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
@@ -180,26 +177,19 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     const loadStars = async () => {
       const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
       if (snapshot.error) {
-        if (!cancelled) {
-          const fallback = Number(profile?.stars_count);
-          setStarsRemaining(Number.isFinite(fallback) ? Math.max(0, fallback) : 0);
-        }
+        if (!cancelled) setStarsRemaining(0);
         return;
       }
       const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
       const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
-      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
-      const used = Number(typed.stars_used_cycle || 0);
-      const extra = Number(typed.extra_stars || 0);
-      const nextRemaining = Math.max(0, cap - used) + Math.max(0, extra);
+      const nextRemaining = getRemainingStarsFromSnapshot(profile?.tier, typed);
       if (!cancelled) setStarsRemaining(nextRemaining);
     };
     void loadStars();
     return () => {
       cancelled = true;
     };
-  }, [menuOpen, profile?.effective_tier, profile?.id, profile?.stars_count, profile?.tier]);
+  }, [menuOpen, profile?.id, profile?.tier]);
 
   useEffect(() => {
     if (!user?.id) return;

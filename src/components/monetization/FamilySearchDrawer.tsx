@@ -91,11 +91,11 @@ export function FamilySearchDrawer({ isOpen, onClose, onInviteSent, linkedIds }:
       isOpen={isOpen}
       onClose={onClose}
       title="Search user"
-      backdropClassName="z-[9300]"
-      className="z-[9310]"
+      backdropClassName="z-[9700]"
+      className="z-[9710]"
       contentClassName="overflow-y-auto overflow-x-visible"
     >
-      <div className="px-4 pb-4 space-y-3">
+      <div className="px-4 pb-4 pt-5 space-y-3">
         {/* Search field */}
         <div className="relative z-20 focus-within:z-30">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" strokeWidth={1.75} />

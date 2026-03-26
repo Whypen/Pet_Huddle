@@ -9,7 +9,8 @@ import { areUsersBlocked } from "@/lib/blocking";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import { toast } from "sonner";
 import { ensureDirectChatRoom } from "@/lib/chatRooms";
-import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { quotaConfig } from "@/config/quotaConfig";
+import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -194,7 +195,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
 
   const handleStar = async () => {
     if (!viewedUserId || !profile?.id) return;
-    const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
+    const tier = resolveStarQuotaTier(profile?.tier);
     if (tier === "free") {
       openStarUpsell("plus");
       return;
@@ -204,11 +205,8 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
       if (snapshot.error) throw snapshot.error;
       const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
       const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
-      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
-      const used = Number(typed.stars_used_cycle || 0);
-      const extra = Number(typed.extra_stars || 0);
-      const remaining = Math.max(0, cap - used) + Math.max(0, extra);
+      const userTier = resolveStarQuotaTier(profile?.tier, typed.tier);
+      const remaining = getRemainingStarsFromSnapshot(profile?.tier, typed);
       if (remaining <= 0) {
         if (userTier === "plus") {
           openStarUpsell("gold");

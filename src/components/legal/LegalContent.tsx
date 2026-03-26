@@ -21,7 +21,6 @@ const HTML_MAP: Record<LegalType, string> = {
 };
 
 const APP_STYLE = `<style>
-@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:transparent;color:#424965;font-family:'Urbanist',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;line-height:1.6}
 .wrap{padding:16px 0 80px}

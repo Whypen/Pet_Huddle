@@ -8,6 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
+import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
 
 export type UpsellType = "star" | "emergency_alert" | "media" | "family_slot" | null;
 
@@ -62,6 +63,11 @@ export const useUpsell = () => {
     [profile?.effective_tier, profile?.tier]
   );
 
+  const starTier = useCallback(
+    (snap: QuotaSnapshot | null) => resolveStarQuotaTier(profile?.tier, snap?.tier),
+    [profile?.tier],
+  );
+
   /**
    * Check if user needs to buy stars before boosting profile
    * Call this BEFORE any star-consuming action
@@ -70,11 +76,8 @@ export const useUpsell = () => {
     if (!user) return false;
 
     const snap = await fetchQuotaSnapshot();
-    const tier = effectiveTier(snap);
-    const base = getQuotaCapsForTier(tier).starsPerMonth;
-    const used = snap?.stars_used_cycle ?? 0;
-    const extra = snap?.extra_stars ?? 0;
-    const remaining = Math.max(0, base - used) + Math.max(0, extra);
+    const tier = starTier(snap);
+    const remaining = getRemainingStarsFromSnapshot(profile?.tier, snap);
 
     if (remaining <= 0) {
       setUpsellModal({
@@ -88,7 +91,7 @@ export const useUpsell = () => {
     }
 
     return true;
-  }, [effectiveTier, fetchQuotaSnapshot, t, user]);
+  }, [fetchQuotaSnapshot, profile?.tier, starTier, t, user]);
 
   /**
    * Check if user can send emergency alert

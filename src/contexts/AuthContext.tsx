@@ -582,12 +582,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem("pending_addon");
   };
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
       const runId = beginHydrationRun();
       await fetchProfile(user.id, runId);
     }
-  };
+  }, [beginHydrationRun, fetchProfile, user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`family-members:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "family_members", filter: `invitee_user_id=eq.${user.id}` },
+        () => {
+          void refreshProfile();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refreshProfile, user?.id]);
 
   return (
     <AuthContext.Provider

@@ -7,7 +7,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
 import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
 import { supabase } from "@/integrations/supabase/client";
-import { getQuotaCapsForTier } from "@/config/quotaConfig";
+import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -18,10 +18,7 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const navigate = useNavigate();
   const { signOut, profile } = useAuth();
   const { t } = useLanguage();
-  const [starsRemaining, setStarsRemaining] = useState<number | null>(() => {
-    const initial = Number(profile?.stars_count);
-    return Number.isFinite(initial) ? Math.max(0, initial) : null;
-  });
+  const [starsRemaining, setStarsRemaining] = useState<number | null>(null);
 
   const isVerified = profile?.is_verified === true;
   const normalizedTier = normalizeMembershipTier(
@@ -45,26 +42,19 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
     const loadStars = async () => {
       const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
       if (snapshot.error) {
-        if (!cancelled) {
-          const fallback = Number(profile?.stars_count);
-          setStarsRemaining(Number.isFinite(fallback) ? Math.max(0, fallback) : 0);
-        }
+        if (!cancelled) setStarsRemaining(0);
         return;
       }
       const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
       const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-      const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
-      const cap = getQuotaCapsForTier(userTier).starsPerMonth;
-      const used = Number(typed.stars_used_cycle || 0);
-      const extra = Number(typed.extra_stars || 0);
-      const nextRemaining = Math.max(0, cap - used) + Math.max(0, extra);
+      const nextRemaining = getRemainingStarsFromSnapshot(profile?.tier, typed);
       if (!cancelled) setStarsRemaining(nextRemaining);
     };
     void loadStars();
     return () => {
       cancelled = true;
     };
-  }, [isOpen, profile?.effective_tier, profile?.id, profile?.stars_count, profile?.tier]);
+  }, [isOpen, profile?.id, profile?.tier]);
 
   const menuItems = [
     { icon: User, label: t("settings.profile"), href: "/edit-profile" },
