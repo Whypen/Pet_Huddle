@@ -39,9 +39,8 @@ import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
-import { buildShareModel } from "@/lib/shareModel";
-import type { SharePayload } from "@/lib/shareModel";
-import { recordThreadShareClick } from "@/lib/shareCount";
+import { buildShareModel, type ShareModel } from "@/lib/shareModel";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
 
@@ -296,6 +295,36 @@ const formatUrlLabel = (url: string) => {
   }
 };
 
+const buildFallbackLinkPreview = (url: string, error?: string): LinkPreview => {
+  const label = formatUrlLabel(url);
+  try {
+    const parsed = new URL(url);
+    return {
+      url,
+      title: label,
+      description: undefined,
+      image: undefined,
+      siteName: parsed.hostname.replace(/^www\./, "") || "External link",
+      loading: false,
+      failed: false,
+      resolved: true,
+      error,
+    };
+  } catch {
+    return {
+      url,
+      title: label,
+      description: undefined,
+      image: undefined,
+      siteName: "External link",
+      loading: false,
+      failed: false,
+      resolved: true,
+      error,
+    };
+  }
+};
+
 const findMentionOccurrences = (value: string, socialId: string) => {
   const matches: Array<{ start: number; end: number }> = [];
   if (!socialId) return matches;
@@ -460,7 +489,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const mentionDirectoryRef = useRef<Record<string, MentionSuggestion>>({});
   const [mentionSeeds, setMentionSeeds] = useState<MentionSeed[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
-  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
+  const [sharePayload, setSharePayload] = useState<ShareModel | null>(null);
   const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, LinkPreview>>({});
   const [expandedContentIds, setExpandedContentIds] = useState<Set<string>>(new Set());
   const [expandableContentById, setExpandableContentById] = useState<Record<string, boolean>>({});
@@ -2447,16 +2476,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const openShareSheet = useCallback((notice: Thread) => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const model = buildShareModel({
-      origin,
-      contentType: "thread",
-      contentId: notice.id,
-      displayName: notice.author?.display_name,
-      socialId: notice.author?.social_id,
-      contentSnippet: notice.content,
-    });
-
-    setSharePayload(model);
+    const firstImage = Array.isArray(notice.images)
+      ? notice.images.find((entry) => typeof entry === "string" && entry.trim().length > 0) || null
+      : null;
+    setSharePayload(
+      buildShareModel({
+        origin,
+        contentType: "thread",
+        contentId: notice.id,
+        surface: "Social",
+        displayName: notice.author?.display_name,
+        socialId: notice.author?.social_id,
+        contentSnippet: notice.content,
+        imagePath: firstImage,
+      }),
+    );
     setShareOpen(true);
   }, []);
 
@@ -2472,12 +2506,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     );
 
     try {
-      const count = await recordThreadShareClick(threadId);
-      if (typeof count === "number") {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "record_thread_share_click",
+        { p_thread_id: threadId }
+      );
+      if (error) return;
+      if (typeof data === "number") {
         setNotices((prev) =>
           prev.map((notice) =>
             notice.id === threadId
-              ? { ...notice, share_count: Math.max(0, Number(count)) }
+              ? { ...notice, share_count: Math.max(0, Number(data)) }
               : notice
           )
         );
@@ -2581,7 +2619,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [visibleNotices, threadMentionsById]);
 
   const ensureLinkPreview = useCallback(async (url: string) => {
-    if (!url) return;
+    if (!url || !user?.id) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.access_token) return;
     const existing = linkPreviewMapRef.current[url];
     if (existing && (existing.loading || existing.resolved)) return;
     if (linkPreviewInFlightRef.current.has(url)) return;
@@ -2595,7 +2635,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     try {
-      const invokePromise = supabase.functions.invoke<LinkPreviewPayload>("link-preview", { body: { url } });
+      const invokePromise = invokeAuthedFunction<LinkPreviewPayload>("link-preview", { body: { url } });
       const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
         setTimeout(() => resolve({ data: null, error: new Error("preview_timeout") }), 7000)
       );
@@ -2605,7 +2645,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         console.error("[link-preview] fetch:failed", { url, reason });
         setLinkPreviewByUrl((prev) => ({
           ...prev,
-          [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+          [url]: buildFallbackLinkPreview(url, reason),
         }));
         return;
       }
@@ -2621,7 +2661,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         console.error("[link-preview] fetch:empty", { url, reason, payload });
         setLinkPreviewByUrl((prev) => ({
           ...prev,
-          [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+          [url]: buildFallbackLinkPreview(url, reason),
         }));
         return;
       }
@@ -2653,12 +2693,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       console.error("[link-preview] fetch:exception", { url, reason, err });
       setLinkPreviewByUrl((prev) => ({
         ...prev,
-        [url]: { ...(prev[url] || { url }), url, loading: false, failed: true, resolved: true, error: reason },
+        [url]: buildFallbackLinkPreview(url, reason),
       }));
     } finally {
       linkPreviewInFlightRef.current.delete(url);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     const urls = Array.from(

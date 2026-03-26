@@ -45,9 +45,7 @@ import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
-import { buildShareModel } from "@/lib/shareModel";
-import type { SharePayload } from "@/lib/shareModel";
-import { getThreadShareCount, recordThreadShareClick } from "@/lib/shareCount";
+import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
@@ -137,8 +135,7 @@ interface PinDetailModalProps {
   const [confirmBlock, setConfirmBlock] = useState(false);
   const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
-  const [sharePayload, setSharePayload] = useState<SharePayload | null>(null);
-  const [shareCount, setShareCount] = useState<number>(0);
+  const [sharePayload, setSharePayload] = useState<ShareModel | null>(null);
 
   const [supportCount, setSupportCount] = useState(0);
 
@@ -407,49 +404,93 @@ interface PinDetailModalProps {
   const isSocial = Boolean(alert?.post_on_social || alert?.social_post_id || alert?.thread_id);
   const socialThreadId = alert?.thread_id || (alert?.social_post_id ? String(alert.social_post_id) : null);
 
-  const openShareSheet = useCallback(() => {
+  const openShareSheet = useCallback(async () => {
     if (!alert?.id) return;
+
+    let displayName = alert?.creator?.display_name || null;
+    let socialId = alert?.creator?.social_id || null;
+    const creatorId = String(alert?.creator_id || "").trim();
+
+    if (creatorId && (!displayName || !socialId)) {
+      try {
+        const { data: creatorProfile } = await (supabase
+          .from("profiles")
+          .select("display_name,social_id")
+          .eq("id", creatorId)
+          .maybeSingle() as Promise<{ data: { display_name?: string | null; social_id?: string | null } | null; error: { message?: string } | null }>);
+        displayName = creatorProfile?.display_name || displayName;
+        socialId = creatorProfile?.social_id || socialId;
+      } catch {
+        // Non-blocking: continue with next fallback.
+      }
+    }
+
+    if (socialThreadId && (!displayName || !socialId)) {
+      try {
+        const { data: threadRow } = await (supabase
+          .from("threads")
+          .select("user_id")
+          .eq("id", socialThreadId)
+          .maybeSingle() as Promise<{ data: { user_id?: string | null } | null; error: { message?: string } | null }>);
+        const authorId = String(threadRow?.user_id || "").trim();
+        if (authorId) {
+          const { data: profileRow } = await (supabase
+            .from("profiles")
+            .select("display_name,social_id")
+            .eq("id", authorId)
+            .maybeSingle() as Promise<{ data: { display_name?: string | null; social_id?: string | null } | null; error: { message?: string } | null }>);
+          displayName = profileRow?.display_name || displayName;
+          socialId = profileRow?.social_id || socialId;
+        }
+      } catch {
+        // Keep share UX non-blocking if enrichment query fails.
+      }
+    }
+
+    const firstAlertImage = (
+      Array.isArray(alert.media_urls)
+        ? alert.media_urls.find((entry) => typeof entry === "string" && entry.trim().length > 0)
+        : null
+    ) || (alert.photo_url ? String(alert.photo_url).trim() : null);
+
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const model = buildShareModel({
-      origin,
-      contentType: socialThreadId ? "thread" : "alert",
-      contentId: socialThreadId || alert.id,
-      displayName: alert?.creator?.display_name,
-      socialId: alert?.creator?.social_id,
-      contentSnippet: alert?.description || alert?.title || null,
-    });
-    setSharePayload(model);
+    setSharePayload(
+      buildShareModel({
+        origin,
+        contentType: socialThreadId ? "thread" : "alert",
+        contentId: socialThreadId || alert.id,
+        surface: "Map",
+        appContentId: alert.id,
+        displayName,
+        socialId,
+        contentSnippet: alert?.description || alert?.title || null,
+        imagePath: firstAlertImage,
+      }),
+    );
     setShareOpen(true);
-  }, [alert?.creator?.display_name, alert?.creator?.social_id, alert?.description, alert?.id, alert?.title, socialThreadId]);
+  }, [
+    alert?.creator?.display_name,
+    alert?.creator?.social_id,
+    alert?.creator_id,
+    alert?.description,
+    alert?.id,
+    alert?.media_urls,
+    alert?.photo_url,
+    alert?.title,
+    socialThreadId,
+  ]);
 
   const handleShareAction = useCallback(async () => {
     if (!socialThreadId) return;
-    setShareCount((prev) => Math.max(0, prev + 1));
-    try {
-      const count = await recordThreadShareClick(socialThreadId);
-      if (typeof count === "number") {
-        setShareCount(Math.max(0, count));
-      }
-    } catch {
-      // Keep optimistic count if RPC is unavailable.
-    }
-  }, [socialThreadId]);
 
-  useEffect(() => {
-    if (!socialThreadId) {
-      setShareCount(0);
-      return;
+    try {
+      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "record_thread_share_click",
+        { p_thread_id: socialThreadId },
+      );
+    } catch {
+      // Keep current non-blocking behavior if share count RPC is unavailable.
     }
-    let canceled = false;
-    void (async () => {
-      const count = await getThreadShareCount(socialThreadId);
-      if (!canceled && typeof count === "number") {
-        setShareCount(Math.max(0, count));
-      }
-    })();
-    return () => {
-      canceled = true;
-    };
   }, [socialThreadId]);
 
   const removeEditMediaAt = (index: number) => {
@@ -663,9 +704,6 @@ interface PinDetailModalProps {
                   title="Share"
                 >
                   <Send className="w-4 h-4 text-muted-foreground" />
-                  {shareCount > 0 ? (
-                    <span className="text-xs font-medium tabular-nums text-muted-foreground">{shareCount}</span>
-                  ) : null}
                 </button>
 
                 {/* 3-dots menu (Report / Hide / Block) */}
