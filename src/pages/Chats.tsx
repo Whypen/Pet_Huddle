@@ -1411,6 +1411,9 @@ const Chats = () => {
   );
 
   const openStarUpgradeSheet = useCallback((tier: StarUpgradeTier) => {
+    // Always close discovery filter layers before showing upsell, so upsell is the active top modal.
+    setIsFilterModalOpen(false);
+    setActiveFilterRow(null);
     setStarUpgradeTier(tier);
     setStarUpgradeBilling("monthly");
   }, []);
