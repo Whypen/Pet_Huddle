@@ -34,10 +34,11 @@ import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
-import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
+import { parseChatShareMessage } from "@/lib/shareModel";
+import { SharedContentCard } from "@/components/chat/SharedContentCard";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -545,6 +546,10 @@ const isWaveSchemaFallbackError = (err: unknown) => {
 const parseChatPreviewText = (rawContent: string | null | undefined) => {
   const raw = String(rawContent || "").trim();
   if (!raw) return "";
+  const share = parseChatShareMessage(raw);
+  if (share) {
+    return `Shared from huddle's ${share.surface}`;
+  }
   const starParsed = parseStarChatContent(raw);
   if (isStarIntroKind(starParsed.kind)) {
     return "Star connection";
@@ -1420,12 +1425,16 @@ const Chats = () => {
     if (snapshot.error) throw snapshot.error;
     const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
     const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-    return getRemainingStarsFromSnapshot(profile?.tier, typed);
-  }, [profile?.tier]);
+    const userTier = String(profile?.effective_tier || profile?.tier || typed.tier || "free").toLowerCase();
+    const cap = getQuotaCapsForTier(userTier).starsPerMonth;
+    const used = Number(typed.stars_used_cycle || 0);
+    const extra = Number(typed.extra_stars || 0);
+    return Math.max(0, cap - used) + Math.max(0, extra);
+  }, [profile?.effective_tier, profile?.tier]);
 
   async function runStarAction(target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> {
     if (!profile?.id) return { sent: false, roomId: null };
-    const tier = resolveStarQuotaTier(profile?.tier);
+    const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
     if (tier === "free") {
       openStarUpgradeSheet("plus");
       return { sent: false, roomId: null };
@@ -4405,8 +4414,17 @@ const Chats = () => {
                     <p className="text-sm text-muted-foreground">No messages yet.</p>
                   ) : activeRoomMessages.map((m) => {
                     const mine = m.sender_id === profile?.id;
+                    const share = parseChatShareMessage(m.content);
                     return (
-                      <div key={m.id} className={cn("max-w-[85%] rounded-lg px-3 py-2 text-sm", mine ? "ml-auto bg-brandBlue text-white" : "bg-muted text-brandText")}>{m.content}</div>
+                      <div key={m.id} className={cn("max-w-[85%]", mine ? "ml-auto" : "")}>
+                        {share ? (
+                          <SharedContentCard share={share} mine={mine} compact />
+                        ) : (
+                          <div className={cn("rounded-lg px-3 py-2 text-sm", mine ? "bg-brandBlue text-white" : "bg-muted text-brandText")}>
+                            {m.content}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

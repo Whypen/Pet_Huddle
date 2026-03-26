@@ -13,6 +13,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Textarea } from "@/components/ui/textarea";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
+import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
+import { SharedContentCard } from "@/components/chat/SharedContentCard";
 
 type ChatMessage = {
   id: string;
@@ -33,6 +35,7 @@ type ParsedMessage = {
   kind?: string | null;
   senderId?: string | null;
   recipientId?: string | null;
+  share?: ShareModel | null;
 };
 
 type CounterpartProfile = {
@@ -165,6 +168,14 @@ const ChatDialogue = () => {
   );
 
   const parseMessageContent = useCallback((content: string): ParsedMessage => {
+    const share = parseChatShareMessage(content);
+    if (share) {
+      return {
+        text: "",
+        attachments: [],
+        share,
+      };
+    }
     const starParsed = parseStarChatContent(content);
     if (isStarIntroKind(starParsed.kind)) {
       return {
@@ -173,6 +184,7 @@ const ChatDialogue = () => {
         kind: starParsed.kind,
         senderId: starParsed.senderId,
         recipientId: starParsed.recipientId,
+        share: null,
       };
     }
     try {
@@ -187,12 +199,13 @@ const ChatDialogue = () => {
               mime: String(item.mime || ""),
               name: String(item.name || "media"),
             })),
+          share: null,
         };
       }
     } catch {
       // plain text fallback
     }
-    return { text: content, attachments: [] };
+    return { text: content, attachments: [], share: null };
   }, []);
 
   const markMessagesAsRead = useCallback(async (roomMessages: ChatMessage[]) => {
@@ -958,6 +971,7 @@ const ChatDialogue = () => {
             const mine = message.sender_id === profile?.id;
             const parsed = parseMessageContent(message.content);
             const attachments = parsed.attachments;
+            const share = parsed.share;
             const normalizedText = parsed.text.trim();
             const isStarIntro = !isGroup && isStarIntroKind(parsed.kind || null);
             const isStarFirstUserMessage =
@@ -1004,6 +1018,10 @@ const ChatDialogue = () => {
                     >
                       {mine ? "You sent a Star ⭐" : "New Star Connection ⭐"}
                     </div>
+                  </div>
+                ) : share ? (
+                  <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
+                    <SharedContentCard share={share} mine={mine} />
                   </div>
                 ) : (
                   <>
