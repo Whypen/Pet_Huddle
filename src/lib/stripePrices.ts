@@ -17,6 +17,7 @@ export type LivePriceMap = {
   superBroadcast:    number;
   topProfileBooster: number;
   sharePerks:        number;
+  currencyCode: string;
 };
 
 /** Canonical fallback from quotaConfig — shown instantly before the fetch resolves */
@@ -29,10 +30,26 @@ export const FALLBACK_PRICES: LivePriceMap = {
   superBroadcast:    4.99,
   topProfileBooster: 2.99,
   sharePerks:        4.99,
+  currencyCode: "USD",
 };
 
-let _cache: LivePriceMap | null = null;
-let _inflight: Promise<LivePriceMap> | null = null;
+const _cacheByKey = new Map<string, LivePriceMap>();
+const _inflightByKey = new Map<string, Promise<LivePriceMap>>();
+
+const getBrowserCountryHint = (): string | null => {
+  try {
+    const locale = (Intl.DateTimeFormat().resolvedOptions().locale || navigator.language || "").trim();
+    const match = locale.match(/[-_](\w{2,3})$/);
+    return match ? match[1].toUpperCase() : null;
+  } catch {
+    return null;
+  }
+};
+
+export const getStripeLocaleHints = (): { country?: string } => {
+  const country = getBrowserCountryHint();
+  return country ? { country } : {};
+};
 
 /** Formats a number as a USD currency string using the browser locale. */
 export function fmtCurrency(n: number): string {
@@ -49,16 +66,31 @@ export function fmtCurrency(n: number): string {
 }
 
 /** Returns live Stripe prices; result is cached for the entire app session. */
-export function fetchLivePrices(): Promise<LivePriceMap> {
-  if (_cache) return Promise.resolve(_cache);
-  if (_inflight) return _inflight;
+export function fetchLivePrices(input?: { currency?: string; country?: string }): Promise<LivePriceMap> {
+  const countryHint = input?.country || getBrowserCountryHint();
+  const currencyHint = String(input?.currency || "").trim().toUpperCase();
+  const cacheKey = `${currencyHint || "-"}|${countryHint || "-"}`;
+  const cached = _cacheByKey.get(cacheKey);
+  if (cached) return Promise.resolve(cached);
+  const inflight = _inflightByKey.get(cacheKey);
+  if (inflight) return inflight;
 
-  _inflight = (async (): Promise<LivePriceMap> => {
+  const request = (async (): Promise<LivePriceMap> => {
     try {
-      const { data, error } = await supabase.functions.invoke("stripe-pricing");
+      const { data, error } = await supabase.functions.invoke("stripe-pricing", {
+        body: {
+          currency: currencyHint || null,
+          country: countryHint || null,
+        },
+      });
       if (!error && data?.prices) {
-        const p = data.prices as Record<string, { amount?: number }>;
-        _cache = {
+        const p = data.prices as Record<string, { amount?: number; currency?: string }>;
+        const displayCurrency = String(
+          (data as { display_currency?: string } | null)?.display_currency ||
+          p.plus_monthly?.currency ||
+          "usd",
+        ).toUpperCase();
+        const resolved = {
           plus_monthly:      typeof p.plus_monthly?.amount      === "number" ? p.plus_monthly.amount      : FALLBACK_PRICES.plus_monthly,
           plus_annual:       typeof p.plus_annual?.amount       === "number" ? p.plus_annual.amount       : FALLBACK_PRICES.plus_annual,
           gold_monthly:      typeof p.gold_monthly?.amount      === "number" ? p.gold_monthly.amount      : FALLBACK_PRICES.gold_monthly,
@@ -66,16 +98,24 @@ export function fetchLivePrices(): Promise<LivePriceMap> {
           superBroadcast:    typeof p.superBroadcast?.amount    === "number" ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
           topProfileBooster: typeof p.topProfileBooster?.amount === "number" ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
           sharePerks:        typeof p.sharePerks?.amount        === "number" ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
+          currencyCode: displayCurrency || "USD",
         };
+        _cacheByKey.set(cacheKey, resolved);
+        return resolved;
       } else {
-        _cache = { ...FALLBACK_PRICES };
+        const fallback = { ...FALLBACK_PRICES };
+        _cacheByKey.set(cacheKey, fallback);
+        return fallback;
       }
     } catch {
-      _cache = { ...FALLBACK_PRICES };
+      const fallback = { ...FALLBACK_PRICES };
+      _cacheByKey.set(cacheKey, fallback);
+      return fallback;
+    } finally {
+      _inflightByKey.delete(cacheKey);
     }
-    _inflight = null;
-    return _cache!;
   })();
+  _inflightByKey.set(cacheKey, request);
 
-  return _inflight;
+  return request;
 }

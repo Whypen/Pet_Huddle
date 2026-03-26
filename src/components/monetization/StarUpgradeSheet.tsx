@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export function StarUpgradeSheet({
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    fetchLivePrices().then((p) => { if (active) setLivePrices(p); });
+    fetchLivePrices(getStripeLocaleHints()).then((p) => { if (active) setLivePrices(p); });
     return () => { active = false; };
   }, [isOpen]);
 
@@ -94,7 +94,7 @@ export function StarUpgradeSheet({
           {/* ── Overlay ── */}
           <motion.div
             key="star-upgrade-overlay"
-            className="fixed inset-0 z-[10020] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
+            className="fixed inset-0 z-[5200] bg-[rgba(20,25,48,0.40)] backdrop-blur-[6px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -103,7 +103,7 @@ export function StarUpgradeSheet({
           />
 
           {/* ── Centered modal ── */}
-          <div className="fixed inset-0 z-[10030] flex items-center justify-center px-5 pointer-events-none">
+          <div className="fixed inset-0 z-[5201] flex items-center justify-center px-5 pointer-events-none">
             <motion.div
               key="star-upgrade-modal"
               className="w-full max-w-[390px] pointer-events-auto"
@@ -170,22 +170,22 @@ export function StarUpgradeSheet({
                   <div className="mt-4">
                     {!isAnnual ? (
                       <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                        <PriceDisplay n={monthlyAmt} />
+                        <PriceDisplay n={monthlyAmt} currency={livePrices.currencyCode} />
                         <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
                       </p>
                     ) : (
                       <div>
                         <div className="flex items-baseline gap-2">
                           <span className="text-[15px] font-[400] line-through opacity-60" style={{ color: theme.textOnBg }}>
-                            <PriceDisplay n={monthlyAmt} />
+                            <PriceDisplay n={monthlyAmt} currency={livePrices.currencyCode} />
                           </span>
                           <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                            <PriceDisplay n={annualPerMo} />
+                            <PriceDisplay n={annualPerMo} currency={livePrices.currencyCode} />
                             <span className="ml-1 text-[14px] font-[400] opacity-80">/mo</span>
                           </p>
                         </div>
                         <p className="mt-0.5 text-[12px] opacity-75" style={{ color: theme.textOnBg }}>
-                          <PriceDisplay n={annualTotal} /> billed yearly
+                          <PriceDisplay n={annualTotal} currency={livePrices.currencyCode} /> billed yearly
                         </p>
                       </div>
                     )}

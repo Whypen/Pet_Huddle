@@ -46,6 +46,43 @@ const ADDON_DEFAULTS: Record<string, number> = {
 };
 
 const requiredSubscriptionTypes = new Set(["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"]);
+const COUNTRY_TO_CURRENCY: Record<string, string> = {
+  HK: "hkd",
+  US: "usd",
+  GB: "gbp",
+  SG: "sgd",
+  AU: "aud",
+  CA: "cad",
+  JP: "jpy",
+  TW: "twd",
+  CN: "cny",
+  MO: "mop",
+};
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  HKG: "HK",
+  GBR: "GB",
+  USA: "US",
+  SGP: "SG",
+  AUS: "AU",
+  CAN: "CA",
+  JPN: "JP",
+  TWN: "TW",
+  CHN: "CN",
+  MAC: "MO",
+  "HONG KONG": "HK",
+  "UNITED KINGDOM": "GB",
+  "GREAT BRITAIN": "GB",
+  "UNITED STATES": "US",
+  "UNITED STATES OF AMERICA": "US",
+  SINGAPORE: "SG",
+  AUSTRALIA: "AU",
+  CANADA: "CA",
+  JAPAN: "JP",
+  TAIWAN: "TW",
+  CHINA: "CN",
+  MACAU: "MO",
+};
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -59,6 +96,22 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
+
+const normalizeCurrency = (value: unknown): string | null => {
+  const text = String(value || "").trim().toLowerCase();
+  return /^[a-z]{3}$/.test(text) ? text : null;
+};
+
+const normalizeCountryIso2 = (value: unknown): string | null => {
+  const text = String(value || "").trim().toUpperCase();
+  if (!text) return null;
+  if (/^[A-Z]{2}$/.test(text)) return text;
+  if (COUNTRY_ALIASES[text]) return COUNTRY_ALIASES[text];
+  return null;
+};
+
+const resolveCurrencyByCountry = (country: string | null): string =>
+  (country && COUNTRY_TO_CURRENCY[country]) || "usd";
 
 async function resolveStripePrice(type: string, required: boolean) {
   const priceId = STRIPE_PRICE_IDS[type];
@@ -110,6 +163,22 @@ async function resolvePriceByLookupKey(lookupKey: string, mode: "subscription" |
   return price.id;
 }
 
+async function resolveLookupKeyFromMetadata(planKey: string, currency: string): Promise<string | null> {
+  const target = currency.toUpperCase();
+  const { data, error } = await supabase
+    .from("plan_metadata")
+    .select("stripe_lookup_key,currency")
+    .eq("plan_key", planKey)
+    .eq("is_active", true)
+    .in("currency", [target, "USD"])
+    .order("priority", { ascending: false })
+    .limit(10);
+  if (error || !data?.length) return null;
+  const exact = data.find((row) => String(row.currency || "").toUpperCase() === target) || data[0];
+  const lookup = String(exact?.stripe_lookup_key || "").trim();
+  return lookup || null;
+}
+
 async function validateExplicitPriceId(priceId: string, mode: "subscription" | "payment") {
   const trimmed = String(priceId || "").trim();
   if (!trimmed) return null;
@@ -138,6 +207,8 @@ serve(async (req: Request) => {
       metadata: extraMetadata,
       successUrl,
       cancelUrl,
+      currency,
+      country,
     } = await req.json();
 
     // Enforce auth: require a valid JWT and bind user_id to auth.uid.
@@ -158,6 +229,16 @@ serve(async (req: Request) => {
     }
 
     const userId = authedUserId;
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("currency,location_country")
+      .eq("id", userId)
+      .maybeSingle();
+    const profileCurrency = normalizeCurrency(userProfile?.currency);
+    const profileCountry = normalizeCountryIso2(userProfile?.location_country);
+    const bodyCurrency = normalizeCurrency(currency);
+    const bodyCountry = normalizeCountryIso2(country);
+    const checkoutCurrency = bodyCurrency || profileCurrency || resolveCurrencyByCountry(bodyCountry || profileCountry);
 
     // Get or create Stripe customer
     const { data: profile } = await supabase
@@ -205,7 +286,14 @@ serve(async (req: Request) => {
     if (mode === "subscription") {
       let resolvedPriceId: string | null = null;
 
-      if (typeof priceId === "string" && priceId.trim().length > 0) {
+      if (!resolvedPriceId) {
+        const dynamicLookup = await resolveLookupKeyFromMetadata(normalizedType, checkoutCurrency);
+        if (dynamicLookup) {
+          resolvedPriceId = await resolvePriceByLookupKey(dynamicLookup, "subscription");
+        }
+      }
+
+      if (!resolvedPriceId && typeof priceId === "string" && priceId.trim().length > 0) {
         resolvedPriceId = await validateExplicitPriceId(priceId, "subscription");
       }
 
@@ -242,11 +330,19 @@ serve(async (req: Request) => {
           throw new Error(`Unknown add-on type: ${itemType}`);
         }
 
-        const resolved = await resolveStripePrice(itemType, false);
-        if (!resolved.ok) return resolved.response;
+        let resolvedPriceId: string | null = null;
+        const dynamicLookup = await resolveLookupKeyFromMetadata(itemType, checkoutCurrency);
+        if (dynamicLookup) {
+          resolvedPriceId = await resolvePriceByLookupKey(dynamicLookup, "payment");
+        }
+        if (!resolvedPriceId) {
+          const resolved = await resolveStripePrice(itemType, false);
+          if (!resolved.ok) return resolved.response;
+          resolvedPriceId = resolved.priceId || null;
+        }
 
-        if (resolved.priceId) {
-          lineItems.push({ price: resolved.priceId, quantity: qty });
+        if (resolvedPriceId) {
+          lineItems.push({ price: resolvedPriceId, quantity: qty });
         } else {
           lineItems.push({
             price_data: {

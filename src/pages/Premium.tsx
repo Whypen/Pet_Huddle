@@ -22,13 +22,13 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, type LivePriceMap } from "@/lib/stripePrices";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
+import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -134,14 +134,14 @@ export default function PremiumPage() {
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const normalizedTier = normalizeQuotaTier(profile?.effective_tier || profile?.tier || "free");
+  const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
   const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
 
   useEffect(() => {
     let active = true;
-    fetchLivePrices().then((prices) => { if (active) setLivePrices(prices); });
+    fetchLivePrices(getStripeLocaleHints()).then((prices) => { if (active) setLivePrices(prices); });
     return () => { active = false; };
   }, []);
 
@@ -176,7 +176,7 @@ export default function PremiumPage() {
           const a = ADD_ONS.find((x) => x.id === item.id);
           return sum + (a?.price ?? 0) * item.qty;
         }, 0);
-        const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
+        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "payment",
@@ -184,6 +184,7 @@ export default function PremiumPage() {
             amount: Math.round(total * 100),
             successUrl: `${window.location.origin}/premium?addon_done=1`,
             cancelUrl: `${window.location.origin}/premium`,
+            ...getStripeLocaleHints(),
           },
         });
         if (error) throw error;
@@ -219,25 +220,11 @@ export default function PremiumPage() {
     [selectedAddonItems, livePrices]
   );
 
-  const isPlanBlockedForTier = (targetPlan: "plus" | "gold"): boolean => {
-    if (targetPlan === "plus") return normalizedTier === "plus" || normalizedTier === "gold";
-    return normalizedTier === "gold";
-  };
-
-  const getPlanCtaLabel = (targetPlan: "plus" | "gold"): string => {
-    if (targetPlan === "plus") {
-      if (normalizedTier === "gold") return "You're on Huddle Gold";
-      if (normalizedTier === "plus") return "You're on Huddle+";
-      return "Get Huddle+";
-    }
-    if (normalizedTier === "gold") return "You're on Huddle Gold";
-    return "Get Huddle Gold";
-  };
-
   const startPlanCheckout = async (tier: "plus" | "gold") => {
-    if (isPlanBlockedForTier(tier)) return;
     if (!user) { navigate("/auth"); return; }
     if (isCheckingOut) return;
+    if (normalizedTier === "gold") return;
+    if (normalizedTier === "plus" && tier === "plus") return;
 
     const billing = tier === "plus" ? plusBilling : goldBilling;
 
@@ -257,7 +244,7 @@ export default function PremiumPage() {
         );
       }
 
-      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
+      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "subscription",
@@ -266,6 +253,7 @@ export default function PremiumPage() {
           priceId: plan.priceId,
           successUrl,
           cancelUrl: `${window.location.origin}/premium`,
+          ...getStripeLocaleHints(),
         },
       });
       if (error) throw error;
@@ -288,7 +276,7 @@ export default function PremiumPage() {
 
     try {
       setIsCheckingOut(true);
-      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
+      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "payment",
@@ -296,6 +284,7 @@ export default function PremiumPage() {
           amount: Math.round(addonTotal * 100),
           successUrl: `${window.location.origin}/premium?addon_done=1`,
           cancelUrl: `${window.location.origin}/premium`,
+          ...getStripeLocaleHints(),
         },
       });
       if (error) throw error;
@@ -320,8 +309,12 @@ export default function PremiumPage() {
     const setBilling = tier === "plus" ? setPlusBilling : setGoldBilling;
     const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
     const isAnnual = billing === "annual";
-    const ctaLabel = getPlanCtaLabel(tier);
-    const blockedPlan = isPlanBlockedForTier(tier);
+    const isBlockedByTier =
+      normalizedTier === "gold" ||
+      (normalizedTier === "plus" && tier === "plus");
+    const ctaLabel = isBlockedByTier
+      ? (normalizedTier === "gold" ? "You're on Huddle Gold" : "You're on Huddle+")
+      : (tier === "plus" ? "Get Huddle+" : "Get Huddle Gold");
 
     return (
       <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
@@ -381,7 +374,7 @@ export default function PremiumPage() {
           {/* Price */}
           {!isAnnual ? (
             <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-              <PriceDisplay n={monthlyAmt} />
+              <PriceDisplay n={monthlyAmt} currency={livePrices.currencyCode} />
               <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
             </p>
           ) : (
@@ -391,15 +384,15 @@ export default function PremiumPage() {
                   className="text-[15px] font-[400] line-through opacity-60"
                   style={{ color: theme.textOnBg }}
                 >
-                  <PriceDisplay n={monthlyAmt} />
+                  <PriceDisplay n={monthlyAmt} currency={livePrices.currencyCode} />
                 </span>
                 <p className="text-[30px] font-[700] leading-tight" style={{ color: theme.textOnBg }}>
-                  <PriceDisplay n={annualPerMo} />
+                  <PriceDisplay n={annualPerMo} currency={livePrices.currencyCode} />
                   <span className="text-[14px] font-[400] ml-1 opacity-80">/mo</span>
                 </p>
               </div>
               <p className="text-[12px] mt-0.5 opacity-75" style={{ color: theme.textOnBg }}>
-                <PriceDisplay n={annualTotal} /> billed yearly
+                <PriceDisplay n={annualTotal} currency={livePrices.currencyCode} /> billed yearly
               </p>
             </div>
           )}
@@ -441,20 +434,17 @@ export default function PremiumPage() {
 
           {/* CTA — white bg, themed text */}
           <button
-            className="mt-5 relative overflow-hidden w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
+            className="mt-5 w-full h-[50px] rounded-[16px] text-[15px] font-[600] flex items-center justify-center gap-2 transition-opacity"
             style={{
-              background: "#FFFFFF",
-              color: blockedPlan ? "#94A3B8" : theme.bg,
+              background: isBlockedByTier ? "#F4F5FA" : "#FFFFFF",
+              color: isBlockedByTier ? "#99A0B3" : theme.bg,
               opacity: isCheckingOut ? 0.6 : 1,
             }}
-            disabled={isCheckingOut || blockedPlan}
+            disabled={isCheckingOut || isBlockedByTier}
             onClick={() => void startPlanCheckout(tier)}
           >
-            {blockedPlan && <span className="absolute inset-0 bg-white/65" aria-hidden />}
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
-              {isCheckingOut ? "Loading…" : ctaLabel}
-            </span>
+            <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
+            {isCheckingOut ? "Loading…" : ctaLabel}
           </button>
         </div>
       </div>
@@ -519,7 +509,11 @@ export default function PremiumPage() {
                       className="text-[13px] font-[600] mt-1"
                       style={{ color: BRAND_BLUE }}
                     >
-                      <PriceDisplay n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price} suffix={addon.billingNote} />
+                      <PriceDisplay
+                        n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}
+                        suffix={addon.billingNote}
+                        currency={livePrices.currencyCode}
+                      />
                     </p>
                   </div>
 
@@ -564,7 +558,7 @@ export default function PremiumPage() {
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
             {selectedAddonItems.length > 0
-              ? <>Purchase Add-ons · <PriceDisplay n={addonTotal} /></>
+              ? <>Purchase Add-ons · <PriceDisplay n={addonTotal} currency={livePrices.currencyCode} /></>
               : "Purchase Add-ons"}
           </button>
 

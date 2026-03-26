@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Users2, Check } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
-import { fetchLivePrices, FALLBACK_PRICES } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -26,13 +26,13 @@ const FEATURES_GOLD = ["Video uploads", "Top Profile Visibility"];
 
 export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const [loading, setLoading] = useState(false);
-  const [livePrice, setLivePrice] = useState(FALLBACK_PRICES.sharePerks);
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
 
   useEffect(() => {
     let active = true;
-    fetchLivePrices().then((p) => { if (active) setLivePrice(p.sharePerks); });
+    fetchLivePrices(getStripeLocaleHints()).then((p) => { if (active) setLivePrices(p); });
     return () => { active = false; };
   }, []);
 
@@ -45,10 +45,9 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
           body: {
             mode: "subscription",
             type: "sharePerks",
-            priceId: "price_1SwQsp5QcAjQDse0RaD0z8nh",
-            lookupKey: "Family_Member",
             successUrl: `${window.location.origin}/settings?addon_done=1`,
             cancelUrl: window.location.href,
+            ...getStripeLocaleHints(),
           },
         }
       );
@@ -71,7 +70,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <Users2 size={18} color="#fff" strokeWidth={1.75} />
         <span className="text-[15px] font-[600] text-white">Share Perks</span>
         <span className="ml-auto text-[13px] font-[500] text-white/80">
-          <PriceDisplay n={livePrice} suffix="/mo" />
+          <PriceDisplay n={livePrices.sharePerks} suffix="/mo" currency={livePrices.currencyCode} />
         </span>
       </div>
 
