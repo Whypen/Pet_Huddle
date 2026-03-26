@@ -52,7 +52,6 @@ const AIVet = lazy(() => import("./pages/AIVet"));
 const MapPage = lazy(() => import("./pages/Map"));
 const PetDetails = lazy(() => import("./pages/PetDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
-const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 const Premium = lazy(() => import("./pages/Premium"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Admin = lazy(() => import("./pages/Admin"));
@@ -341,9 +340,7 @@ const App = () => (
                     path="/settings/security"
                     element={
                       <ProtectedRoute>
-                        <AppShell>
-                          <RouteSuspense><SecuritySettings /></RouteSuspense>
-                        </AppShell>
+                        <Navigate to="/settings" replace />
                       </ProtectedRoute>
                     }
                   />

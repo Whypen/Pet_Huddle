@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, Lock, ShieldCheck, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, ChevronRight, PawPrint } from "lucide-react";
-import { listTotpFactors } from "@/lib/mfa";
-import { listPasskeyFactors } from "@/lib/passkey";
+import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, ChevronRight, PawPrint } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,9 +47,6 @@ const Settings: React.FC = () => {
 
   const [nonSocial, setNonSocial] = useState(false);
   const [hideFromMap, setHideFromMap] = useState(false);
-
-  const [hasMfa, setHasMfa] = useState(false);
-  const [hasPasskey, setHasPasskey] = useState(false);
 
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -247,18 +242,6 @@ const Settings: React.FC = () => {
   useEffect(() => {
     void loadPrefs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    Promise.all([
-      listTotpFactors(supabase).then((factors) =>
-        setHasMfa(factors.some((f) => f.status === "verified"))
-      ).catch(() => {}),
-      listPasskeyFactors(supabase).then((factors) =>
-        setHasPasskey(factors.some((f) => f.status === "verified"))
-      ).catch(() => {}),
-    ]);
   }, [user?.id]);
 
   const persistPrefs = async (next: NotificationPrefs) => {
@@ -590,19 +573,7 @@ const Settings: React.FC = () => {
             icon={<Lock size={16} strokeWidth={1.75} />}
             onClick={() => setPasswordOpen(true)}
           />
-          <InsetDivider />
-          <InsetRow
-            label="Extra Security"
-            variant="nav"
-            icon={<ShieldCheck size={16} strokeWidth={1.75} />}
-            value={
-              hasMfa && hasPasskey ? "Authenticator & Passkey"
-              : hasMfa ? "Authenticator"
-              : hasPasskey ? "Passkey"
-              : undefined
-            }
-            onClick={() => navigate("/settings/security")}
-          />
+          {/* Extra Security is temporarily hidden in production. */}
         </InsetPanel>
 
         {/* ── Log out ── */}
