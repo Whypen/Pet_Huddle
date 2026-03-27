@@ -64,13 +64,17 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         </div>
       );
     }
+    // No profile after wait — not a registered user.
+    // Signup flow: send to /set-profile to complete registration.
+    // All other cases (stale UUID, deleted account, OAuth mid-signup): send to /auth.
     const isSignupOnboardingFlow = flowState !== "idle";
     if (isSignupOnboardingFlow && !allowOnboardingRoutes) {
       return <Navigate to="/set-profile" replace />;
     }
-    // Existing users can transiently miss profile hydration; do not force
-    // /set-profile unless explicitly in signup/onboarding flow.
-    return <>{children}</>;
+    if (allowOnboardingRoutes) {
+      return <>{children}</>;
+    }
+    return <Navigate to="/auth" replace />;
   }
 
   if (!onboardingComplete && !allowOnboardingRoutes) {
@@ -79,7 +83,9 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   // Defense-in-depth: if profile is loaded and email not verified,
   // user cannot leave onboarding routes.
-  const emailVerified = (profile as { email_verified?: boolean } | null)?.email_verified ?? true;
+  // OAuth users (Google/Apple) are exempt — their email is already provider-verified.
+  const isOAuthUser = user?.app_metadata?.provider !== "email";
+  const emailVerified = isOAuthUser || ((profile as { email_verified?: boolean } | null)?.email_verified ?? true);
   if (!emailVerified && !allowOnboardingRoutes) {
     return <Navigate to="/set-profile" replace />;
   }
