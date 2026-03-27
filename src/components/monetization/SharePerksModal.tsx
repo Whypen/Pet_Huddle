@@ -67,8 +67,8 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         "create-checkout-session",
         {
           body: {
-            mode: "subscription",
-            type: "sharePerks",
+            mode: "payment",
+            items: [{ type: "sharePerks", quantity: 1 }],
             successUrl: `${window.location.origin}/settings?addon_done=1`,
             cancelUrl: window.location.href,
             country: pricingHints.country,

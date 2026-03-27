@@ -603,7 +603,7 @@ export default function PremiumPage() {
 
   return (
     <div className="min-h-svh overflow-x-hidden">
-      <GlobalHeader closeButton={() => navigate(-1)} />
+      <GlobalHeader closeButton={() => navigate("/settings", { replace: true })} />
 
       <div
         className="overflow-y-auto"

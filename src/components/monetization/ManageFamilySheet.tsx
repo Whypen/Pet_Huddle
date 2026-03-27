@@ -79,7 +79,7 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
 
   const memberRow = members.find((m) => m.invitee_user_id === profile?.id);
   const ownerMembers = members.filter((m) => m.inviter_user_id === profile?.id);
-  const isOwner = ownerMembers.length > 0 || !memberRow;
+  const isOwner = !profile?.family_owner_id || ownerMembers.length > 0;
   const acceptedCount = ownerMembers.filter((m) => m.status !== "declined").length;
   const usedSlots = acceptedCount;
   const totalSlots = Math.min(MAX_MEMBERS, includedSlots + purchasedFamilySlots);
@@ -248,7 +248,7 @@ export function ManageFamilySheet({ isOpen, onClose }: Props) {
           )}
 
           {/* [+] add button — always visible for owner */}
-          {isOwner && (
+          {isOwner && usedSlots < MAX_MEMBERS && (
             <div className="mt-4">
               <button
                 onClick={handleAddPress}

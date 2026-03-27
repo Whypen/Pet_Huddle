@@ -595,6 +595,10 @@ const CarerProfile: React.FC = () => {
     setStripeConnecting(true);
     const stripePopup = window.open("", "huddle-stripe-connect", "width=460,height=820,noopener,noreferrer");
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.access_token) {
+        throw new Error("auth_required");
+      }
       const returnUrl = `${window.location.origin}/carerprofile/stripe-return`;
       const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
       const { data, error } = await invokeAuthedFunction<{ url?: string }>(
@@ -621,6 +625,8 @@ const CarerProfile: React.FC = () => {
       const message = await readFunctionHttpErrorMessage(err);
       if ((err as Error)?.message === "stripe_popup_blocked") {
         toast.error("Pop-up blocked. Please allow pop-ups for Huddle and try again.");
+      } else if ((err as Error)?.message === "auth_required") {
+        toast.error("Session expired. Please sign in again.");
       } else {
         toast.error(message || "Could not start payout setup. Please retry.");
       }

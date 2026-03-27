@@ -42,11 +42,11 @@ import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
 import CarerStripeReturn from "./pages/carerprofile/StripeReturn";
 import CarerStripeRefresh from "./pages/carerprofile/StripeRefresh";
 import CarerProfile from "./pages/CarerProfile";
+import Social from "./pages/Social";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
 
-const Social = lazy(() => import("./pages/Social"));
 const Discover = lazy(() => import("./pages/Discover"));
 const Chats = lazy(() => import("./pages/Chats"));
 const ChatDialogue = lazy(() => import("./pages/ChatDialogue"));

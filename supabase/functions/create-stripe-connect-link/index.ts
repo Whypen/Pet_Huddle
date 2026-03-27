@@ -5,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
+    "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -173,7 +173,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization") ?? "";
+    const authHeader = req.headers.get("Authorization") ?? req.headers.get("x-huddle-access-token") ?? "";
     const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) {
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });

@@ -132,6 +132,7 @@ export async function invokeAuthedFunction<T = unknown>(
         headers: {
           ...baseHeaders,
           Authorization: `Bearer ${token}`,
+          "x-huddle-access-token": token,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(args.body ?? null),
