@@ -13,7 +13,7 @@ import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { createPortal } from "react-dom";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export function StarUpgradeSheet({
 
   const cachedPrices = getCachedLivePrices({
     currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
-  });
+  }) ?? getLastLivePricesSnapshot();
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const modalRoot = typeof document !== "undefined" ? document.body : null;
 

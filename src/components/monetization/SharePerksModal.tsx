@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Users2, Check } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -31,7 +31,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const [pricingHints, setPricingHints] = useState<{ country?: string; currency?: string }>({});
   const cachedPrices = getCachedLivePrices({
     currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
-  });
+  }) ?? getLastLivePricesSnapshot();
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;

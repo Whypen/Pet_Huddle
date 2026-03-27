@@ -28,7 +28,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
+import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -139,7 +139,10 @@ export default function PremiumPage() {
   const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
-  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
+  const initialLivePrices = getCachedLivePrices({
+    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+  }) ?? getLastLivePricesSnapshot() ?? FALLBACK_PRICES;
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(initialLivePrices);
 
   useEffect(() => {
     let active = true;

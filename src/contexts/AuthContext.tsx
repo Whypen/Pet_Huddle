@@ -12,6 +12,7 @@ import {
   buildScopedStorageKey,
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
+import { fetchLivePrices, resolvePricingHints } from "@/lib/stripePrices";
 
 export interface Profile {
   id: string;
@@ -46,6 +47,7 @@ export interface Profile {
   location_name: string | null;
   location_country?: string | null;
   location_district?: string | null;
+  currency?: string | null;
   user_role: string;
   tier?: string | null;
   effective_tier?: string | null;
@@ -150,6 +152,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "location_name",
     "location_country",
     "location_district",
+    "currency",
     "is_admin",
     "user_role",
     "tier",
@@ -315,6 +318,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
 
       setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
+
+      // Warm pricing cache in the background so Premium / upsell UI can
+      // render the user's resolved currency without a visible flash.
+      void (async () => {
+        const hints = await resolvePricingHints({
+          userId,
+          profileCountry: (data as Profile).location_country ?? null,
+          profileCurrency: (data as Profile).currency ?? null,
+        });
+        await fetchLivePrices({
+          country: hints.country,
+          currency: hints.currency,
+        });
+      })();
     } catch (error) {
       if (!isHydrationRunCurrent(runId)) return;
       console.error("[AuthContext] fetchProfile failed", error);

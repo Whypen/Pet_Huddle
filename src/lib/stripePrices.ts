@@ -87,6 +87,11 @@ const readLastPriceSnapshot = (): { cacheKey: string; prices: LivePriceMap } | n
   }
 };
 
+export const getLastLivePricesSnapshot = (): LivePriceMap | null => {
+  const snapshot = readLastPriceSnapshot();
+  return snapshot?.prices ?? null;
+};
+
 export const getCachedLivePrices = (input?: { currency?: string; country?: string }): LivePriceMap | null => {
   const cacheKey = getPriceCacheKey(input);
   const inMemory = _cacheByKey.get(cacheKey);
