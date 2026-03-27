@@ -27,10 +27,14 @@ const FEATURES_GOLD = ["Video uploads", "Top Profile Visibility"];
 
 export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const { profile } = useAuth();
+  const profilePrefs = (profile?.prefs as Record<string, unknown> | null | undefined) ?? null;
+  const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
+    ? profilePrefs.pricing_currency
+    : null;
   const [loading, setLoading] = useState(false);
   const [pricingHints, setPricingHints] = useState<{ country?: string; currency?: string }>({});
   const cachedPrices = getCachedLivePrices({
-    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+    currency: savedPricingCurrency ?? undefined,
   }) ?? getLastLivePricesSnapshot();
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
@@ -43,7 +47,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
       const hints = await resolvePricingHints({
         userId: profile?.id,
         profileCountry: profile?.location_country,
-        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+        profileCurrency: savedPricingCurrency,
       });
       if (!active) return;
       setPricingHints(hints);
@@ -54,7 +58,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
       if (active) setLivePrices(prices);
     })();
     return () => { active = false; };
-  }, [isOpen, profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
+  }, [isOpen, profile?.id, profile?.location_country, savedPricingCurrency]);
 
   async function handlePurchase() {
     setLoading(true);

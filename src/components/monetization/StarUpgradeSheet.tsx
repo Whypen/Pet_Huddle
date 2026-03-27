@@ -71,12 +71,16 @@ export function StarUpgradeSheet({
   onUpgrade,
 }: StarUpgradeSheetProps) {
   const { profile } = useAuth();
+  const profilePrefs = (profile?.prefs as Record<string, unknown> | null | undefined) ?? null;
+  const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
+    ? profilePrefs.pricing_currency
+    : null;
   const copy       = tier === "plus" ? quotaConfig.copy.stars.upgrade.free : quotaConfig.copy.stars.upgrade.plus;
   const theme      = TIER_THEMES[tier];
   const highlights = tier === "plus" ? PLUS_HIGHLIGHTS : GOLD_HIGHLIGHTS;
 
   const cachedPrices = getCachedLivePrices({
-    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+    currency: savedPricingCurrency ?? undefined,
   }) ?? getLastLivePricesSnapshot();
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const modalRoot = typeof document !== "undefined" ? document.body : null;
@@ -88,7 +92,7 @@ export function StarUpgradeSheet({
       const hints = await resolvePricingHints({
         userId: profile?.id,
         profileCountry: profile?.location_country,
-        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+        profileCurrency: savedPricingCurrency,
       });
       const prices = await fetchLivePrices({
         country: hints.country,
@@ -97,7 +101,7 @@ export function StarUpgradeSheet({
       if (active) setLivePrices(prices);
     })();
     return () => { active = false; };
-  }, [isOpen, profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
+  }, [isOpen, profile?.id, profile?.location_country, savedPricingCurrency]);
 
   const isAnnual    = billing === "annual";
   const monthlyAmt  = tier === "plus" ? livePrices.plus_monthly : livePrices.gold_monthly;

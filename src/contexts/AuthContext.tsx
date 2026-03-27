@@ -47,7 +47,6 @@ export interface Profile {
   location_name: string | null;
   location_country?: string | null;
   location_district?: string | null;
-  currency?: string | null;
   user_role: string;
   tier?: string | null;
   effective_tier?: string | null;
@@ -152,7 +151,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "location_name",
     "location_country",
     "location_district",
-    "currency",
     "is_admin",
     "user_role",
     "tier",
@@ -322,10 +320,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Warm pricing cache in the background so Premium / upsell UI can
       // render the user's resolved currency without a visible flash.
       void (async () => {
+        const profilePrefs = (data as Profile).prefs as Record<string, unknown> | null | undefined;
+        const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
+          ? profilePrefs.pricing_currency
+          : null;
         const hints = await resolvePricingHints({
           userId,
           profileCountry: (data as Profile).location_country ?? null,
-          profileCurrency: (data as Profile).currency ?? null,
+          profileCurrency: savedPricingCurrency,
         });
         await fetchLivePrices({
           country: hints.country,

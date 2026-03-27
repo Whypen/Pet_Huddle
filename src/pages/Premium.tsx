@@ -124,6 +124,10 @@ export default function PremiumPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile } = useAuth();
   const { t } = useLanguage();
+  const profilePrefs = (profile?.prefs as Record<string, unknown> | null | undefined) ?? null;
+  const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
+    ? profilePrefs.pricing_currency
+    : null;
 
   const [activeTab, setActiveTab] = useState<PlanTab>("gold");
   const [plusBilling, setPlusBilling] = useState<Billing>("monthly");
@@ -140,7 +144,7 @@ export default function PremiumPage() {
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
   const initialLivePrices = getCachedLivePrices({
-    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+    currency: savedPricingCurrency ?? undefined,
   }) ?? getLastLivePricesSnapshot() ?? FALLBACK_PRICES;
   const [livePrices, setLivePrices] = useState<LivePriceMap>(initialLivePrices);
 
@@ -150,7 +154,7 @@ export default function PremiumPage() {
       const hints = await resolvePricingHints({
         userId: profile?.id,
         profileCountry: profile?.location_country,
-        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+        profileCurrency: savedPricingCurrency,
       });
       if (!active) return;
       setPricingCountry(hints.country ?? null);
@@ -162,7 +166,7 @@ export default function PremiumPage() {
       if (active) setLivePrices(prices);
     })();
     return () => { active = false; };
-  }, [profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
+  }, [profile?.id, profile?.location_country, savedPricingCurrency]);
 
   // ── Sequential checkout: detect ?plan_done=1 ────────────────────────────────
   useEffect(() => {
