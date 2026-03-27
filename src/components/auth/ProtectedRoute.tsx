@@ -64,13 +64,9 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         </div>
       );
     }
-    // No profile after wait — not a registered user.
-    // Signup flow: send to /set-profile to complete registration.
-    // All other cases (stale UUID, deleted account, OAuth mid-signup): send to /auth.
-    const isSignupOnboardingFlow = flowState !== "idle";
-    if (isSignupOnboardingFlow && !allowOnboardingRoutes) {
-      return <Navigate to="/set-profile" replace />;
-    }
+    // No profile after wait — not a registered user (abandoned signup, deleted
+    // account, or OAuth mid-signup). Never send to /set-profile; always /auth.
+    // /set-profile is only for users who have a profile that is incomplete.
     if (allowOnboardingRoutes) {
       return <>{children}</>;
     }

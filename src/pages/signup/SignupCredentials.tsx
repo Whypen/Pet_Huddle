@@ -63,6 +63,10 @@ const SignupCredentials = () => {
     setTimeout(() => navigate(to), 180);
   };
 
+  const [verifySubState, setVerifySubState] = useState<"form" | "verifying">("form");
+  const [verifyToken, setVerifyToken] = useState("");
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [resending, setResending] = useState(false);
   const [emailOptIn, setEmailOptIn] = useState(false);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
@@ -237,6 +241,22 @@ const SignupCredentials = () => {
 
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
+  // Poll localStorage every 2s for pre-signup email verification flag.
+  // Only active in the "verifying" sub-state; clears on unmount.
+  useEffect(() => {
+    if (verifySubState !== "verifying" || !verifyToken || emailVerified) return;
+    const interval = setInterval(() => {
+      try {
+        if (localStorage.getItem(`huddle_presignup_verified_${verifyToken}`) === "true") {
+          setEmailVerified(true);
+        }
+      } catch {
+        // localStorage unavailable — fail silently
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [verifySubState, verifyToken, emailVerified]);
+
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const onSubmit = async () => {
@@ -281,7 +301,15 @@ const SignupCredentials = () => {
       // This prevents orphaned accounts when users abandon mid-flow.
       update({ email: email.trim(), password, phone: phone.trim(), email_opt_in: emailOptIn });
       setFlowState("signup");
-      goTo("/signup/name");
+      // Transition to email verify sub-state (still Step 2).
+      // send-pre-signup-verify sends a Brevo email with a token link to /signup/verify-email.
+      // The landing page sets a localStorage flag; polling picks it up here.
+      const token = crypto.randomUUID();
+      setVerifyToken(token);
+      void supabase.functions
+        .invoke("send-pre-signup-verify", { body: { email: email.trim(), token } })
+        .catch((err) => console.warn("[credentials] pre-signup verify email failed silently", err));
+      setVerifySubState("verifying");
       return;
     } catch (err) {
       console.error("Signup failed:", err);
@@ -314,6 +342,20 @@ const SignupCredentials = () => {
       sessionOnlyHandlerRef.current = clearAuthTokens;
       window.addEventListener("beforeunload", clearAuthTokens);
       window.addEventListener("pagehide", clearAuthTokens);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!verifyToken || resending) return;
+    setResending(true);
+    try {
+      await supabase.functions.invoke("send-pre-signup-verify", {
+        body: { email: email.trim(), token: verifyToken },
+      });
+    } catch (err) {
+      console.warn("[credentials] resend verify email failed", err);
+    } finally {
+      setResending(false);
     }
   };
 
@@ -350,6 +392,93 @@ const SignupCredentials = () => {
           : phoneInvalid
             ? "Enter a valid phone number"
             : "Complete all required fields to continue");
+
+  // ── Verify sub-state screen ──────────────────────────────────────────────────
+
+  if (verifySubState === "verifying") {
+    return (
+      <>
+        <SignupShell
+          step={2}
+          onBack={() => {
+            setVerifySubState("form");
+            setEmailVerified(false);
+            setVerifyToken("");
+          }}
+          isExiting={isExiting}
+          cta={
+            <div className="space-y-2">
+              <NeuButton
+                variant="primary"
+                className="w-full h-12"
+                disabled={!emailVerified}
+                onClick={() => { if (emailVerified) goTo("/signup/name"); }}
+              >
+                Continue
+              </NeuButton>
+              {!emailVerified && (
+                <p className="text-[11px] text-[rgba(74,73,101,0.55)] text-center">
+                  Check your inbox and verify your email to continue
+                </p>
+              )}
+            </div>
+          }
+        >
+          <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
+            Verify your email
+          </h1>
+          <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-2">
+            To verify your email address, tap the button in the email we just sent to{" "}
+            <strong className="font-[600] text-[#424965]">{email}</strong>
+          </p>
+
+          <div className="mt-8 space-y-6">
+            <div>
+              <p className="text-[15px] font-[600] text-[#424965]">Didn't receive the email?</p>
+              <p className="text-[14px] text-[rgba(74,73,101,0.70)] mt-1">
+                Check your spam folder, or tap <strong className="font-[600]">Resend email</strong> below.
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <NeuButton
+                variant="secondary"
+                className="w-full h-12 flex items-center justify-center gap-2"
+                onClick={() => window.open("mailto:", "_blank")}
+              >
+                <Mail size={16} strokeWidth={1.75} />
+                Open Mail
+              </NeuButton>
+
+              <button
+                type="button"
+                className="w-full text-center text-[14px] font-[500] text-[#424965] py-2"
+                onClick={handleResend}
+                disabled={resending}
+              >
+                {resending ? "Sending…" : "Resend email"}
+              </button>
+
+              <p className="text-[11px] text-[rgba(74,73,101,0.50)] text-center">
+                If your email was entered incorrectly,{" "}
+                <Link
+                  to="/auth"
+                  className="text-[#2145CF] underline"
+                  onClick={() => setFlowState("idle")}
+                >
+                  register / login again
+                </Link>
+              </p>
+            </div>
+          </div>
+        </SignupShell>
+        <LegalModal isOpen={legalModal === "terms"}   onClose={() => setLegalModal(null)} type="terms" />
+        <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
+      </>
+    );
+  }
+
+  // ── Form screen (default) ────────────────────────────────────────────────────
 
   return (
     <>
