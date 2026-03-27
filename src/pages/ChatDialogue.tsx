@@ -675,7 +675,7 @@ const ChatDialogue = () => {
     } finally {
       setConfirmUnmatchOpen(false);
     }
-  }, [counterpart?.id, navigate, profile?.id]);
+  }, [counterpart?.id, navigate, profile?.id, roomId]);
 
   const loadGroupManageData = useCallback(async () => {
     if (!roomId || !profile?.id) return;

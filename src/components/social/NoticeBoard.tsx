@@ -1406,7 +1406,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [fetchFeedPage, focusThreadId, hydrateRows, mapFeedRowToThread, user?.id]);
+  }, [applyHydratedRows, fetchFeedPage, focusThreadId, hydrateRows, mapFeedRowToThread, user?.id]);
 
   useEffect(() => {
     fetchNotices(true);
@@ -1515,7 +1515,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [createMentionQuery?.query, searchMentionProfiles]);
+  }, [createMentionQuery, searchMentionProfiles]);
 
   useEffect(() => {
     if (!MENTION_LIVE_SUGGESTIONS_ENABLED) {
@@ -1536,7 +1536,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [replyMentionQuery?.query, searchMentionProfiles]);
+  }, [replyMentionQuery, searchMentionProfiles]);
 
   const handleCreateInputChange = (value: string, caret: number) => {
     setContent(value);

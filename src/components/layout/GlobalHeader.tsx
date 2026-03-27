@@ -239,7 +239,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         "",
       );
     }
-  }, [location.key]);
+  }, [location.key, location.pathname, location.state]);
 
   // ── Unread badge: real-time subscription ────────────────────────────────────
   useEffect(() => {

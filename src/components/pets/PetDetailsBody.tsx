@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState } from "react";
 import { BellRing, CakeSlice, ChevronDown, Cpu, Pill, Stethoscope, Weight } from "lucide-react";
 import { cn } from "@/lib/utils";

@@ -135,7 +135,7 @@ const parseCountryFromText = (value?: string | null): string | null => {
   const direct = normalizeCountryCode(text);
   if (direct) return direct;
   const tokens = text
-    .split(/[,\-]/)
+    .split(/[,-]/)
     .map((token) => normalizeCountryCode(token))
     .filter((token): token is string => Boolean(token));
   return tokens.at(-1) || null;

@@ -152,7 +152,7 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
     } finally {
       setLoading(false);
     }
-  }, [anchor?.lat, anchor?.lng]);
+  }, [anchor]);
 
   useEffect(() => {
     void fetchProviders();
