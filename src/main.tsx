@@ -43,7 +43,8 @@ const resetServiceWorkerCachesOnce = async () => {
 };
 void resetServiceWorkerCachesOnce();
 
-const CHUNK_RELOAD_GUARD = "huddle:chunk-reload-once";
+const CHUNK_RELOAD_ATTEMPTS_KEY = "huddle:chunk-reload-attempts";
+const CHUNK_RELOAD_MAX_ATTEMPTS = 3;
 const shouldReloadForChunkFailure = (input: unknown): boolean => {
   const text = String(input ?? "");
   return (
@@ -52,25 +53,43 @@ const shouldReloadForChunkFailure = (input: unknown): boolean => {
     text.includes("Expected a JavaScript-or-Wasm module script")
   );
 };
-const reloadOnceForChunkFailure = () => {
+const reloadForChunkFailure = async () => {
   try {
-    if (sessionStorage.getItem(CHUNK_RELOAD_GUARD) === "1") return;
-    sessionStorage.setItem(CHUNK_RELOAD_GUARD, "1");
-    window.location.reload();
+    const raw = sessionStorage.getItem(CHUNK_RELOAD_ATTEMPTS_KEY);
+    const attempts = Number(raw || "0");
+    if (Number.isFinite(attempts) && attempts >= CHUNK_RELOAD_MAX_ATTEMPTS) return;
+    sessionStorage.setItem(CHUNK_RELOAD_ATTEMPTS_KEY, String((Number.isFinite(attempts) ? attempts : 0) + 1));
   } catch {
-    window.location.reload();
+    // Ignore storage failures and continue with recovery reload.
   }
+
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch {
+    // Best effort cleanup.
+  }
+
+  const current = new URL(window.location.href);
+  current.searchParams.set("__chunk_recover", String(Date.now()));
+  window.location.replace(current.toString());
 };
 window.addEventListener("error", (event) => {
   if (shouldReloadForChunkFailure(event.message)) {
-    reloadOnceForChunkFailure();
+    void reloadForChunkFailure();
   }
 });
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason as { message?: unknown } | unknown;
   const message = typeof reason === "object" && reason !== null ? (reason as { message?: unknown }).message : reason;
   if (shouldReloadForChunkFailure(message)) {
-    reloadOnceForChunkFailure();
+    void reloadForChunkFailure();
   }
 });
 
