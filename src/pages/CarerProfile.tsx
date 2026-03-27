@@ -597,10 +597,12 @@ const CarerProfile: React.FC = () => {
     try {
       const returnUrl = `${window.location.origin}/carerprofile/stripe-return`;
       const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
-      const { data, error } = await invokeAuthedFunction<{ url?: string }>(
-        "create-stripe-connect-link",
-        { body: { action: "create_link", returnUrl, refreshUrl } },
-      );
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token || "";
+      const { data, error } = await supabase.functions.invoke("create-stripe-connect-link", {
+        body: { action: "create_link", returnUrl, refreshUrl },
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      });
       if (error) throw error;
       const targetUrl = String((data as { url?: string } | null)?.url || "").trim();
       if (!targetUrl) {
