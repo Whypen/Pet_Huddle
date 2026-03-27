@@ -279,7 +279,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select(profileSelect)
+        .select("*")
         .eq("id", userId)
         .maybeSingle();
       if (!isHydrationRunCurrent(runId)) return;
@@ -339,7 +339,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("[AuthContext] fetchProfile failed", error);
       setProfile(null);
     }
-  }, [isHydrationRunCurrent, profileSelect]);
+  }, [isHydrationRunCurrent]);
 
   const touchProfileActivity = useCallback(async () => {
     try {
