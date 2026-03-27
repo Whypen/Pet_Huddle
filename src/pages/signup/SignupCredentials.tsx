@@ -63,6 +63,7 @@ const SignupCredentials = () => {
     setTimeout(() => navigate(to), 180);
   };
 
+  const [emailOptIn, setEmailOptIn] = useState(false);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [duplicateDetected, setDuplicateDetected] = useState(false);
@@ -241,6 +242,7 @@ const SignupCredentials = () => {
   const onSubmit = async () => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
+      update({ email_opt_in: emailOptIn });
       setFlowState("signup");
       goTo("/signup/name");
       return;
@@ -253,7 +255,7 @@ const SignupCredentials = () => {
       // Final submit-time guards (belt-and-suspenders in case CTA was somehow
       // enabled with a stale state snapshot).
       if (!phone || !isValidPhoneNumber(phone) || duplicateDetected) return;
-      update({ email: user?.email || email, phone });
+      update({ email: user?.email || email, phone, email_opt_in: emailOptIn });
       setFlowState("signup");
       goTo("/signup/name");
       return;
@@ -277,7 +279,7 @@ const SignupCredentials = () => {
       // Store credentials — signUp() is deferred to /signup/name so the user's
       // display name and social ID are collected before the account is created.
       // This prevents orphaned accounts when users abandon mid-flow.
-      update({ email: email.trim(), password, phone: phone.trim() });
+      update({ email: email.trim(), password, phone: phone.trim(), email_opt_in: emailOptIn });
       setFlowState("signup");
       goTo("/signup/name");
       return;
@@ -467,25 +469,45 @@ const SignupCredentials = () => {
           )}
 
           {/* Legal consent copy */}
-          <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
-            By tapping Continue, you agree to our{" "}
-            <button
-              type="button"
-              className="text-[#2145CF] underline"
-              onClick={() => setLegalModal("terms")}
-            >
-              Terms of Service
-            </button>{" "}
-            and{" "}
-            <button
-              type="button"
-              className="text-[#2145CF] underline"
-              onClick={() => setLegalModal("privacy")}
-            >
-              Privacy Policy
-            </button>
-            , and to receive community safety alerts, pet care tips, and Huddle updates. You can unsubscribe anytime from any email.
-          </p>
+          <div className="space-y-3">
+            <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
+              By tapping Continue, you agree to our{" "}
+              <button
+                type="button"
+                className="text-[#2145CF] underline"
+                onClick={() => setLegalModal("terms")}
+              >
+                Terms of Service
+              </button>{" "}
+              and{" "}
+              <button
+                type="button"
+                className="text-[#2145CF] underline"
+                onClick={() => setLegalModal("privacy")}
+              >
+                Privacy Policy
+              </button>
+              .
+            </p>
+
+            <label className="flex items-start gap-2 text-[12px] text-[rgba(74,73,101,0.80)] leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={emailOptIn}
+                onChange={(e) => setEmailOptIn(e.target.checked)}
+                className="mt-[2px] h-4 w-4 rounded border-[rgba(74,73,101,0.35)] shrink-0"
+              />
+              <span>
+                I agree to receive emails from Huddle for pet care, community news, and product updates.
+              </span>
+            </label>
+
+            {emailOptIn && (
+              <p className="text-[12px] text-[rgba(74,73,101,0.55)] pl-6">
+                We'll send you a separate email to confirm your subscription.
+              </p>
+            )}
+          </div>
 
           <div className="h-[calc(env(safe-area-inset-bottom,0px)+8px)]" aria-hidden="true" />
         </form>
