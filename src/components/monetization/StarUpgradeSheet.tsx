@@ -12,7 +12,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { createPortal } from "react-dom";
 import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
-import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -69,19 +70,34 @@ export function StarUpgradeSheet({
   onBillingChange,
   onUpgrade,
 }: StarUpgradeSheetProps) {
+  const { profile } = useAuth();
   const copy       = tier === "plus" ? quotaConfig.copy.stars.upgrade.free : quotaConfig.copy.stars.upgrade.plus;
   const theme      = TIER_THEMES[tier];
   const highlights = tier === "plus" ? PLUS_HIGHLIGHTS : GOLD_HIGHLIGHTS;
 
-  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
+  const cachedPrices = getCachedLivePrices({
+    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+  });
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const modalRoot = typeof document !== "undefined" ? document.body : null;
 
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
-    fetchLivePrices(getStripeLocaleHints()).then((p) => { if (active) setLivePrices(p); });
+    (async () => {
+      const hints = await resolvePricingHints({
+        userId: profile?.id,
+        profileCountry: profile?.location_country,
+        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+      });
+      const prices = await fetchLivePrices({
+        country: hints.country,
+        currency: hints.currency,
+      });
+      if (active) setLivePrices(prices);
+    })();
     return () => { active = false; };
-  }, [isOpen]);
+  }, [isOpen, profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
 
   const isAnnual    = billing === "annual";
   const monthlyAmt  = tier === "plus" ? livePrices.plus_monthly : livePrices.gold_monthly;

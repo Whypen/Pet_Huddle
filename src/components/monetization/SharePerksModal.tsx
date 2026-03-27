@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { Users2, Check } from "lucide-react";
 import { GlassModal } from "@/components/ui/GlassModal";
-import { fetchLivePrices, FALLBACK_PRICES, getStripeLocaleHints, type LivePriceMap } from "@/lib/stripePrices";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -25,16 +26,35 @@ const FEATURES_BASE = [
 const FEATURES_GOLD = ["Video uploads", "Top Profile Visibility"];
 
 export function SharePerksModal({ isOpen, onClose, tier }: Props) {
+  const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [livePrices, setLivePrices] = useState<LivePriceMap>(FALLBACK_PRICES);
+  const [pricingHints, setPricingHints] = useState<{ country?: string; currency?: string }>({});
+  const cachedPrices = getCachedLivePrices({
+    currency: (profile as { currency?: string | null } | null)?.currency ?? undefined,
+  });
+  const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
 
   useEffect(() => {
+    if (!isOpen) return;
     let active = true;
-    fetchLivePrices(getStripeLocaleHints()).then((p) => { if (active) setLivePrices(p); });
+    (async () => {
+      const hints = await resolvePricingHints({
+        userId: profile?.id,
+        profileCountry: profile?.location_country,
+        profileCurrency: (profile as { currency?: string | null } | null)?.currency ?? null,
+      });
+      if (!active) return;
+      setPricingHints(hints);
+      const prices = await fetchLivePrices({
+        country: hints.country,
+        currency: hints.currency,
+      });
+      if (active) setLivePrices(prices);
+    })();
     return () => { active = false; };
-  }, []);
+  }, [isOpen, profile?.id, profile?.location_country, (profile as { currency?: string | null } | null)?.currency]);
 
   async function handlePurchase() {
     setLoading(true);
@@ -47,7 +67,8 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
             type: "sharePerks",
             successUrl: `${window.location.origin}/settings?addon_done=1`,
             cancelUrl: window.location.href,
-            ...getStripeLocaleHints(),
+            country: pricingHints.country,
+            currency: pricingHints.currency,
           },
         }
       );

@@ -54,6 +54,50 @@ export const FALLBACK_PRICES: LivePriceMap = {
 
 const _cacheByKey = new Map<string, LivePriceMap>();
 const _inflightByKey = new Map<string, Promise<LivePriceMap>>();
+const LAST_PRICE_SNAPSHOT_KEY = "stripe_prices:last_snapshot:v1";
+
+const getPriceCacheKey = (input?: { currency?: string; country?: string }): string => {
+  const countryHint = String(input?.country || "").trim().toUpperCase();
+  const currencyHint = String(input?.currency || "").trim().toUpperCase();
+  return `${currencyHint || "-"}|${countryHint || "-"}`;
+};
+
+const writeLastPriceSnapshot = (cacheKey: string, prices: LivePriceMap) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      LAST_PRICE_SNAPSHOT_KEY,
+      JSON.stringify({ cacheKey, prices }),
+    );
+  } catch {
+    // ignore storage failures
+  }
+};
+
+const readLastPriceSnapshot = (): { cacheKey: string; prices: LivePriceMap } | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAST_PRICE_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { cacheKey?: string; prices?: LivePriceMap } | null;
+    if (!parsed?.cacheKey || !parsed?.prices) return null;
+    return { cacheKey: parsed.cacheKey, prices: parsed.prices };
+  } catch {
+    return null;
+  }
+};
+
+export const getCachedLivePrices = (input?: { currency?: string; country?: string }): LivePriceMap | null => {
+  const cacheKey = getPriceCacheKey(input);
+  const inMemory = _cacheByKey.get(cacheKey);
+  if (inMemory) return inMemory;
+  const snapshot = readLastPriceSnapshot();
+  if (snapshot && snapshot.cacheKey === cacheKey) {
+    _cacheByKey.set(cacheKey, snapshot.prices);
+    return snapshot.prices;
+  }
+  return null;
+};
 
 const getBrowserCountryHint = (): string | null => {
   try {
@@ -234,10 +278,10 @@ export function fmtCurrency(n: number): string {
 
 /** Returns live Stripe prices; result is cached for the entire app session. */
 export function fetchLivePrices(input?: { currency?: string; country?: string }): Promise<LivePriceMap> {
-  const countryHint = input?.country || getBrowserCountryHint();
+  const countryHint = String(input?.country || getBrowserCountryHint() || "").trim().toUpperCase();
   const currencyHint = String(input?.currency || "").trim().toUpperCase();
-  const cacheKey = `${currencyHint || "-"}|${countryHint || "-"}`;
-  const cached = _cacheByKey.get(cacheKey);
+  const cacheKey = getPriceCacheKey({ currency: currencyHint, country: countryHint });
+  const cached = getCachedLivePrices({ currency: currencyHint, country: countryHint });
   if (cached) return Promise.resolve(cached);
   const inflight = _inflightByKey.get(cacheKey);
   if (inflight) return inflight;
@@ -268,15 +312,18 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
           currencyCode: displayCurrency || "USD",
         };
         _cacheByKey.set(cacheKey, resolved);
+        writeLastPriceSnapshot(cacheKey, resolved);
         return resolved;
       } else {
         const fallback = { ...FALLBACK_PRICES };
         _cacheByKey.set(cacheKey, fallback);
+        writeLastPriceSnapshot(cacheKey, fallback);
         return fallback;
       }
     } catch {
       const fallback = { ...FALLBACK_PRICES };
       _cacheByKey.set(cacheKey, fallback);
+      writeLastPriceSnapshot(cacheKey, fallback);
       return fallback;
     } finally {
       _inflightByKey.delete(cacheKey);
