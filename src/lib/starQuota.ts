@@ -8,8 +8,8 @@ type StarQuotaSnapshot = {
 
 export const resolveStarQuotaTier = (
   profileTier?: string | null,
-  snapshotTier?: string | null,
-) => normalizeQuotaTier(profileTier || snapshotTier || "free");
+  _snapshotTier?: string | null,
+) => normalizeQuotaTier(profileTier || "free");
 
 export const getRemainingStarsFromSnapshot = (
   profileTier?: string | null,

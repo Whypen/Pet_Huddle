@@ -64,7 +64,7 @@ export const useUpsell = () => {
   );
 
   const starTier = useCallback(
-    (snap: QuotaSnapshot | null) => resolveStarQuotaTier(profile?.tier, snap?.tier),
+    (_snap: QuotaSnapshot | null) => resolveStarQuotaTier(profile?.tier),
     [profile?.tier],
   );
 
