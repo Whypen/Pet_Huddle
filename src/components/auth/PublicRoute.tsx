@@ -25,6 +25,12 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
     return <>{children}</>;
   }
 
+  // Always let AuthCallback handle its own navigation. It checks profile existence
+  // and routes new OAuth users to /signup/dob before PublicRoute sees loading=false.
+  if (location.pathname === "/auth/callback") {
+    return <>{children}</>;
+  }
+
   if (loading) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
