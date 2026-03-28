@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, User, Settings, Shield, LogOut, Crown, Bug, FileText, Scale } from "lucide-react";
+import { X, User, Settings, LogOut, Crown, Bug, FileText, Scale } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { cn } from "@/lib/utils";
-import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
 import { supabase } from "@/integrations/supabase/client";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
+import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -21,20 +21,6 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
   const [starsRemaining, setStarsRemaining] = useState<number | null>(null);
 
   const isVerified = profile?.is_verified === true;
-  const normalizedTier = normalizeMembershipTier(
-    String(profile?.effective_tier || profile?.tier || "free"),
-  );
-  const tierLabel = membershipTierLabel(normalizedTier);
-  const tierPillClass =
-    normalizedTier === "gold"
-      ? "bg-[#ff6a55] text-white"
-      : normalizedTier === "plus"
-        ? "bg-[#5ba4f5] text-white"
-        : "bg-[#eceff4] text-[#6e7386]";
-  const starPillClass = starsRemaining && starsRemaining > 0
-    ? "border border-[#E4E8F2] bg-white text-[#4A4965]"
-    : "border border-[#C6CAD6] bg-transparent text-[#98A0B8]";
-  const starPillLabel = `${Math.max(0, Number(starsRemaining || 0))} ⭐`;
 
   useEffect(() => {
     if (!isOpen || !profile?.id) return;
@@ -112,54 +98,17 @@ export const SettingsDrawer = ({ isOpen, onClose }: SettingsDrawerProps) => {
                 </div>
                 
                 {/* User Summary */}
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    {profile?.avatar_url ? (
-                      <img
-                        src={profile.avatar_url}
-                        alt={t("Profile")}
-                        className="w-12 h-12 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-                        <User className="w-6 h-6 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div
-                      className={cn(
-                        "absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center",
-                        isVerified
-                          ? "bg-brandBlue"
-                          : "bg-muted"
-                      )}
-                    >
-                      <Shield className={cn("w-3 h-3", isVerified ? "text-white" : "text-muted-foreground")} />
-                    </div>
-                  </div>
-                  <div>
-                    <p className="font-semibold">{profile?.display_name || t("User")}</p>
-                    {/* UAT: remove 'identity pending' status text; keep badge on avatar only */}
-                    <div className="mt-0.5 flex items-center gap-1.5">
-                      <span
-                        className={cn("inline-block text-xs font-medium px-2 py-0.5 rounded-full", tierPillClass)}
-                      >
-                        {tierLabel}
-                      </span>
-                      {starsRemaining !== null && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onClose();
-                            navigate("/premium");
-                          }}
-                          className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors", starPillClass)}
-                        >
-                          {starPillLabel}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <SettingsProfileSummary
+                  displayName={profile?.display_name || t("User")}
+                  avatarUrl={profile?.avatar_url || null}
+                  isVerified={isVerified}
+                  tierValue={String(profile?.effective_tier || profile?.tier || "free")}
+                  starsLabel={String(Math.max(0, Number(starsRemaining || 0)))}
+                  onStarsClick={() => {
+                    onClose();
+                    navigate("/premium");
+                  }}
+                />
               </div>
               
               {/* Menu Items */}

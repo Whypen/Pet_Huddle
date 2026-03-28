@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, ChevronRight, PawPrint } from "lucide-react";
+import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, PawPrint } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
-import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
-import { cn } from "@/lib/utils";
 import { PageHeader } from "@/layouts/PageHeader";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuControl } from "@/components/ui/NeuControl";
@@ -16,6 +14,7 @@ import { GlassModal } from "@/components/ui/GlassModal";
 import strayCatImage from "@/assets/Notifications/Stray Cat.jpg";
 import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
+import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -60,24 +59,6 @@ const Settings: React.FC = () => {
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
-  const avatarUrl = p.avatar_url ? String(p.avatar_url) : "";
-  const initials = displayName
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("")
-    .slice(0, 2) || "U";
-  const effectiveTier = normalizeMembershipTier((p.effective_tier as string) || (p.tier as string) || "free");
-  const tierChipClass =
-    effectiveTier === "gold"
-      ? "bg-[#FF6452] text-white"
-      : effectiveTier === "plus"
-        ? "bg-[#5BA4F5] text-white"
-        : "bg-[#E9ECF3] text-[#7E8599]";
-  const starsPillClass =
-    starsRemaining > 0
-      ? "border border-[#E4E8F2] bg-white text-[#4A4965]"
-      : "border border-[#C6CAD6] bg-transparent text-[#98A0B8]";
   const isVerified = p.is_verified === true;
   const dob = (p.dob as string | null) ?? null;
   const isAge16Plus = dob
@@ -407,41 +388,16 @@ const Settings: React.FC = () => {
       <div className="pt-[68px] px-4 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+20px)] space-y-4 max-w-md mx-auto">
 
         {/* ── UserHeader ── */}
-        <div
-          role="button"
-          tabIndex={0}
-          className="flex items-center gap-3 px-0 py-4 cursor-pointer"
-          onClick={() => navigate("/edit-profile")}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") navigate("/edit-profile"); }}
-        >
-          <div className="flex h-[56px] w-[56px] items-center justify-center overflow-hidden rounded-full bg-[rgba(33,69,207,0.10)] text-sm font-semibold flex-shrink-0">
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={displayName} className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-[18px] font-[600] text-[var(--text-primary)]">{initials}</span>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-[16px] font-[600] text-[var(--text-primary)] leading-[1.3] truncate">{displayName}</h3>
-            <div className="mt-1 inline-flex items-center gap-1.5">
-              <span className={cn("inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none", tierChipClass)}>
-                {membershipTierLabel(effectiveTier)}
-              </span>
-              <button
-                type="button"
-                className={cn("inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none", starsPillClass)}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  navigate("/premium");
-                }}
-              >
-                {starsRemaining} ⭐
-              </button>
-            </div>
-          </div>
-          <ChevronRight size={16} strokeWidth={1.75} className="text-[var(--text-tertiary)] flex-shrink-0" />
-        </div>
+        <SettingsProfileSummary
+          displayName={displayName}
+          avatarUrl={p.avatar_url ? String(p.avatar_url) : null}
+          isVerified={p.is_verified === true}
+          tierValue={String((p.effective_tier as string) || (p.tier as string) || "free")}
+          starsLabel={String(starsRemaining)}
+          onStarsClick={() => navigate("/premium")}
+          onPress={() => navigate("/edit-profile")}
+          showChevron
+        />
 
         {/* ── VISIBILITY ── */}
         <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">VISIBILITY</p>
