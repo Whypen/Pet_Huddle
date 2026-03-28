@@ -35,7 +35,7 @@ async function getTokenBucket(userId: string) {
     .eq("user_id", userId)
     .maybeSingle();
   const tier = await getTier(userId);
-  const capacity = tier === "gold" ? 300 : tier === "premium" ? 200 : 50;
+  const capacity = tier === "gold" ? 300 : (tier === "plus" || tier === "premium") ? 200 : 50;
   if (!data) {
     await supabase.from("ai_vet_rate_limits").insert({ user_id: userId, tokens: capacity });
     return { tokens: capacity };
@@ -178,7 +178,7 @@ serve(async (req: Request) => {
     remaining = bucket.remaining;
 
     if (imageBase64) {
-      // Contract: AI Vet uploads are gated by QMS (Free=0, Premium=10/day, Gold=20/day pooled).
+      // Contract: AI Vet uploads are gated by QMS (Free=0, Plus=10/day, Gold=20/day pooled).
       const upload = await consumeToken(userId, "ai_vet_upload");
       if (!upload.allowed) return json({ error: "Quota Exceeded" }, 429);
       // Gold-only: priority analyses (5/month pooled). Only consume when explicitly requested.

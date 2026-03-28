@@ -13,6 +13,7 @@ import {
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
 import { fetchLivePrices, resolvePricingHints } from "@/lib/stripePrices";
+import { normalizeMembershipTier } from "@/lib/membership";
 
 export interface Profile {
   id: string;
@@ -289,20 +290,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
-      const normalizeTier = (tier: unknown): "free" | "plus" | "gold" => {
-        const value = String(tier || "free").toLowerCase();
-        if (value === "gold") return "gold";
-        if (value === "plus" || value === "premium") return "plus";
-        return "free";
-      };
-      const tierRank = (tier: "free" | "plus" | "gold"): number => {
-        if (tier === "gold") return 3;
-        if (tier === "plus") return 2;
-        return 1;
-      };
-      const tierFromRecord = (record: { effective_tier?: unknown; tier?: unknown }): "free" | "plus" | "gold" => {
-        return normalizeTier(record.effective_tier ?? record.tier);
-      };
       const resolveFamilyOwnerId = async (seedUserId: string): Promise<string> => {
         let current = seedUserId;
         const seen = new Set<string>([seedUserId]);
@@ -323,74 +310,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         return current;
       };
-      const resolveHighestFamilyTier = async (
-        seedUserId: string,
-        seedTier: "free" | "plus" | "gold"
-      ): Promise<{ effectiveTier: "free" | "plus" | "gold"; familyOwnerId: string | null }> => {
-        const ownerId = await resolveFamilyOwnerId(seedUserId);
-        if (!isHydrationRunCurrent(runId)) {
-          return { effectiveTier: seedTier, familyOwnerId: null };
-        }
-
-        const visited = new Set<string>([ownerId]);
-        let frontier = new Set<string>([ownerId]);
-
-        for (let depth = 0; depth < 8; depth += 1) {
-          const ids = Array.from(frontier);
-          if (!ids.length) break;
-
-          const { data: asInviter } = await supabase
-            .from("family_members")
-            .select("inviter_user_id, invitee_user_id")
-            .eq("status", "accepted")
-            .in("inviter_user_id", ids);
-          if (!isHydrationRunCurrent(runId)) {
-            return { effectiveTier: seedTier, familyOwnerId: null };
-          }
-
-          const edges = (asInviter || []) as Array<{
-            inviter_user_id: string;
-            invitee_user_id: string;
-          }>;
-          const next = new Set<string>();
-          for (const edge of edges) {
-            if (!visited.has(edge.invitee_user_id)) {
-              visited.add(edge.invitee_user_id);
-              next.add(edge.invitee_user_id);
-            }
-          }
-          frontier = next;
-        }
-
-        const linkedIds = Array.from(visited);
-        const { data: linkedProfiles } = await supabase
-          .from("profiles")
-          .select("id, tier, effective_tier")
-          .in("id", linkedIds) as unknown as {
-          data: Array<{ id: string; tier?: string | null; effective_tier?: string | null }> | null;
-        };
-        if (!isHydrationRunCurrent(runId)) {
-          return { effectiveTier: seedTier, familyOwnerId: null };
-        }
-
-        let highestTier = seedTier;
-        for (const profileRow of linkedProfiles || []) {
-          const rowTier = tierFromRecord(profileRow);
-          if (tierRank(rowTier) > tierRank(highestTier)) {
-            highestTier = rowTier;
-          }
-        }
-
-        const familyOwnerId = ownerId !== seedUserId ? ownerId : null;
-
-        return { effectiveTier: highestTier, familyOwnerId };
-      };
-
-      const selfTier = normalizeTier(data.effective_tier ?? data.tier);
-      const familyTier = await resolveHighestFamilyTier(userId, selfTier);
+      const ownerId = await resolveFamilyOwnerId(userId);
       if (!isHydrationRunCurrent(runId)) return;
-      const effectiveTier = familyTier.effectiveTier;
-      const familyOwnerId = familyTier.familyOwnerId;
+      const familyOwnerId = ownerId !== userId ? ownerId : null;
+      const effectiveTier = normalizeMembershipTier(String(data.effective_tier ?? data.tier ?? "free"));
 
       // Auto-expire any restriction/suspension that has passed its deadline
       void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");

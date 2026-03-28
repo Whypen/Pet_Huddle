@@ -18,20 +18,20 @@ interface PremiumFooterProps {
 
 const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
   notice_create: {
-    title: "Notice Board is Premium only",
+    title: "Notice Board is Huddle+ only",
     body: "Upgrade to post notices, share updates, and connect with your huddle community.",
   },
   mesh_alert: {
-    title: "Extended Broadcast needs Premium",
+    title: "Extended Broadcast needs Huddle+",
     body: "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.",
   },
   broadcast_alert: {
     title: "Broadcast limit reached",
-    body: "Upgrade to Premium or Gold to send more broadcast alerts and expand your radius and visibility.",
+    body: "Upgrade to Huddle+ or Gold to send more broadcast alerts and expand your radius and visibility.",
   },
   chat_media: {
-    title: "Media sharing is a Premium perk",
-    body: "Send photos & files in chats. Unlock unlimited media with Premium.",
+    title: "Media sharing is a Huddle+ perk",
+    body: "Send photos & files in chats. Unlock unlimited media with Huddle+.",
   },
   "3rd_mesh_alert": {
     title: "Alert limit reached",
@@ -87,7 +87,7 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
                 <div className="flex items-center gap-2">
                   <Crown className="w-5 h-5 text-brandText" />
                   <span className="text-sm font-bold text-brandText uppercase tracking-wide">
-                    {t("huddle Premium")}
+                    huddle Plus
                   </span>
                 </div>
                 <button

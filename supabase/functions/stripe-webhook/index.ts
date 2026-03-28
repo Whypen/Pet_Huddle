@@ -23,7 +23,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Stripe Product IDs (authoritative registry per APP_MASTER_SPEC)
 const STRIPE_PRODUCTS: Record<string, string> = {
-  premium: "prod_TuEpCL4vGGwUpk",
+  plus: "prod_TuEpCL4vGGwUpk",
   gold: "prod_TuF4blxU2yHqBV",
   star_pack: "prod_TuFPF3zjXiWiK8",
   emergency_alert: "prod_TuFKa021SiFK58",
@@ -194,7 +194,7 @@ async function handleCheckoutSessionCompleted(
   // =====================================================
   if (session.mode === "subscription") {
     const subscriptionId = session.subscription as string;
-    const tier = type?.startsWith("gold") ? "gold" : "premium";
+    const tier = type?.startsWith("gold") ? "gold" : "plus";
 
     // Update user tier and subscription
     const { error: upgradeError } = await supabase.rpc("upgrade_user_tier", {
@@ -386,7 +386,8 @@ async function handleSubscriptionUpdated(
   }
 
   // Determine tier from subscription metadata or price
-  const tier = subscription.metadata?.tier || "premium";
+  const tierRaw = String(subscription.metadata?.tier || "plus").toLowerCase();
+  const tier = tierRaw === "gold" ? "gold" : "plus";
   const status = subscription.status;
 
   // For anniversary-based monthly quota resets, persist a stable day-of-month anchor.
