@@ -22,7 +22,6 @@ import {
   Zap,
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -30,6 +29,7 @@ import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -226,7 +226,7 @@ export default function PremiumPage() {
     (async () => {
       try {
         setIsCheckingOut(true);
-        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+        const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "payment",
@@ -309,7 +309,7 @@ export default function PremiumPage() {
         toast.warning("Share Perks is billed monthly and must be checked out separately.");
       }
 
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "subscription",
@@ -347,7 +347,7 @@ export default function PremiumPage() {
     if (selectedRecurringAddonItems.length > 0) {
       try {
         setIsCheckingOut(true);
-        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+        const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "subscription",
@@ -372,7 +372,7 @@ export default function PremiumPage() {
 
     try {
       setIsCheckingOut(true);
-      const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "payment",
