@@ -8,7 +8,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { quotaConfig } from "@/config/quotaConfig";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 const SUPPORTED_CURRENCIES = new Set([
   "AUD",
@@ -296,16 +295,23 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
 
   const request = (async (): Promise<LivePriceMap> => {
     try {
-      const { data, error } = await invokeAuthedFunction<{
-        prices?: Record<string, { amount?: number; currency?: string; interval?: string }>;
-        display_currency?: string;
-      }>("stripe-pricing", {
-        body: {
+      const fnUrl = `${String(import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "")}/functions/v1/stripe-pricing`;
+      const response = await fetch(fnUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           currency: currencyHint || null,
           country: countryHint || null,
-        },
+        }),
       });
-      if (!error && data?.prices) {
+      const payload = await response.json().catch(() => null) as {
+        prices?: Record<string, { amount?: number; currency?: string; interval?: string }>;
+        display_currency?: string;
+      } | null;
+      if (response.ok && payload?.prices) {
+        const data = payload;
         const p = data.prices as Record<string, { amount?: number; currency?: string; interval?: string }>;
         const displayCurrency = String(
           data?.display_currency ||
