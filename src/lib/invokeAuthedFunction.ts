@@ -55,6 +55,15 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshed.data.session?.access_token ?? null;
 }
 
+async function tokenBelongsToCurrentProject(token: string): Promise<boolean> {
+  try {
+    const res = await supabase.auth.getUser(token);
+    return Boolean(res.data.user) && !res.error;
+  } catch {
+    return false;
+  }
+}
+
 const tokenLooksJwt = (token: string) => token.split(".").length === 3;
 
 async function normalizeInvokeError(error: Error | null): Promise<Error | null> {
@@ -118,7 +127,17 @@ export async function invokeAuthedFunction<T = unknown>(
     };
   }
 
-  const firstToken = token;
+  let firstToken = token;
+  if (!await tokenBelongsToCurrentProject(firstToken)) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed || !tokenLooksJwt(refreshed) || !await tokenBelongsToCurrentProject(refreshed)) {
+      return {
+        data: null,
+        error: new Error("auth_required"),
+      };
+    }
+    firstToken = refreshed;
+  }
 
   const baseHeaders = { ...(args.headers || {}) };
   if (anonKey) {
