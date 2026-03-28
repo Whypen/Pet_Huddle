@@ -8,6 +8,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { quotaConfig } from "@/config/quotaConfig";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 const SUPPORTED_CURRENCIES = new Set([
   "AUD",
@@ -50,7 +51,7 @@ export const FALLBACK_PRICES: LivePriceMap = {
   superBroadcast:    4.99,
   topProfileBooster: 2.99,
   sharePerks:        0,
-  sharePerksInterval: null,
+  sharePerksInterval: "month",
   currencyCode: "USD",
 };
 
@@ -295,19 +296,30 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
 
   const request = (async (): Promise<LivePriceMap> => {
     try {
-      const { data, error } = await supabase.functions.invoke("stripe-pricing", {
+      const { data, error } = await invokeAuthedFunction<{
+        prices?: Record<string, { amount?: number; currency?: string; interval?: string }>;
+        display_currency?: string;
+      }>("stripe-pricing", {
         body: {
           currency: currencyHint || null,
           country: countryHint || null,
         },
       });
       if (!error && data?.prices) {
-        const p = data.prices as Record<string, { amount?: number; currency?: string }>;
+        const p = data.prices as Record<string, { amount?: number; currency?: string; interval?: string }>;
         const displayCurrency = String(
-          (data as { display_currency?: string } | null)?.display_currency ||
+          data?.display_currency ||
           p.plus_monthly?.currency ||
           "usd",
         ).toUpperCase();
+        const resolvedSharePerksInterval = (
+          typeof p.sharePerks?.interval === "string" && ["month", "year"].includes(p.sharePerks.interval.toLowerCase())
+            ? (p.sharePerks.interval.toLowerCase() as "month" | "year")
+            : null
+        );
+        const resolvedSharePerksAmount = typeof p.sharePerks?.amount === "number" && p.sharePerks.amount > 0
+          ? p.sharePerks.amount
+          : 0;
         const resolved = {
           plus_monthly:      typeof p.plus_monthly?.amount      === "number" ? p.plus_monthly.amount      : FALLBACK_PRICES.plus_monthly,
           plus_annual:       typeof p.plus_annual?.amount       === "number" ? p.plus_annual.amount       : FALLBACK_PRICES.plus_annual,
@@ -315,11 +327,10 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
           gold_annual:       typeof p.gold_annual?.amount       === "number" ? p.gold_annual.amount       : FALLBACK_PRICES.gold_annual,
           superBroadcast:    typeof p.superBroadcast?.amount    === "number" && p.superBroadcast.amount > 0 ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
           topProfileBooster: typeof p.topProfileBooster?.amount === "number" && p.topProfileBooster.amount > 0 ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
-          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : 0,
-          sharePerksInterval:
-            typeof p.sharePerks?.interval === "string" && ["month", "year"].includes(p.sharePerks.interval.toLowerCase())
-              ? (p.sharePerks.interval.toLowerCase() as "month" | "year")
-              : null,
+          sharePerks:        resolvedSharePerksAmount,
+          sharePerksInterval: resolvedSharePerksAmount > 0
+            ? (resolvedSharePerksInterval || "month")
+            : null,
           currencyCode: displayCurrency || "USD",
         };
         _cacheByKey.set(cacheKey, resolved);
