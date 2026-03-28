@@ -23,9 +23,19 @@ begin
 end$$;
 
 -- 2) Canonicalize persisted legacy values.
+alter table public.profiles drop constraint if exists profiles_tier_check;
+alter table public.profiles
+  add constraint profiles_tier_check
+  check (tier = any (array['free'::text, 'plus'::text, 'gold'::text, 'premium'::text]));
+
 update public.profiles
 set tier = 'plus'
 where lower(coalesce(tier, '')) = 'premium';
+
+alter table public.profiles drop constraint if exists profiles_tier_check;
+alter table public.profiles
+  add constraint profiles_tier_check
+  check (tier = any (array['free'::text, 'plus'::text, 'gold'::text]));
 
 -- 3) Non-circular effective tier resolution:
 --    derive from base profile tier + linked accepted family tiers only.
