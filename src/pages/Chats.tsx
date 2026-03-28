@@ -137,6 +137,29 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   activeOnly: false,
 };
 
+const sameSet = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((value) => b.includes(value));
+
+const isDefaultDiscoveryFilters = (filters: DiscoveryFilters) =>
+  filters.ageMin === DEFAULT_FILTERS.ageMin &&
+  filters.ageMax === DEFAULT_FILTERS.ageMax &&
+  filters.maxDistanceKm === DEFAULT_FILTERS.maxDistanceKm &&
+  filters.heightMin === DEFAULT_FILTERS.heightMin &&
+  filters.heightMax === DEFAULT_FILTERS.heightMax &&
+  filters.experienceYearsMin === DEFAULT_FILTERS.experienceYearsMin &&
+  filters.experienceYearsMax === DEFAULT_FILTERS.experienceYearsMax &&
+  filters.hasCar === DEFAULT_FILTERS.hasCar &&
+  filters.verifiedOnly === DEFAULT_FILTERS.verifiedOnly &&
+  filters.whoWavedAtMe === DEFAULT_FILTERS.whoWavedAtMe &&
+  filters.activeOnly === DEFAULT_FILTERS.activeOnly &&
+  sameSet(filters.genders, DEFAULT_FILTERS.genders) &&
+  sameSet(filters.species, DEFAULT_FILTERS.species) &&
+  sameSet(filters.socialRoles, DEFAULT_FILTERS.socialRoles) &&
+  sameSet(filters.orientations, DEFAULT_FILTERS.orientations) &&
+  sameSet(filters.degrees, DEFAULT_FILTERS.degrees) &&
+  sameSet(filters.relationshipStatuses, DEFAULT_FILTERS.relationshipStatuses) &&
+  sameSet(filters.languages, DEFAULT_FILTERS.languages);
+
 type FilterKey = keyof DiscoveryFilters;
 type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "plus" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
 
@@ -2611,12 +2634,59 @@ const Chats = () => {
           setDiscoveryProfiles([]);
           return;
         }
-        const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), filters, {
+        let mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), filters, {
           enforceVerifiedOnly: filters.verifiedOnly,
           enforceActiveOnly: filters.activeOnly,
           wavedByUserIds,
           anchor,
         }).filter((row) => row.id !== profile.id && !handledIds.has(row.id));
+
+        if (mergedList.length === 0 && isDefaultDiscoveryFilters(filters)) {
+          const cap = getQuotaCapsForTier(profile?.effective_tier || profile?.tier || "free").discoveryViewsPerDay;
+          const fallbackLimit = Math.max(20, Math.min(cap, 400));
+          const { data: fallbackRows, error: fallbackError } = await supabase
+            .from("profiles")
+            .select("id, display_name, avatar_url, verification_status, is_verified, has_car, bio, relationship_status, dob, location_name, occupation, school, major, tier, effective_tier, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, availability_status, non_social, last_active_at, updated_at, created_at, last_lat, last_lng")
+            .neq("id", profile.id)
+            .eq("non_social", false)
+            .not("dob", "is", null)
+            .limit(fallbackLimit * 2);
+          if (!fallbackError && Array.isArray(fallbackRows)) {
+            const now = Date.now();
+            const ranked = (fallbackRows as DiscoveryProfile[])
+              .filter((row) => {
+                if (!row?.id || handledIds.has(row.id)) return false;
+                const age = row?.dob ? Math.floor((now - new Date(row.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : null;
+                if (age === null || age < 16) return false;
+                const role = getDiscoverySocialRole(row);
+                return Boolean(role);
+              })
+              .map((row) => {
+                const activeAt = row.last_active_at || row.updated_at || row.created_at || null;
+                const activeMs = activeAt ? new Date(activeAt).getTime() : 0;
+                const days = activeMs ? Math.max(0, (now - activeMs) / (1000 * 60 * 60 * 24)) : 999;
+                const normalizedCandidateTier = normalizeQuotaTier(row.effective_tier || row.tier || "free");
+                const tierBoost = normalizedCandidateTier === "gold" ? 15 : normalizedCandidateTier === "plus" ? 8 : 0;
+                const freshness = days <= 1 ? 20 : days <= 3 ? 15 : days <= 7 ? 10 : days <= 14 ? 5 : 1;
+                const trust = (row.is_verified ? 25 : 0) + (row.has_car ? 10 : 0);
+                return { ...row, score: trust + freshness + tierBoost };
+              })
+              .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                const aTime = new Date(a.last_active_at || a.updated_at || a.created_at || 0).getTime();
+                const bTime = new Date(b.last_active_at || b.updated_at || b.created_at || 0).getTime();
+                return bTime - aTime;
+              })
+              .slice(0, fallbackLimit);
+
+            mergedList = applyDiscoveryClientFilters(ranked, filters, {
+              enforceVerifiedOnly: filters.verifiedOnly,
+              enforceActiveOnly: filters.activeOnly,
+              wavedByUserIds,
+              anchor,
+            }).filter((row) => row.id !== profile.id && !handledIds.has(row.id));
+          }
+        }
         if (mergedList.length > 0) {
           setDiscoveryProfiles(mergedList);
           return;
