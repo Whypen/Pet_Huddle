@@ -6,7 +6,6 @@ import {
   Bell,
   BookOpen,
   ChevronLeft,
-  ChevronRight,
   FileText,
   Heart,
   HelpCircle,
@@ -29,13 +28,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { membershipTierLabel, normalizeMembershipTier } from "@/lib/membership";
+import { normalizeMembershipTier } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
 import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
+import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
 
 // ─── Notification types & helpers ────────────────────────────────────────────
 
@@ -149,27 +149,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       })()
     : false;
   const normalizedTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
-  const tierLabel = membershipTierLabel(normalizedTier);
-  const avatarUrl = profile?.avatar_url ? String(profile.avatar_url) : "";
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
-  const initials = useMemo(() => {
-    const name = profile?.display_name || "User";
-    return name.trim().slice(0, 1).toUpperCase();
-  }, [profile?.display_name]);
-  const membershipPillClassName = useMemo(() => {
-    if (normalizedTier === "gold") {
-      return "bg-[#FF6452] text-white";
-    }
-    if (normalizedTier === "plus") {
-      return "bg-[#5BA4F5] text-white";
-    }
-    return "bg-[#E9ECF3] text-[#7E8599]";
-  }, [normalizedTier]);
-  const starPillClassName = starsRemaining && starsRemaining > 0
-    ? "bg-white text-[#4A4965] border border-[#E4E8F2]"
-    : "bg-transparent text-[#98A0B8] border border-[#C6CAD6]";
-  const starPillLabel = `${Math.max(0, Number(starsRemaining || 0))} ⭐`;
 
   useEffect(() => {
     if (!menuOpen || !profile?.id) return;
@@ -613,69 +594,20 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               <>
               {/* 1. User identity row */}
               <SheetClose asChild>
-                <button
-                  onClick={() => navigate("/edit-profile")}
-                  className="flex items-center gap-3 px-1 w-full text-left"
-                >
-                  <div
-                    className={cn(
-                      "w-14 h-14 rounded-full flex items-center justify-center overflow-hidden shrink-0",
-                      "bg-[rgba(33,69,207,0.10)]",
-                      isVerified && "ring-2 ring-brandBlue ring-offset-1"
-                    )}
-                    aria-hidden
-                  >
-                    {avatarUrl ? (
-                      <img
-                        src={avatarUrl}
-                        alt={profile?.display_name || "Avatar"}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-[18px] font-[600] text-[var(--color-brand,#2145CF)]">
-                        {initials}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-[16px] font-[600] text-[var(--text-primary,#424965)] truncate leading-tight">
-                      {profile?.display_name || "User"}
-                    </h3>
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "inline-flex h-6 items-center justify-center rounded-full px-3 text-[11px] font-[700] leading-none",
-                          membershipPillClassName
-                        )}
-                      >
-                        {tierLabel}
-                      </span>
-                      {starsRemaining !== null && (
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setMenuOpen(false);
-                            navigate("/premium");
-                          }}
-                          className={cn(
-                            "inline-flex h-6 items-center justify-center rounded-full px-2.5 text-[11px] font-[700] leading-none",
-                            starPillClassName
-                          )}
-                        >
-                          {starPillLabel}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight
-                    size={16}
-                    strokeWidth={1.75}
-                    className="text-[var(--text-tertiary)] shrink-0 mr-1"
-                    aria-hidden
-                  />
-                </button>
+                <SettingsProfileSummary
+                  displayName={profile?.display_name || "User"}
+                  avatarUrl={profile?.avatar_url || null}
+                  isVerified={isVerified}
+                  tierValue={String(profile?.effective_tier || profile?.tier || "free")}
+                  starsLabel={String(Math.max(0, Number(starsRemaining || 0)))}
+                  onStarsClick={() => {
+                    setMenuOpen(false);
+                    navigate("/premium");
+                  }}
+                  onPress={() => navigate("/edit-profile")}
+                  showChevron
+                  className="px-1 py-0"
+                />
               </SheetClose>
 
               {/* 2. Membership panel */}

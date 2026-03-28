@@ -9,7 +9,9 @@ const CookiesPolicy = () => (
       <BackButton />
       <h1 className="text-base font-semibold">Cookie Policy</h1>
     </header>
-    <LegalContent type="cookies" />
+    <div className="px-4 py-6">
+      <LegalContent type="cookies" />
+    </div>
   </div>
 );
 
