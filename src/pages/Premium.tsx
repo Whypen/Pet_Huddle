@@ -262,8 +262,12 @@ export default function PremiumPage() {
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
   );
+  const baseFamilySlots = normalizedTier === "plus" || normalizedTier === "gold" ? 2 : 1;
+  const purchasedFamilySlots = Math.max(0, Number(profile?.family_slots || 0));
+  const totalFamilyCapacity = Math.min(4, baseFamilySlots + purchasedFamilySlots);
+  const isMaxFamilyCapacity = totalFamilyCapacity >= 4;
   const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
-  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0;
+  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0 && !isMaxFamilyCapacity;
   const sharePerksSuffix = livePrices.sharePerksInterval === "year" ? "/yr" : "/mo";
   const selectedRecurringAddonItems = useMemo(
     () => selectedAddonItems.filter((a) => a.id === "sharePerks" && isSharePerksPurchasable),
@@ -314,7 +318,7 @@ export default function PremiumPage() {
       }
 
       if (addonSelected.sharePerks && !isSharePerksPurchasable) {
-        toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+        toast.error(isMaxFamilyCapacity ? "Max. capacity reached" : "Share Perks is temporarily unavailable. Please try again shortly.");
         return;
       }
 
@@ -353,7 +357,7 @@ export default function PremiumPage() {
     if (!selectedAddonItems.length || isCheckingOut) return;
 
     if (addonSelected.sharePerks && !isSharePerksPurchasable) {
-      toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+      toast.error(isMaxFamilyCapacity ? "Max. capacity reached" : "Share Perks is temporarily unavailable. Please try again shortly.");
       return;
     }
 
@@ -632,7 +636,7 @@ export default function PremiumPage() {
                       style={{ color: BRAND_BLUE }}
                     >
                       {addon.id === "sharePerks" && !isSharePerksPurchasable ? (
-                        "Temporarily unavailable"
+                        (isMaxFamilyCapacity ? "Max. capacity reached" : "Temporarily unavailable")
                       ) : (
                         <PriceDisplay
                           n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}

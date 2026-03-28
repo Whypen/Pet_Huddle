@@ -29,11 +29,103 @@ const STRIPE_PRODUCTS: Record<string, string> = {
   emergency_alert: "prod_TuFKa021SiFK58",
   vet_media: "prod_TuFLRWYZGrItCP",
 };
+const SHARE_PERKS_PRICE_ID = Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER") || "";
+const SHARE_PERKS_KEYS = new Set(["sharePerks", "family_member", "Family_Member", "share_perks", "familymember"]);
 
 interface WebhookResponse {
   success: boolean;
   message: string;
   eventId?: string;
+}
+
+function normalizeType(value?: string | null): string {
+  return String(value || "").trim();
+}
+
+function isSharePerksType(value?: string | null): boolean {
+  const raw = normalizeType(value);
+  if (!raw) return false;
+  if (SHARE_PERKS_KEYS.has(raw)) return true;
+  return SHARE_PERKS_KEYS.has(raw.toLowerCase());
+}
+
+function extractSharePerksSubscriptionIds(prefs: unknown): string[] {
+  if (!prefs || typeof prefs !== "object") return [];
+  const key = (prefs as Record<string, unknown>).share_perks_subscription_ids;
+  if (!Array.isArray(key)) return [];
+  return key.filter((id): id is string => typeof id === "string" && id.trim().length > 0).map((id) => id.trim());
+}
+
+function buildSharePerksPrefs(prefs: unknown, ids: string[]): Record<string, unknown> {
+  const base = prefs && typeof prefs === "object" ? { ...(prefs as Record<string, unknown>) } : {};
+  if (ids.length > 0) {
+    base.share_perks_subscription_ids = ids;
+  } else {
+    delete base.share_perks_subscription_ids;
+  }
+  return base;
+}
+
+function subscriptionContainsSharePerksPrice(subscription: Stripe.Subscription): boolean {
+  if (!SHARE_PERKS_PRICE_ID) return false;
+  const items = subscription.items?.data || [];
+  return items.some((item) => item?.price?.id === SHARE_PERKS_PRICE_ID);
+}
+
+function isSharePerksSubscription(subscription: Stripe.Subscription): boolean {
+  return isSharePerksType(subscription.metadata?.type) || subscriptionContainsSharePerksPrice(subscription);
+}
+
+async function grantSharePerksSlot(userId: string, subscriptionId: string): Promise<void> {
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("family_slots, prefs")
+    .eq("id", userId)
+    .single();
+  if (profileErr) throw new Error(`Share Perks profile read failed: ${profileErr.message}`);
+
+  const existingIds = extractSharePerksSubscriptionIds(profile?.prefs);
+  if (existingIds.includes(subscriptionId)) return;
+
+  const nextIds = [...existingIds, subscriptionId];
+  const currentSlots = Number(profile?.family_slots || 0);
+  const nextSlots = Math.min(3, Math.max(0, currentSlots + 1));
+
+  const { error: updateErr } = await supabase
+    .from("profiles")
+    .update({
+      family_slots: nextSlots,
+      prefs: buildSharePerksPrefs(profile?.prefs, nextIds),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", userId);
+  if (updateErr) throw new Error(`Share Perks slot grant failed: ${updateErr.message}`);
+}
+
+async function revokeSharePerksSlotByCustomer(customerId: string, subscriptionId: string): Promise<void> {
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("id, family_slots, prefs")
+    .eq("stripe_customer_id", customerId)
+    .single();
+  if (profileErr || !profile?.id) return;
+
+  const existingIds = extractSharePerksSubscriptionIds(profile.prefs);
+  if (!existingIds.includes(subscriptionId)) return;
+
+  const nextIds = existingIds.filter((id) => id !== subscriptionId);
+  const currentSlots = Number(profile.family_slots || 0);
+  const nextSlots = Math.max(0, currentSlots - 1);
+
+  const { error: updateErr } = await supabase
+    .from("profiles")
+    .update({
+      family_slots: nextSlots,
+      prefs: buildSharePerksPrefs(profile.prefs, nextIds),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", profile.id);
+  if (updateErr) throw new Error(`Share Perks slot revoke failed: ${updateErr.message}`);
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -194,6 +286,22 @@ async function handleCheckoutSessionCompleted(
   // =====================================================
   if (session.mode === "subscription") {
     const subscriptionId = session.subscription as string;
+    if (isSharePerksType(type)) {
+      await grantSharePerksSlot(userId, subscriptionId);
+      if (session.customer) {
+        await supabase
+          .from("profiles")
+          .update({ stripe_customer_id: session.customer as string })
+          .eq("id", userId);
+      }
+      console.log(`[CHECKOUT COMPLETED] User ${userId} granted Share Perks slot for subscription ${subscriptionId}`);
+      return {
+        success: true,
+        message: "Checkout session processed (Share Perks)",
+        eventId: event.id,
+      };
+    }
+
     const tier = type?.startsWith("gold") ? "gold" : "plus";
 
     // Update user tier and subscription
@@ -224,14 +332,19 @@ async function handleCheckoutSessionCompleted(
   // PAYMENT MODE (ADD-ONS)
   // =====================================================
   else if (session.mode === "payment") {
-    const creditsMap: Record<string, { stars?: number; mesh?: number; media?: number; family?: number }> = {
+    const creditsMap: Record<string, { stars?: number; mesh?: number; media?: number; family?: number; boosterHours?: number }> = {
       star_pack: { stars: 3 },
       emergency_alert: { mesh: 1 },
       vet_media: { media: 10 },
+      superBroadcast: { mesh: 1 },
+      family_member: { family: 1 },
+      sharePerks: { family: 1 },
+      topProfileBooster: { boosterHours: 24 },
+      top_profile_booster: { boosterHours: 24 },
     };
 
     const credits = creditsMap[type || ""];
-    if (credits) {
+    if (credits && (credits.stars || credits.mesh || credits.media || credits.family)) {
       const { error: creditsError } = await supabase.rpc("increment_user_credits", {
         p_user_id: userId,
         p_stars: credits.stars || 0,
@@ -246,6 +359,30 @@ async function handleCheckoutSessionCompleted(
       }
 
       console.log(`[CHECKOUT COMPLETED] User ${userId} received credits: ${JSON.stringify(credits)}`);
+    }
+
+    if (credits?.boosterHours && credits.boosterHours > 0) {
+      const { data: profile, error: profileReadError } = await supabase
+        .from("profiles")
+        .select("top_profile_boost_until")
+        .eq("id", userId)
+        .single();
+      if (profileReadError) {
+        console.error(`[CHECKOUT COMPLETED] Failed to read top_profile_boost_until: ${profileReadError.message}`);
+        throw new Error(`Top profile booster read failed: ${profileReadError.message}`);
+      }
+      const base = profile?.top_profile_boost_until ? new Date(profile.top_profile_boost_until) : new Date();
+      const now = new Date();
+      const anchor = base > now ? base : now;
+      anchor.setHours(anchor.getHours() + credits.boosterHours);
+      const { error: profileUpdateError } = await supabase
+        .from("profiles")
+        .update({ top_profile_boost_until: anchor.toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", userId);
+      if (profileUpdateError) {
+        console.error(`[CHECKOUT COMPLETED] Failed to grant top profile booster: ${profileUpdateError.message}`);
+        throw new Error(`Top profile booster grant failed: ${profileUpdateError.message}`);
+      }
     }
 
     // Handle marketplace booking paid state
@@ -315,24 +452,19 @@ async function handleInvoicePaymentFailed(
     return { success: true, message: "User not found", eventId: event.id };
   }
 
-  // Downgrade to free tier
-  await supabase.rpc("downgrade_user_tier", {
-    p_user_id: profile.id,
-  });
-
-  // Update subscription_status to past_due
+  // Keep active tier during dunning window. Stripe may recover payment in-retry.
   await supabase
     .from("profiles")
     .update({ subscription_status: "past_due" })
     .eq("id", profile.id);
 
-  console.log(`[PAYMENT FAILED] User ${profile.id} downgraded to free (past_due)`);
+  console.log(`[PAYMENT FAILED] User ${profile.id} marked past_due (no immediate downgrade)`);
 
   // TODO: Send email/push notification
 
   return {
     success: true,
-    message: "Payment failed - user downgraded",
+    message: "Payment failed - user marked past_due",
     eventId: event.id,
   };
 }
@@ -345,6 +477,17 @@ async function handleSubscriptionDeleted(
 ): Promise<WebhookResponse> {
   const subscription = event.data.object as Stripe.Subscription;
   const customerId = subscription.customer as string;
+  const isSharePerks = isSharePerksSubscription(subscription);
+
+  if (isSharePerks) {
+    await revokeSharePerksSlotByCustomer(customerId, subscription.id);
+    console.log(`[SUBSCRIPTION DELETED] Share Perks removed for customer ${customerId}, sub ${subscription.id}`);
+    return {
+      success: true,
+      message: "Share Perks subscription deleted",
+      eventId: event.id,
+    };
+  }
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -399,6 +542,25 @@ async function handleSubscriptionUpdated(
 ): Promise<WebhookResponse> {
   const subscription = event.data.object as Stripe.Subscription;
   const customerId = subscription.customer as string;
+  const isSharePerks = isSharePerksSubscription(subscription);
+
+  if (isSharePerks) {
+    const terminal = new Set(["canceled", "incomplete_expired", "unpaid"]);
+    if (terminal.has(subscription.status)) {
+      await revokeSharePerksSlotByCustomer(customerId, subscription.id);
+      return {
+        success: true,
+        message: "Share Perks subscription terminal update handled",
+        eventId: event.id,
+      };
+    }
+    // Renewal/active updates must not mutate tier or re-grant slots.
+    return {
+      success: true,
+      message: "Share Perks subscription updated (no tier mutation)",
+      eventId: event.id,
+    };
+  }
 
   const { data: profile } = await supabase
     .from("profiles")

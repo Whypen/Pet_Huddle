@@ -41,9 +41,14 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
+  const normalizedTier = String(profile?.effective_tier || profile?.tier || tier || "free").toLowerCase();
+  const baseFamilySlots = normalizedTier === "plus" || normalizedTier === "gold" ? 2 : 1;
+  const purchasedFamilySlots = Math.max(0, Number(profile?.family_slots || 0));
+  const totalFamilyCapacity = Math.min(4, baseFamilySlots + purchasedFamilySlots);
+  const isMaxFamilyCapacity = totalFamilyCapacity >= 4;
   const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
   const sharePerksSuffix = livePrices.sharePerksInterval === "year" ? "/yr" : "/mo";
-  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0;
+  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0 && !isMaxFamilyCapacity;
   const returnTo = useMemo(() => {
     const target = `${location.pathname}${location.search}`;
     return target.startsWith("/") ? target : "/";
@@ -74,7 +79,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
 
   async function handlePurchase() {
     if (!isSharePerksPurchasable) {
-      toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+      toast.error(isMaxFamilyCapacity ? "Max. capacity reached" : "Share Perks is temporarily unavailable. Please try again shortly.");
       return;
     }
     setLoading(true);
@@ -116,7 +121,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
               currency={livePrices.currencyCode}
             />
           ) : (
-            "Unavailable"
+            isMaxFamilyCapacity ? "Max. capacity reached" : "Unavailable"
           )}
         </span>
       </div>
@@ -148,7 +153,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
             opacity: loading || !isSharePerksPurchasable ? 0.55 : 1,
           }}
         >
-          {loading ? "Loading…" : isSharePerksPurchasable ? "Purchase Member Slot" : "Temporarily unavailable"}
+          {loading ? "Loading…" : isSharePerksPurchasable ? "Purchase Member Slot" : (isMaxFamilyCapacity ? "Max. capacity reached" : "Temporarily unavailable")}
         </button>
         <button
           onClick={onClose}
