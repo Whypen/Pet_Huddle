@@ -67,12 +67,10 @@ serve(async (req) => {
 
     const payload = await req.json().catch(() => ({} as Record<string, unknown>));
     const serviceChatId = String(payload.service_chat_id || "").trim();
-    const amountCents = Number(payload.amount_cents || 0);
-    const currency = String(payload.currency || "").trim().toLowerCase();
     const successUrl = String(payload.success_url || "").trim();
     const cancelUrl = String(payload.cancel_url || "").trim();
 
-    if (!serviceChatId || !amountCents || !currency || !successUrl || !cancelUrl) {
+    if (!serviceChatId || !successUrl || !cancelUrl) {
       return json({ error: "Missing required fields" }, 400);
     }
 
@@ -81,17 +79,32 @@ serve(async (req) => {
       .select("chat_id, requester_id, provider_id, status, quote_card")
       .eq("chat_id", serviceChatId)
       .maybeSingle();
-    if (serviceChatErr) return json({ error: serviceChatErr.message }, 500);
+    if (serviceChatErr) return json({ error: "Service lookup failed" }, 500);
     if (!serviceChat) return json({ error: "Service chat not found" }, 404);
     if (serviceChat.requester_id !== user.id) return json({ error: "Forbidden" }, 403);
     if (serviceChat.status !== "pending") return json({ error: "Service is no longer pending" }, 409);
+
+    // Amount and currency are authoritative from the server-side quote_card, not the client.
+    // This prevents a requester from manipulating the charge amount or currency.
+    const quoteCard = (serviceChat.quote_card || {}) as Record<string, unknown>;
+    const rate = String(quoteCard.rate || "").trim();
+    const finalPriceStr = String(quoteCard.finalPrice || "").trim();
+    const parsedPrice = Number(finalPriceStr);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      return json({ error: "Quote has no valid price" }, 409);
+    }
+    const amountCents = Math.round(parsedPrice * 100);
+    const currency = String(quoteCard.currency || "").trim().toLowerCase();
+    if (!currency) {
+      return json({ error: "Quote has no currency" }, 409);
+    }
 
     const { data: providerCarer, error: providerErr } = await supabase
       .from("pet_care_profiles")
       .select("stripe_account_id, stripe_payout_status")
       .eq("user_id", serviceChat.provider_id)
       .maybeSingle();
-    if (providerErr) return json({ error: providerErr.message }, 500);
+    if (providerErr) return json({ error: "Provider lookup failed" }, 500);
     if (!providerCarer?.stripe_account_id || providerCarer.stripe_payout_status !== "complete") {
       return json({ error: "Provider has not completed payout setup" }, 409);
     }
@@ -120,46 +133,49 @@ serve(async (req) => {
 
     const platformFee = Math.round(amountCents * 0.1);
     const providerPayout = amountCents - platformFee;
-    const quoteCard = (serviceChat.quote_card || {}) as Record<string, unknown>;
-    const rate = String(quoteCard.rate || "").trim();
 
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency,
-            unit_amount: amountCents,
-            product_data: {
-              name: "Pet Care Service Booking",
-              description: rate ? `Service booking (${rate})` : "Service booking",
+    // Idempotency key scoped to this service chat prevents duplicate checkout
+    // sessions if the client retries on network failure.
+    const session = await stripe.checkout.sessions.create(
+      {
+        customer: customerId,
+        mode: "payment",
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency,
+              unit_amount: amountCents,
+              product_data: {
+                name: "Pet Care Service Booking",
+                description: rate ? `Service booking (${rate})` : "Service booking",
+              },
             },
+            quantity: 1,
           },
-          quantity: 1,
+        ],
+        payment_intent_data: {
+          metadata: {
+            type: "service_booking",
+            service_chat_id: serviceChatId,
+            requester_id: user.id,
+            provider_id: serviceChat.provider_id,
+            provider_stripe_account_id: providerCarer.stripe_account_id,
+            platform_fee_cents: String(platformFee),
+            provider_payout_cents: String(providerPayout),
+          },
         },
-      ],
-      payment_intent_data: {
         metadata: {
           type: "service_booking",
           service_chat_id: serviceChatId,
           requester_id: user.id,
           provider_id: serviceChat.provider_id,
-          provider_stripe_account_id: providerCarer.stripe_account_id,
-          platform_fee_cents: String(platformFee),
-          provider_payout_cents: String(providerPayout),
         },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
       },
-      metadata: {
-        type: "service_booking",
-        service_chat_id: serviceChatId,
-        requester_id: user.id,
-        provider_id: serviceChat.provider_id,
-      },
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-    });
+      { idempotencyKey: `svc_pay_${serviceChatId}` },
+    );
 
     return json({
       mode,
@@ -169,7 +185,6 @@ serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[create-service-payment] failed:", message);
-    return json({ error: "internal_error", detail: message }, 500);
+    return json({ error: "internal_error" }, 500);
   }
 });
-

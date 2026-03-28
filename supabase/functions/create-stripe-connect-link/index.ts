@@ -288,7 +288,12 @@ serve(async (req) => {
       let accountId = (profile as { stripe_account_id?: string } | null)?.stripe_account_id;
 
       const createFreshAccountLink = async () => {
-        const account = await stripe.accounts.create(accountPayloadBase);
+        // Idempotency key prevents duplicate Connect accounts if the client
+        // retries on network failure before the account ID is written to DB.
+        const account = await stripe.accounts.create(
+          accountPayloadBase,
+          { idempotencyKey: `huddle_connect_${user.id}` },
+        );
         accountId = account.id;
         await syncStripeStatus(supabase, user.id, accountId, account);
         return await stripe.accountLinks.create({

@@ -259,6 +259,32 @@ async function handleCheckoutSessionCompleted(
         })
         .eq("stripe_payment_intent_id", session.payment_intent as string);
     }
+
+    // Handle service chat booking (from create-service-payment).
+    // Advance status pending → booked and record the PaymentIntent ID so that
+    // release-service-payout can retrieve and transfer funds after completion.
+    if (type === "service_booking" && session.metadata?.service_chat_id && session.payment_intent) {
+      const paymentIntentId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : (session.payment_intent as { id?: string } | null)?.id ?? null;
+      if (paymentIntentId) {
+        const { error: chatErr } = await supabase
+          .from("service_chats")
+          .update({
+            status: "booked",
+            stripe_payment_intent_id: paymentIntentId,
+            booked_at: new Date().toISOString(),
+          })
+          .eq("chat_id", session.metadata.service_chat_id)
+          .eq("status", "pending"); // idempotent: only advances from pending
+        if (chatErr) {
+          console.error(`[CHECKOUT COMPLETED] service_booking advance failed: ${chatErr.message}`);
+        } else {
+          console.log(`[CHECKOUT COMPLETED] service_booking booked: chat=${session.metadata.service_chat_id} pi=${paymentIntentId}`);
+        }
+      }
+    }
   }
 
   return {
