@@ -110,6 +110,15 @@ export function PublicCarerProfileModal({
           false,
         );
 
+        // Defense-in-depth: never display an unverified provider regardless
+        // of what the DB returned. The RLS policy already enforces this at the
+        // database layer; this guard covers any edge case where verification
+        // state changed between policy evaluation and this render path.
+        if (!mapped || mapped.verificationStatus !== "verified") {
+          setError("Provider is unavailable right now.");
+          return;
+        }
+
         if (!mounted) return;
         setProvider(mapped);
 

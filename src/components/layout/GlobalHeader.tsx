@@ -814,6 +814,15 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         onClick={() => navigate("/community-guidelines", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
                       />
                     </SheetClose>
+                    <InsetDivider />
+                    <SheetClose asChild>
+                      <InsetRow
+                        label="Cookies Notice"
+                        icon={<FileText size={16} strokeWidth={1.75} />}
+                        variant="nav"
+                        onClick={() => navigate("/cookies", { state: { openDrawer: true, drawerView: "legal", from: location.pathname } })}
+                      />
+                    </SheetClose>
                   </InsetPanel>
 
                   <InsetPanel>

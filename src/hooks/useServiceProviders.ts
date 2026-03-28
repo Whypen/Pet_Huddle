@@ -145,7 +145,15 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
         }),
       );
 
-      setProviders(mapped.filter((entry): entry is ProviderSummary => entry !== null));
+      // Defense-in-depth: only surface verified providers in the public feed.
+      // The listing gate in CarerProfile prevents unverified users from setting
+      // listed=true going forward, but this filter protects against legacy rows.
+      setProviders(
+        mapped.filter(
+          (entry): entry is ProviderSummary =>
+            entry !== null && entry.verificationStatus === "verified",
+        ),
+      );
     } catch (e) {
       console.error("[service.fetch_providers_failed]", e);
       setError("Unable to load services right now.");

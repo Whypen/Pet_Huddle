@@ -13,7 +13,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import { credentialsSchema } from "@/lib/authSchemas";
+import { credentialsSchema, oauthCredentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { isRegisteredUserProfile } from "@/lib/signupFlow";
@@ -97,7 +97,10 @@ const SignupCredentials = () => {
     watch,
     formState: { errors, isValid },
   } = useForm({
-    resolver: zodResolver(credentialsSchema),
+    // OAuth path: password fields are hidden and must not block validation.
+    // oauthCredentialsSchema omits password requirements so isValid reflects
+    // only email + phone — the only fields the user can actually fill.
+    resolver: zodResolver(isOAuthOnboarding ? oauthCredentialsSchema : credentialsSchema),
     mode: "onChange",
     defaultValues: {
       // OAuth onboarding: pre-fill email from provider; do not allow entry
@@ -281,32 +284,46 @@ const SignupCredentials = () => {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  const onSubmit = async () => {
+  // onSubmit receives RHF-validated values after handleSubmit runs the conditional
+  // schema (oauthCredentialsSchema for OAuth, credentialsSchema for email signup).
+  // All field reads inside this handler use `values` — never raw watch() output —
+  // so the handler works correctly regardless of which schema was active.
+  // DOI (email_opt_in) is stored in client flow state only; it is NOT committed
+  // to the database here. The final account-creation step commits it.
+  const onSubmit = async (values: {
+    email: string;
+    phone: string;
+    password?: string;
+    confirmPassword?: string;
+  }) => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
-      update({ email_opt_in: emailOptIn });
+      update({ email: values.email, phone: values.phone, email_opt_in: emailOptIn });
       setFlowState("signup");
       goTo("/signup/name");
       return;
     }
     // Strict OAuth onboarding path — already authenticated via Google / Apple,
     // incomplete onboarding, signup flow active. Do NOT call signUp() again.
-    // Save email (from provider) + phone (user-entered) to context, preserve
-    // flowState, and continue to the next signup step.
+    // oauthCredentialsSchema already validated phone structurally; the only
+    // remaining runtime guard is the async duplicate-check state.
     if (isOAuthOnboarding) {
-      // Final submit-time guards (belt-and-suspenders in case CTA was somehow
-      // enabled with a stale state snapshot).
-      if (!phone || !isValidPhoneNumber(phone) || duplicateDetected) return;
-      update({ email: user?.email || email, phone, email_opt_in: emailOptIn });
+      if (duplicateDetected) return;
+      update({
+        email: user?.email || values.email,
+        phone: values.phone,
+        email_opt_in: emailOptIn,
+      });
       setFlowState("signup");
       goTo("/signup/name");
       return;
     }
+    // Email signup path — credentialsSchema validated all fields including password.
     setSubmitting(true);
     try {
       const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
-        p_email: email,
-        p_phone: phone,
+        p_email: values.email,
+        p_phone: values.phone,
       });
       if (checkError) {
         console.error("Duplicate check error:", checkError);
@@ -314,21 +331,27 @@ const SignupCredentials = () => {
         return;
       }
       if (checkResult?.registered) {
-        setSigninEmail(email);
+        setSigninEmail(values.email);
         setShowSignInModal(true);
         return;
       }
-      // Store credentials — signUp() is deferred to /signup/name so the user's
-      // display name and social ID are collected before the account is created.
+      // Store credentials in flow state — signUp() is deferred to /signup/name so
+      // the user's display name and social ID are collected before account creation.
       // This prevents orphaned accounts when users abandon mid-flow.
-      update({ email: email.trim(), password, phone: phone.trim(), email_opt_in: emailOptIn });
+      // email_opt_in is stored in client state only; DB commit happens at account creation.
+      update({
+        email: values.email.trim(),
+        password: values.password ?? "",
+        phone: values.phone.trim(),
+        email_opt_in: emailOptIn,
+      });
       setFlowState("signup");
       // Send pre-signup verification email (awaited — no silent failures).
       // DB token is created server-side; client polls get-pre-signup-verify-status.
       const newToken = crypto.randomUUID();
       const { data: sendData, error: sendError } = await supabase.functions.invoke(
         "send-pre-signup-verify",
-        { body: { email: email.trim(), token: newToken } },
+        { body: { email: values.email.trim(), token: newToken } },
       );
       if (sendError || !sendData?.ok) {
         setFlowState("idle");
@@ -337,7 +360,7 @@ const SignupCredentials = () => {
       }
       setVerifyToken(newToken);
       sessionStorage.setItem("huddle_presignup_token", newToken);
-      sessionStorage.setItem("huddle_presignup_email", email.trim());
+      sessionStorage.setItem("huddle_presignup_email", values.email.trim());
       setSendState("sent");
       setVerifySubState("verifying");
       return;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
@@ -299,6 +299,24 @@ const CarerProfile: React.FC = () => {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
 
+  // ── Provider-level eligibility (age + verification) ───────────────────────
+  // These checks run at component level so they gate every save path and the
+  // listing toggle. Age is derived from profile.dob — same logic as GlobalHeader.
+  const dob = (profile as Record<string, unknown> | null)?.dob as string | null ?? null;
+  const isAge18Plus = dob
+    ? (() => {
+        const birth = new Date(dob);
+        const now = new Date();
+        const age = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        return age > 18 || (age === 18 && (m > 0 || (m === 0 && now.getDate() >= birth.getDate())));
+      })()
+    : false;
+  const isVerified = profile?.is_verified === true;
+  // providerEligible gates the listed flag on every save path.
+  // computeListingEligible() still handles profile completeness + Stripe + agreement.
+  const providerEligible = isAge18Plus && isVerified;
+
   const [mode, setMode] = useState<Mode>("view");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -460,7 +478,7 @@ const CarerProfile: React.FC = () => {
             ? (formData.agreementAcceptedAt ?? new Date().toISOString())
             : null,
           agreement_version: formData.agreementAccepted ? AGREEMENT_VERSION : null,
-          listed: computeListingEligible(formData) ? formData.listed : false,
+          listed: computeListingEligible(formData) && providerEligible ? formData.listed : false,
           completed: computeCompleted(formData),
         },
         { onConflict: "user_id" }
@@ -515,7 +533,7 @@ const CarerProfile: React.FC = () => {
           agreement_accepted: data.agreementAccepted,
           agreement_accepted_at: data.agreementAccepted ? (data.agreementAcceptedAt ?? new Date().toISOString()) : null,
           agreement_version: data.agreementAccepted ? AGREEMENT_VERSION : null,
-          listed: computeListingEligible(data) ? data.listed : false,
+          listed: computeListingEligible(data) && providerEligible ? data.listed : false,
           completed: computeCompleted(data),
         },
         { onConflict: "user_id" }
@@ -646,6 +664,13 @@ const CarerProfile: React.FC = () => {
         <Loader2 className="animate-spin text-muted-foreground" size={24} />
       </div>
     );
+  }
+
+  // ── Under-18 hard gate ────────────────────────────────────────────────────
+  // GlobalHeader hides the menu item for under-18 users, but direct URL
+  // navigation must also be blocked. Redirect to home — no error toast needed.
+  if (!isAge18Plus) {
+    return <Navigate to="/" replace />;
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1348,13 +1373,13 @@ const CarerProfile: React.FC = () => {
               {(() => {
                 const payoutsDone = formData.stripePayoutStatus === "complete";
                 const agreementDone = formData.agreementAccepted;
-                const blocked = !payoutsDone || !agreementDone;
-                const warningText =
-                  !payoutsDone && !agreementDone
-                    ? "Complete payout setup and accept the Service Provider Agreement before listing your services."
-                    : !payoutsDone
-                    ? "Complete payout setup before listing your services."
-                    : "Accept the Service Provider Agreement before listing your services.";
+                const blocked = !isAge18Plus || !isVerified || !payoutsDone || !agreementDone;
+                const warningParts: string[] = [];
+                if (!isAge18Plus) warningParts.push("Service Providers must be at least 18.");
+                if (!isVerified) warningParts.push("Complete identity verification first.");
+                if (!payoutsDone) warningParts.push("Complete payout setup.");
+                if (!agreementDone) warningParts.push("Accept the Service Provider Agreement.");
+                const warningText = warningParts.join(" ");
                 return (
                   <div className="space-y-2 pb-2">
                     {listingAttempted && blocked && (

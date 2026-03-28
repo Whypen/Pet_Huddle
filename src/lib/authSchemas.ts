@@ -86,22 +86,25 @@ export const nameSchema = z.object({
     .regex(/^[a-zA-Z\s'-]+$/, "Only letters, spaces, hyphens, and apostrophes allowed"),
 });
 
+// Phone validation refine — shared between both credential schemas.
+const phoneRefine = z
+  .string()
+  .regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format")
+  // Full structural validity check via libphonenumber (ships with react-phone-number-input).
+  // isValidPhoneNumber matches against actual national-number patterns, not just length ranges.
+  // isPossiblePhoneNumber (length-range only) accepted partial inputs for many countries
+  // where the possible-length list has a range (e.g. HK [5,6,7,8,9,11]) — isValidPhoneNumber
+  // checks actual national-number patterns and rejects any number not yet structurally complete.
+  // "valid" = structurally complete for the country. NOT OTP-verified ownership.
+  .refine(
+    (val) => { try { return isValidPhoneNumber(val); } catch { return false; } },
+    "Phone number is not complete or valid for the selected country"
+  );
+
 export const credentialsSchema = z
   .object({
     email: z.string().email("Invalid email format"),
-    phone: z
-      .string()
-      .regex(/^\+[1-9]\d{1,14}$/, "Invalid phone format")
-      // Full structural validity check via libphonenumber (ships with react-phone-number-input).
-      // isValidPhoneNumber matches against actual national-number patterns, not just length ranges.
-      // isPossiblePhoneNumber (length-range only) accepted partial inputs for many countries
-      // where the possible-length list has a range (e.g. HK [5,6,7,8,9,11]) — isValidPhoneNumber
-      // checks actual national-number patterns and rejects any number not yet structurally complete.
-      // "valid" = structurally complete for the country. NOT OTP-verified ownership.
-      .refine(
-        (val) => { try { return isValidPhoneNumber(val); } catch { return false; } },
-        "Phone number is not complete or valid for the selected country"
-      ),
+    phone: phoneRefine,
     password: z
       .string()
       .min(8, "Minimum 8 characters")
@@ -114,6 +117,16 @@ export const credentialsSchema = z
     message: "Passwords do not match",
     path: ["confirmPassword"],
   });
+
+// OAuth onboarding path — user is already authenticated via Google / Apple.
+// Password is not set by the user; those fields are hidden and must not be validated.
+// Only email (pre-filled, read-only) and phone (user-entered) are validated.
+export const oauthCredentialsSchema = z.object({
+  email: z.string().email("Invalid email format"),
+  phone: phoneRefine,
+  password: z.string().optional(),
+  confirmPassword: z.string().optional(),
+});
 
 export const verifySchema = z.object({
   legal_name: z.string().min(2).max(50).optional(),

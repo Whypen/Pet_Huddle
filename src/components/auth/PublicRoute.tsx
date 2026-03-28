@@ -42,6 +42,16 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
     return <>{children}</>;
   }
   if (user && !allowSignupFlowWithSession) {
+    if (!profile) {
+      // user+!profile = mid-OAuth onboarding or abandoned signup.
+      // Only /auth is permitted: it is the loop-break target and the correct
+      // restart point. Active /signup/* paths are already allowed above via
+      // allowSignupFlowWithSession and never reach this block. Token-gated
+      // paths have their own early return above. All other public pages are
+      // blocked — a partial-auth user has no business on /reset-password etc.
+      if (location.pathname === "/auth") return <>{children}</>;
+      return <Navigate to="/auth" replace />;
+    }
     if (onboardingIncomplete) {
       return <Navigate to="/set-profile" replace />;
     }
