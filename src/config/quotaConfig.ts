@@ -26,6 +26,8 @@ export type QuotaCopy = {
   discovery: {
     exhausted: {
       free: string;
+      plus: string;
+      gold: string;
     };
   };
   threads: {
@@ -171,7 +173,9 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
 const COPY: QuotaCopy = {
   discovery: {
     exhausted: {
-      free: "Taking a \"paws.\" You’ve reached your daily discovery limit. Come back tomorrow or upgrade to huddle+ for more browsing",
+      free: "Ready to expand the pack? Upgrade to Huddle+ for more or Huddle Gold for the full daily cap.",
+      plus: "You’ve reached today’s Discover limit. Upgrade to Gold for the full daily cap.",
+      gold: "You’ve reached today’s Discover cap. More profiles will be ready tomorrow.",
     },
   },
   threads: {

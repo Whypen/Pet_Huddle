@@ -33,7 +33,7 @@ import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
-import { getQuotaCapsForTier, quotaConfig } from "@/config/quotaConfig";
+import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
@@ -231,10 +231,19 @@ type DiscoveryProfile = {
 };
 
 const getDiscoverySocialRole = (profile: DiscoveryProfile) => {
-  if (Array.isArray(profile.availability_status) && profile.availability_status.length > 0) {
-    return profile.availability_status[0] || null;
-  }
-  return profile.social_role || null;
+  const rawRole =
+    Array.isArray(profile.availability_status) && profile.availability_status.length > 0
+      ? profile.availability_status[0] || null
+      : profile.social_role || null;
+  const role = String(rawRole || "").trim();
+  if (!role) return null;
+  const exact = CANONICAL_SOCIAL_ROLE_OPTIONS.find((entry) => entry.toLowerCase() === role.toLowerCase());
+  if (exact) return exact;
+  const token = role.toLowerCase();
+  if (token.includes("nann")) return "Pet Nanny";
+  if (token.includes("play")) return "Pet Parent";
+  if (token.includes("animal")) return "Animal Friend (No Pet)";
+  return null;
 };
 
 const normalizeAvailabilityLabel = (value: string) => {
@@ -711,6 +720,7 @@ const Chats = () => {
   const isMinor = userAge !== null && userAge < 13;
   const discoverChatAgeBlocked = userAge !== null && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
+  const discoverExhaustedCopy = quotaConfig.copy.discovery.exhausted[normalizeQuotaTier(effectiveTier)];
   const normalizedTier = String(effectiveTier || "free").toLowerCase();
   const isGoldTier = normalizedTier === "gold";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
@@ -1502,7 +1512,7 @@ const Chats = () => {
       const ok = await bumpDiscoverySeen();
       if (!ok) {
         if (!isGoldTier) {
-          toast.info(quotaConfig.copy.discovery.exhausted.free);
+          toast.info(discoverExhaustedCopy);
         }
         setConfirmStarTarget(null);
         return;
@@ -2516,58 +2526,6 @@ const Chats = () => {
         const pinDistrictByUserId = new Map<string, string | null>();
         const liveLocationDistrictByUserId = new Map<string, string | null>();
         const pinRadiusM = Math.max(1000, Math.round((filters.maxDistanceKm || 5) * 1000));
-        const { data: fallbackPins, error: fallbackPinsError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-          "get_friend_pins_nearby",
-          {
-            p_lat: anchor.lat,
-            p_lng: anchor.lng,
-            p_radius_m: pinRadiusM,
-          }
-        );
-        if (!fallbackPinsError && Array.isArray(fallbackPins) && fallbackPins.length > 0) {
-          const fallbackMeta = new Map(
-            (fallbackPins as Array<Record<string, unknown>>).map((row) => [
-              String(row.id),
-              {
-                location_name: typeof row.location_name === "string" ? row.location_name : null,
-                avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
-                display_name: typeof row.display_name === "string" ? row.display_name : "User",
-              },
-            ])
-          );
-          for (const [userId, meta] of fallbackMeta.entries()) {
-            pinDistrictByUserId.set(userId, extractDistrictToken(meta.location_name || null));
-          }
-          const fallbackIds = Array.from(fallbackMeta.keys());
-          const { data: fallbackProfilesByPins, error: fallbackProfilesByPinsError } = await supabase
-            .from("profiles")
-            .select("id, display_name, avatar_url, verification_status, is_verified, availability_status, pet_experience, pet_experience_years:experience_years, social_album, dob, gender_genre, orientation, relationship_status, degree, languages, height, has_car, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district, pets(species,name,is_active,is_public)")
-            .in("id", fallbackIds)
-            .or("non_social.is.null,non_social.eq.false");
-
-          if (fallbackProfilesByPinsError) throw fallbackProfilesByPinsError;
-
-          const normalizedByPins = (((fallbackProfilesByPins || []) as unknown) as DiscoveryProfile[]).map((row) => {
-            const meta = fallbackMeta.get(row.id);
-            const profileDistrict = String((row as DiscoveryProfile & { location_district?: string | null }).location_district || "").trim() || null;
-            const profileLocation = String(row.location_name || "").trim() || null;
-            const pinDistrict = pinDistrictByUserId.get(row.id) || extractDistrictToken(meta?.location_name || null);
-            return {
-              ...row,
-              display_name: row.display_name || meta?.display_name || "User",
-              avatar_url: row.avatar_url || meta?.avatar_url || null,
-              location_name: resolveDiscoveryLocationLabel({
-                pinDistrict,
-                profileLocationDistrict: profileDistrict,
-                profileLocationName: profileLocation || meta?.location_name || null,
-              }),
-              social_role: Array.isArray((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status)
-                ? (((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status || [])[0] ?? null)
-                : row.social_role ?? null,
-            };
-          });
-          for (const row of normalizedByPins) mergedProfiles.set(row.id, row);
-        }
         try {
           const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
             "social_discovery",
@@ -2649,7 +2607,9 @@ const Chats = () => {
             }
           }
         } catch (edgeErr) {
-          console.warn("[Chats] social_discovery rpc unavailable, using local nearby candidates", edgeErr);
+          console.warn("[Chats] social_discovery rpc unavailable", edgeErr);
+          setDiscoveryProfiles([]);
+          return;
         }
         const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), filters, {
           enforceVerifiedOnly: filters.verifiedOnly,
@@ -2661,28 +2621,7 @@ const Chats = () => {
           setDiscoveryProfiles(mergedList);
           return;
         }
-        const { data: fallbackProfiles } = await supabase
-          .from("profiles")
-          .select("id, display_name, avatar_url, verification_status, is_verified, availability_status, pet_experience, pet_experience_years:experience_years, social_album, dob, gender_genre, orientation, relationship_status, degree, languages, height, has_car, last_active_at, updated_at, created_at, last_lat, last_lng, pets(species,name,is_active,is_public)")
-          .or("non_social.is.null,non_social.eq.false")
-          .neq("id", profile.id)
-          .limit(80);
-
-        const normalizedFallback = (((fallbackProfiles || []) as unknown) as DiscoveryProfile[]).map((row) => ({
-          ...row,
-          social_role: Array.isArray((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status)
-            ? (((row as DiscoveryProfile & { availability_status?: string[] | null }).availability_status || [])[0] ?? null)
-            : row.social_role ?? null,
-        }));
-
-        const fallbackList = applyDiscoveryClientFilters(normalizedFallback, filters, {
-          enforceVerifiedOnly: filters.verifiedOnly,
-          enforceActiveOnly: filters.activeOnly,
-          wavedByUserIds,
-          anchor,
-        }).filter((row) => !handledIds.has(row.id));
-
-        setDiscoveryProfiles(fallbackList);
+        setDiscoveryProfiles([]);
       } catch (err) {
         console.warn("[Chats] Discovery failed", err);
         setDiscoveryProfiles([]);
@@ -3983,7 +3922,7 @@ const Chats = () => {
                             const ok = await bumpDiscoverySeen();
                             if (!ok) {
                               if (!isGoldTier) {
-                                toast.info(quotaConfig.copy.discovery.exhausted.free);
+                                toast.info(discoverExhaustedCopy);
                               }
                               return;
                             }
@@ -4074,7 +4013,7 @@ const Chats = () => {
                         <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
                           <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
                             <p className="text-sm font-semibold text-white">
-                              Taking a "paws." You’ve reached your daily discovery limit. Come back tomorrow or upgrade to huddle+ for more browsing
+                              {discoverExhaustedCopy}
                             </p>
                             <button
                               type="button"

@@ -6,6 +6,7 @@ import { SPECIES_LIST } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { quotaConfig } from "@/config/quotaConfig";
 import type { FilterState } from "./filterTypes";
+import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 
 interface FilterSheetProps {
   isOpen: boolean;
@@ -15,11 +16,7 @@ interface FilterSheetProps {
   onPremiumClick: (tier: "plus" | "gold") => void;
 }
 
-const roles = [
-  { id: "nannies", labelKey: "social.nannies" },
-  { id: "playdates", labelKey: "social.playdates" },
-  { id: "animal-lovers", labelKey: "social.animal_lovers" },
-] as const;
+const roles = [...CANONICAL_SOCIAL_ROLE_OPTIONS] as const;
 
 const BASE_DISTANCE_MAX = 150;
 const SEE_FURTHER_INCREMENT = 5;
@@ -55,10 +52,6 @@ const languageOptions = [
 export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick }: FilterSheetProps) => {
   const { t } = useLanguage();
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
-
-  const handleRoleChange = (role: FilterState["role"]) => {
-    setLocalFilters(prev => ({ ...prev, role }));
-  };
 
   const handleSpeciesToggle = (species: string) => {
     setLocalFilters(prev => ({
@@ -129,19 +122,19 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   <label className="text-sm font-medium mb-3 block">{t("Looking for")}</label>
                   <div className="space-y-2">
                     {roles.map((role) => {
-                      const isSelected = localFilters.selectedRoles?.includes(role.id) || localFilters.role === role.id;
+                      const isSelected = localFilters.selectedRoles?.includes(role) || localFilters.role === role;
                       return (
                         <button
-                          key={role.id}
+                          key={role}
                           onClick={() => {
                             setLocalFilters(prev => {
                               const currentRoles = prev.selectedRoles || [prev.role];
-                              const newRoles = currentRoles.includes(role.id)
-                                ? currentRoles.filter(r => r !== role.id)
-                                : [...currentRoles, role.id];
+                              const newRoles = currentRoles.includes(role)
+                                ? currentRoles.filter(r => r !== role)
+                                : [...currentRoles, role];
                               return { 
                                 ...prev, 
-                                selectedRoles: newRoles.length > 0 ? newRoles : [role.id],
+                                selectedRoles: newRoles.length > 0 ? newRoles : [role],
                                 role: newRoles[0] as FilterState["role"]
                               };
                             });
@@ -165,7 +158,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                               </svg>
                             )}
                           </div>
-                          <span className="font-medium">{t(role.labelKey)}</span>
+                          <span className="font-medium">{t(role)}</span>
                         </button>
                       );
                     })}

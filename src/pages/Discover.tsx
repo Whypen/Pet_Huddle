@@ -18,8 +18,9 @@ import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
-import { getQuotaCapsForTier, quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
+import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 
 type DiscoveryPet = {
   species?: string | null;
@@ -71,6 +72,18 @@ const discoverySpeciesOptions = [
   { value: "hamster", label: "Hamster" },
   { value: "others", label: "Others" },
 ];
+
+const resolveCanonicalDiscoveryRole = (rawRole: string | null | undefined): (typeof CANONICAL_SOCIAL_ROLE_OPTIONS)[number] | null => {
+  const role = String(rawRole || "").trim();
+  if (!role) return null;
+  const exact = CANONICAL_SOCIAL_ROLE_OPTIONS.find((entry) => entry.toLowerCase() === role.toLowerCase());
+  if (exact) return exact;
+  const token = role.toLowerCase();
+  if (token.includes("nann")) return "Pet Nanny";
+  if (token.includes("play")) return "Pet Parent";
+  if (token.includes("animal")) return "Animal Friend (No Pet)";
+  return null;
+};
 
 const getVisiblePetSpecies = (profile: DiscoveryProfile) => {
   const pets = Array.isArray(profile.pets) ? profile.pets : [];
@@ -156,7 +169,7 @@ const Discover = () => {
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
-  const [discoveryRole, setDiscoveryRole] = useState("playdates");
+  const [discoveryRole, setDiscoveryRole] = useState<string>("");
   const [discoveryDistance, setDiscoveryDistance] = useState(10);
   const [discoveryPetSize, setDiscoveryPetSize] = useState("Any");
   const [discoveryGender, setDiscoveryGender] = useState("Any");
@@ -175,6 +188,7 @@ const Discover = () => {
   const discoverChatAgeBlocked = userAge !== null && userAge < 16;
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
+  const discoveryExhaustedCopy = quotaConfig.copy.discovery.exhausted[normalizeQuotaTier(effectiveTier)];
 
   // Daily discovery quota by tier from canonical quota config.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
@@ -261,7 +275,7 @@ const Discover = () => {
             p_radius_m: Math.max(1000, Math.round((discoveryDistance || 5) * 1000)),
             p_min_age: minAge,
             p_max_age: maxAge,
-            p_role: discoveryRole,
+            p_role: null,
             p_gender: discoveryGender !== "Any" ? discoveryGender : null,
             p_species: discoverySpecies !== "Any" ? [discoverySpecies] : null,
             p_pet_size: discoveryPetSize !== "Any" ? discoveryPetSize : null,
@@ -272,55 +286,6 @@ const Discover = () => {
         let profiles = Array.isArray(data) ? data : [];
         const pinDistrictByUserId = new Map<string, string | null>();
         const liveLocationDistrictByUserId = new Map<string, string | null>();
-
-        if (profiles.length === 0) {
-          const { data: fallbackPins, error: fallbackError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-            "get_friend_pins_nearby",
-            {
-              p_lat: anchorLat,
-              p_lng: anchorLng,
-              p_radius_m: Math.max(1000, Math.round((discoveryDistance || 5) * 1000)),
-            }
-          );
-          if (!fallbackError && Array.isArray(fallbackPins) && fallbackPins.length > 0) {
-            const fallbackMeta = new Map(
-              (fallbackPins as Array<Record<string, unknown>>).map((row) => [
-                String(row.id),
-                {
-                  location_name: typeof row.location_name === "string" ? row.location_name : null,
-                  avatar_url: typeof row.avatar_url === "string" ? row.avatar_url : null,
-                  display_name: typeof row.display_name === "string" ? row.display_name : "User",
-                },
-              ])
-            );
-            for (const [id, meta] of fallbackMeta.entries()) {
-              pinDistrictByUserId.set(id, extractDistrictToken(meta.location_name || null));
-            }
-            const fallbackIds = Array.from(fallbackMeta.keys());
-            const { data: fallbackProfiles, error: fallbackProfilesError } = await supabase
-              .from("profiles")
-              .select("id, display_name, avatar_url, verification_status, is_verified, bio, relationship_status, dob, location_name, occupation, school, major, tier, social_album, pets(species,name,is_active,is_public)")
-              .in("id", fallbackIds)
-              .or("non_social.is.null,non_social.eq.false")
-              .or("account_status.is.null,account_status.eq.active");
-
-            if (fallbackProfilesError) throw fallbackProfilesError;
-
-            profiles = (((fallbackProfiles || []) as unknown) as DiscoveryProfile[]).map((row) => {
-              const meta = fallbackMeta.get(row.id);
-              const pinDistrict = pinDistrictByUserId.get(row.id) || null;
-              return {
-                ...row,
-                display_name: row.display_name || meta?.display_name || "User",
-                avatar_url: row.avatar_url || meta?.avatar_url || null,
-                location_name: resolveDiscoveryLocationLabel({
-                  pinDistrict,
-                  profileLocationName: row.location_name || meta?.location_name || null,
-                }),
-              };
-            });
-          }
-        }
         const profileIds = profiles
           .map((row) => String((row as DiscoveryProfile).id || "").trim())
           .filter(Boolean);
@@ -366,8 +331,11 @@ const Discover = () => {
             };
           });
         }
+        const roleFilteredProfiles = discoveryRole
+          ? profiles.filter((row) => resolveCanonicalDiscoveryRole(row.social_role) === discoveryRole)
+          : profiles;
         setDiscoveryError(null);
-        setDiscoveryProfiles(profiles);
+        setDiscoveryProfiles(roleFilteredProfiles);
       } catch (err) {
         console.warn("[Discover] discovery fetch failed", err);
         setDiscoveryError("Live discovery is temporarily unavailable.");
@@ -439,9 +407,10 @@ const Discover = () => {
               onChange={(e) => setDiscoveryRole(e.target.value)}
               className="h-9 rounded-lg border border-border bg-background px-3 text-xs"
             >
-              <option value="playdates">{t("Playdates")}</option>
-              <option value="nannies">{t("Nannies")}</option>
-              <option value="animal-lovers">{t("Animal Lovers")}</option>
+              <option value="">{t("Community Role")}</option>
+              {CANONICAL_SOCIAL_ROLE_OPTIONS.map((role) => (
+                <option key={role} value={role}>{t(role)}</option>
+              ))}
             </select>
             <select
               value={discoverySpecies}
@@ -573,7 +542,7 @@ const Discover = () => {
                   {blocked && (
                     <div className="absolute inset-0 z-20 bg-white/70 backdrop-blur-md flex flex-col items-center justify-center gap-2 p-4">
                       <Lock className="w-8 h-8 text-brandBlue" />
-                      <p className="text-xs text-center font-semibold text-brandText">{quotaConfig.copy.discovery.exhausted.free}</p>
+                      <p className="text-xs text-center font-semibold text-brandText">{discoveryExhaustedCopy}</p>
                       <button
                         onClick={(e) => { e.stopPropagation(); openPremiumForTier("plus"); }}
                         className="px-4 py-1.5 rounded-full bg-brandBlue text-white text-xs font-bold"

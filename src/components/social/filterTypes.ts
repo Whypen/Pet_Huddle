@@ -1,6 +1,10 @@
+import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
+
+export type CanonicalSocialRole = (typeof CANONICAL_SOCIAL_ROLE_OPTIONS)[number];
+
 export interface FilterState {
-  role: "playdates" | "nannies" | "animal-lovers";
-  selectedRoles?: ("playdates" | "nannies" | "animal-lovers")[];
+  role: CanonicalSocialRole;
+  selectedRoles?: CanonicalSocialRole[];
   species: string[];
   distance: number;
   seeFurther: boolean; // SPRINT 3: See Further toggle for extending max distance
@@ -19,7 +23,7 @@ export interface FilterState {
 
 // SPRINT 3: Default filters with 150km max distance, ±3 year age range
 export const defaultFilters: FilterState = {
-  role: "playdates",
+  role: CANONICAL_SOCIAL_ROLE_OPTIONS[0],
   species: [],
   distance: 50,
   seeFurther: false, // Default to standard range
