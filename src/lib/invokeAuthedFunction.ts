@@ -150,12 +150,8 @@ export async function invokeAuthedFunction<T = unknown>(
     };
   }
 
-  // Use raw fetch instead of supabase.functions.invoke() to avoid the SDK
-  // auto-injecting x-client-info / x-supabase-client-platform headers, which
-  // cause CORS preflight failures on remote when the gateway's cached
-  // Access-Control-Allow-Headers list doesn't include them.
   const fnUrl = `${(import.meta.env.VITE_SUPABASE_URL as string).replace(/\/$/, "")}/functions/v1/${functionName}`;
-  const invokeWithToken = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
+  const invokeWithRawFetch = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
     try {
       const res = await fetch(fnUrl, {
         method: "POST",
@@ -180,6 +176,32 @@ export async function invokeAuthedFunction<T = unknown>(
       return { data: payload, error: null };
     } catch (err) {
       return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    }
+  };
+  const invokeWithToken = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
+    try {
+      const sdk = await supabase.functions.invoke(functionName, {
+        body: args.body ?? null,
+        headers: {
+          ...baseHeaders,
+          Authorization: `Bearer ${token}`,
+          "x-huddle-access-token": token,
+        },
+      });
+      if (!sdk.error) {
+        return { data: sdk.data ?? null, error: null };
+      }
+      const message = String(sdk.error.message || "");
+      const shouldFallbackToRaw =
+        message.includes("Failed to fetch")
+        || message.includes("NetworkError")
+        || message.includes("Load failed");
+      if (shouldFallbackToRaw) {
+        return await invokeWithRawFetch(token);
+      }
+      return { data: sdk.data ?? null, error: sdk.error };
+    } catch {
+      return await invokeWithRawFetch(token);
     }
   };
 
