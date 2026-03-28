@@ -2550,6 +2550,8 @@ const Chats = () => {
         const liveLocationDistrictByUserId = new Map<string, string | null>();
         const pinRadiusM = Math.max(1000, Math.round((filters.maxDistanceKm || 5) * 1000));
         try {
+          const hasExplicitHeightFilter =
+            isPremium && (filters.heightMin > DEFAULT_FILTERS.heightMin || filters.heightMax < DEFAULT_FILTERS.heightMax);
           const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
             "social_discovery",
             {
@@ -2564,8 +2566,8 @@ const Chats = () => {
               p_species: filters.species.length === ALL_SPECIES.length ? null : filters.species,
               p_pet_size: null,
               p_advanced: isPremium,
-              p_height_min: isPremium ? filters.heightMin : null,
-              p_height_max: isPremium ? filters.heightMax : null,
+              p_height_min: hasExplicitHeightFilter ? filters.heightMin : null,
+              p_height_max: hasExplicitHeightFilter ? filters.heightMax : null,
               p_only_waved: filters.whoWavedAtMe,
               p_active_only: filters.activeOnly,
             }
