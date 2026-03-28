@@ -377,10 +377,11 @@ const CarerProfile: React.FC = () => {
   }, []);
 
   const refreshStripePayoutStatus = useCallback(async () => {
-    const { data: statusData } = await invokeAuthedFunction<{ status?: string }>(
+    const { data: statusData, error } = await invokeAuthedFunction<{ status?: string }>(
       "create-stripe-connect-link",
-      { body: { action: "check_status" }, forceRefresh: true },
+      { body: { action: "check_status" } },
     );
+    if (error) return;
     const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
     if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
       setFormData((prev) => ({ ...prev, stripePayoutStatus: nextStatus as CarerProfileData["stripePayoutStatus"] }));
@@ -671,7 +672,6 @@ const CarerProfile: React.FC = () => {
         "create-stripe-connect-link",
         {
           body: { action: "create_link", returnUrl, refreshUrl },
-          forceRefresh: true,
         },
       );
       if (error) {

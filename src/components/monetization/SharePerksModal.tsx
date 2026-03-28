@@ -5,7 +5,7 @@ import { GlassModal } from "@/components/ui/GlassModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { toast } from "sonner";
 
 const BRAND_BLUE = "#2145CF";
@@ -64,19 +64,17 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   async function handlePurchase() {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke(
-        "create-checkout-session",
-        {
-          body: {
-            mode: isSharePerksRecurring ? "subscription" : "payment",
-            type: "sharePerks",
-            successUrl: `${window.location.origin}/settings?addon_done=1`,
-            cancelUrl: window.location.href,
-            country: pricingHints.country,
-            currency: pricingHints.currency,
-          },
-        }
-      );
+      const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
+        body: {
+          userId: profile?.id,
+          mode: isSharePerksRecurring ? "subscription" : "payment",
+          type: isSharePerksRecurring ? "family_member" : "sharePerks",
+          successUrl: `${window.location.origin}/settings?addon_done=1`,
+          cancelUrl: window.location.href,
+          country: pricingHints.country,
+          currency: pricingHints.currency,
+        },
+      });
       if (error || !data?.url) throw error ?? new Error("No checkout URL");
       window.location.href = data.url;
     } catch {

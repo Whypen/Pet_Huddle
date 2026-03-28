@@ -21,7 +21,7 @@ import {
   Video,
   Zap,
 } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -120,6 +120,7 @@ function discountPct(monthlyAmt: number, annualTotal: number): number {
 
 export default function PremiumPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile } = useAuth();
   const { t } = useLanguage();
@@ -140,6 +141,37 @@ export default function PremiumPage() {
   const [pricingCountry, setPricingCountry] = useState<string | null>(null);
   const [pricingCurrency, setPricingCurrency] = useState<string | null>(null);
   const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
+  const returnToFromState = (() => {
+    const raw = (location.state as { returnTo?: unknown } | null)?.returnTo;
+    return typeof raw === "string" && raw.startsWith("/") ? raw : null;
+  })();
+  const reopenDrawerFromState = (location.state as { reopenDrawerOnClose?: unknown } | null)?.reopenDrawerOnClose === true;
+  const returnToFromQuery = (() => {
+    const raw = searchParams.get("return_to");
+    return raw && raw.startsWith("/") ? raw : null;
+  })();
+  const reopenDrawerFromQuery = searchParams.get("reopen_drawer") === "1";
+  const returnToFromSession = (() => {
+    const raw = sessionStorage.getItem("premium:returnTo");
+    return raw && raw.startsWith("/") ? raw : null;
+  })();
+  const reopenDrawerFromSession = sessionStorage.getItem("premium:reopenDrawer") === "1";
+  const resolvedReturnTo = returnToFromState || returnToFromQuery || returnToFromSession || null;
+  const shouldReopenDrawerOnClose = reopenDrawerFromState || reopenDrawerFromQuery || reopenDrawerFromSession;
+  const encodedReturnToParam = resolvedReturnTo ? `&return_to=${encodeURIComponent(resolvedReturnTo)}` : "";
+  const reopenDrawerParam = shouldReopenDrawerOnClose ? "&reopen_drawer=1" : "";
+  const closePremium = () => {
+    if (resolvedReturnTo) {
+      sessionStorage.removeItem("premium:returnTo");
+      sessionStorage.removeItem("premium:reopenDrawer");
+      navigate(resolvedReturnTo, {
+        replace: true,
+        state: shouldReopenDrawerOnClose ? { openSettingsDrawer: true } : undefined,
+      });
+      return;
+    }
+    navigate("/settings", { replace: true });
+  };
 
   // ── Live Stripe prices — cached at module level after first fetch ────────────
   const initialLivePrices = getCachedLivePrices({
@@ -199,15 +231,16 @@ export default function PremiumPage() {
             userId: user.id,
             mode: "payment",
             items: pending.map((p) => ({ type: p.id, quantity: p.qty })),
-            successUrl: `${window.location.origin}/premium?addon_done=1`,
-            cancelUrl: `${window.location.origin}/premium`,
+            successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+            cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: pricingCurrency || undefined,
             country: pricingCountry || undefined,
           },
         });
         if (error) throw error;
         const url = (data as { url?: string } | null)?.url;
-        if (url) window.location.assign(url);
+        if (!url) throw new Error("checkout_url_missing");
+        window.location.assign(url);
       } catch {
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
@@ -262,8 +295,8 @@ export default function PremiumPage() {
       const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
       const hasAddons = hasPaymentAddons;
       const successUrl = hasAddons
-        ? `${window.location.origin}/premium?plan_done=1`
-        : `${window.location.origin}/premium`;
+        ? `${window.location.origin}/premium?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
+        : `${window.location.origin}/premium?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`;
 
       if (hasAddons) {
         sessionStorage.setItem(
@@ -284,17 +317,16 @@ export default function PremiumPage() {
           lookupKey: plan.lookupKey,
           priceId: plan.priceId,
           successUrl,
-          cancelUrl: `${window.location.origin}/premium`,
+          cancelUrl: `${window.location.origin}/premium?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`,
           currency: pricingCurrency || undefined,
           country: pricingCountry || undefined,
         },
       });
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
-      if (url) {
-        console.log("[Premium] Checkout URL:", url);
-        window.location.assign(url);
-      }
+      if (!url) throw new Error("checkout_url_missing");
+      console.log("[Premium] Checkout URL:", url);
+      window.location.assign(url);
     } catch {
       sessionStorage.removeItem("pending_addons");
       toast.error(t("Checkout unavailable. Please try again."));
@@ -319,16 +351,17 @@ export default function PremiumPage() {
           body: {
             userId: user.id,
             mode: "subscription",
-            type: "sharePerks",
-            successUrl: `${window.location.origin}/premium?addon_done=1`,
-            cancelUrl: `${window.location.origin}/premium`,
+            type: "family_member",
+            successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+            cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: pricingCurrency || undefined,
             country: pricingCountry || undefined,
           },
         });
         if (error) throw error;
         const url = (data as { url?: string } | null)?.url;
-        if (url) window.location.assign(url);
+        if (!url) throw new Error("checkout_url_missing");
+        window.location.assign(url);
       } catch {
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
@@ -344,15 +377,16 @@ export default function PremiumPage() {
           userId: user.id,
           mode: "payment",
           items: selectedPaymentAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
-          successUrl: `${window.location.origin}/premium?addon_done=1`,
-          cancelUrl: `${window.location.origin}/premium`,
+          successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+          cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
           currency: pricingCurrency || undefined,
           country: pricingCountry || undefined,
         },
       });
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
-      if (url) window.location.assign(url);
+      if (!url) throw new Error("checkout_url_missing");
+      window.location.assign(url);
     } catch {
       toast.error(t("Checkout unavailable. Please try again."));
     } finally {
@@ -518,6 +552,17 @@ export default function PremiumPage() {
 
   const renderAddonsCard = () => {
     const theme = PLAN_THEMES.addons;
+    const recurringAddonTotal = selectedRecurringAddonItems.reduce(
+      (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
+      0,
+    );
+    const checkoutDisplayTotal = selectedPaymentAddonItems.length > 0 ? addonTotal : recurringAddonTotal;
+    const checkoutDisplaySuffix =
+      selectedPaymentAddonItems.length === 0 &&
+      selectedRecurringAddonItems.length > 0 &&
+      isSharePerksRecurring
+        ? "/mo"
+        : undefined;
 
     return (
       <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
@@ -621,7 +666,7 @@ export default function PremiumPage() {
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
             {selectedAddonItems.length > 0
-              ? <>Purchase Add-ons · <PriceDisplay n={addonTotal} currency={livePrices.currencyCode} /></>
+              ? <>Purchase Add-ons · <PriceDisplay n={checkoutDisplayTotal} currency={livePrices.currencyCode} suffix={checkoutDisplaySuffix} /></>
               : "Purchase Add-ons"}
           </button>
 
@@ -640,7 +685,7 @@ export default function PremiumPage() {
 
   return (
     <div className="min-h-svh overflow-x-hidden">
-      <GlobalHeader closeButton={() => navigate("/settings", { replace: true })} />
+      <GlobalHeader closeButton={closePremium} />
 
       <div
         className="overflow-y-auto"

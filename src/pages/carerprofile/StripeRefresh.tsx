@@ -20,11 +20,6 @@ const StripeRefresh = () => {
       // best effort only
     }
     window.close();
-    window.setTimeout(() => {
-      if (!window.closed && !window.opener) {
-        window.location.replace("/carerprofile");
-      }
-    }, 200);
   };
 
   useEffect(() => {
@@ -34,7 +29,7 @@ const StripeRefresh = () => {
         const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
         const { data, error } = await invokeAuthedFunction<{ url?: string }>(
           "create-stripe-connect-link",
-          { body: { action: "create_link", returnUrl, refreshUrl }, forceRefresh: true },
+          { body: { action: "create_link", returnUrl, refreshUrl } },
         );
         if (error) throw error;
         const nextUrl = String(data?.url || "").trim();

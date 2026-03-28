@@ -23,6 +23,8 @@ const PRICE_IDS: Record<string, string | undefined> = {
   superBroadcast: Deno.env.get("STRIPE_PRICE_SUPER_BROADCAST"),
   topProfileBooster: Deno.env.get("STRIPE_PRICE_TOP_PROFILE"),
   sharePerks: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+  family_member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+  Family_Member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
 };
 
 const CORE_PREMIUM_KEYS = new Set([
@@ -43,6 +45,13 @@ const DEFAULTS: Record<string, { amount: number; currency: string; interval?: st
   superBroadcast: { amount: 4.99, currency: "usd" },
   topProfileBooster: { amount: 2.99, currency: "usd" },
   sharePerks: { amount: 4.99, currency: "usd" },
+  family_member: { amount: 4.99, currency: "usd" },
+  Family_Member: { amount: 4.99, currency: "usd" },
+};
+const SHARED_PERKS_PLAN_KEYS = ["sharePerks", "family_member", "Family_Member", "share_perks"] as const;
+const resolvePlanKeys = (planKey: string): string[] => {
+  if (SHARED_PERKS_PLAN_KEYS.includes(planKey as typeof SHARED_PERKS_PLAN_KEYS[number])) return [...SHARED_PERKS_PLAN_KEYS];
+  return [planKey];
 };
 
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
@@ -135,10 +144,11 @@ const resolveCurrencyByCountry = (country: string | null): string =>
 
 async function resolveLookupKeyFromMetadata(planKey: string, currency: string): Promise<string | null> {
   const target = currency.toUpperCase();
+  const planKeys = resolvePlanKeys(planKey);
   const { data, error } = await supabase
     .from("plan_metadata")
     .select("stripe_lookup_key,currency")
-    .eq("plan_key", planKey)
+    .in("plan_key", planKeys)
     .eq("is_active", true)
     .in("currency", [target, "USD"])
     .order("priority", { ascending: false })
@@ -247,6 +257,7 @@ serve(async (req) => {
 
     const results: Record<string, { amount: number; currency: string; interval?: string }> = {};
     for (const [key, priceId] of Object.entries(PRICE_IDS)) {
+      if (key === "family_member" || key === "Family_Member") continue;
       let price = null;
       if (CORE_PREMIUM_KEYS.has(key)) {
         if (priceId) {

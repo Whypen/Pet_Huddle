@@ -45,8 +45,8 @@ async function resolveAccessToken(): Promise<AccessTokenResolution> {
   }
   const refreshedToken = await pendingRefresh;
   if (refreshedToken) return { token: refreshedToken, hasSession: true };
-  // Refresh failed — fall back to whatever session token exists (retry logic handles 401)
-  if (existing) return { token: existing, hasSession: true };
+  // Refresh failed and existing token is stale/near expiry — force re-auth instead
+  // of sending an invalid JWT repeatedly to protected edge functions.
   return { token: null, hasSession: false };
 }
 

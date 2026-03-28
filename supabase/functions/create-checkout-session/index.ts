@@ -33,6 +33,8 @@ const STRIPE_PRICE_IDS: Record<string, string | undefined> = {
   superBroadcast: Deno.env.get("STRIPE_PRICE_SUPER_BROADCAST"),
   topProfileBooster: Deno.env.get("STRIPE_PRICE_TOP_PROFILE"),
   sharePerks: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+  family_member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
+  Family_Member: Deno.env.get("STRIPE_PRICE_FAMILY_MEMBER"),
 };
 
 const ADDON_DEFAULTS: Record<string, number> = {
@@ -43,9 +45,24 @@ const ADDON_DEFAULTS: Record<string, number> = {
   superBroadcast: 499,
   topProfileBooster: 299,
   sharePerks: 499,
+  family_member: 499,
+  Family_Member: 499,
 };
 
 const requiredSubscriptionTypes = new Set(["plus_monthly", "plus_annual", "gold_monthly", "gold_annual"]);
+const SHARED_PERKS_PLAN_KEYS = ["sharePerks", "family_member", "Family_Member", "share_perks"] as const;
+const normalizeCheckoutType = (value: string): string => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (SHARED_PERKS_PLAN_KEYS.includes(normalized as typeof SHARED_PERKS_PLAN_KEYS[number])) return "sharePerks";
+  if (normalized.toLowerCase() === "familymember") return "sharePerks";
+  return normalized;
+};
+const resolvePlanKeys = (planKey: string): string[] => {
+  const normalized = normalizeCheckoutType(planKey);
+  if (normalized === "sharePerks") return [...SHARED_PERKS_PLAN_KEYS];
+  return [normalized];
+};
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
   HK: "hkd",
   US: "usd",
@@ -255,10 +272,11 @@ async function resolvePriceByLookupKey(lookupKey: string, mode: "subscription" |
 
 async function resolveLookupKeyFromMetadata(planKey: string, currency: string): Promise<string | null> {
   const target = currency.toUpperCase();
+  const planKeys = resolvePlanKeys(planKey);
   const { data, error } = await supabase
     .from("plan_metadata")
     .select("stripe_lookup_key,currency")
-    .eq("plan_key", planKey)
+    .in("plan_key", planKeys)
     .eq("is_active", true)
     .in("currency", [target, "USD"])
     .order("priority", { ascending: false })
@@ -354,7 +372,7 @@ serve(async (req: Request) => {
         .eq("id", userId);
     }
 
-    const normalizedType = typeof type === "string" ? type : "";
+    const normalizedType = normalizeCheckoutType(typeof type === "string" ? type : "");
     const normalizedItems = Array.isArray(items)
       ? items
           .map((item) => {
@@ -428,8 +446,14 @@ serve(async (req: Request) => {
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
 
       for (const item of rawItems) {
-        const itemType = String(item.type || "");
+        const itemType = normalizeCheckoutType(String(item.type || ""));
         const qty = Math.max(1, Number(item.quantity || 1));
+        if (itemType === "sharePerks") {
+          return json(
+            { error: "Invalid checkout mode: sharePerks must use subscription checkout." },
+            400,
+          );
+        }
         const expectedAmount = ADDON_DEFAULTS[itemType];
         if (!expectedAmount) {
           throw new Error(`Unknown add-on type: ${itemType}`);

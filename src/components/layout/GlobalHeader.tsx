@@ -130,6 +130,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [supportMessage, setSupportMessage] = useState("");
   const [supportEmailOptIn, setSupportEmailOptIn] = useState(true);
   const [drawerView, setDrawerView] = useState<"main" | "legal">("main");
+  const premiumReturnTo = `${location.pathname}${location.search}`;
 
   // ── Notification drawer state ──────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -603,7 +604,14 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   starsLabel={String(Math.max(0, Number(starsRemaining || 0)))}
                   onStarsClick={() => {
                     setMenuOpen(false);
-                    navigate("/premium");
+                    sessionStorage.setItem("premium:returnTo", premiumReturnTo);
+                    sessionStorage.setItem("premium:reopenDrawer", "1");
+                    navigate("/premium", {
+                      state: {
+                        returnTo: premiumReturnTo,
+                        reopenDrawerOnClose: true,
+                      },
+                    });
                   }}
                   onPress={() => navigate("/edit-profile")}
                   showChevron
@@ -622,7 +630,14 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                       if (onUpgradeClick && !isPlusOrAbove) {
                         setTimeout(onUpgradeClick, 200);
                       } else {
-                        navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"));
+                        sessionStorage.setItem("premium:returnTo", premiumReturnTo);
+                        sessionStorage.setItem("premium:reopenDrawer", "1");
+                        navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"), {
+                          state: {
+                            returnTo: premiumReturnTo,
+                            reopenDrawerOnClose: true,
+                          },
+                        });
                       }
                     }}
                   />
