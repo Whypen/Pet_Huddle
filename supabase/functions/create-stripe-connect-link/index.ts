@@ -284,6 +284,7 @@ serve(async (req) => {
       const safeRefreshUrl = mode === "live" && !isHttpsUrl(refreshUrl)
         ? buildFallbackConnectUrl("/carerprofile/stripe-refresh")
         : refreshUrl;
+      const linkKeySuffix = Math.floor(Date.now() / 60000);
 
       let accountId = (profile as { stripe_account_id?: string } | null)?.stripe_account_id;
 
@@ -302,6 +303,8 @@ serve(async (req) => {
           return_url: safeReturnUrl,
           type: "account_onboarding",
           collection_options: { fields: "currently_due" },
+        }, {
+          idempotencyKey: `huddle_connect_link_${user.id}_${accountId}_${linkKeySuffix}`,
         });
       };
 
@@ -316,6 +319,8 @@ serve(async (req) => {
                 return_url: safeReturnUrl,
                 type: "account_onboarding",
                 collection_options: { fields: "currently_due" },
+              }, {
+                idempotencyKey: `huddle_connect_link_${user.id}_${accountId}_${linkKeySuffix}`,
               });
             })()
           : await createFreshAccountLink();

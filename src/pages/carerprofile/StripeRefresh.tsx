@@ -1,11 +1,29 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
+const STRIPE_CONNECT_RESULT_KEY = "huddle:stripe-connect-result";
+const STRIPE_CONNECT_MESSAGE_TYPE = "huddle:stripe-connect";
+
 const StripeRefresh = () => {
-  const navigate = useNavigate();
+  const notifyAndClose = () => {
+    const payload = { type: STRIPE_CONNECT_MESSAGE_TYPE, status: "error", ts: Date.now() };
+    try {
+      localStorage.setItem(STRIPE_CONNECT_RESULT_KEY, JSON.stringify(payload));
+    } catch {
+      // best effort only
+    }
+    try {
+      window.opener?.postMessage(payload, window.location.origin);
+    } catch {
+      // best effort only
+    }
+    window.close();
+    window.setTimeout(() => {
+      window.location.replace("/carerprofile");
+    }, 120);
+  };
 
   useEffect(() => {
     void (async () => {
@@ -22,10 +40,10 @@ const StripeRefresh = () => {
         window.location.href = nextUrl;
       } catch {
         toast.error("Could not refresh payout link. Please retry.");
-        navigate("/carerprofile", { replace: true });
+        notifyAndClose();
       }
     })();
-  }, [navigate]);
+  }, []);
 
   return (
     <div className="h-full flex items-center justify-center">

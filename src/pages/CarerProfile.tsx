@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -89,7 +89,6 @@ const PROOF_CONFIG: Record<string, {
 };
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
-const TIME_BLOCKS = ["Full-day", "Overnight", "Other"] as const;
 const LOCATION_STYLES = [
   "Flexible",
   "At owner's place",
@@ -118,6 +117,8 @@ const CURRENCIES = ["USD", "HKD", "GBP", "EUR", "AUD", "SGD", "CAD", "JPY"] as c
 const RATE_OPTIONS = ["Per hour", "Per day", "Per session", "Per night"] as const;
 
 const AGREEMENT_VERSION = "1.0";
+const STRIPE_CONNECT_RESULT_KEY = "huddle:stripe-connect-result";
+const STRIPE_CONNECT_MESSAGE_TYPE = "huddle:stripe-connect";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -323,6 +324,8 @@ const CarerProfile: React.FC = () => {
   const [formData, setFormData] = useState<CarerProfileData>(EMPTY);
   const [stripeConnecting, setStripeConnecting] = useState(false);
   const [showPayoutPrefillModal, setShowPayoutPrefillModal] = useState(false);
+  const stripePopupRef = useRef<Window | null>(null);
+  const stripePopupPollRef = useRef<number | null>(null);
 
   const readFunctionHttpErrorMessage = async (err: unknown): Promise<string | null> => {
     try {
@@ -365,6 +368,25 @@ const CarerProfile: React.FC = () => {
   const [srDraft, setSrDraft] = useState<{ services: string[]; price: string; rate: string }>({ services: [], price: "", rate: "" });
   const [srDropOpen, setSrDropOpen] = useState(false);
 
+  const clearStripePopupWatcher = useCallback(() => {
+    if (stripePopupPollRef.current !== null) {
+      window.clearInterval(stripePopupPollRef.current);
+      stripePopupPollRef.current = null;
+    }
+    stripePopupRef.current = null;
+  }, []);
+
+  const refreshStripePayoutStatus = useCallback(async () => {
+    const { data: statusData } = await invokeAuthedFunction<{ status?: string }>(
+      "create-stripe-connect-link",
+      { body: { action: "check_status" } },
+    );
+    const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
+    if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
+      setFormData((prev) => ({ ...prev, stripePayoutStatus: nextStatus as CarerProfileData["stripePayoutStatus"] }));
+    }
+  }, []);
+
   useEffect(() => {
     const raw = (profile?.social_album ?? []) as string[];
     if (!raw.length) { setAlbumUrls([]); return; }
@@ -398,16 +420,7 @@ const CarerProfile: React.FC = () => {
         // Re-check payout status when account exists to keep local UI in sync
         const row = data as Record<string, unknown>;
         if (row.stripe_account_id) {
-          void (async () => {
-            const { data: statusData } = await invokeAuthedFunction<{ status?: string }>(
-              "create-stripe-connect-link",
-              { body: { action: "check_status" } },
-            );
-            const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
-            if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
-              setFormData((prev) => ({ ...prev, stripePayoutStatus: nextStatus as CarerProfileData["stripePayoutStatus"] }));
-            }
-          })();
+          void refreshStripePayoutStatus();
         }
       } else {
         setFormData({ ...EMPTY });
@@ -415,7 +428,33 @@ const CarerProfile: React.FC = () => {
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [user, refreshStripePayoutStatus]);
+
+  useEffect(() => {
+    const handleStripeConnectMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data as { type?: string } | null;
+      if (!payload || payload.type !== STRIPE_CONNECT_MESSAGE_TYPE) return;
+      setStripeConnecting(false);
+      clearStripePopupWatcher();
+      void refreshStripePayoutStatus();
+    };
+
+    const handleStripeConnectStorage = (event: StorageEvent) => {
+      if (event.key !== STRIPE_CONNECT_RESULT_KEY || !event.newValue) return;
+      setStripeConnecting(false);
+      clearStripePopupWatcher();
+      void refreshStripePayoutStatus();
+    };
+
+    window.addEventListener("message", handleStripeConnectMessage);
+    window.addEventListener("storage", handleStripeConnectStorage);
+    return () => {
+      window.removeEventListener("message", handleStripeConnectMessage);
+      window.removeEventListener("storage", handleStripeConnectStorage);
+      clearStripePopupWatcher();
+    };
+  }, [clearStripePopupWatcher, refreshStripePayoutStatus]);
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -611,8 +650,21 @@ const CarerProfile: React.FC = () => {
   // ── Stripe Connect ────────────────────────────────────────────────────────
   const handleStripeConnect = async () => {
     setStripeConnecting(true);
-    const stripePopup = window.open("", "huddle-stripe-connect", "width=460,height=820,noopener,noreferrer");
+    const stripePopup = window.open("", "huddle-stripe-connect", "width=460,height=820");
     try {
+      if (!stripePopup) {
+        throw new Error("stripe_popup_blocked");
+      }
+      clearStripePopupWatcher();
+      stripePopupRef.current = stripePopup;
+      stripePopupPollRef.current = window.setInterval(() => {
+        if (!stripePopupRef.current || stripePopupRef.current.closed) {
+          setStripeConnecting(false);
+          clearStripePopupWatcher();
+          void refreshStripePayoutStatus();
+        }
+      }, 500);
+
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session?.access_token) {
         throw new Error("auth_required");
@@ -632,13 +684,11 @@ const CarerProfile: React.FC = () => {
       if (!targetUrl) {
         throw new Error("stripe_connect_link_missing");
       }
-      if (!stripePopup) {
-        throw new Error("stripe_popup_blocked");
-      }
       stripePopup.location.replace(targetUrl);
       stripePopup.focus();
     } catch (err) {
       if (stripePopup && !stripePopup.closed) stripePopup.close();
+      clearStripePopupWatcher();
       console.error("[CarerProfile.stripe_connect]", err);
       const message = await readFunctionHttpErrorMessage(err);
       if ((err as Error)?.message === "stripe_popup_blocked") {
@@ -683,7 +733,7 @@ const CarerProfile: React.FC = () => {
         <NeuControl
           size="icon-md"
           variant="tertiary"
-          onClick={() => navigate(-1)}
+          onClick={() => navigate("/settings", { replace: true })}
           aria-label="Back"
         >
           <ArrowLeft size={20} strokeWidth={1.75} aria-hidden />

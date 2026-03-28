@@ -111,7 +111,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
+    "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
 };
 
 const json = (body: unknown, status = 200) =>
@@ -147,7 +147,45 @@ const normalizeCountryIso2 = (value: unknown): string | null => {
 const resolveCurrencyByCountry = (country: string | null): string =>
   (country && COUNTRY_TO_CURRENCY[country]) || "usd";
 
-async function resolveStripePrice(type: string, required: boolean) {
+const toHex = (bytes: Uint8Array): string =>
+  Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+async function buildCheckoutIdempotencyKey(input: {
+  userId: string;
+  mode: string;
+  type: string;
+  lookupKey: string;
+  priceId: string;
+  items: Array<{ type: string; quantity: number }>;
+  currency: string;
+  successUrl: string;
+  cancelUrl: string;
+}) {
+  const normalizedItems = [...input.items]
+    .map((item) => ({ type: item.type, quantity: item.quantity }))
+    .sort((a, b) => (a.type === b.type ? a.quantity - b.quantity : a.type.localeCompare(b.type)));
+  const payload = JSON.stringify({
+    userId: input.userId,
+    mode: input.mode,
+    type: input.type,
+    lookupKey: input.lookupKey,
+    priceId: input.priceId,
+    items: normalizedItems,
+    currency: input.currency,
+    successUrl: input.successUrl,
+    cancelUrl: input.cancelUrl,
+  });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  const hash = toHex(new Uint8Array(digest)).slice(0, 24);
+  const bucket = Math.floor(Date.now() / 60000); // 1-minute retry window
+  return `huddle_checkout_${hash}_${bucket}`;
+}
+
+async function resolveStripePrice(
+  type: string,
+  required: boolean,
+  mode?: "subscription" | "payment",
+) {
   const priceId = STRIPE_PRICE_IDS[type];
   if (!priceId) {
     if (required) {
@@ -165,7 +203,25 @@ async function resolveStripePrice(type: string, required: boolean) {
   }
 
   try {
-    await stripe.prices.retrieve(priceId);
+    const price = await stripe.prices.retrieve(priceId);
+    if (mode === "subscription" && !price.recurring) {
+      return {
+        ok: false as const,
+        response: json(
+          { error: `Invalid checkout mode: ${type} is not a recurring price.` },
+          400,
+        ),
+      };
+    }
+    if (mode === "payment" && price.recurring) {
+      return {
+        ok: false as const,
+        response: json(
+          { error: `Invalid checkout mode: ${type} must use subscription checkout.` },
+          400,
+        ),
+      };
+    }
     return { ok: true as const, priceId };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -237,7 +293,6 @@ serve(async (req: Request) => {
       priceId,
       mode,
       items,
-      amount,
       metadata: extraMetadata,
       successUrl,
       cancelUrl,
@@ -299,10 +354,29 @@ serve(async (req: Request) => {
         .eq("id", userId);
     }
 
-    // Generate idempotency key
-    const idempotencyKey = `${userId}-${type || "cart"}-${crypto.randomUUID()}`;
-
     const normalizedType = typeof type === "string" ? type : "";
+    const normalizedItems = Array.isArray(items)
+      ? items
+          .map((item) => {
+            const rec = (typeof item === "object" && item !== null) ? (item as Record<string, unknown>) : {};
+            return {
+              type: typeof rec.type === "string" ? rec.type : String(rec.type || ""),
+              quantity: Math.max(1, Number(rec.quantity || 1)),
+            };
+          })
+          .filter((item) => item.type.length > 0)
+      : [];
+    const idempotencyKey = await buildCheckoutIdempotencyKey({
+      userId,
+      mode: String(mode || ""),
+      type: normalizedType,
+      lookupKey: typeof lookupKey === "string" ? lookupKey : "",
+      priceId: typeof priceId === "string" ? priceId : "",
+      items: normalizedItems,
+      currency: checkoutCurrency,
+      successUrl: String(successUrl || ""),
+      cancelUrl: String(cancelUrl || ""),
+    });
 
     // Create checkout session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -335,12 +409,11 @@ serve(async (req: Request) => {
         resolvedPriceId = await resolvePriceByLookupKey(lookupKey, "subscription");
       }
 
-      if (!resolvedPriceId && !requiredSubscriptionTypes.has(normalizedType)) {
-        return json({ error: `Unknown subscription type: ${normalizedType}` }, 400);
-      }
-
       if (!resolvedPriceId) {
-        const resolved = await resolveStripePrice(normalizedType, true);
+        if (!requiredSubscriptionTypes.has(normalizedType) && !STRIPE_PRICE_IDS[normalizedType]) {
+          return json({ error: `Unknown subscription type: ${normalizedType}` }, 400);
+        }
+        const resolved = await resolveStripePrice(normalizedType, true, "subscription");
         if (!resolved.ok) return resolved.response;
         resolvedPriceId = resolved.priceId || null;
       }
@@ -351,14 +424,12 @@ serve(async (req: Request) => {
       sessionParams.line_items = [{ price: resolvedPriceId, quantity: 1 }];
       sessionParams.payment_method_types = ["card"];
     } else {
-      const rawItems = (items && Array.isArray(items) ? items : [{ type, quantity: 1 }]);
+      const rawItems = normalizedItems.length > 0 ? normalizedItems : [{ type: normalizedType, quantity: 1 }];
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-      let fallbackTotal = 0;
 
       for (const item of rawItems) {
-        const rec = (typeof item === "object" && item !== null) ? (item as Record<string, unknown>) : {};
-        const itemType = typeof rec.type === "string" ? rec.type : String(rec.type || "");
-        const qty = Math.max(1, Number(rec.quantity || 1));
+        const itemType = String(item.type || "");
+        const qty = Math.max(1, Number(item.quantity || 1));
         const expectedAmount = ADDON_DEFAULTS[itemType];
         if (!expectedAmount) {
           throw new Error(`Unknown add-on type: ${itemType}`);
@@ -370,7 +441,7 @@ serve(async (req: Request) => {
           resolvedPriceId = await resolvePriceByLookupKey(dynamicLookup, "payment");
         }
         if (!resolvedPriceId) {
-          const resolved = await resolveStripePrice(itemType, false);
+          const resolved = await resolveStripePrice(itemType, false, "payment");
           if (!resolved.ok) return resolved.response;
           resolvedPriceId = resolved.priceId || null;
         }
@@ -386,13 +457,6 @@ serve(async (req: Request) => {
             },
             quantity: qty,
           });
-          fallbackTotal += expectedAmount * qty;
-        }
-      }
-
-      if (amount) {
-        if (fallbackTotal && amount !== fallbackTotal) {
-          return json({ error: "Invalid amount for add-on" }, 400);
         }
       }
 

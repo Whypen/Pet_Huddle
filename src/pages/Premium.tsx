@@ -111,6 +111,8 @@ const ADD_ONS: AddOnItem[] = [
   },
 ];
 
+const RECURRING_ADDON_IDS = new Set<AddOnItem["id"]>(["sharePerks"]);
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function discountPct(monthlyAmt: number, annualTotal: number): number {
@@ -195,16 +197,11 @@ export default function PremiumPage() {
     (async () => {
       try {
         setIsCheckingOut(true);
-        const total = pending.reduce((sum, item) => {
-          const a = ADD_ONS.find((x) => x.id === item.id);
-          return sum + (a?.price ?? 0) * item.qty;
-        }, 0);
         const { data, error } = await supabase.functions.invoke("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "payment",
             items: pending.map((p) => ({ type: p.id, quantity: p.qty })),
-            amount: Math.round(total * 100),
             successUrl: `${window.location.origin}/premium?addon_done=1`,
             cancelUrl: `${window.location.origin}/premium`,
             currency: pricingCurrency || undefined,
@@ -235,13 +232,21 @@ export default function PremiumPage() {
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
   );
+  const selectedRecurringAddonItems = useMemo(
+    () => selectedAddonItems.filter((a) => RECURRING_ADDON_IDS.has(a.id)),
+    [selectedAddonItems],
+  );
+  const selectedPaymentAddonItems = useMemo(
+    () => selectedAddonItems.filter((a) => !RECURRING_ADDON_IDS.has(a.id)),
+    [selectedAddonItems],
+  );
 
   const addonTotal = useMemo(
-    () => selectedAddonItems.reduce(
+    () => selectedPaymentAddonItems.reduce(
       (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
       0
     ),
-    [selectedAddonItems, livePrices]
+    [selectedPaymentAddonItems, livePrices]
   );
 
   const startPlanCheckout = async (tier: "plus" | "gold") => {
@@ -256,7 +261,8 @@ export default function PremiumPage() {
       setIsCheckingOut(true);
       const plan = quotaConfig.stripePlans[tier][billing];
       const type = `${tier}_${billing}`;
-      const hasAddons = selectedAddonItems.length > 0;
+      const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
+      const hasAddons = hasPaymentAddons;
       const successUrl = hasAddons
         ? `${window.location.origin}/premium?plan_done=1`
         : `${window.location.origin}/premium`;
@@ -264,8 +270,12 @@ export default function PremiumPage() {
       if (hasAddons) {
         sessionStorage.setItem(
           "pending_addons",
-          JSON.stringify(selectedAddonItems.map((a) => ({ id: a.id, qty: 1 })))
+          JSON.stringify(selectedPaymentAddonItems.map((a) => ({ id: a.id, qty: 1 })))
         );
+      }
+
+      if (selectedRecurringAddonItems.length > 0) {
+        toast.warning("Share Perks is billed monthly and must be checked out separately.");
       }
 
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
@@ -299,14 +309,43 @@ export default function PremiumPage() {
     if (!user) { navigate("/auth"); return; }
     if (!selectedAddonItems.length || isCheckingOut) return;
 
+    if (selectedRecurringAddonItems.length > 0 && selectedPaymentAddonItems.length > 0) {
+      toast.error("Share Perks is billed monthly. Please check out Share Perks separately from one-time add-ons.");
+      return;
+    }
+
+    if (selectedRecurringAddonItems.length > 0) {
+      try {
+        setIsCheckingOut(true);
+        const { data, error } = await supabase.functions.invoke("create-checkout-session", {
+          body: {
+            userId: user.id,
+            mode: "subscription",
+            type: "sharePerks",
+            successUrl: `${window.location.origin}/premium?addon_done=1`,
+            cancelUrl: `${window.location.origin}/premium`,
+            currency: pricingCurrency || undefined,
+            country: pricingCountry || undefined,
+          },
+        });
+        if (error) throw error;
+        const url = (data as { url?: string } | null)?.url;
+        if (url) window.location.assign(url);
+      } catch {
+        toast.error(t("Checkout unavailable. Please try again."));
+      } finally {
+        setIsCheckingOut(false);
+      }
+      return;
+    }
+
     try {
       setIsCheckingOut(true);
       const { data, error } = await supabase.functions.invoke("create-checkout-session", {
         body: {
           userId: user.id,
           mode: "payment",
-          items: selectedAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
-          amount: Math.round(addonTotal * 100),
+          items: selectedPaymentAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
           successUrl: `${window.location.origin}/premium?addon_done=1`,
           cancelUrl: `${window.location.origin}/premium`,
           currency: pricingCurrency || undefined,
