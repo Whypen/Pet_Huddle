@@ -806,6 +806,7 @@ export default function PremiumPage() {
             onClick={() => void startAddonOnlyCheckout()}
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
+            {/* Keep CTA total split as one-time + recurring when both are selected. */}
             {selectedAddonItems.length > 0 ? (
               <>
                 {hasOneTime ? <PriceDisplay n={addonTotal} currency={livePrices.currencyCode} /> : null}
