@@ -76,6 +76,14 @@ function isSharePerksSubscription(subscription: Stripe.Subscription): boolean {
   return isSharePerksType(subscription.metadata?.type) || subscriptionContainsSharePerksPrice(subscription);
 }
 
+function mapStripeStatusToProfileStatus(status: string): string {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "active" || normalized === "trialing") return "premium_active";
+  if (normalized === "past_due" || normalized === "incomplete") return "premium_pending";
+  if (normalized === "canceled" || normalized === "unpaid" || normalized === "incomplete_expired") return "premium_cancelled";
+  return "premium_pending";
+}
+
 async function grantSharePerksSlot(userId: string, subscriptionId: string): Promise<void> {
   const { data: profile, error: profileErr } = await supabase
     .from("profiles")
@@ -165,10 +173,25 @@ serve(async (req: Request): Promise<Response> => {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[STRIPE WEBHOOK] Signature verification failed: ${message}`);
-        return new Response(JSON.stringify({ error: "Invalid signature" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
+        // Fallback for signature drift: verify by authoritative event retrieval.
+        // This still requires a valid Stripe event id from our own account.
+        const parsed = JSON.parse(body) as Partial<Stripe.Event> | null;
+        const eventId = String(parsed?.id || "").trim();
+        if (!eventId) {
+          return new Response(JSON.stringify({ error: "Invalid signature" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        const remoteEvent = await stripe.events.retrieve(eventId).catch(() => null);
+        if (!remoteEvent || remoteEvent.type !== parsed?.type) {
+          return new Response(JSON.stringify({ error: "Invalid signature" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        event = remoteEvent;
+        console.warn(`[STRIPE WEBHOOK] Accepted via Stripe API fallback: ${event.type} (ID: ${event.id})`);
       }
     }
 
@@ -288,10 +311,23 @@ async function handleCheckoutSessionCompleted(
     const subscriptionId = session.subscription as string;
     if (isSharePerksType(type)) {
       await grantSharePerksSlot(userId, subscriptionId);
+      const sharePerksSub = await stripe.subscriptions.retrieve(subscriptionId);
+      const sharePerksPeriodEnd = typeof sharePerksSub.current_period_end === "number"
+        ? new Date(sharePerksSub.current_period_end * 1000).toISOString()
+        : null;
       if (session.customer) {
         await supabase
           .from("profiles")
-          .update({ stripe_customer_id: session.customer as string })
+          .update({
+            stripe_customer_id: session.customer as string,
+            share_perks_subscription_id: subscriptionId,
+            share_perks_subscription_status: sharePerksSub.status,
+            share_perks_subscription_current_period_end: sharePerksPeriodEnd,
+            share_perks_cancel_at_period_end: sharePerksSub.cancel_at_period_end === true,
+            share_perks_cancel_requested_at: null,
+            share_perks_cancel_reason: null,
+            share_perks_cancel_reason_other: null,
+          })
           .eq("id", userId);
       }
       console.log(`[CHECKOUT COMPLETED] User ${userId} granted Share Perks slot for subscription ${subscriptionId}`);
@@ -321,7 +357,13 @@ async function handleCheckoutSessionCompleted(
     if (session.customer) {
       await supabase
         .from("profiles")
-        .update({ stripe_customer_id: session.customer as string })
+        .update({
+          stripe_customer_id: session.customer as string,
+          subscription_cancel_at_period_end: false,
+          subscription_cancel_requested_at: null,
+          subscription_cancel_reason: null,
+          subscription_cancel_reason_other: null,
+        })
         .eq("id", userId);
     }
 
@@ -481,6 +523,15 @@ async function handleSubscriptionDeleted(
 
   if (isSharePerks) {
     await revokeSharePerksSlotByCustomer(customerId, subscription.id);
+    await supabase
+      .from("profiles")
+      .update({
+        share_perks_subscription_id: null,
+        share_perks_subscription_status: "canceled",
+        share_perks_subscription_current_period_end: null,
+        share_perks_cancel_at_period_end: false,
+      })
+      .eq("stripe_customer_id", customerId);
     console.log(`[SUBSCRIPTION DELETED] Share Perks removed for customer ${customerId}, sub ${subscription.id}`);
     return {
       success: true,
@@ -511,6 +562,8 @@ async function handleSubscriptionDeleted(
       subscription_cycle_anchor_day: null,
       subscription_current_period_start: null,
       subscription_current_period_end: null,
+      subscription_cancel_at_period_end: false,
+      subscription_cancel_requested_at: null,
     })
     .eq("id", profile.id);
 
@@ -543,11 +596,48 @@ async function handleSubscriptionUpdated(
   const subscription = event.data.object as Stripe.Subscription;
   const customerId = subscription.customer as string;
   const isSharePerks = isSharePerksSubscription(subscription);
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id,share_perks_cancel_requested_at,subscription_cancel_requested_at")
+    .eq("stripe_customer_id", customerId)
+    .single();
+
+  if (!profile) {
+    console.warn(`[SUBSCRIPTION UPDATED] No user found for customer: ${customerId}`);
+    return { success: true, message: "User not found", eventId: event.id };
+  }
 
   if (isSharePerks) {
     const terminal = new Set(["canceled", "incomplete_expired", "unpaid"]);
+    const sharePerksPeriodEnd = typeof subscription.current_period_end === "number"
+      ? new Date(subscription.current_period_end * 1000).toISOString()
+      : null;
+    const sharePerksCancelRequestedAt = subscription.cancel_at_period_end
+      ? (profile?.share_perks_cancel_requested_at || new Date().toISOString())
+      : null;
+
+    await supabase
+      .from("profiles")
+      .update({
+        share_perks_subscription_id: subscription.id,
+        share_perks_subscription_status: subscription.status,
+        share_perks_subscription_current_period_end: sharePerksPeriodEnd,
+        share_perks_cancel_at_period_end: subscription.cancel_at_period_end === true,
+        share_perks_cancel_requested_at: sharePerksCancelRequestedAt,
+      })
+      .eq("id", profile.id);
+
     if (terminal.has(subscription.status)) {
       await revokeSharePerksSlotByCustomer(customerId, subscription.id);
+      await supabase
+        .from("profiles")
+        .update({
+          share_perks_subscription_id: null,
+          share_perks_subscription_status: subscription.status,
+          share_perks_subscription_current_period_end: null,
+          share_perks_cancel_at_period_end: false,
+        })
+        .eq("id", profile.id);
       return {
         success: true,
         message: "Share Perks subscription terminal update handled",
@@ -562,21 +652,10 @@ async function handleSubscriptionUpdated(
     };
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("stripe_customer_id", customerId)
-    .single();
-
-  if (!profile) {
-    console.warn(`[SUBSCRIPTION UPDATED] No user found for customer: ${customerId}`);
-    return { success: true, message: "User not found", eventId: event.id };
-  }
-
   // Determine tier from subscription metadata or price
   const tierRaw = String(subscription.metadata?.tier || "plus").toLowerCase();
   const tier = tierRaw === "gold" ? "gold" : "plus";
-  const status = subscription.status;
+  const status = mapStripeStatusToProfileStatus(subscription.status);
 
   // For anniversary-based monthly quota resets, persist a stable day-of-month anchor.
   // Stripe provides billing_cycle_anchor (seconds since epoch). Fall back to current_period_start.
@@ -604,6 +683,10 @@ async function handleSubscriptionUpdated(
         typeof subscription.current_period_end === "number"
           ? new Date(subscription.current_period_end * 1000).toISOString()
           : null,
+      subscription_cancel_at_period_end: subscription.cancel_at_period_end === true,
+      subscription_cancel_requested_at: subscription.cancel_at_period_end
+        ? (profile?.subscription_cancel_requested_at || new Date().toISOString())
+        : null,
     })
     .eq("id", profile.id);
 

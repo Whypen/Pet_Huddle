@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.create-stripe-connect-link]
 verify_jwt = false
+
+[functions.cancel-subscription]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false

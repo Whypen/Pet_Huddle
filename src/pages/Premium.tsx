@@ -25,6 +25,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { GlassModal } from "@/components/ui/GlassModal";
 import { toast } from "sonner";
 import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
@@ -116,6 +117,17 @@ function discountPct(monthlyAmt: number, annualTotal: number): number {
   return Math.round((1 - annualTotal / 12 / monthlyAmt) * 100);
 }
 
+const CANCEL_REASONS = [
+  "Too expensive",
+  "Not using it enough",
+  "Not enough value",
+  "Temporary break",
+  "Found another option",
+  "Other",
+] as const;
+
+type CancelTarget = "base_plus" | "base_gold" | "share_perks";
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PremiumPage() {
@@ -138,6 +150,13 @@ export default function PremiumPage() {
     sharePerks: false,
   });
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<CancelTarget | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>("");
+  const [cancelReasonOther, setCancelReasonOther] = useState<string>("");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [isCancelPreviewLoading, setIsCancelPreviewLoading] = useState(false);
+  const [cancelPreviewEndDateOverride, setCancelPreviewEndDateOverride] = useState<string | null>(null);
+  const [cancelSuccess, setCancelSuccess] = useState<{ target: "base" | "share_perks"; endDate: string | null } | null>(null);
   const [pricingCountry, setPricingCountry] = useState<string | null>(null);
   const [pricingCurrency, setPricingCurrency] = useState<string | null>(null);
   const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
@@ -262,6 +281,16 @@ export default function PremiumPage() {
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
   );
+  const isPlusActive = normalizedTier === "plus";
+  const isGoldActive = normalizedTier === "gold";
+  const profileSharePerksIds = Array.isArray((profilePrefs as { share_perks_subscription_ids?: unknown } | null)?.share_perks_subscription_ids)
+    ? ((profilePrefs as { share_perks_subscription_ids?: unknown[] }).share_perks_subscription_ids || []).filter((v) => typeof v === "string" && String(v).trim().length > 0)
+    : [];
+  const sharePerksStatus = String(profile?.share_perks_subscription_status || "").toLowerCase();
+  const hasActiveSharePerks = (
+    Boolean(profile?.share_perks_subscription_id || profileSharePerksIds.length > 0)
+      && !["canceled", "unpaid", "incomplete_expired"].includes(sharePerksStatus)
+  ) || Number(profile?.family_slots || 0) > 0;
   const baseFamilySlots = normalizedTier === "plus" || normalizedTier === "gold" ? 2 : 1;
   const purchasedFamilySlots = Math.max(0, Number(profile?.family_slots || 0));
   const totalFamilyCapacity = Math.min(4, baseFamilySlots + purchasedFamilySlots);
@@ -416,6 +445,72 @@ export default function PremiumPage() {
     }
   };
 
+  const openCancelModal = (target: CancelTarget) => {
+    setCancelTarget(target);
+    setCancelReason("");
+    setCancelReasonOther("");
+    setCancelPreviewEndDateOverride(null);
+    void (async () => {
+      try {
+        setIsCancelPreviewLoading(true);
+        const apiTarget = target === "share_perks" ? "share_perks" : "base";
+        const { data, error } = await invokeAuthedFunction<{ endDate?: string | null }>("cancel-subscription", {
+          body: { target: apiTarget, previewOnly: true },
+        });
+        if (!error && data?.endDate) setCancelPreviewEndDateOverride(data.endDate);
+      } finally {
+        setIsCancelPreviewLoading(false);
+      }
+    })();
+  };
+
+  const closeCancelModal = () => {
+    setCancelTarget(null);
+    setCancelReason("");
+    setCancelReasonOther("");
+    setCancelPreviewEndDateOverride(null);
+  };
+
+  const formatEndDate = (iso: string | null | undefined) => {
+    if (!iso) return "your current billing period end date";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "your current billing period end date";
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(d);
+  };
+
+  const cancelPreviewEndDate = (() => {
+    if (cancelPreviewEndDateOverride) return cancelPreviewEndDateOverride;
+    if (cancelTarget === "share_perks") return profile?.share_perks_subscription_current_period_end;
+    return profile?.subscription_current_period_end;
+  })();
+
+  const submitScheduledCancel = async () => {
+    if (!cancelTarget || !cancelReason) return;
+    if (cancelReason === "Other" && !cancelReasonOther.trim()) return;
+    try {
+      setIsCancelling(true);
+      const target = cancelTarget === "share_perks" ? "share_perks" : "base";
+      const { data, error } = await invokeAuthedFunction<{ endDate?: string | null; target?: "base" | "share_perks" }>("cancel-subscription", {
+        body: {
+          target,
+          reason: cancelReason,
+          reasonOther: cancelReason === "Other" ? cancelReasonOther.trim() : "",
+        },
+      });
+      if (error) throw error;
+      closeCancelModal();
+      setCancelSuccess({
+        target,
+        endDate: data?.endDate || null,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not schedule cancellation.";
+      toast.error(message || "Could not schedule cancellation.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   // ── Folder card: Plus / Huddle Gold ──────────────────────────────────────────
 
   const renderPlanFolderCard = (tier: "plus" | "gold") => {
@@ -565,6 +660,17 @@ export default function PremiumPage() {
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
             {isCheckingOut ? "Loading…" : ctaLabel}
           </button>
+
+          {((tier === "plus" && isPlusActive) || (tier === "gold" && isGoldActive)) && (
+            <button
+              type="button"
+              className="mt-3 mx-auto block text-[11px] font-[500] underline underline-offset-2"
+              style={{ color: "rgba(255,255,255,0.72)" }}
+              onClick={() => openCancelModal(tier === "plus" ? "base_plus" : "base_gold")}
+            >
+              Cancel Subscription
+            </button>
+          )}
         </div>
       </div>
     );
@@ -645,6 +751,16 @@ export default function PremiumPage() {
                         />
                       )}
                     </p>
+                    {addon.id === "sharePerks" && hasActiveSharePerks && (
+                      <button
+                        type="button"
+                        className="mt-1 block mx-auto text-[11px] font-[500] underline underline-offset-2"
+                        style={{ color: "rgba(33,69,207,0.52)" }}
+                        onClick={() => openCancelModal("share_perks")}
+                      >
+                        Cancel Subscription
+                      </button>
+                    )}
                   </div>
 
                   {/* White (+/−) circle button */}
@@ -791,6 +907,90 @@ export default function PremiumPage() {
           {activeTab === "addons" && renderAddonsCard()}
         </div>
       </div>
+
+      <GlassModal
+        isOpen={cancelTarget !== null}
+        onClose={closeCancelModal}
+        title="Cancel your subscription?"
+        maxWidth="max-w-sm"
+      >
+        <p className="text-[13px] text-[var(--text-secondary)]">
+          Your plan will stay active until {isCancelPreviewLoading ? "loading..." : formatEndDate(cancelPreviewEndDate)}. After that, your subscription will end automatically.
+        </p>
+        <p className="text-[13px] font-[600] text-[var(--text-primary)] mt-4">
+          What made you want to cancel?
+        </p>
+        <div className="mt-2 space-y-2">
+          {CANCEL_REASONS.map((reason) => {
+            const active = cancelReason === reason;
+            return (
+              <button
+                key={reason}
+                type="button"
+                className="w-full rounded-[12px] px-3 py-2 text-left text-[13px] transition-colors"
+                style={{
+                  border: `1px solid ${active ? BRAND_BLUE : "rgba(33,69,207,0.18)"}`,
+                  color: "var(--text-primary)",
+                  background: active ? "rgba(33,69,207,0.08)" : "rgba(255,255,255,0.7)",
+                }}
+                onClick={() => setCancelReason(reason)}
+              >
+                {reason}
+              </button>
+            );
+          })}
+        </div>
+        {cancelReason === "Other" && (
+          <textarea
+            className="mt-3 w-full rounded-[12px] border px-3 py-2 text-[13px] bg-white/80"
+            style={{ borderColor: "rgba(33,69,207,0.18)" }}
+            placeholder="Tell us more (optional detail)"
+            value={cancelReasonOther}
+            onChange={(e) => setCancelReasonOther(e.target.value)}
+            rows={3}
+            maxLength={240}
+          />
+        )}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            className="flex-1 h-[42px] rounded-[12px] text-[13px] font-[600]"
+            style={{ background: "#EEF1F7", color: "#5F6780" }}
+            onClick={closeCancelModal}
+            disabled={isCancelling}
+          >
+            Keep Subscription
+          </button>
+          <button
+            type="button"
+            className="flex-1 h-[42px] rounded-[12px] text-[13px] font-[600] text-white"
+            style={{ background: BRAND_BLUE, opacity: (!cancelReason || (cancelReason === "Other" && !cancelReasonOther.trim()) || isCancelling) ? 0.45 : 1 }}
+            onClick={() => void submitScheduledCancel()}
+            disabled={!cancelReason || (cancelReason === "Other" && !cancelReasonOther.trim()) || isCancelling}
+          >
+            {isCancelling ? "Loading…" : "Confirm Cancellation"}
+          </button>
+        </div>
+      </GlassModal>
+
+      <GlassModal
+        isOpen={cancelSuccess !== null}
+        onClose={() => setCancelSuccess(null)}
+        title="Cancellation scheduled"
+        maxWidth="max-w-sm"
+      >
+        <p className="text-[13px] text-[var(--text-secondary)]">
+          You’ll keep your current access until {formatEndDate(cancelSuccess?.endDate)}. After that, your subscription will end automatically.
+        </p>
+        <button
+          type="button"
+          className="mt-4 w-full h-[42px] rounded-[12px] text-[13px] font-[600] text-white"
+          style={{ background: BRAND_BLUE }}
+          onClick={() => setCancelSuccess(null)}
+        >
+          Done
+        </button>
+      </GlassModal>
     </div>
   );
 }
