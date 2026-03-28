@@ -574,13 +574,8 @@ export default function PremiumPage() {
       (sum, a) => sum + (livePrices[a.id as keyof LivePriceMap] ?? a.price),
       0,
     );
-    const checkoutDisplayTotal = selectedPaymentAddonItems.length > 0 ? addonTotal : recurringAddonTotal;
-    const checkoutDisplaySuffix =
-      selectedPaymentAddonItems.length === 0 &&
-      selectedRecurringAddonItems.length > 0 &&
-      isSharePerksPurchasable
-        ? sharePerksSuffix
-        : undefined;
+    const hasOneTime = selectedPaymentAddonItems.length > 0 && addonTotal > 0;
+    const hasRecurring = selectedRecurringAddonItems.length > 0 && recurringAddonTotal > 0;
 
     return (
       <div className="rounded-[20px] overflow-hidden" style={CARD_FLOAT_STYLE}>
@@ -691,9 +686,19 @@ export default function PremiumPage() {
             onClick={() => void startAddonOnlyCheckout()}
           >
             <ShoppingBag size={18} strokeWidth={1.75} aria-hidden />
-            {selectedAddonItems.length > 0
-              ? <>Purchase Add-ons · <PriceDisplay n={checkoutDisplayTotal} currency={livePrices.currencyCode} suffix={checkoutDisplaySuffix} /></>
-              : "Purchase Add-ons"}
+            {selectedAddonItems.length > 0 ? (
+              <>
+                {hasOneTime ? <PriceDisplay n={addonTotal} currency={livePrices.currencyCode} /> : null}
+                {hasOneTime && hasRecurring ? " + " : null}
+                {hasRecurring ? (
+                  <PriceDisplay
+                    n={recurringAddonTotal}
+                    currency={livePrices.currencyCode}
+                    suffix={sharePerksSuffix}
+                  />
+                ) : null}
+              </>
+            ) : "Purchase Add-ons"}
           </button>
 
           <p
