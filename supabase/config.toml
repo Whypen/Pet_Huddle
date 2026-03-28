@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.create-identity-setup-intent]
 verify_jwt = false
+
+[functions.create-checkout-session]
+verify_jwt = false
+
+[functions.create-stripe-connect-link]
+verify_jwt = false
