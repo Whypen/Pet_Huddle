@@ -263,14 +263,22 @@ export default function PremiumPage() {
     [addonSelected]
   );
   const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
+  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0;
+  const sharePerksSuffix = livePrices.sharePerksInterval === "year" ? "/yr" : "/mo";
   const selectedRecurringAddonItems = useMemo(
-    () => selectedAddonItems.filter((a) => a.id === "sharePerks" && isSharePerksRecurring),
-    [selectedAddonItems, isSharePerksRecurring],
+    () => selectedAddonItems.filter((a) => a.id === "sharePerks" && isSharePerksPurchasable),
+    [selectedAddonItems, isSharePerksPurchasable],
   );
   const selectedPaymentAddonItems = useMemo(
-    () => selectedAddonItems.filter((a) => !(a.id === "sharePerks" && isSharePerksRecurring)),
-    [selectedAddonItems, isSharePerksRecurring],
+    () => selectedAddonItems.filter((a) => a.id !== "sharePerks"),
+    [selectedAddonItems],
   );
+
+  useEffect(() => {
+    if (addonSelected.sharePerks && !isSharePerksPurchasable) {
+      setAddonSelected((prev) => ({ ...prev, sharePerks: false }));
+    }
+  }, [addonSelected.sharePerks, isSharePerksPurchasable]);
 
   const addonTotal = useMemo(
     () => selectedPaymentAddonItems.reduce(
@@ -292,8 +300,8 @@ export default function PremiumPage() {
       setIsCheckingOut(true);
       const plan = quotaConfig.stripePlans[tier][billing];
       const type = `${tier}_${billing}`;
-      const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
-      const hasAddons = hasPaymentAddons;
+    const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
+    const hasAddons = hasPaymentAddons;
       const successUrl = hasAddons
         ? `${window.location.origin}/premium?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
         : `${window.location.origin}/premium?tab=${tier}${encodedReturnToParam}${reopenDrawerParam}`;
@@ -305,8 +313,13 @@ export default function PremiumPage() {
         );
       }
 
+      if (addonSelected.sharePerks && !isSharePerksPurchasable) {
+        toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+        return;
+      }
+
       if (selectedRecurringAddonItems.length > 0) {
-        toast.warning("Share Perks is billed monthly and must be checked out separately.");
+        toast.warning("Share Perks is a recurring subscription and must be checked out separately.");
       }
 
       const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
@@ -339,8 +352,13 @@ export default function PremiumPage() {
     if (!user) { navigate("/auth"); return; }
     if (!selectedAddonItems.length || isCheckingOut) return;
 
+    if (addonSelected.sharePerks && !isSharePerksPurchasable) {
+      toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+      return;
+    }
+
     if (selectedRecurringAddonItems.length > 0 && selectedPaymentAddonItems.length > 0) {
-      toast.error("Share Perks is billed monthly. Please check out Share Perks separately from one-time add-ons.");
+      toast.error("Share Perks is recurring. Please check out Share Perks separately from one-time add-ons.");
       return;
     }
 
@@ -560,8 +578,8 @@ export default function PremiumPage() {
     const checkoutDisplaySuffix =
       selectedPaymentAddonItems.length === 0 &&
       selectedRecurringAddonItems.length > 0 &&
-      isSharePerksRecurring
-        ? "/mo"
+      isSharePerksPurchasable
+        ? sharePerksSuffix
         : undefined;
 
     return (
@@ -576,7 +594,7 @@ export default function PremiumPage() {
             Power-ups
           </span>
           <span className="text-[11px] opacity-65" style={{ color: BRAND_BLUE }}>
-            Billed once
+            One-time and recurring
           </span>
         </div>
 
@@ -584,6 +602,7 @@ export default function PremiumPage() {
         <div className="px-4 pt-2 pb-4" style={{ background: "#FFFFFF" }}>
           {ADD_ONS.map((addon, i) => {
             const selected = addonSelected[addon.id];
+            const addonDisabled = addon.id === "sharePerks" && !isSharePerksPurchasable;
             return (
               <div key={addon.id}>
                 {i > 0 && (
@@ -617,11 +636,15 @@ export default function PremiumPage() {
                       className="text-[13px] font-[600] mt-1"
                       style={{ color: BRAND_BLUE }}
                     >
-                      <PriceDisplay
-                        n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}
-                        suffix={addon.id === "sharePerks" && isSharePerksRecurring ? "/mo" : undefined}
-                        currency={livePrices.currencyCode}
-                      />
+                      {addon.id === "sharePerks" && !isSharePerksPurchasable ? (
+                        "Temporarily unavailable"
+                      ) : (
+                        <PriceDisplay
+                          n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}
+                          suffix={addon.id === "sharePerks" && isSharePerksPurchasable ? sharePerksSuffix : undefined}
+                          currency={livePrices.currencyCode}
+                        />
+                      )}
                     </p>
                   </div>
 
@@ -638,8 +661,11 @@ export default function PremiumPage() {
                           }
                     }
                     onClick={() =>
+                      !addonDisabled &&
                       setAddonSelected((prev) => ({ ...prev, [addon.id]: !prev[addon.id] }))
                     }
+                    disabled={addonDisabled}
+                    aria-disabled={addonDisabled}
                     aria-label={`${selected ? "Remove" : "Add"} ${addon.title}`}
                   >
                     {selected

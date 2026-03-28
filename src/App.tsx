@@ -3,7 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, type ComponentType } from "react";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -48,6 +48,33 @@ import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
 
+const CHUNK_RETRY_FLAG_PREFIX = "huddle:lazy-reload:";
+const lazyWithChunkRecovery = <T extends ComponentType<unknown>>(
+  key: string,
+  importer: () => Promise<{ default: T }>,
+) =>
+  lazy(async () => {
+    try {
+      return await importer();
+    } catch (error) {
+      const message = String((error as { message?: unknown } | null)?.message ?? error ?? "");
+      const isChunkFailure =
+        message.includes("Failed to fetch dynamically imported module")
+        || message.includes("Importing a module script failed")
+        || message.includes("Expected a JavaScript-or-Wasm module script");
+      if (isChunkFailure) {
+        const flagKey = `${CHUNK_RETRY_FLAG_PREFIX}${key}`;
+        const retried = sessionStorage.getItem(flagKey) === "1";
+        if (!retried) {
+          sessionStorage.setItem(flagKey, "1");
+          window.location.reload();
+          return new Promise<never>(() => undefined);
+        }
+      }
+      throw error;
+    }
+  });
+
 const Discover = lazy(() => import("./pages/Discover"));
 const Chats = lazy(() => import("./pages/Chats"));
 const ChatDialogue = lazy(() => import("./pages/ChatDialogue"));
@@ -57,7 +84,7 @@ const MapPage = lazy(() => import("./pages/Map"));
 const PetDetails = lazy(() => import("./pages/PetDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
 const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
-const Premium = lazy(() => import("./pages/Premium"));
+const Premium = lazyWithChunkRecovery("premium", () => import("./pages/Premium"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminKYCReview = lazy(() => import("./pages/admin/AdminKYCReview"));

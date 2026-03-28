@@ -49,8 +49,8 @@ export const FALLBACK_PRICES: LivePriceMap = {
   // Add-on fallbacks (cents → dollars)
   superBroadcast:    4.99,
   topProfileBooster: 2.99,
-  sharePerks:        4.99,
-  sharePerksInterval: "month",
+  sharePerks:        0,
+  sharePerksInterval: null,
   currencyCode: "USD",
 };
 
@@ -315,11 +315,11 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
           gold_annual:       typeof p.gold_annual?.amount       === "number" ? p.gold_annual.amount       : FALLBACK_PRICES.gold_annual,
           superBroadcast:    typeof p.superBroadcast?.amount    === "number" && p.superBroadcast.amount > 0 ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
           topProfileBooster: typeof p.topProfileBooster?.amount === "number" && p.topProfileBooster.amount > 0 ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
-          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
+          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : 0,
           sharePerksInterval:
             typeof p.sharePerks?.interval === "string" && ["month", "year"].includes(p.sharePerks.interval.toLowerCase())
               ? (p.sharePerks.interval.toLowerCase() as "month" | "year")
-              : (FALLBACK_PRICES.sharePerksInterval ?? null),
+              : null,
           currencyCode: displayCurrency || "USD",
         };
         _cacheByKey.set(cacheKey, resolved);

@@ -432,20 +432,38 @@ const CarerProfile: React.FC = () => {
   }, [user, refreshStripePayoutStatus]);
 
   useEffect(() => {
-    const handleStripeConnectMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const payload = event.data as { type?: string } | null;
-      if (!payload || payload.type !== STRIPE_CONNECT_MESSAGE_TYPE) return;
+    const handleStripeConnectEvent = (status: string | undefined) => {
       setStripeConnecting(false);
       clearStripePopupWatcher();
+      try {
+        localStorage.removeItem(STRIPE_CONNECT_RESULT_KEY);
+      } catch {
+        // ignore storage cleanup failures
+      }
+      if (status === "refresh") {
+        toast.warning("Please continue Stripe onboarding from this page.");
+      } else if (status === "error") {
+        toast.error("Could not complete Stripe onboarding. Please retry.");
+      }
       void refreshStripePayoutStatus();
+    };
+
+    const handleStripeConnectMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data as { type?: string; status?: string } | null;
+      if (!payload || payload.type !== STRIPE_CONNECT_MESSAGE_TYPE) return;
+      handleStripeConnectEvent(payload.status);
     };
 
     const handleStripeConnectStorage = (event: StorageEvent) => {
       if (event.key !== STRIPE_CONNECT_RESULT_KEY || !event.newValue) return;
-      setStripeConnecting(false);
-      clearStripePopupWatcher();
-      void refreshStripePayoutStatus();
+      let payloadStatus: string | undefined;
+      try {
+        payloadStatus = (JSON.parse(event.newValue) as { status?: string } | null)?.status;
+      } catch {
+        payloadStatus = undefined;
+      }
+      handleStripeConnectEvent(payloadStatus);
     };
 
     window.addEventListener("message", handleStripeConnectMessage);

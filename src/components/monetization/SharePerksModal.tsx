@@ -1,6 +1,7 @@
 // src/components/monetization/SharePerksModal.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Users2, Check } from "lucide-react";
+import { useLocation } from "react-router-dom";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
@@ -26,6 +27,7 @@ const FEATURES_BASE = [
 const FEATURES_GOLD = ["Video uploads", "Top Profile Visibility"];
 
 export function SharePerksModal({ isOpen, onClose, tier }: Props) {
+  const location = useLocation();
   const { profile } = useAuth();
   const profilePrefs = (profile?.prefs as Record<string, unknown> | null | undefined) ?? null;
   const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
@@ -40,6 +42,15 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
   const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
+  const sharePerksSuffix = livePrices.sharePerksInterval === "year" ? "/yr" : "/mo";
+  const isSharePerksPurchasable = isSharePerksRecurring && Number.isFinite(livePrices.sharePerks) && livePrices.sharePerks > 0;
+  const returnTo = useMemo(() => {
+    const target = `${location.pathname}${location.search}`;
+    return target.startsWith("/") ? target : "/";
+  }, [location.pathname, location.search]);
+  const encodedReturnTo = encodeURIComponent(returnTo);
+  const successUrl = `${window.location.origin}/premium?addon_done=1&return_to=${encodedReturnTo}&reopen_drawer=1`;
+  const cancelUrl = `${window.location.origin}/premium?tab=addons&return_to=${encodedReturnTo}&reopen_drawer=1`;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -62,15 +73,19 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   }, [isOpen, profile?.id, profile?.location_country, savedPricingCurrency]);
 
   async function handlePurchase() {
+    if (!isSharePerksPurchasable) {
+      toast.error("Share Perks is temporarily unavailable. Please try again shortly.");
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
         body: {
           userId: profile?.id,
-          mode: isSharePerksRecurring ? "subscription" : "payment",
-          type: isSharePerksRecurring ? "family_member" : "sharePerks",
-          successUrl: `${window.location.origin}/settings?addon_done=1`,
-          cancelUrl: window.location.href,
+          mode: "subscription",
+          type: "family_member",
+          successUrl,
+          cancelUrl,
           country: pricingHints.country,
           currency: pricingHints.currency,
         },
@@ -94,11 +109,15 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <Users2 size={18} color="#fff" strokeWidth={1.75} />
         <span className="text-[15px] font-[600] text-white">Share Perks</span>
         <span className="ml-auto text-[13px] font-[500] text-white/80">
-          <PriceDisplay
-            n={livePrices.sharePerks}
-            suffix={isSharePerksRecurring ? "/mo" : undefined}
-            currency={livePrices.currencyCode}
-          />
+          {isSharePerksPurchasable ? (
+            <PriceDisplay
+              n={livePrices.sharePerks}
+              suffix={sharePerksSuffix}
+              currency={livePrices.currencyCode}
+            />
+          ) : (
+            "Unavailable"
+          )}
         </span>
       </div>
 
@@ -122,11 +141,14 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         </div>
         <button
           onClick={handlePurchase}
-          disabled={loading}
+          disabled={loading || !isSharePerksPurchasable}
           className="mt-7 w-full rounded-[12px] py-3 text-[14px] font-[600] text-white"
-          style={{ background: BRAND_BLUE }}
+          style={{
+            background: BRAND_BLUE,
+            opacity: loading || !isSharePerksPurchasable ? 0.55 : 1,
+          }}
         >
-          {loading ? "Loading…" : "Purchase Member Slot"}
+          {loading ? "Loading…" : isSharePerksPurchasable ? "Purchase Member Slot" : "Temporarily unavailable"}
         </button>
         <button
           onClick={onClose}

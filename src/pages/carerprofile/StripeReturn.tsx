@@ -1,13 +1,12 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 const STRIPE_CONNECT_RESULT_KEY = "huddle:stripe-connect-result";
 const STRIPE_CONNECT_MESSAGE_TYPE = "huddle:stripe-connect";
 
 const StripeReturn = () => {
-  const notifyAndClose = (status: "complete" | "needs_action" | "pending" | "error") => {
+  const notifyAndClose = (status: "returned" | "error") => {
     const payload = { type: STRIPE_CONNECT_MESSAGE_TYPE, status, ts: Date.now() };
     try {
       localStorage.setItem(STRIPE_CONNECT_RESULT_KEY, JSON.stringify(payload));
@@ -23,29 +22,8 @@ const StripeReturn = () => {
   };
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const { data, error } = await invokeAuthedFunction<{ status?: string }>(
-          "create-stripe-connect-link",
-          { body: { action: "check_status" } },
-        );
-        if (error) throw error;
-        const status = String((data as { status?: string })?.status || "pending");
-        if (status === "complete") {
-          toast.success("Payouts set up successfully.");
-          notifyAndClose("complete");
-        } else if (status === "needs_action") {
-          toast.warning("More details needed. Please resume Stripe onboarding.");
-          notifyAndClose("needs_action");
-        } else {
-          toast.warning("Payout setup not yet complete. Please try again.");
-          notifyAndClose("pending");
-        }
-      } catch {
-        toast.error("Could not confirm payout status. Please retry.");
-        notifyAndClose("error");
-      }
-    })();
+    toast.success("Stripe returned to Huddle. Finalizing payout status…");
+    notifyAndClose("returned");
   }, []);
 
   return (

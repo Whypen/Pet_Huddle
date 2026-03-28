@@ -206,7 +206,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform",
+    "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
 };
 
 const json = (body: unknown, status = 200) =>
@@ -273,17 +273,23 @@ serve(async (req) => {
         }
       }
       if (!price) {
-        results[key] = DEFAULTS[key];
+        if (key === "sharePerks") {
+          results[key] = { amount: 0, currency: targetCurrency };
+        } else {
+          results[key] = DEFAULTS[key];
+        }
         continue;
       }
       const localized = resolveLocalizedAmount(price, targetCurrency);
       const safeAmount = Number.isFinite(localized.amount) && localized.amount > 0
         ? localized.amount
-        : DEFAULTS[key].amount;
+        : (key === "sharePerks" ? 0 : DEFAULTS[key].amount);
       results[key] = {
         amount: safeAmount,
-        currency: safeAmount === localized.amount ? localized.currency : DEFAULTS[key].currency,
-        interval: price.recurring?.interval,
+        currency: safeAmount === localized.amount
+          ? localized.currency
+          : (key === "sharePerks" ? targetCurrency : DEFAULTS[key].currency),
+        interval: key === "sharePerks" ? price.recurring?.interval : price.recurring?.interval,
       };
     }
     const displayCurrency = String(
