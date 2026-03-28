@@ -357,19 +357,19 @@ export default function PremiumPage() {
       return;
     }
 
-    if (selectedRecurringAddonItems.length > 0 && selectedPaymentAddonItems.length > 0) {
-      toast.error("Share Perks is recurring. Please check out Share Perks separately from one-time add-ons.");
-      return;
-    }
-
     if (selectedRecurringAddonItems.length > 0) {
       try {
         setIsCheckingOut(true);
+        const mixedItems = [
+          { type: "family_member", quantity: 1 },
+          ...selectedPaymentAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
+        ];
         const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "subscription",
             type: "family_member",
+            items: mixedItems,
             successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
             cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: pricingCurrency || undefined,

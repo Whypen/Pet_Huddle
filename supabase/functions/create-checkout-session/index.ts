@@ -270,6 +270,17 @@ async function resolvePriceByLookupKey(lookupKey: string, mode: "subscription" |
   return price.id;
 }
 
+async function resolvePriceObjectByLookupKey(lookupKey: string): Promise<Stripe.Price | null> {
+  const trimmed = String(lookupKey || "").trim();
+  if (!trimmed) return null;
+  const list = await stripe.prices.list({
+    lookup_keys: [trimmed],
+    active: true,
+    limit: 1,
+  });
+  return list.data?.[0] ?? null;
+}
+
 async function resolveLookupKeyFromMetadata(planKey: string, currency: string): Promise<string | null> {
   const target = currency.toUpperCase();
   const planKeys = resolvePlanKeys(planKey);
@@ -410,6 +421,40 @@ serve(async (req: Request) => {
     };
 
     if (mode === "subscription") {
+      if (normalizedItems.length > 0) {
+        const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+        for (const item of normalizedItems) {
+          const itemType = normalizeCheckoutType(String(item.type || ""));
+          const qty = Math.max(1, Number(item.quantity || 1));
+          let price: Stripe.Price | null = null;
+
+          const dynamicLookup = await resolveLookupKeyFromMetadata(itemType, checkoutCurrency);
+          if (dynamicLookup) {
+            price = await resolvePriceObjectByLookupKey(dynamicLookup);
+          }
+          if (!price) {
+            const envPriceId = STRIPE_PRICE_IDS[itemType];
+            if (envPriceId) {
+              price = await stripe.prices.retrieve(envPriceId);
+            }
+          }
+          if (!price) {
+            return json({ error: `Unknown subscription item type: ${itemType}` }, 400);
+          }
+
+          if (itemType === "sharePerks" && !price.recurring) {
+            return json({ error: "Invalid Share Perks price: must be recurring." }, 400);
+          }
+          if (itemType !== "sharePerks" && price.recurring) {
+            return json({ error: `Invalid add-on price for ${itemType}: must be one-time.` }, 400);
+          }
+
+          lineItems.push({ price: price.id, quantity: qty });
+        }
+
+        sessionParams.line_items = lineItems;
+        sessionParams.payment_method_types = ["card"];
+      } else {
       let resolvedPriceId: string | null = null;
 
       if (!resolvedPriceId) {
@@ -441,6 +486,7 @@ serve(async (req: Request) => {
 
       sessionParams.line_items = [{ price: resolvedPriceId, quantity: 1 }];
       sessionParams.payment_method_types = ["card"];
+      }
     } else {
       const rawItems = normalizedItems.length > 0 ? normalizedItems : [{ type: normalizedType, quantity: 1 }];
       const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
