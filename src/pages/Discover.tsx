@@ -60,6 +60,12 @@ type DiscoveryProfile = {
   gender_genre?: string | null;
   orientation?: string | null;
   social_role?: string | null;
+  availability_status?: string[] | null;
+  non_social?: boolean | null;
+  last_active_at?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+  effective_tier?: string | null;
 };
 
 const discoverySpeciesOptions = [
@@ -83,6 +89,15 @@ const resolveCanonicalDiscoveryRole = (rawRole: string | null | undefined): (typ
   if (token.includes("play")) return "Pet Parent";
   if (token.includes("animal")) return "Animal Friend (No Pet)";
   return null;
+};
+
+const isDefaultDiscoverFilters = (input: {
+  role: string;
+  species: string;
+  gender: string;
+  petSize: string;
+}) => {
+  return !input.role && input.species === "Any" && input.gender === "Any" && input.petSize === "Any";
 };
 
 const getVisiblePetSpecies = (profile: DiscoveryProfile) => {
@@ -334,8 +349,70 @@ const Discover = () => {
         const roleFilteredProfiles = discoveryRole
           ? profiles.filter((row) => resolveCanonicalDiscoveryRole(row.social_role) === discoveryRole)
           : profiles;
+
+        let finalProfiles = roleFilteredProfiles;
+        const shouldUseFallback =
+          finalProfiles.length === 0 &&
+          isDefaultDiscoverFilters({
+            role: discoveryRole,
+            species: discoverySpecies,
+            gender: discoveryGender,
+            petSize: discoveryPetSize,
+          });
+
+        if (shouldUseFallback) {
+          const cap = getQuotaCapsForTier(effectiveTier).discoveryViewsPerDay;
+          const fallbackLimit = Math.max(20, Math.min(cap, 400));
+          const { data: fallbackRows, error: fallbackError } = await supabase
+            .from("profiles")
+            .select("id, display_name, avatar_url, verification_status, is_verified, has_car, bio, relationship_status, dob, location_name, occupation, school, major, tier, effective_tier, social_album, show_occupation, show_academic, show_bio, show_relationship_status, show_age, show_gender, show_orientation, show_height, show_weight, gender_genre, orientation, availability_status, non_social, last_active_at, updated_at, created_at")
+            .neq("id", profile.id)
+            .eq("non_social", false)
+            .not("dob", "is", null)
+            .limit(fallbackLimit * 2);
+
+          if (!fallbackError && Array.isArray(fallbackRows)) {
+            const now = Date.now();
+            const normalizeRole = (row: DiscoveryProfile) => {
+              const roleFromArray = Array.isArray(row.availability_status) ? row.availability_status[0] : null;
+              return resolveCanonicalDiscoveryRole(roleFromArray || row.social_role || null);
+            };
+            const ranked = (fallbackRows as DiscoveryProfile[])
+              .filter((row) => {
+                if (!row?.id) return false;
+                const age = row?.dob ? Math.floor((now - new Date(row.dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : null;
+                if (age === null || age < 16) return false;
+                if (!normalizeRole(row)) return false;
+                return true;
+              })
+              .map((row) => {
+                const activeAt = row.last_active_at || row.updated_at || row.created_at || null;
+                const activeMs = activeAt ? new Date(activeAt).getTime() : 0;
+                const days = activeMs ? Math.max(0, (now - activeMs) / (1000 * 60 * 60 * 24)) : 999;
+                const normalizedCandidateTier = normalizeQuotaTier(row.effective_tier || row.tier || "free");
+                const tierBoost = normalizedCandidateTier === "gold" ? 15 : normalizedCandidateTier === "plus" ? 8 : 0;
+                const freshness = days <= 1 ? 20 : days <= 3 ? 15 : days <= 7 ? 10 : days <= 14 ? 5 : 1;
+                const trust = (row.is_verified ? 25 : 0) + (row.has_car ? 10 : 0);
+                const score = trust + freshness + tierBoost;
+                return {
+                  ...row,
+                  social_role: normalizeRole(row),
+                  score,
+                } as DiscoveryProfile & { score: number };
+              })
+              .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                const aTime = new Date(a.last_active_at || a.updated_at || a.created_at || 0).getTime();
+                const bTime = new Date(b.last_active_at || b.updated_at || b.created_at || 0).getTime();
+                return bTime - aTime;
+              })
+              .slice(0, fallbackLimit);
+
+            finalProfiles = ranked;
+          }
+        }
         setDiscoveryError(null);
-        setDiscoveryProfiles(roleFilteredProfiles);
+        setDiscoveryProfiles(finalProfiles);
       } catch (err) {
         console.warn("[Discover] discovery fetch failed", err);
         setDiscoveryError("Live discovery is temporarily unavailable.");
@@ -357,6 +434,7 @@ const Discover = () => {
     discoveryMinAge,
     discoveryMaxAge,
     isPremium,
+    effectiveTier,
     discoverChatAgeBlocked,
   ]);
 

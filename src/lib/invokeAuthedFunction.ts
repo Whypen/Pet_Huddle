@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 type InvokeArgs = {
   body?: unknown;
   headers?: Record<string, string>;
+  forceRefresh?: boolean;
 };
 
 const authErrorPattern = /(401|unauthori[sz]ed|invalid[_\s-]?jwt|missing[_\s-]?token)/i;
@@ -49,6 +50,11 @@ async function resolveAccessToken(): Promise<AccessTokenResolution> {
   return { token: null, hasSession: false };
 }
 
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshed = await supabase.auth.refreshSession();
+  return refreshed.data.session?.access_token ?? null;
+}
+
 const tokenLooksJwt = (token: string) => token.split(".").length === 3;
 
 async function normalizeInvokeError(error: Error | null): Promise<Error | null> {
@@ -79,6 +85,12 @@ export async function invokeAuthedFunction<T = unknown>(
 ): Promise<{ data: T | null; error: Error | null }> {
   const resolved = await resolveAccessToken();
   let token = resolved.token;
+  if (args.forceRefresh) {
+    const forced = await refreshAccessToken();
+    if (forced && tokenLooksJwt(forced)) {
+      token = forced;
+    }
+  }
   if (import.meta.env.DEV) {
     console.debug("[invokeAuthedFunction] preflight", {
       functionName,
@@ -90,8 +102,7 @@ export async function invokeAuthedFunction<T = unknown>(
     });
   }
   if (!token) {
-    const refreshed = await supabase.auth.refreshSession();
-    const refreshedToken = refreshed.data.session?.access_token ?? null;
+    const refreshedToken = await refreshAccessToken();
     if (!refreshedToken || !tokenLooksJwt(refreshedToken)) {
       return {
         data: null,

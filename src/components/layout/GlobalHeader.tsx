@@ -122,6 +122,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [menuOpen, setMenuOpen] = useState(false);
   const [carerGateOpen, setCarerGateOpen] = useState(false);
   const [familySheetOpen, setFamilySheetOpen] = useState(false);
+  const [reopenMenuOnFamilyClose, setReopenMenuOnFamilyClose] = useState(false);
   const [familyUsedCount, setFamilyUsedCount] = useState(0);
   const [starsRemaining, setStarsRemaining] = useState<number | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
@@ -633,6 +634,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   variant="nav"
                   value={familyUsedCount > 0 ? `${familyUsedCount} member${familyUsedCount > 1 ? "s" : ""}` : undefined}
                   onClick={() => {
+                    setReopenMenuOnFamilyClose(true);
                     setMenuOpen(false);
                     setTimeout(() => setFamilySheetOpen(true), 150);
                   }}
@@ -819,7 +821,16 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         </div>
       )}
 
-      <ManageFamilySheet isOpen={familySheetOpen} onClose={() => setFamilySheetOpen(false)} />
+      <ManageFamilySheet
+        isOpen={familySheetOpen}
+        onClose={() => {
+          setFamilySheetOpen(false);
+          if (reopenMenuOnFamilyClose) {
+            setTimeout(() => setMenuOpen(true), 120);
+          }
+          setReopenMenuOnFamilyClose(false);
+        }}
+      />
 
       {/* ── Help & Support dialog ── */}
       <Dialog open={supportOpen} onOpenChange={(o) => { if (!o) setSupportOpen(false); }}>

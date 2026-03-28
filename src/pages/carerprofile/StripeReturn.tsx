@@ -21,8 +21,10 @@ const StripeReturn = () => {
     }
     window.close();
     window.setTimeout(() => {
-      window.location.replace("/carerprofile");
-    }, 120);
+      if (!window.closed && !window.opener) {
+        window.location.replace("/carerprofile");
+      }
+    }, 200);
   };
 
   useEffect(() => {
@@ -30,7 +32,7 @@ const StripeReturn = () => {
       try {
         const { data, error } = await invokeAuthedFunction<{ status?: string }>(
           "create-stripe-connect-link",
-          { body: { action: "check_status" } },
+          { body: { action: "check_status" }, forceRefresh: true },
         );
         if (error) throw error;
         const status = String((data as { status?: string })?.status || "pending");

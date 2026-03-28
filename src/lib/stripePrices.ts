@@ -36,6 +36,7 @@ export type LivePriceMap = {
   superBroadcast:    number;
   topProfileBooster: number;
   sharePerks:        number;
+  sharePerksInterval?: "month" | "year" | null;
   currencyCode: string;
 };
 
@@ -49,6 +50,7 @@ export const FALLBACK_PRICES: LivePriceMap = {
   superBroadcast:    4.99,
   topProfileBooster: 2.99,
   sharePerks:        4.99,
+  sharePerksInterval: "month",
   currencyCode: "USD",
 };
 
@@ -311,9 +313,13 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
           plus_annual:       typeof p.plus_annual?.amount       === "number" ? p.plus_annual.amount       : FALLBACK_PRICES.plus_annual,
           gold_monthly:      typeof p.gold_monthly?.amount      === "number" ? p.gold_monthly.amount      : FALLBACK_PRICES.gold_monthly,
           gold_annual:       typeof p.gold_annual?.amount       === "number" ? p.gold_annual.amount       : FALLBACK_PRICES.gold_annual,
-          superBroadcast:    typeof p.superBroadcast?.amount    === "number" ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
-          topProfileBooster: typeof p.topProfileBooster?.amount === "number" ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
-          sharePerks:        typeof p.sharePerks?.amount        === "number" ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
+          superBroadcast:    typeof p.superBroadcast?.amount    === "number" && p.superBroadcast.amount > 0 ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
+          topProfileBooster: typeof p.topProfileBooster?.amount === "number" && p.topProfileBooster.amount > 0 ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
+          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
+          sharePerksInterval:
+            typeof p.sharePerks?.interval === "string" && ["month", "year"].includes(p.sharePerks.interval.toLowerCase())
+              ? (p.sharePerks.interval.toLowerCase() as "month" | "year")
+              : (FALLBACK_PRICES.sharePerksInterval ?? null),
           currencyCode: displayCurrency || "USD",
         };
         _cacheByKey.set(cacheKey, resolved);

@@ -39,6 +39,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
+  const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,7 +68,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         "create-checkout-session",
         {
           body: {
-            mode: "subscription",
+            mode: isSharePerksRecurring ? "subscription" : "payment",
             type: "sharePerks",
             successUrl: `${window.location.origin}/settings?addon_done=1`,
             cancelUrl: window.location.href,
@@ -95,7 +96,11 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         <Users2 size={18} color="#fff" strokeWidth={1.75} />
         <span className="text-[15px] font-[600] text-white">Share Perks</span>
         <span className="ml-auto text-[13px] font-[500] text-white/80">
-          <PriceDisplay n={livePrices.sharePerks} suffix="/mo" currency={livePrices.currencyCode} />
+          <PriceDisplay
+            n={livePrices.sharePerks}
+            suffix={isSharePerksRecurring ? "/mo" : undefined}
+            currency={livePrices.currencyCode}
+          />
         </span>
       </div>
 

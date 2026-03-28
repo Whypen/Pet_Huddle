@@ -107,11 +107,8 @@ const ADD_ONS: AddOnItem[] = [
     title: "Share Perks",
     subtitle: "Mirrors tier's access to exclusive features",
     price: 4.99,
-    billingNote: "/mo",
   },
 ];
-
-const RECURRING_ADDON_IDS = new Set<AddOnItem["id"]>(["sharePerks"]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -232,13 +229,14 @@ export default function PremiumPage() {
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
   );
+  const isSharePerksRecurring = livePrices.sharePerksInterval === "month" || livePrices.sharePerksInterval === "year";
   const selectedRecurringAddonItems = useMemo(
-    () => selectedAddonItems.filter((a) => RECURRING_ADDON_IDS.has(a.id)),
-    [selectedAddonItems],
+    () => selectedAddonItems.filter((a) => a.id === "sharePerks" && isSharePerksRecurring),
+    [selectedAddonItems, isSharePerksRecurring],
   );
   const selectedPaymentAddonItems = useMemo(
-    () => selectedAddonItems.filter((a) => !RECURRING_ADDON_IDS.has(a.id)),
-    [selectedAddonItems],
+    () => selectedAddonItems.filter((a) => !(a.id === "sharePerks" && isSharePerksRecurring)),
+    [selectedAddonItems, isSharePerksRecurring],
   );
 
   const addonTotal = useMemo(
@@ -576,7 +574,7 @@ export default function PremiumPage() {
                     >
                       <PriceDisplay
                         n={livePrices[addon.id as keyof LivePriceMap] ?? addon.price}
-                        suffix={addon.billingNote}
+                        suffix={addon.id === "sharePerks" && isSharePerksRecurring ? "/mo" : undefined}
                         currency={livePrices.currencyCode}
                       />
                     </p>

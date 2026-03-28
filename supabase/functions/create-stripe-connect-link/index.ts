@@ -173,8 +173,11 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const authHeader = req.headers.get("Authorization") ?? req.headers.get("x-huddle-access-token") ?? "";
-    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const huddleTokenHeader = req.headers.get("x-huddle-access-token") ?? "";
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const huddleToken = huddleTokenHeader.replace(/^Bearer\s+/i, "").trim();
+    const accessToken = [bearerToken, huddleToken].find((token) => token.split(".").length === 3) || "";
     if (!accessToken) {
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
     }

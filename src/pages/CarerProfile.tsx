@@ -379,7 +379,7 @@ const CarerProfile: React.FC = () => {
   const refreshStripePayoutStatus = useCallback(async () => {
     const { data: statusData } = await invokeAuthedFunction<{ status?: string }>(
       "create-stripe-connect-link",
-      { body: { action: "check_status" } },
+      { body: { action: "check_status" }, forceRefresh: true },
     );
     const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
     if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
@@ -665,16 +665,13 @@ const CarerProfile: React.FC = () => {
         }
       }, 500);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session?.access_token) {
-        throw new Error("auth_required");
-      }
       const returnUrl = `${window.location.origin}/carerprofile/stripe-return`;
       const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
       const { data, error } = await invokeAuthedFunction<{ url?: string }>(
         "create-stripe-connect-link",
         {
           body: { action: "create_link", returnUrl, refreshUrl },
+          forceRefresh: true,
         },
       );
       if (error) {

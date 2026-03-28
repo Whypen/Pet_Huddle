@@ -266,9 +266,12 @@ serve(async (req) => {
         continue;
       }
       const localized = resolveLocalizedAmount(price, targetCurrency);
+      const safeAmount = Number.isFinite(localized.amount) && localized.amount > 0
+        ? localized.amount
+        : DEFAULTS[key].amount;
       results[key] = {
-        amount: localized.amount,
-        currency: localized.currency,
+        amount: safeAmount,
+        currency: safeAmount === localized.amount ? localized.currency : DEFAULTS[key].currency,
         interval: price.recurring?.interval,
       };
     }
