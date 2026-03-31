@@ -53,8 +53,8 @@ as $$
   ranked as (
     select
       case
-        when lower(coalesce(nullif((row_to_json(p)::jsonb->>'effective_tier'), ''), p.tier, 'free')) = 'gold' then 3
-        when lower(coalesce(nullif((row_to_json(p)::jsonb->>'effective_tier'), ''), p.tier, 'free')) in ('premium','plus') then 2
+        when lower(coalesce(p.tier, 'free')) = 'gold' then 3
+        when lower(coalesce(p.tier, 'free')) in ('premium','plus') then 2
         else 1
       end as rank
     from public.profiles p
@@ -62,7 +62,7 @@ as $$
   )
   select case coalesce(max(rank), 1)
     when 3 then 'gold'
-    when 2 then 'premium'
+    when 2 then 'plus'
     else 'free'
   end
   from ranked;

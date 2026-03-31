@@ -234,11 +234,24 @@ export default function PremiumPage() {
       pending = JSON.parse(raw) as { id: string; qty: number }[];
     } catch {
       sessionStorage.removeItem("pending_addons");
+      sessionStorage.removeItem("pending_pricing");
       setSearchParams({}, { replace: true });
       return;
     }
 
+    let savedCurrency: string | null = null;
+    let savedCountry: string | null = null;
+    try {
+      const pricingRaw = sessionStorage.getItem("pending_pricing");
+      if (pricingRaw) {
+        const parsed = JSON.parse(pricingRaw) as { currency?: string | null; country?: string | null };
+        savedCurrency = parsed.currency ?? null;
+        savedCountry = parsed.country ?? null;
+      }
+    } catch { /* ignore */ }
+
     sessionStorage.removeItem("pending_addons");
+    sessionStorage.removeItem("pending_pricing");
     setSearchParams({}, { replace: true });
     if (!pending.length || !user) return;
 
@@ -252,8 +265,8 @@ export default function PremiumPage() {
             items: pending.map((p) => ({ type: p.id, quantity: p.qty })),
             successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
             cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
-            currency: pricingCurrency || undefined,
-            country: pricingCountry || undefined,
+            currency: savedCurrency || undefined,
+            country: savedCountry || undefined,
           },
         });
         if (error) throw error;
@@ -344,6 +357,10 @@ export default function PremiumPage() {
           "pending_addons",
           JSON.stringify(selectedPaymentAddonItems.map((a) => ({ id: a.id, qty: 1 })))
         );
+        sessionStorage.setItem(
+          "pending_pricing",
+          JSON.stringify({ currency: pricingCurrency, country: pricingCountry })
+        );
       }
 
       if (addonSelected.sharePerks && !isSharePerksPurchasable) {
@@ -371,7 +388,6 @@ export default function PremiumPage() {
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (!url) throw new Error("checkout_url_missing");
-      console.log("[Premium] Checkout URL:", url);
       window.location.assign(url);
     } catch {
       sessionStorage.removeItem("pending_addons");
@@ -393,17 +409,28 @@ export default function PremiumPage() {
     if (selectedRecurringAddonItems.length > 0) {
       try {
         setIsCheckingOut(true);
-        const mixedItems = [
-          { type: "family_member", quantity: 1 },
-          ...selectedPaymentAddonItems.map((a) => ({ type: a.id, quantity: 1 })),
-        ];
+        const hasPaymentAddons = selectedPaymentAddonItems.length > 0;
+        const successUrl = hasPaymentAddons
+          ? `${window.location.origin}/premium?plan_done=1${encodedReturnToParam}${reopenDrawerParam}`
+          : `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`;
+
+        if (hasPaymentAddons) {
+          sessionStorage.setItem(
+            "pending_addons",
+            JSON.stringify(selectedPaymentAddonItems.map((a) => ({ id: a.id, qty: 1 })))
+          );
+          sessionStorage.setItem(
+            "pending_pricing",
+            JSON.stringify({ currency: pricingCurrency, country: pricingCountry })
+          );
+        }
+
         const { data, error } = await invokeAuthedFunction<{ url?: string }>("create-checkout-session", {
           body: {
             userId: user.id,
             mode: "subscription",
             type: "family_member",
-            items: mixedItems,
-            successUrl: `${window.location.origin}/premium?addon_done=1${encodedReturnToParam}${reopenDrawerParam}`,
+            successUrl,
             cancelUrl: `${window.location.origin}/premium?tab=addons${encodedReturnToParam}${reopenDrawerParam}`,
             currency: pricingCurrency || undefined,
             country: pricingCountry || undefined,
@@ -414,6 +441,8 @@ export default function PremiumPage() {
         if (!url) throw new Error("checkout_url_missing");
         window.location.assign(url);
       } catch {
+        sessionStorage.removeItem("pending_addons");
+        sessionStorage.removeItem("pending_pricing");
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
         setIsCheckingOut(false);

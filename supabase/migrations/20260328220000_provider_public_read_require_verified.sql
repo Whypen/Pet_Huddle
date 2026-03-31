@@ -1,4 +1,4 @@
--- Provider public read: require is_verified = true at database layer.
+-- Provider public read: require verification_status = 'verified' at database layer.
 --
 -- The previous policy "pet_care_profiles_public_listed_read" allowed any
 -- authenticated or anonymous client to read a pet_care_profiles row whenever
@@ -6,8 +6,8 @@
 -- provider could appear in the public marketplace feed and provider-profile modal.
 --
 -- This migration replaces that policy with one that also requires the provider's
--- corresponding profiles row to have is_verified = true. The check is performed
--- via a correlated subquery so that no is_verified column is needed on
+-- corresponding profiles row to have verification_status = 'verified'. The check
+-- is performed via a correlated subquery so that no verification status column is needed on
 -- pet_care_profiles itself.
 --
 -- Effect on read paths:
@@ -34,6 +34,6 @@ create policy "pet_care_profiles_public_listed_verified_read"
       select 1
       from public.profiles p
       where p.id = pet_care_profiles.user_id
-        and p.is_verified = true
+        and p.verification_status = 'verified'
     )
   );

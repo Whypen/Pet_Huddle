@@ -29,15 +29,6 @@ const LIST_SERVICE_PROVIDERS = "service_providers";
 // Activity throttle: max 24h between syncs unless bucket changes
 const ACTIVITY_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-// Valid ONBOARDING_STEP values
-type OnboardingStep =
-  | "signup_started"
-  | "profile_complete"
-  | "pet_complete"
-  | "verification_complete"
-  | "service_profile_complete"
-  | "fully_onboarded";
-
 // Valid ACTIVITY_BUCKET values
 type ActivityBucket = "active" | "inactive_7d" | "inactive_30d";
 
@@ -57,32 +48,30 @@ const BREVO_ATTRIBUTES: Array<{ name: string; type: "text" | "date" | "boolean" 
   { name: "COUNTRY",                  type: "text" },
   { name: "DISTRICT",             type: "text" },
   { name: "PET_TYPES",            type: "text" },   // comma-sep e.g. "DOG,CAT"
-  { name: "HAS_PET",              type: "boolean" },
+  { name: "HAS_PET",              type: "text" },
   { name: "PET_COUNT",            type: "float" },
-  { name: "HAS_DOG",              type: "boolean" },
-  { name: "HAS_CAT",              type: "boolean" },
-  { name: "HAS_OTHERS",           type: "boolean" },
+  { name: "HAS_DOG",              type: "text" },
+  { name: "HAS_CAT",              type: "text" },
+  { name: "HAS_OTHERS",           type: "text" },
   { name: "TIER",                 type: "text" },
-  { name: "SERVICE_PROVIDER",     type: "boolean" },
+  { name: "SERVICE_PROVIDER",     type: "text" },
   { name: "VERIFICATION_STATUS",  type: "text" },
-  { name: "ONBOARDING_STEP",      type: "text" },
-  { name: "LAST_ACTIVE_AT",       type: "date" },
+  { name: "LAST_ACTIVE_AT",       type: "text" },
   { name: "ACTIVITY_BUCKET",      type: "text" },
   { name: "TRUST_SCORE",          type: "float" },
   { name: "TRUST_TIER",           type: "text" },
   { name: "SUBSCRIPTION_STATUS",  type: "text" },
-  { name: "LAST_BOOKING_AT",      type: "date" },
-  { name: "LAST_BROADCAST_AT",    type: "date" },
-  { name: "LAST_CHAT_AT",         type: "date" },
-  { name: "MARKETING_CONSENT",         type: "boolean" },
+  { name: "LAST_BOOKING_AT",      type: "text" },
+  { name: "LAST_BROADCAST_AT",    type: "text" },
+  { name: "LAST_CHAT_AT",         type: "text" },
+  { name: "MARKETING_CONSENT",         type: "text" },
   { name: "MARKETING_CONSENT_AT",      type: "date" },
-  { name: "MARKETING_OPT_IN",          type: "boolean" },  // stage-1: form checkbox
+  { name: "MARKETING_OPT_IN",          type: "text" },  // stage-1: form checkbox
   { name: "MARKETING_OPT_IN_AT",       type: "date" },
-  { name: "MARKETING_DOI_CONFIRMED",   type: "boolean" },  // stage-2: email click
+  { name: "MARKETING_DOI_CONFIRMED",   type: "text" },  // stage-2: email click
   { name: "MARKETING_DOI_CONFIRMED_AT",type: "date" },
   { name: "EMAIL_ENABLED",             type: "boolean" },
-  { name: "USER_CREATED_AT",           type: "date" },
-  { name: "PROFILE_COMPLETED_AT",      type: "date" },
+  { name: "USER_CREATED_AT",           type: "text" },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -259,6 +248,87 @@ async function addContactToList(email: string, listId: number): Promise<void> {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+interface CrmContactsViewRow {
+  EMAIL: string | null;
+  DISPLAY_NAME: string | null;
+  SOCIAL_ID: string | null;
+  PHONE: string | null;
+  COUNTRY: string | null;
+  DISTRICT: string | null;
+  TIER: string | null;
+  SERVICE_PROVIDER: string | null;
+  VERIFICATION_STATUS: string | null;
+  SUBSCRIPTION_STATUS: string | null;
+  HAS_PET: string | null;
+  PET_COUNT: number | null;
+  PET_TYPES: string | null;
+  HAS_DOG: string | null;
+  HAS_CAT: string | null;
+  HAS_OTHERS: string | null;
+  LAST_ACTIVE_AT: string | null;
+  ACTIVITY_BUCKET: string | null;
+  LAST_CHAT_AT: string | null;
+  LAST_BROADCAST_AT: string | null;
+  LAST_BOOKING_AT: string | null;
+  TRUST_SCORE: number | null;
+  TRUST_TIER: string | null;
+  USER_CREATED_AT: string | null;
+  MARKETING_CONSENT: string | null;
+  MARKETING_OPT_IN: string | null;
+  MARKETING_DOI_CONFIRMED: string | null;
+}
+
+function crmAttrsFromView(viewRow: CrmContactsViewRow | null): Record<string, unknown> {
+  if (!viewRow) return {};
+  return {
+    DISPLAY_NAME: viewRow.DISPLAY_NAME ?? "",
+    SOCIAL_ID: viewRow.SOCIAL_ID ?? "",
+    PHONE: viewRow.PHONE ?? "",
+    COUNTRY: viewRow.COUNTRY ?? "",
+    DISTRICT: viewRow.DISTRICT ?? "",
+    TIER: viewRow.TIER ?? "free",
+    SERVICE_PROVIDER: viewRow.SERVICE_PROVIDER ?? "No",
+    VERIFICATION_STATUS: viewRow.VERIFICATION_STATUS ?? "unverified",
+    SUBSCRIPTION_STATUS: viewRow.SUBSCRIPTION_STATUS ?? null,
+    HAS_PET: viewRow.HAS_PET ?? "No",
+    PET_COUNT: viewRow.PET_COUNT ?? 0,
+    PET_TYPES: viewRow.PET_TYPES ?? "",
+    HAS_DOG: viewRow.HAS_DOG ?? "No",
+    HAS_CAT: viewRow.HAS_CAT ?? "No",
+    HAS_OTHERS: viewRow.HAS_OTHERS ?? "No",
+    LAST_ACTIVE_AT: viewRow.LAST_ACTIVE_AT ?? null,
+    ACTIVITY_BUCKET: viewRow.ACTIVITY_BUCKET ?? null,
+    LAST_CHAT_AT: viewRow.LAST_CHAT_AT ?? null,
+    LAST_BROADCAST_AT: viewRow.LAST_BROADCAST_AT ?? null,
+    LAST_BOOKING_AT: viewRow.LAST_BOOKING_AT ?? null,
+    TRUST_SCORE: viewRow.TRUST_SCORE ?? null,
+    TRUST_TIER: viewRow.TRUST_TIER ?? null,
+    USER_CREATED_AT: viewRow.USER_CREATED_AT ?? null,
+    MARKETING_CONSENT: viewRow.MARKETING_CONSENT ?? "No",
+    MARKETING_OPT_IN: viewRow.MARKETING_OPT_IN ?? "No",
+    MARKETING_DOI_CONFIRMED: viewRow.MARKETING_DOI_CONFIRMED ?? "No",
+  };
+}
+
+async function loadCrmViewRowByEmail(email: string): Promise<CrmContactsViewRow | null> {
+  const { data, error } = await supabase
+    .from("crm_contacts_view")
+    .select(
+      "EMAIL, DISPLAY_NAME, SOCIAL_ID, PHONE, COUNTRY, DISTRICT, TIER, SERVICE_PROVIDER, " +
+      "VERIFICATION_STATUS, SUBSCRIPTION_STATUS, HAS_PET, PET_COUNT, PET_TYPES, HAS_DOG, HAS_CAT, HAS_OTHERS, " +
+      "LAST_ACTIVE_AT, ACTIVITY_BUCKET, LAST_CHAT_AT, LAST_BROADCAST_AT, LAST_BOOKING_AT, TRUST_SCORE, TRUST_TIER, " +
+      "USER_CREATED_AT, MARKETING_CONSENT, MARKETING_OPT_IN, MARKETING_DOI_CONFIRMED",
+    )
+    .eq("EMAIL", email)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[brevo-sync] crm_contacts_view lookup failed", email, error);
+    return null;
+  }
+  return (data ?? null) as CrmContactsViewRow | null;
+}
+
 async function handleProfileCompleted(userId: string): Promise<void> {
   // First and only point where a Brevo contact is created
   const { data: profile, error } = await supabase
@@ -283,6 +353,7 @@ async function handleProfileCompleted(userId: string): Promise<void> {
     console.warn("[brevo-sync] profile_completed: no email for user", userId);
     return;
   }
+  const crmView = await loadCrmViewRowByEmail(email);
 
   const listIds: number[] = [];
   const usersAllId = await ensureList(LIST_USERS_ALL);
@@ -302,7 +373,6 @@ async function handleProfileCompleted(userId: string): Promise<void> {
       DISTRICT:             profile.location_district ?? "",
       TIER:                 profile.tier ?? "free",
       VERIFICATION_STATUS:  profile.verification_status ?? "unverified",
-      ONBOARDING_STEP:      "profile_complete" satisfies OnboardingStep,
       MARKETING_CONSENT:          Boolean(profile.marketing_consent),
       MARKETING_CONSENT_AT:       profile.marketing_consent_at ?? null,
       MARKETING_OPT_IN:           Boolean(profile.marketing_opt_in_checked),
@@ -311,9 +381,9 @@ async function handleProfileCompleted(userId: string): Promise<void> {
       MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
       EMAIL_ENABLED:              Boolean(profile.marketing_consent),
       USER_CREATED_AT:      profile.created_at ?? null,
-      PROFILE_COMPLETED_AT: now,
       LAST_ACTIVE_AT:       profile.last_active_at ?? now,
       ACTIVITY_BUCKET:      "active" satisfies ActivityBucket,
+      ...crmAttrsFromView(crmView),
     },
     listIds,
   });
@@ -329,17 +399,6 @@ async function handleProfileCompleted(userId: string): Promise<void> {
 }
 
 async function handlePetProfileCompleted(userId: string): Promise<void> {
-  // Fetch all pets for this user
-  const { data: pets, error } = await supabase
-    .from("pets")
-    .select("species")
-    .eq("owner_id", userId);
-
-  if (error) {
-    console.error("[brevo-sync] pet_profile_completed: pets query failed", userId, error);
-    return;
-  }
-
   const { data: profile } = await supabase
     .from("profiles")
     .select("email")
@@ -347,26 +406,13 @@ async function handlePetProfileCompleted(userId: string): Promise<void> {
     .single();
 
   if (!profile?.email) return;
-
-  const species = (pets ?? []).map((p: { species?: string }) =>
-    (p.species ?? "other").toUpperCase()
-  );
-  const petTypes = [...new Set(species)].join(",");
-  const hasDog = species.includes("DOG");
-  const hasCat = species.includes("CAT");
-  const hasOthers = species.some((s) => s !== "DOG" && s !== "CAT");
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   await upsertContact({
     email: profile.email,
     ext_id: userId,
     attributes: {
-      HAS_PET:              pets!.length > 0,
-      PET_COUNT:            pets!.length,
-      PET_TYPES:            petTypes,
-      HAS_DOG:              hasDog,
-      HAS_CAT:              hasCat,
-      HAS_OTHERS:           hasOthers,
-      ONBOARDING_STEP:      "pet_complete" satisfies OnboardingStep,
+      ...crmAttrsFromView(crmView),
     },
   });
   console.log("[brevo-sync] pet_profile_completed synced", userId);
@@ -388,6 +434,7 @@ async function handleVerificationCompleted(userId: string): Promise<void> {
     .single();
 
   if (!profile?.email) return;
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   // Device fingerprint: row presence in device_fingerprint_history (mirrors RPC)
   const { count: fpCount } = await supabase
@@ -414,7 +461,7 @@ async function handleVerificationCompleted(userId: string): Promise<void> {
       VERIFICATION_STATUS: profile.verification_status ?? "pending",
       TRUST_SCORE:         score,
       TRUST_TIER:          tier,
-      ONBOARDING_STEP:     "verification_complete" satisfies OnboardingStep,
+      ...crmAttrsFromView(crmView),
     },
   });
   console.log("[brevo-sync] verification_completed synced", userId, { score, tier });
@@ -428,6 +475,7 @@ async function handleServiceProfileCompleted(userId: string): Promise<void> {
     .single();
 
   if (!profile?.email) return;
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   const serviceProvidersId = await ensureList(LIST_SERVICE_PROVIDERS);
   const listIds = serviceProvidersId ? [serviceProvidersId] : [];
@@ -436,8 +484,7 @@ async function handleServiceProfileCompleted(userId: string): Promise<void> {
     email: profile.email,
     ext_id: userId,
     attributes: {
-      SERVICE_PROVIDER: true,
-      ONBOARDING_STEP:  "service_profile_complete" satisfies OnboardingStep,
+      ...crmAttrsFromView(crmView),
     },
     listIds,
   });
@@ -456,6 +503,7 @@ async function handleSubscriptionChanged(
     .single();
 
   if (!profile?.email) return;
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   await upsertContact({
     email: profile.email,
@@ -463,6 +511,7 @@ async function handleSubscriptionChanged(
     attributes: {
       TIER:                tier,
       SUBSCRIPTION_STATUS: subscriptionStatus,
+      ...crmAttrsFromView(crmView),
     },
   });
   console.log("[brevo-sync] subscription_changed synced", userId, { tier, subscriptionStatus });
@@ -480,6 +529,7 @@ async function handleMarketingDoiConfirmed(userId: string): Promise<void> {
     .single();
 
   if (!profile?.email) return;
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   await upsertContact({
     email:    profile.email,
@@ -492,6 +542,7 @@ async function handleMarketingDoiConfirmed(userId: string): Promise<void> {
       MARKETING_DOI_CONFIRMED:    Boolean(profile.marketing_doi_confirmed),
       MARKETING_DOI_CONFIRMED_AT: profile.marketing_doi_confirmed_at ?? null,
       EMAIL_ENABLED:              Boolean(profile.marketing_consent),
+      ...crmAttrsFromView(crmView),
     },
   });
   console.log("[brevo-sync] marketing_doi_confirmed synced", userId);
@@ -506,6 +557,7 @@ async function handleImportantUserActivity(userId: string): Promise<void> {
     .single();
 
   if (!profile?.email) return;
+  const crmView = await loadCrmViewRowByEmail(profile.email);
 
   // Derive current activity bucket
   const lastActive = profile.last_active_at ? new Date(profile.last_active_at) : new Date();
@@ -530,6 +582,7 @@ async function handleImportantUserActivity(userId: string): Promise<void> {
     attributes: {
       LAST_ACTIVE_AT:  profile.last_active_at ?? new Date().toISOString(),
       ACTIVITY_BUCKET: currentBucket,
+      ...crmAttrsFromView(crmView),
     },
   });
 

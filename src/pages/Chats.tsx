@@ -137,6 +137,9 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
   activeOnly: false,
 };
 
+const DISCOVERY_EXPAND_STEP_KM = 15;
+const DISCOVERY_MAX_RADIUS_KM = 150;
+
 
 type FilterKey = keyof DiscoveryFilters;
 type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "plus" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
@@ -421,8 +424,8 @@ const applyDiscoveryClientFilters = (
     if (filters.hasCar && !profile.has_car) return false;
 
     if (options?.enforceActiveOnly && filters.activeOnly) {
-      const active7dThresholdMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      if (activityMs < active7dThresholdMs) return false;
+      const active24hThresholdMs = Date.now() - 24 * 60 * 60 * 1000;
+      if (activityMs < active24hThresholdMs) return false;
     }
 
     if (filters.whoWavedAtMe) {
@@ -617,6 +620,7 @@ const Chats = () => {
   const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
   const [activeFilterRow, setActiveFilterRow] = useState<FilterRowDef | null>(null);
   const [filters, setFilters] = useState<DiscoveryFilters>({ ...DEFAULT_FILTERS });
+  const [expandedDistanceKm, setExpandedDistanceKm] = useState<number | null>(null);
   const [ageMinDraft, setAgeMinDraft] = useState(String(DEFAULT_FILTERS.ageMin));
   const [ageMaxDraft, setAgeMaxDraft] = useState(String(DEFAULT_FILTERS.ageMax));
   const [profileSheetUser, setProfileSheetUser] = useState<{ id: string; name: string; avatarUrl?: string | null } | null>(null);
@@ -1229,6 +1233,13 @@ const Chats = () => {
   const discoveryQuotaReached = Number.isFinite(discoveryDailyCap) && discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
   const showDiscoveryQuotaLock = discoveryQuotaReached && !isGoldTier;
   const silentGoldDiscoveryCapReached = discoveryQuotaReached && isGoldTier;
+  const effectiveDiscoveryDistanceKm = useMemo(() => {
+    const base = Math.max(1, Math.round(filters.maxDistanceKm || 5));
+    const expanded = expandedDistanceKm === null ? base : Math.max(base, Math.round(expandedDistanceKm));
+    return Math.min(DISCOVERY_MAX_RADIUS_KM, expanded);
+  }, [expandedDistanceKm, filters.maxDistanceKm]);
+  const canExpandSearch = effectiveDiscoveryDistanceKm < DISCOVERY_MAX_RADIUS_KM;
+  const prevDiscoveryQuotaReachedRef = useRef(discoveryQuotaReached);
 
   const bumpDiscoverySeen = async (): Promise<boolean> => {
     if (discoveryQuotaReached) return false;
@@ -1243,6 +1254,39 @@ const Chats = () => {
     });
     return true;
   };
+
+  useEffect(() => {
+    setExpandedDistanceKm(null);
+  }, [
+    filters.maxDistanceKm,
+    filters.ageMin,
+    filters.ageMax,
+    filters.genders,
+    filters.species,
+    filters.socialRoles,
+    filters.heightMin,
+    filters.heightMax,
+    filters.orientations,
+    filters.degrees,
+    filters.relationshipStatuses,
+    filters.hasCar,
+    filters.experienceYearsMin,
+    filters.experienceYearsMax,
+    filters.languages,
+    filters.verifiedOnly,
+    filters.whoWavedAtMe,
+    filters.activeOnly,
+  ]);
+
+  useEffect(() => {
+    const prev = prevDiscoveryQuotaReachedRef.current;
+    if (prev && !discoveryQuotaReached && topTab === "discover") {
+      setSwipeDir(null);
+      dragY.set(0);
+      setDiscoveryRefreshTick((tick) => tick + 1);
+    }
+    prevDiscoveryQuotaReachedRef.current = discoveryQuotaReached;
+  }, [discoveryQuotaReached, dragY, topTab]);
 
   const checkReciprocalWave = useCallback(
     async (targetUserId: string) => {
@@ -2526,7 +2570,7 @@ const Chats = () => {
         const mergedProfiles = new Map<string, DiscoveryProfile>();
         const pinDistrictByUserId = new Map<string, string | null>();
         const liveLocationDistrictByUserId = new Map<string, string | null>();
-        const pinRadiusM = Math.max(1000, Math.round((filters.maxDistanceKm || 5) * 1000));
+        const pinRadiusM = Math.max(1000, Math.round(effectiveDiscoveryDistanceKm * 1000));
         try {
           const hasExplicitHeightFilter =
             isPremium && (filters.heightMin > DEFAULT_FILTERS.heightMin || filters.heightMax < DEFAULT_FILTERS.heightMax);
@@ -2614,7 +2658,10 @@ const Chats = () => {
           setDiscoveryProfiles([]);
           return;
         }
-        const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), filters, {
+        const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), {
+          ...filters,
+          maxDistanceKm: effectiveDiscoveryDistanceKm,
+        }, {
           enforceVerifiedOnly: filters.verifiedOnly,
           enforceActiveOnly: filters.activeOnly,
           wavedByUserIds,
@@ -2637,6 +2684,7 @@ const Chats = () => {
     discoveryHistoryHydrated,
     profile?.id,
     filters,
+    effectiveDiscoveryDistanceKm,
     isPremium,
     effectiveTier,
     resolveDiscoveryAnchor,
@@ -2927,6 +2975,31 @@ const Chats = () => {
     dragY.set(0);
     setDiscoveryRefreshTick((tick) => tick + 1);
   }, [dragY]);
+
+  const handleExpandSearch = useCallback(() => {
+    if (!canExpandSearch) return;
+    setExpandedDistanceKm((prev) => {
+      const base = prev === null ? Math.max(1, Math.round(filters.maxDistanceKm || 5)) : prev;
+      return Math.min(DISCOVERY_MAX_RADIUS_KM, base + DISCOVERY_EXPAND_STEP_KM);
+    });
+    setSwipeDir(null);
+    dragY.set(0);
+    setDiscoveryRefreshTick((tick) => tick + 1);
+  }, [canExpandSearch, dragY, filters.maxDistanceKm]);
+
+  const resurfacePassedProfiles = useCallback(() => {
+    setPassedDiscoveryIds(new Set());
+    setCarryoverPassedIds(new Set());
+    try {
+      sessionStorage.removeItem(passedDiscoverySessionKey);
+      localStorage.removeItem(passedDiscoveryKey);
+    } catch {
+      // ignore cache clear failure
+    }
+    setSwipeDir(null);
+    dragY.set(0);
+    setDiscoveryRefreshTick((tick) => tick + 1);
+  }, [dragY, passedDiscoveryKey, passedDiscoverySessionKey]);
 
   const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
     dragY.set(0);
@@ -3841,14 +3914,31 @@ const Chats = () => {
                     <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
                       <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
                       <p className="mt-2 text-sm text-[#4F5677]/75">
-                        Try expanding your filters or check back later to find more friends.
+                        Expand your search first, then revisit passed profiles if needed.
                       </p>
-                      <button
-                        className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]"
-                        onClick={refreshDiscovery}
-                      >
-                        Refresh
-                      </button>
+                      <div className="mt-4 flex flex-col gap-2">
+                        <button
+                          className={cn(
+                            "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold shadow-[0_10px_24px_rgba(33,71,201,0.24)]",
+                            canExpandSearch
+                              ? "bg-[rgba(33,71,201,0.92)] text-white"
+                              : "bg-white/70 text-[#4F5677]"
+                          )}
+                          onClick={canExpandSearch ? handleExpandSearch : refreshDiscovery}
+                        >
+                          {canExpandSearch
+                            ? `Expand Search +${DISCOVERY_EXPAND_STEP_KM}km (${effectiveDiscoveryDistanceKm}km)`
+                            : `Search Radius Maxed (${effectiveDiscoveryDistanceKm}km)`}
+                        </button>
+                        {!canExpandSearch && passedDiscoveryIds.size > 0 && (
+                          <button
+                            className="inline-flex h-11 items-center justify-center rounded-full bg-white/75 px-5 text-sm font-semibold text-[#4F5677] shadow-[0_8px_20px_rgba(33,71,201,0.12)]"
+                            onClick={resurfacePassedProfiles}
+                          >
+                            Resurface Skipped Profiles
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

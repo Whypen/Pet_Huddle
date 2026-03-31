@@ -53,6 +53,19 @@ export interface Profile {
   effective_tier?: string | null;
   family_owner_id?: string | null;
   subscription_status?: string | null;
+  stripe_subscription_id?: string | null;
+  subscription_current_period_end?: string | null;
+  subscription_cancel_at_period_end?: boolean | null;
+  subscription_cancel_requested_at?: string | null;
+  subscription_cancel_reason?: string | null;
+  subscription_cancel_reason_other?: string | null;
+  share_perks_subscription_id?: string | null;
+  share_perks_subscription_status?: string | null;
+  share_perks_subscription_current_period_end?: string | null;
+  share_perks_cancel_at_period_end?: boolean | null;
+  share_perks_cancel_requested_at?: string | null;
+  share_perks_cancel_reason?: string | null;
+  share_perks_cancel_reason_other?: string | null;
   stars_count?: number | null;
   mesh_alert_count?: number | null;
   media_credits?: number | null;
@@ -157,6 +170,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "tier",
     "effective_tier",
     "subscription_status",
+    "stripe_subscription_id",
+    "subscription_current_period_end",
+    "subscription_cancel_at_period_end",
+    "subscription_cancel_requested_at",
+    "subscription_cancel_reason",
+    "subscription_cancel_reason_other",
+    "share_perks_subscription_id",
+    "share_perks_subscription_status",
+    "share_perks_subscription_current_period_end",
+    "share_perks_cancel_at_period_end",
+    "share_perks_cancel_requested_at",
+    "share_perks_cancel_reason",
+    "share_perks_cancel_reason_other",
     "stars_count",
     "mesh_alert_count",
     "media_credits",
