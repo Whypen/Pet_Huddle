@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, EyeOff, Bell, Shield, Users, PawPrint } from "lucide-react";
+import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Bell, Shield, Users, PawPrint } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,6 +8,7 @@ import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
 import { PageHeader } from "@/layouts/PageHeader";
 import { NeuToggle } from "@/components/ui/NeuToggle";
 import { NeuControl } from "@/components/ui/NeuControl";
+import { FormField } from "@/components/ui";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { GlassModal } from "@/components/ui/GlassModal";
@@ -53,8 +54,6 @@ const Settings: React.FC = () => {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -573,8 +572,6 @@ const Settings: React.FC = () => {
         if (!o) {
           setPasswordOpen(false);
           changePasswordTurnstile.reset();
-          setShowNewPassword(false);
-          setShowConfirmPassword(false);
         }
       }}>
         <DialogContent className="max-w-sm">
@@ -582,48 +579,24 @@ const Settings: React.FC = () => {
             <DialogTitle>Change Password</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-          <div className="space-y-1.5">
-            <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">New Password</label>
-            <div className="form-field-rest relative flex items-center">
-              <input
-                type={showNewPassword ? "text" : "password"}
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="New password"
-                className="field-input-core"
-              />
-              <button
-                type="button"
-                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-tertiary,#6b7280)] hover:text-[var(--text-primary,#424965)]"
-                onClick={() => setShowNewPassword((prev) => !prev)}
-                aria-label={showNewPassword ? "Hide new password" : "Show new password"}
-                aria-pressed={showNewPassword}
-              >
-                {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Confirm Password</label>
-            <div className="form-field-rest relative flex items-center">
-              <input
-                type={showConfirmPassword ? "text" : "password"}
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Confirm password"
-                className="field-input-core"
-              />
-              <button
-                type="button"
-                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-tertiary,#6b7280)] hover:text-[var(--text-primary,#424965)]"
-                onClick={() => setShowConfirmPassword((prev) => !prev)}
-                aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
-                aria-pressed={showConfirmPassword}
-              >
-                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </div>
+            <FormField
+              type="password"
+              label="New Password"
+              leadingIcon={<Lock size={16} strokeWidth={1.75} />}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="new-password"
+            />
+            <FormField
+              type="password"
+              label="Confirm Password"
+              leadingIcon={<Lock size={16} strokeWidth={1.75} />}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="new-password"
+            />
           </div>
           <TurnstileWidget
             siteKeyMissing={changePasswordTurnstile.siteKeyMissing}

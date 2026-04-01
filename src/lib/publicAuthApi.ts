@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 type ApiError = {
   message: string;
@@ -125,12 +124,44 @@ export async function authResetPassword(payload: ResetPayload): Promise<{ error:
 }
 
 export async function authChangePassword(payload: ChangePasswordPayload): Promise<{ error: ApiError | null }> {
-  const result = await invokeAuthedFunction<null>("auth-change-password", {
-    body: payload,
-  });
-  if (result.error) {
-    return { error: { message: result.error.message || "change_password_failed" } };
+  if (!supabaseUrl || !anonKey) {
+    return { error: { message: "auth_client_misconfigured" } };
   }
-  return { error: null };
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const accessToken = String(session?.access_token || "").trim();
+  if (!accessToken) {
+    return { error: { message: "auth_required" } };
+  }
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/auth-change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        "x-huddle-access-token": accessToken,
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json().catch(() => null)) as
+      | { error?: string; message?: string; code?: string }
+      | null;
+    if (!res.ok) {
+      return {
+        error: {
+          message: String(body?.error || body?.message || `http_${res.status}`),
+          code: body?.code ?? null,
+        },
+      };
+    }
+  } catch (error) {
+    return {
+      error: { message: error instanceof Error ? error.message : "network_error" },
+    };
+  }
+  return {
+    error: null,
+  };
 }
-
