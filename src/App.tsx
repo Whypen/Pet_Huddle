@@ -40,8 +40,6 @@ import ServiceAgreement from "./pages/ServiceAgreement";
 import BookingTerms from "./pages/BookingTerms";
 import VerifyIdentity from "./pages/VerifyIdentity";
 import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
-import CarerStripeReturn from "./pages/carerprofile/StripeReturn";
-import CarerStripeRefresh from "./pages/carerprofile/StripeRefresh";
 import CarerProfile from "./pages/CarerProfile";
 import Social from "./pages/Social";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
@@ -295,26 +293,6 @@ const App = () => (
                         <AppShell>
                           <RouteSuspense><Service /></RouteSuspense>
                           <BottomNav />
-                        </AppShell>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/carerprofile/stripe-return"
-                    element={
-                      <ProtectedRoute>
-                        <AppShell>
-                          <CarerStripeReturn />
-                        </AppShell>
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/carerprofile/stripe-refresh"
-                    element={
-                      <ProtectedRoute>
-                        <AppShell>
-                          <CarerStripeRefresh />
                         </AppShell>
                       </ProtectedRoute>
                     }

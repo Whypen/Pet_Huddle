@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,6 +18,7 @@ import {
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
 import carerPlaceholderImg from "@/assets/Profile Placeholder.png";
+import { WalletOnboardingModal } from "@/components/wallet/WalletOnboardingModal";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -117,8 +118,6 @@ const CURRENCIES = ["USD", "HKD", "GBP", "EUR", "AUD", "SGD", "CAD", "JPY"] as c
 const RATE_OPTIONS = ["Per hour", "Per day", "Per session", "Per night"] as const;
 
 const AGREEMENT_VERSION = "1.0";
-const STRIPE_CONNECT_RESULT_KEY = "huddle:stripe-connect-result";
-const STRIPE_CONNECT_MESSAGE_TYPE = "huddle:stripe-connect";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,6 +157,11 @@ interface CarerProfileData {
   currency: string;
   rateRows: RateRow[];
   stripePayoutStatus: "pending" | "needs_action" | "complete" | null;
+  stripeAccountId: string;
+  stripeDetailsSubmitted: boolean;
+  stripePayoutsEnabled: boolean;
+  stripeRequirementsCurrentlyDue: string[];
+  hasStripeAccount: boolean;
   agreementAccepted: boolean;
   agreementAcceptedAt: string | null;
   listed: boolean;
@@ -185,6 +189,11 @@ const EMPTY: CarerProfileData = {
   currency: "",
   rateRows: [{ price: "", rate: "", services: [] }],
   stripePayoutStatus: null,
+  stripeAccountId: "",
+  stripeDetailsSubmitted: false,
+  stripePayoutsEnabled: false,
+  stripeRequirementsCurrentlyDue: [],
+  hasStripeAccount: false,
   agreementAccepted: false,
   agreementAcceptedAt: null,
   listed: false,
@@ -231,6 +240,11 @@ function mapRowToForm(row: Record<string, unknown>): CarerProfileData {
     currency: String(row.currency ?? ""),
     rateRows,
     stripePayoutStatus: (row.stripe_payout_status as "pending" | "needs_action" | "complete" | null) ?? null,
+    stripeAccountId: String(row.stripe_account_id ?? ""),
+    stripeDetailsSubmitted: Boolean(row.stripe_details_submitted ?? false),
+    stripePayoutsEnabled: Boolean(row.stripe_payouts_enabled ?? false),
+    stripeRequirementsCurrentlyDue: (row.stripe_requirements_currently_due as string[]) ?? [],
+    hasStripeAccount: Boolean(row.stripe_account_id),
     agreementAccepted: Boolean(row.agreement_accepted ?? false),
     agreementAcceptedAt: row.agreement_accepted_at ? String(row.agreement_accepted_at) : null,
     listed: Boolean(row.listed ?? false),
@@ -286,10 +300,32 @@ function computeCompleted(d: CarerProfileData): boolean {
   return true;
 }
 
+// ── Wallet UI state ───────────────────────────────────────────────────────────
+// Derived from DB truth (boolean fields + currently_due), never from optimistic state.
+// "review"    = details submitted, no remaining requirements, Stripe still enabling payouts
+// "incomplete"= has account but requirements still blocking (reopen onboarding)
+// "none"      = no account yet (first-time Set Wallet)
+// "connected" = payouts_enabled = true
+type WalletUIState = "none" | "incomplete" | "review" | "connected";
+
+function deriveWalletState(
+  accountId: string,
+  detailsSubmitted: boolean,
+  payoutsEnabled: boolean,
+  currentlyDue: string[],
+): WalletUIState {
+  if (!accountId) return "none";
+  if (payoutsEnabled) return "connected";
+  // Only "review" when details are fully submitted AND no requirements are blocking.
+  // If requirements are still due/actionable → keep as "incomplete" → reopen onboarding.
+  if (detailsSubmitted && currentlyDue.length === 0) return "review";
+  return "incomplete";
+}
+
 function computeListingEligible(d: CarerProfileData): boolean {
   return (
     computeCompleted(d) &&
-    d.stripePayoutStatus === "complete" &&
+    d.stripePayoutsEnabled === true &&
     d.agreementAccepted
   );
 }
@@ -322,10 +358,11 @@ const CarerProfile: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<CarerProfileData>(EMPTY);
-  const [stripeConnecting, setStripeConnecting] = useState(false);
-  const [showPayoutPrefillModal, setShowPayoutPrefillModal] = useState(false);
-  const stripePopupRef = useRef<Window | null>(null);
-  const stripePopupPollRef = useRef<number | null>(null);
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  // Debounced silent account creation guards
+  const initialSkillsRef = useRef<string[] | null>(null);
+  const silentConnectTimerRef = useRef<number | null>(null);
+  const silentConnectFiredRef = useRef(false);
 
   const readFunctionHttpErrorMessage = async (err: unknown): Promise<string | null> => {
     try {
@@ -368,25 +405,6 @@ const CarerProfile: React.FC = () => {
   const [srDraft, setSrDraft] = useState<{ services: string[]; price: string; rate: string }>({ services: [], price: "", rate: "" });
   const [srDropOpen, setSrDropOpen] = useState(false);
 
-  const clearStripePopupWatcher = useCallback(() => {
-    if (stripePopupPollRef.current !== null) {
-      window.clearInterval(stripePopupPollRef.current);
-      stripePopupPollRef.current = null;
-    }
-    stripePopupRef.current = null;
-  }, []);
-
-  const refreshStripePayoutStatus = useCallback(async () => {
-    const { data: statusData, error } = await invokeAuthedFunction<{ status?: string }>(
-      "create-stripe-connect-link",
-      { body: { action: "check_status" } },
-    );
-    if (error) return;
-    const nextStatus = String((statusData as { status?: string } | null)?.status || "").trim();
-    if (nextStatus === "complete" || nextStatus === "pending" || nextStatus === "needs_action") {
-      setFormData((prev) => ({ ...prev, stripePayoutStatus: nextStatus as CarerProfileData["stripePayoutStatus"] }));
-    }
-  }, []);
 
   useEffect(() => {
     const raw = (profile?.social_album ?? []) as string[];
@@ -418,62 +436,82 @@ const CarerProfile: React.FC = () => {
       if (data) {
         setFormData(mapRowToForm(data as Record<string, unknown>));
         setMode("view");
-        // Re-check payout status when account exists to keep local UI in sync
-        const row = data as Record<string, unknown>;
-        if (row.stripe_account_id) {
-          void refreshStripePayoutStatus();
-        }
       } else {
         setFormData({ ...EMPTY });
         setMode("edit");
       }
       setLoading(false);
     })();
-  }, [user, refreshStripePayoutStatus]);
+  }, [user]);
 
+  // ── Silent background Stripe account creation ─────────────────────────────
+  // Fires once when user NEWLY adds the first provider skill in this edit session.
+  // Does NOT fire from skills that were already saved before the page loaded.
+  // 2-second debounce; cancelled if skills drop back to zero before timer fires.
   useEffect(() => {
-    const handleStripeConnectEvent = (status: string | undefined) => {
-      setStripeConnecting(false);
-      clearStripePopupWatcher();
-      try {
-        localStorage.removeItem(STRIPE_CONNECT_RESULT_KEY);
-      } catch {
-        // ignore storage cleanup failures
-      }
-      if (status === "refresh") {
-        toast.warning("Please continue Stripe onboarding from this page.");
-      } else if (status === "error") {
-        toast.error("Could not complete Stripe onboarding. Please retry.");
-      }
-      void refreshStripePayoutStatus();
-    };
+    if (loading) return; // Wait for initial data load
 
-    const handleStripeConnectMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const payload = event.data as { type?: string; status?: string } | null;
-      if (!payload || payload.type !== STRIPE_CONNECT_MESSAGE_TYPE) return;
-      handleStripeConnectEvent(payload.status);
-    };
+    // Capture baseline skills once — set only after load completes
+    if (initialSkillsRef.current === null) {
+      initialSkillsRef.current = [...formData.skills];
+      return; // Don't fire on initial capture
+    }
 
-    const handleStripeConnectStorage = (event: StorageEvent) => {
-      if (event.key !== STRIPE_CONNECT_RESULT_KEY || !event.newValue) return;
-      let payloadStatus: string | undefined;
-      try {
-        payloadStatus = (JSON.parse(event.newValue) as { status?: string } | null)?.status;
-      } catch {
-        payloadStatus = undefined;
-      }
-      handleStripeConnectEvent(payloadStatus);
-    };
+    if (silentConnectFiredRef.current) return;
+    if (!user) return;
+    if (formData.hasStripeAccount) return; // Account already exists
 
-    window.addEventListener("message", handleStripeConnectMessage);
-    window.addEventListener("storage", handleStripeConnectStorage);
+    // Only proceed if user added a skill not present when the page loaded
+    const hasNewSkill = formData.skills.some((s) => !initialSkillsRef.current!.includes(s));
+    if (!hasNewSkill || formData.skills.length === 0) return;
+
+    const timer = window.setTimeout(() => {
+      silentConnectFiredRef.current = true;
+      void invokeAuthedFunction("create-or-get-stripe-account", { body: {} }).catch(() => {
+        silentConnectFiredRef.current = false; // Allow retry if request failed
+      });
+    }, 2000);
+
+    // Cancel debounce if skills change again within the 2s window
+    return () => window.clearTimeout(timer);
+  }, [loading, formData.skills, formData.hasStripeAccount, user]);
+
+  // ── Supabase Realtime — wallet state sync ─────────────────────────────────
+  // Subscribes to this user's pet_care_profiles row. Updates wallet fields in
+  // local state whenever the webhook or refresh endpoint writes to DB.
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`pet_care_profiles_wallet:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "pet_care_profiles",
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          setFormData((prev) => ({
+            ...prev,
+            stripePayoutStatus: (row.stripe_payout_status as CarerProfileData["stripePayoutStatus"]) ?? prev.stripePayoutStatus,
+            stripeAccountId: String(row.stripe_account_id ?? prev.stripeAccountId),
+            stripeDetailsSubmitted: Boolean(row.stripe_details_submitted ?? prev.stripeDetailsSubmitted),
+            stripePayoutsEnabled: Boolean(row.stripe_payouts_enabled ?? prev.stripePayoutsEnabled),
+            stripeRequirementsCurrentlyDue: (row.stripe_requirements_currently_due as string[]) ?? prev.stripeRequirementsCurrentlyDue,
+            hasStripeAccount: Boolean(row.stripe_account_id ?? prev.stripeAccountId),
+            listed: Boolean(row.listed ?? prev.listed),
+          }));
+        },
+      )
+      .subscribe();
+
     return () => {
-      window.removeEventListener("message", handleStripeConnectMessage);
-      window.removeEventListener("storage", handleStripeConnectStorage);
-      clearStripePopupWatcher();
+      void supabase.removeChannel(channel);
     };
-  }, [clearStripePopupWatcher, refreshStripePayoutStatus]);
+  }, [user]);
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
@@ -666,61 +704,13 @@ const CarerProfile: React.FC = () => {
     setProofFields({});
   };
 
-  // ── Stripe Connect ────────────────────────────────────────────────────────
-  const handleStripeConnect = async () => {
-    setStripeConnecting(true);
-    const stripePopup = window.open("", "huddle-stripe-connect", "width=460,height=820");
-    try {
-      if (!stripePopup) {
-        throw new Error("stripe_popup_blocked");
-      }
-      clearStripePopupWatcher();
-      stripePopupRef.current = stripePopup;
-      stripePopupPollRef.current = window.setInterval(() => {
-        if (!stripePopupRef.current || stripePopupRef.current.closed) {
-          setStripeConnecting(false);
-          clearStripePopupWatcher();
-          void refreshStripePayoutStatus();
-        }
-      }, 500);
-
-      const returnUrl = `${window.location.origin}/carerprofile/stripe-return`;
-      const refreshUrl = `${window.location.origin}/carerprofile/stripe-refresh`;
-      const { data, error } = await invokeAuthedFunction<{ url?: string }>(
-        "create-stripe-connect-link",
-        {
-          body: { action: "create_link", returnUrl, refreshUrl },
-        },
-      );
-      if (error) {
-        throw error;
-      }
-      const targetUrl = String(data?.url || "").trim();
-      if (!targetUrl) {
-        throw new Error("stripe_connect_link_missing");
-      }
-      stripePopup.location.replace(targetUrl);
-      stripePopup.focus();
-    } catch (err) {
-      if (stripePopup && !stripePopup.closed) stripePopup.close();
-      clearStripePopupWatcher();
-      console.error("[CarerProfile.stripe_connect]", err);
-      const message = await readFunctionHttpErrorMessage(err);
-      if ((err as Error)?.message === "stripe_popup_blocked") {
-        toast.error("Pop-up blocked. Please allow pop-ups for Huddle and try again.");
-      } else if ((err as Error)?.message === "auth_required") {
-        toast.error("Session expired. Please sign in again.");
-      } else {
-        toast.error(message || "Could not start payout setup. Please retry.");
-      }
-      setStripeConnecting(false);
-    }
-  };
-
-  const statusCopy =
-    formData.stripePayoutStatus === "complete"
-      ? "Payouts ready"
-      : "Set up Payout Method";
+  // ── Wallet UI state (derived from DB truth) ───────────────────────────────
+  const walletState = deriveWalletState(
+    formData.stripeAccountId,
+    formData.stripeDetailsSubmitted,
+    formData.stripePayoutsEnabled,
+    formData.stripeRequirementsCurrentlyDue,
+  );
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
@@ -1373,35 +1363,41 @@ const CarerProfile: React.FC = () => {
                 })()}
               </div>
 
-              {/* ── Section 9: Set up payouts ────────────────────────────────────── */}
-              <div className="space-y-3">
-                {formData.stripePayoutStatus === "complete" ? (
+              {/* ── Section 9: Neighborly Wallet ─────────────────────────────────── */}
+              <div className="space-y-2">
+                {walletState === "connected" ? (
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Check size={16} className="text-green-600 shrink-0" />
-                      <span className="text-sm text-brandText">{statusCopy}</span>
+                      <span className="text-sm text-brandText">Wallet connected</span>
                     </div>
                     <NeuControl
                       size="sm"
                       variant="tertiary"
-                      onClick={() => setShowPayoutPrefillModal(true)}
-                      disabled={stripeConnecting}
+                      onClick={() => setShowWalletModal(true)}
                     >
-                      {stripeConnecting ? <Loader2 size={14} className="animate-spin" /> : "Update payouts"}
+                      Manage wallet
                     </NeuControl>
                   </div>
+                ) : walletState === "review" ? (
+                  <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-muted/50">
+                    <Loader2 size={14} className="text-muted-foreground shrink-0" style={{ animation: "none", opacity: 0.6 }} />
+                    <span className="text-sm text-muted-foreground">Wallet under review</span>
+                  </div>
                 ) : (
-                  <NeuControl
-                    size="lg"
-                    variant="primary"
-                    onClick={() => setShowPayoutPrefillModal(true)}
-                    disabled={stripeConnecting}
-                    className="w-full"
-                  >
-                    {stripeConnecting
-                      ? <><Loader2 size={14} className="animate-spin mr-2" />Connecting…</>
-                      : statusCopy}
-                  </NeuControl>
+                  <>
+                    <NeuControl
+                      size="lg"
+                      variant="primary"
+                      onClick={() => setShowWalletModal(true)}
+                      className="w-full"
+                    >
+                      Set Wallet
+                    </NeuControl>
+                    <p className="text-xs text-muted-foreground text-center px-1">
+                      Securely powered by Stripe to protect your payouts.
+                    </p>
+                  </>
                 )}
               </div>
 
@@ -1436,13 +1432,13 @@ const CarerProfile: React.FC = () => {
 
               {/* ── Section 11: Display my Pet-Carer Profile ─────────────────────── */}
               {(() => {
-                const payoutsDone = formData.stripePayoutStatus === "complete";
+                const payoutsDone = formData.stripePayoutsEnabled === true;
                 const agreementDone = formData.agreementAccepted;
                 const blocked = !isAge18Plus || !isVerified || !payoutsDone || !agreementDone;
                 const warningParts: string[] = [];
                 if (!isAge18Plus) warningParts.push("Service Providers must be at least 18.");
                 if (!isVerified) warningParts.push("Complete identity verification first.");
-                if (!payoutsDone) warningParts.push("Complete payout setup.");
+                if (!payoutsDone) warningParts.push("Set up wallet before providing service.");
                 if (!agreementDone) warningParts.push("Accept the Service Provider Agreement.");
                 const warningText = warningParts.join(" ");
                 return (
@@ -1464,39 +1460,15 @@ const CarerProfile: React.FC = () => {
                 );
               })()}
 
-              <Dialog open={showPayoutPrefillModal} onOpenChange={setShowPayoutPrefillModal}>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Set up payouts</DialogTitle>
-                    <DialogDescription>
-                      We’ve pre-filled what we can. Stripe will ask you to confirm your details and add your payout information.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <DialogFooter className="flex-col sm:flex-row gap-2">
-                    <NeuControl
-                      size="lg"
-                      variant="secondary"
-                      className="w-full sm:w-auto"
-                      onClick={() => setShowPayoutPrefillModal(false)}
-                      disabled={stripeConnecting}
-                    >
-                      Cancel
-                    </NeuControl>
-                    <NeuControl
-                      size="lg"
-                      variant="primary"
-                      className="w-full sm:w-auto"
-                      onClick={() => {
-                        setShowPayoutPrefillModal(false);
-                        void handleStripeConnect();
-                      }}
-                      disabled={stripeConnecting}
-                    >
-                      Continue with Stripe
-                    </NeuControl>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <WalletOnboardingModal
+                open={showWalletModal}
+                onOpenChange={setShowWalletModal}
+                onExit={() => {
+                  // Sync wallet status immediately after onboarding exits.
+                  // Belt-and-suspenders alongside the Stripe webhook + Realtime.
+                  void invokeAuthedFunction("refresh-stripe-account-status", { body: {} }).catch(() => {});
+                }}
+              />
             </>
           )}
 

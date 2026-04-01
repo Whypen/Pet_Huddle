@@ -242,6 +242,10 @@ serve(async (req: Request): Promise<Response> => {
         result = await handleSubscriptionUpdated(event);
         break;
 
+      case "account.updated":
+        result = await handleAccountUpdated(event);
+        break;
+
       default:
         console.log(`[STRIPE WEBHOOK] Unhandled event type: ${event.type}`);
         return new Response(
@@ -790,6 +794,104 @@ async function handlePaymentIntentSucceeded(
   return {
     success: true,
     message: "Payment intent processed",
+    eventId: event.id,
+  };
+}
+
+// =====================================================
+// HANDLER: account.updated (Stripe Connect wallet sync)
+// =====================================================
+// Does NOT insert into transactions — Connect account updates
+// are not financial events and have their own dedup via DB state.
+// Notification dedup rule: single canonical check — only send
+// wallet_connected notification when stripe_onboarding_completed_at
+// transitions from NULL → value (first-ever payouts_enabled = true).
+async function handleAccountUpdated(event: Stripe.Event): Promise<WebhookResponse> {
+  const account = event.data.object as Stripe.Account;
+  const accountId = account.id;
+
+  // Look up which provider owns this account
+  const { data: providerRow } = await supabase
+    .from("pet_care_profiles")
+    .select("user_id, stripe_payouts_enabled, stripe_onboarding_completed_at")
+    .eq("stripe_account_id", accountId)
+    .maybeSingle();
+
+  if (!providerRow) {
+    // Account not linked to any provider row — ignore silently
+    console.log(`[ACCOUNT UPDATED] No provider row found for account ${accountId} — skipping`);
+    return { success: true, message: "Account not linked to provider", eventId: event.id };
+  }
+
+  const userId = providerRow.user_id as string;
+  const wasPayoutsEnabled = providerRow.stripe_payouts_enabled as boolean;
+  const alreadyCompleted = Boolean(providerRow.stripe_onboarding_completed_at);
+
+  const currentlyDue = Array.isArray(account.requirements?.currently_due)
+    ? (account.requirements?.currently_due ?? []).filter(Boolean)
+    : [];
+  const eventuallyDue = Array.isArray(account.requirements?.eventually_due)
+    ? (account.requirements?.eventually_due ?? []).filter(Boolean)
+    : [];
+  const detailsSubmitted = account.details_submitted === true;
+  const chargesEnabled = account.charges_enabled === true;
+  const payoutsEnabled = account.payouts_enabled === true;
+
+  const resolveStatus = (ds: boolean, pe: boolean, cd: string[]): string => {
+    if (ds && pe && cd.length === 0) return "complete";
+    if (cd.length > 0 || !pe) return "needs_action";
+    return "pending";
+  };
+  const payoutStatus = resolveStatus(detailsSubmitted, payoutsEnabled, currentlyDue);
+
+  const update: Record<string, unknown> = {
+    stripe_details_submitted: detailsSubmitted,
+    stripe_charges_enabled: chargesEnabled,
+    stripe_payouts_enabled: payoutsEnabled,
+    stripe_requirements_currently_due: currentlyDue,
+    stripe_payout_status: payoutStatus,
+    stripe_requirements_state: {
+      currently_due: currentlyDue,
+      eventually_due: eventuallyDue,
+      synced_at: new Date().toISOString(),
+    },
+  };
+
+  // Canonical dedup: set completed_at only on first payouts_enabled transition
+  const isFirstConnect = payoutsEnabled && !alreadyCompleted;
+  if (isFirstConnect) {
+    update.stripe_onboarding_completed_at = new Date().toISOString();
+  }
+
+  await supabase
+    .from("pet_care_profiles")
+    .update(update)
+    .eq("user_id", userId);
+
+  // Send in-app notification exactly once: first transition to payouts_enabled
+  // Guard: wasPayoutsEnabled (pre-event DB state) must be false AND isFirstConnect
+  if (isFirstConnect && !wasPayoutsEnabled) {
+    const { error: notifErr } = await supabase.from("notifications").insert({
+      user_id: userId,
+      title: "Wallet connected!",
+      body: "Turn on your service listing to begin your carer journey!",
+      message: "Wallet connected! Turn on your service listing to begin your carer journey!",
+      type: "alert",
+      data: { kind: "wallet_connected", href: "/carerprofile" },
+      metadata: { kind: "wallet_connected" },
+    });
+    if (notifErr) {
+      console.error(`[ACCOUNT UPDATED] Notification insert failed: ${notifErr.message}`);
+    }
+  }
+
+  console.log(
+    `[ACCOUNT UPDATED] user=${userId} payouts_enabled=${payoutsEnabled} status=${payoutStatus} first_connect=${isFirstConnect}`,
+  );
+
+  return {
+    success: true,
+    message: `Account updated — wallet status: ${payoutStatus}`,
     eventId: event.id,
   };
 }
