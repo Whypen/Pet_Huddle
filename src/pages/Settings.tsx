@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, PawPrint } from "lucide-react";
+import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, EyeOff, Bell, Shield, Users, PawPrint } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -53,6 +53,8 @@ const Settings: React.FC = () => {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
@@ -571,6 +573,8 @@ const Settings: React.FC = () => {
         if (!o) {
           setPasswordOpen(false);
           changePasswordTurnstile.reset();
+          setShowNewPassword(false);
+          setShowConfirmPassword(false);
         }
       }}>
         <DialogContent className="max-w-sm">
@@ -582,24 +586,42 @@ const Settings: React.FC = () => {
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">New Password</label>
             <div className="form-field-rest relative flex items-center">
               <input
-                type="password"
+                type={showNewPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password"
                 className="field-input-core"
               />
+              <button
+                type="button"
+                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-tertiary,#6b7280)] hover:text-[var(--text-primary,#424965)]"
+                onClick={() => setShowNewPassword((prev) => !prev)}
+                aria-label={showNewPassword ? "Hide new password" : "Show new password"}
+                aria-pressed={showNewPassword}
+              >
+                {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Confirm Password</label>
             <div className="form-field-rest relative flex items-center">
               <input
-                type="password"
+                type={showConfirmPassword ? "text" : "password"}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm password"
                 className="field-input-core"
               />
+              <button
+                type="button"
+                className="mr-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-tertiary,#6b7280)] hover:text-[var(--text-primary,#424965)]"
+                onClick={() => setShowConfirmPassword((prev) => !prev)}
+                aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                aria-pressed={showConfirmPassword}
+              >
+                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
             </div>
           </div>
           </div>

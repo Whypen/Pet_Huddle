@@ -13,7 +13,8 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-huddle-access-token, x-client-info, apikey, content-type",
+    "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
+  "Access-Control-Max-Age": "86400",
 };
 
 const json = (status: number, body: unknown) =>
@@ -28,7 +29,7 @@ const clientIp = (req: Request) =>
   "unknown";
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
@@ -82,4 +83,3 @@ Deno.serve(async (req: Request) => {
     },
   });
 });
-

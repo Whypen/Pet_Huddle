@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { NeuButton } from "@/components/ui/NeuButton";
@@ -17,6 +18,7 @@ import {
 const AuthCallback = () => {
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const { setFlowState } = useSignup();
@@ -114,12 +116,21 @@ const AuthCallback = () => {
       <h1 className="text-xl font-bold text-brandText">Set a new password</h1>
       <div className="mt-6 space-y-3">
         <Input
-          type="password"
+          type={showPassword ? "text" : "password"}
           className="h-9"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="New password"
         />
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-tertiary,#6b7280)] hover:text-[var(--text-primary,#424965)]"
+          onClick={() => setShowPassword((prev) => !prev)}
+          aria-label={showPassword ? "Hide password" : "Show password"}
+          aria-pressed={showPassword}
+        >
+          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
         <TurnstileWidget
           siteKeyMissing={recoveryTurnstile.siteKeyMissing}
           setContainer={recoveryTurnstile.setContainer}

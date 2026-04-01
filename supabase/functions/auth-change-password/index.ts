@@ -11,7 +11,8 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-huddle-access-token, x-client-info, apikey, content-type",
+    "authorization, x-huddle-access-token, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-api-version",
+  "Access-Control-Max-Age": "86400",
 };
 
 const json = (status: number, body: unknown) =>
@@ -26,18 +27,25 @@ const clientIp = (req: Request) =>
   "unknown";
 
 const extractToken = (req: Request) => {
-  const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   const huddleToken = (req.headers.get("x-huddle-access-token") ?? "").replace(/^Bearer\s+/i, "").trim();
-  return [bearerToken, huddleToken].find((token) => token.split(".").length === 3) ?? null;
+  const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
+  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  const isUserJwt = (token: string) =>
+    token.split(".").length === 3 &&
+    token !== anonKey &&
+    token !== serviceRole;
+  return [huddleToken, bearerToken].find(isUserJwt) ?? null;
 };
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  if (!supabaseUrl || !anonKey) return json(500, { error: "server_misconfigured" });
+  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  if (!supabaseUrl || !anonKey || !serviceRole) return json(500, { error: "server_misconfigured" });
 
   let body: ChangePasswordBody;
   try {
@@ -74,11 +82,14 @@ Deno.serve(async (req: Request) => {
     return json(401, { error: "unauthorized" });
   }
 
-  const update = await userClient.auth.updateUser({ password });
+  const adminClient = createClient(supabaseUrl, serviceRole, {
+    auth: { persistSession: false },
+  });
+
+  const update = await adminClient.auth.admin.updateUserById(authUser.data.user.id, { password });
   if (update.error) {
     return json(400, { error: update.error.message || "password_change_failed" });
   }
 
   return json(200, { data: null });
 });
-
