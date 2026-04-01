@@ -823,6 +823,27 @@ const CarerProfile: React.FC = () => {
                   </span>
                 </h3>
                 <div className="space-y-2">
+                  {/* Selected skills chips */}
+                  {formData.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {formData.skills.map((s) => (
+                        <span
+                          key={s}
+                          className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-muted text-brandText border border-border/40"
+                        >
+                          {s}
+                          <button
+                            type="button"
+                            onClick={() => toggleSkill(s)}
+                            className="ml-0.5 text-muted-foreground hover:text-destructive transition-colors"
+                            aria-label={`Remove ${s}`}
+                          >
+                            <X size={11} strokeWidth={2.5} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {/* Multi-select dropdown */}
                   {formData.skills.length < MAX_SKILLS && (
                     <div className="relative" ref={openDrop === "skills" ? undefined : dropRef}>
@@ -832,7 +853,7 @@ const CarerProfile: React.FC = () => {
                         className="form-field-rest w-full h-[44px] px-4 flex items-center justify-between text-[14px]"
                       >
                         <span className="text-muted-foreground truncate">
-                          {formData.skills.length === 0 ? "Select skills" : formData.skills.join(", ")}
+                          {formData.skills.length === 0 ? "Select skills" : "Add another skill"}
                         </span>
                         <ChevronDown
                           size={16}
