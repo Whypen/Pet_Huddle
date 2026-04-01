@@ -9,6 +9,10 @@ declare global {
         options: {
           sitekey: string;
           action?: string;
+          retry?: "auto" | "never";
+          "retry-interval"?: number;
+          "refresh-expired"?: "auto" | "manual" | "never";
+          "refresh-timeout"?: "auto" | "manual" | "never";
           callback?: (token: string) => void;
           "expired-callback"?: () => void;
           "error-callback"?: () => void;
@@ -81,6 +85,10 @@ export function useTurnstile(action: string) {
           sitekey: siteKey,
           action,
           theme: "light",
+          retry: "auto",
+          "retry-interval": 800,
+          "refresh-expired": "auto",
+          "refresh-timeout": "auto",
           callback: (nextToken) => {
             setToken(nextToken);
             setError(null);
@@ -94,6 +102,15 @@ export function useTurnstile(action: string) {
           "error-callback": () => {
             setToken(null);
             setReady(false);
+            setError("Verification hiccup. Retrying challenge…");
+            if (localWidgetId && window.turnstile) {
+              try {
+                window.turnstile.reset(localWidgetId);
+                return;
+              } catch {
+                // fall through to user-facing fallback
+              }
+            }
             setError("Verification failed to load. Please retry.");
           },
         });
