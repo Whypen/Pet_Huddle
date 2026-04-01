@@ -39,6 +39,7 @@ import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
+import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -3873,26 +3874,9 @@ const Chats = () => {
                 )}
 
                 {discoveryLoading && (
-                  <>
-                    <div
-                      aria-hidden="true"
-                      className="absolute left-1/2 bottom-[-9%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/20 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
-                      style={{ transform: "translateX(-50%) scaleX(0.73)" }}
-                    />
-                    <div
-                      aria-hidden="true"
-                      className="absolute left-1/2 bottom-[-6%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/30 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
-                      style={{ transform: "translateX(-50%) scaleX(0.81)" }}
-                    />
-                    <div
-                      aria-hidden="true"
-                      className="absolute left-1/2 bottom-[-3%] h-[14%] w-full -translate-x-1/2 animate-pulse rounded-[22px] bg-slate-300/40 shadow-[0_4px_8px_rgba(0,0,255,0.08)]"
-                      style={{ transform: "translateX(-50%) scaleX(0.9)" }}
-                    />
-                    <div className="absolute inset-0 z-10 animate-pulse rounded-[28px] bg-slate-300/45 shadow-[0_16px_36px_rgba(33,71,201,0.08)]" />
-                    <div className="absolute inset-0 animate-pulse rounded-[28px] bg-slate-300/55" />
-                    <div className="absolute inset-x-8 bottom-10 h-28 animate-pulse rounded-[30px] bg-white/40 backdrop-blur-[18px]" />
-                  </>
+                  <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
+                    <HuddleVideoLoader size={32} />
+                  </div>
                 )}
 
                 {discoveryLocationBlocked && (
@@ -3913,24 +3897,16 @@ const Chats = () => {
                   <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
                     <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
                       <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
-                      <p className="mt-2 text-sm text-[#4F5677]/75">
-                        Expand your search first, then revisit passed profiles if needed.
-                      </p>
                       <div className="mt-4 flex flex-col gap-2">
-                        <button
-                          className={cn(
-                            "inline-flex h-11 items-center justify-center rounded-full px-5 text-sm font-semibold shadow-[0_10px_24px_rgba(33,71,201,0.24)]",
-                            canExpandSearch
-                              ? "bg-[rgba(33,71,201,0.92)] text-white"
-                              : "bg-white/70 text-[#4F5677]"
-                          )}
-                          onClick={canExpandSearch ? handleExpandSearch : refreshDiscovery}
-                        >
-                          {canExpandSearch
-                            ? `Expand Search +${DISCOVERY_EXPAND_STEP_KM}km (${effectiveDiscoveryDistanceKm}km)`
-                            : `Search Radius Maxed (${effectiveDiscoveryDistanceKm}km)`}
-                        </button>
-                        {!canExpandSearch && passedDiscoveryIds.size > 0 && (
+                        {canExpandSearch && (
+                          <button
+                            className="inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]"
+                            onClick={handleExpandSearch}
+                          >
+                            {`Expand Search +${DISCOVERY_EXPAND_STEP_KM}km`}
+                          </button>
+                        )}
+                        {passedDiscoveryIds.size > 0 && (
                           <button
                             className="inline-flex h-11 items-center justify-center rounded-full bg-white/75 px-5 text-sm font-semibold text-[#4F5677] shadow-[0_8px_20px_rgba(33,71,201,0.12)]"
                             onClick={resurfacePassedProfiles}
