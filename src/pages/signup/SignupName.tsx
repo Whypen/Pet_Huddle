@@ -12,6 +12,9 @@ import { Button, FormField } from "@/components/ui";
 import { supabase } from "@/integrations/supabase/client";
 import { SignupShell } from "@/components/signup/SignupShell";
 import signupNameImg from "@/assets/Sign up/Signup_Name.png";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { authSignup } from "@/lib/publicAuthApi";
 
 // ─── Validation (unchanged) ───────────────────────────────────────────────────
 
@@ -32,6 +35,7 @@ const SignupName = () => {
   const [submitting, setSubmitting]   = useState(false);
   const [isExiting, setIsExiting]     = useState(false);
   const normalizedSocialId = useMemo(() => socialId.trim(), [socialId]);
+  const signupTurnstile = useTurnstile("signup");
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -68,8 +72,12 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
+        if (!signupTurnstile.token) {
+          toast.error("Complete human verification first.");
+          return;
+        }
         // New user — create account now that we have display name + social ID
-        const { error: signUpError } = await supabase.auth.signUp({
+        const { error: signUpError } = await authSignup({
           email: data.email.trim(),
           password: data.password,
           options: {
@@ -79,7 +87,10 @@ const SignupName = () => {
               marketing_email_opt_in: data.email_opt_in,
             },
           },
+          turnstile_token: signupTurnstile.token,
+          turnstile_action: "signup",
         });
+        signupTurnstile.reset();
         if (signUpError) {
           setFlowState("idle");
           toast.error("Account creation failed. Please try again.");
@@ -178,15 +189,24 @@ const SignupName = () => {
       onBack={() => goTo("/signup/credentials")}
       isExiting={isExiting}
       cta={
-        <Button
-          variant="primary"
-          type="submit"
-          form={FORM_ID}
-          disabled={!canContinue}
-          className="w-full h-12"
-        >
-          {submitting ? "Checking…" : "Continue"}
-        </Button>
+        <div className="space-y-3">
+          {!user ? (
+            <TurnstileWidget
+              siteKeyMissing={signupTurnstile.siteKeyMissing}
+              setContainer={signupTurnstile.setContainer}
+              className="min-h-[65px]"
+            />
+          ) : null}
+          <Button
+            variant="primary"
+            type="submit"
+            form={FORM_ID}
+            disabled={!canContinue}
+            className="w-full h-12"
+          >
+            {submitting ? "Checking…" : "Continue"}
+          </Button>
+        </div>
       }
     >
       {/* Hero illustration */}

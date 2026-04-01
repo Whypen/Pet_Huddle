@@ -18,6 +18,8 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
 import { addPasskeyHint, hasPasskeyHint, mapPasskeyError, verifyPasskeyFactor } from "@/lib/passkey";
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -53,6 +55,7 @@ const Auth = () => {
 
   // ── Credentials step state ─────────────────────────────────────────────────
   const [passkeyInlineError, setPasskeyInlineError] = useState("");
+  const loginTurnstile = useTurnstile("login");
 
   // Auto-fire passkey challenge — no button needed
   useEffect(() => {
@@ -115,7 +118,12 @@ const Auth = () => {
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
     if (!values.email) return;
-    const result = await signIn(values.email, values.password);
+    if (!loginTurnstile.token) {
+      setAuthError("Complete human verification first.");
+      return;
+    }
+    const result = await signIn(values.email, values.password, undefined, loginTurnstile.token);
+    loginTurnstile.reset();
     if (result.error) {
       setAuthError(result.error.message || "Couldn't sign you in.");
       return;
@@ -421,6 +429,12 @@ const Auth = () => {
                 />
                 <Link to="/reset-password" className="text-xs text-brandBlue">Forgot password?</Link>
               </div>
+
+              <TurnstileWidget
+                siteKeyMissing={loginTurnstile.siteKeyMissing}
+                setContainer={loginTurnstile.setContainer}
+                className="min-h-[65px]"
+              />
 
               {hasPasskeyHint(watch("email") ?? "") ? (
                 <NeuButton

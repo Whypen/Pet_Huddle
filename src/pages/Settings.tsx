@@ -15,6 +15,9 @@ import strayCatImage from "@/assets/Notifications/Stray Cat.jpg";
 import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { authChangePassword } from "@/lib/publicAuthApi";
 
 type NotificationPrefs = {
   push_enabled: boolean;
@@ -56,6 +59,7 @@ const Settings: React.FC = () => {
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [starsRemaining, setStarsRemaining] = useState<number>(0);
+  const changePasswordTurnstile = useTurnstile("change_password");
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
@@ -301,9 +305,19 @@ const Settings: React.FC = () => {
       return;
     }
 
+    if (!changePasswordTurnstile.token) {
+      toast.error("Complete human verification first.");
+      return;
+    }
+
     setBusy(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    const { error } = await authChangePassword({
+      password: newPassword,
+      turnstile_token: changePasswordTurnstile.token,
+      turnstile_action: "change_password",
+    });
     setBusy(false);
+    changePasswordTurnstile.reset();
 
     if (error) {
       toast.error("We couldn't update your password. Please retry.");
@@ -553,7 +567,12 @@ const Settings: React.FC = () => {
       </div>
 
       {/* ── Change Password dialog ── */}
-      <Dialog open={passwordOpen} onOpenChange={(o) => { if (!o) setPasswordOpen(false); }}>
+      <Dialog open={passwordOpen} onOpenChange={(o) => {
+        if (!o) {
+          setPasswordOpen(false);
+          changePasswordTurnstile.reset();
+        }
+      }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Change Password</DialogTitle>
@@ -584,6 +603,11 @@ const Settings: React.FC = () => {
             </div>
           </div>
           </div>
+          <TurnstileWidget
+            siteKeyMissing={changePasswordTurnstile.siteKeyMissing}
+            setContainer={changePasswordTurnstile.setContainer}
+            className="min-h-[65px]"
+          />
           <DialogFooter className="!flex-row gap-2 pt-2">
             <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setPasswordOpen(false)}>Cancel</NeuControl>
             <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy} onClick={submitPasswordChange}>Update</NeuControl>

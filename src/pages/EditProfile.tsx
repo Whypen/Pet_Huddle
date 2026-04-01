@@ -150,7 +150,7 @@ type EditProfileProps = {
 const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const { user, profile, refreshProfile, signIn } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const { data: signupData, reset: resetSignup, setFlowState } = useSignup();
   const [loading, setLoading] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -1199,7 +1199,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
   const handleSave = async () => {
     const { data: sessionData } = await supabase.auth.getSession();
-    let activeUser = user ?? sessionData.session?.user ?? null;
+    const activeUser = user ?? sessionData.session?.user ?? null;
     const missingFields = getMissingRequiredFieldLabels();
     if (missingFields.length > 0) {
       validateRequiredFields();
@@ -1213,53 +1213,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         navigate("/auth");
         return;
       }
-      try {
-        const email = (signupData.email || "").trim();
-        const password = signupData.password || "";
-        if (!email || !password) {
-          toast.error("Please sign in to continue.");
-          navigate("/auth");
-          return;
-        }
-
-        const { error: signupError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              display_name: formData.display_name,
-              dob: formData.dob,
-              phone: formData.phone,
-              social_id: formData.social_id,
-            },
-          },
-        });
-        if (signupError && !isAlreadyRegisteredError(signupError.message)) {
-          throw signupError;
-        }
-
-        let nextSessionUser = (await supabase.auth.getSession()).data.session?.user ?? null;
-        if (!nextSessionUser) {
-          const signInResult = await signIn(email, password);
-          if (signInResult.error) throw signInResult.error;
-          if (signInResult.mfaRequired) {
-            throw new Error("Please complete sign-in verification on the login screen, then continue profile setup.");
-          }
-          nextSessionUser = (await supabase.auth.getSession()).data.session?.user ?? null;
-        }
-
-        if (!nextSessionUser) {
-          toast.error("Please verify your email, then sign in to continue.");
-          navigate("/auth");
-          return;
-        }
-
-        activeUser = nextSessionUser;
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast.error(message || "Please sign in to continue.");
+      // Account creation/sign-in is now protected by Turnstile-backed wrapper routes.
+      // If onboarding reaches this page without an authenticated session, route the
+      // user back to the credential/signup step to complete the protected flow.
+      const email = (signupData.email || "").trim();
+      if (email) {
+        toast.error("Please complete account verification, then continue.");
+        navigate("/signup/credentials");
         return;
       }
+      toast.error("Please sign in to continue.");
+      navigate("/auth");
+      return;
     }
 
     // Gate: email must be verified before completing onboarding

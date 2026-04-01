@@ -63,9 +63,7 @@ const SignupVerify = () => {
 
   // ── Start verification ───────────────────────────────────────────────────────
   // signUp() was called at step 2 (SignupCredentials). The auto_confirm trigger
-  // ensures a live session is returned. We verify that here before navigating,
-  // and fall back to signInWithPassword if the session is somehow absent (e.g.
-  // race on first-ever load, or account already existed from a prior attempt).
+  // ensures a live session is returned. We verify that here before navigating.
 
   const startVerificationSignup = async () => {
     snapshotSetProfilePrefill();
@@ -73,26 +71,9 @@ const SignupVerify = () => {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
-      const email = data.email?.trim();
-      const password = data.password?.trim();
-      if (!email || !password) {
-        // Credentials not in context — navigate anyway; VerifyIdentity will
-        // redirect to /auth if truly unauthenticated outside signup flow.
-        navigate("/verify-identity", {
-          state: { returnTo: SIGNUP_VERIFY_RETURN_TO, backTo: "/signup/verify" },
-        });
-        return;
-      }
-      setStarting(true);
-      try {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-          toast.error("Session not ready. Please try again in a moment.");
-          return;
-        }
-      } finally {
-        setStarting(false);
-      }
+      toast.error("Session not ready. Please sign in and continue.");
+      navigate("/auth");
+      return;
     }
 
     navigate("/verify-identity", {

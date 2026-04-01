@@ -24,6 +24,8 @@ import { LegalModal } from "@/components/modals/LegalModal";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { useTurnstile } from "@/hooks/useTurnstile";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
@@ -42,7 +44,7 @@ const shouldBypassDuplicateCheck =
 const SignupCredentials = () => {
   const navigate = useNavigate();
   const { data, update, setFlowState, flowState } = useSignup();
-  const { user, profile } = useAuth();
+  const { user, profile, signIn } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
 
   // Strict OAuth onboarding detection — ALL four conditions must hold:
@@ -89,6 +91,8 @@ const SignupCredentials = () => {
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
+  const presignupTurnstile = useTurnstile("send_pre_signup_verify");
+  const loginTurnstile = useTurnstile("login");
 
   const {
     register,
@@ -297,6 +301,10 @@ const SignupCredentials = () => {
     confirmPassword?: string;
   }) => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
+    if (!shouldBypassDuplicateCheck && !isOAuthOnboarding && !presignupTurnstile.token) {
+      toast.error("Complete human verification first.");
+      return;
+    }
     if (shouldBypassDuplicateCheck) {
       update({ email: values.email, phone: values.phone, email_opt_in: emailOptIn });
       setFlowState("signup");
@@ -351,8 +359,15 @@ const SignupCredentials = () => {
       const newToken = crypto.randomUUID();
       const { data: sendData, error: sendError } = await supabase.functions.invoke(
         "send-pre-signup-verify",
-        { body: { email: values.email.trim(), token: newToken } },
+        {
+          body: {
+            email: values.email.trim(),
+            token: newToken,
+            turnstile_token: presignupTurnstile.token,
+          },
+        },
       );
+      presignupTurnstile.reset();
       if (sendError || !sendData?.ok) {
         setFlowState("idle");
         toast.error("Couldn't send verification email. Please try again.");
@@ -400,12 +415,21 @@ const SignupCredentials = () => {
 
   const handleResend = async () => {
     if (sendState === "sending") return;
+    if (!presignupTurnstile.token) {
+      toast.error("Complete human verification first.");
+      return;
+    }
     setSendState("sending");
     const newToken = crypto.randomUUID();
     try {
       const { data, error } = await supabase.functions.invoke("send-pre-signup-verify", {
-        body: { email: email.trim(), token: newToken },
+        body: {
+          email: email.trim(),
+          token: newToken,
+          turnstile_token: presignupTurnstile.token,
+        },
       });
+      presignupTurnstile.reset();
       if (error || !data?.ok) throw new Error("send_failed");
       setVerifyToken(newToken);
       sessionStorage.setItem("huddle_presignup_token", newToken);
@@ -511,19 +535,28 @@ const SignupCredentials = () => {
           }}
           isExiting={isExiting}
           cta={
-            emailVerified ? (
-              <NeuButton variant="primary" className="w-full h-12" onClick={handleContinue}>
-                Continue
-              </NeuButton>
-            ) : (
-              <NeuButton
-                variant="primary"
-                className="w-full h-12"
-                onClick={() => setShowMailSheet(true)}
-              >
-                Check your email
-              </NeuButton>
-            )
+            <div className="space-y-3">
+              {!emailVerified ? (
+                <TurnstileWidget
+                  siteKeyMissing={presignupTurnstile.siteKeyMissing}
+                  setContainer={presignupTurnstile.setContainer}
+                  className="min-h-[65px]"
+                />
+              ) : null}
+              {emailVerified ? (
+                <NeuButton variant="primary" className="w-full h-12" onClick={handleContinue}>
+                  Continue
+                </NeuButton>
+              ) : (
+                <NeuButton
+                  variant="primary"
+                  className="w-full h-12"
+                  onClick={() => setShowMailSheet(true)}
+                >
+                  Check your email
+                </NeuButton>
+              )}
+            </div>
           }
         >
           <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
@@ -747,8 +780,33 @@ const SignupCredentials = () => {
             </>
           )}
 
-          {/* Legal consent copy */}
           <div className="space-y-3">
+            <label className="flex items-start gap-2 text-[12px] text-[rgba(74,73,101,0.80)] leading-relaxed cursor-pointer">
+              <input
+                type="checkbox"
+                checked={emailOptIn}
+                onChange={(e) => setEmailOptIn(e.target.checked)}
+                className="mt-[2px] h-4 w-4 rounded border-[rgba(74,73,101,0.35)] shrink-0"
+              />
+              <span>
+                I agree to receive emails from Huddle for pet care, community news, and product updates.
+              </span>
+            </label>
+
+            {emailOptIn && (
+              <p className="text-[12px] text-[rgba(74,73,101,0.55)] pl-6">
+                We'll send you a separate email to confirm your subscription.
+              </p>
+            )}
+
+            {!isOAuthOnboarding ? (
+              <TurnstileWidget
+                siteKeyMissing={presignupTurnstile.siteKeyMissing}
+                setContainer={presignupTurnstile.setContainer}
+                className="min-h-[65px]"
+              />
+            ) : null}
+
             <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
               By tapping Continue, you agree to our{" "}
               <button
@@ -768,24 +826,6 @@ const SignupCredentials = () => {
               </button>
               .
             </p>
-
-            <label className="flex items-start gap-2 text-[12px] text-[rgba(74,73,101,0.80)] leading-relaxed cursor-pointer">
-              <input
-                type="checkbox"
-                checked={emailOptIn}
-                onChange={(e) => setEmailOptIn(e.target.checked)}
-                className="mt-[2px] h-4 w-4 rounded border-[rgba(74,73,101,0.35)] shrink-0"
-              />
-              <span>
-                I agree to receive emails from Huddle for pet care, community news, and product updates.
-              </span>
-            </label>
-
-            {emailOptIn && (
-              <p className="text-[12px] text-[rgba(74,73,101,0.55)] pl-6">
-                We'll send you a separate email to confirm your subscription.
-              </p>
-            )}
           </div>
 
           <div className="h-[calc(env(safe-area-inset-bottom,0px)+8px)]" aria-hidden="true" />
@@ -850,6 +890,11 @@ const SignupCredentials = () => {
             {signinError && (
               <p className="text-[12px] text-[#EF4444]">{signinError}</p>
             )}
+            <TurnstileWidget
+              siteKeyMissing={loginTurnstile.siteKeyMissing}
+              setContainer={loginTurnstile.setContainer}
+              className="min-h-[65px]"
+            />
 
             <NeuButton
               className="w-full"
@@ -858,11 +903,14 @@ const SignupCredentials = () => {
                 setSigninLoading(true);
                 setSigninError("");
                 try {
-                  const { error } = await supabase.auth.signInWithPassword({
-                    email: signinEmail,
-                    password: signinPassword,
-                  });
-                  if (error) throw error;
+                  const token = String(loginTurnstile.token || "").trim();
+                  if (!token) throw new Error("Complete human verification first.");
+                  const result = await signIn(signinEmail, signinPassword, undefined, token);
+                  loginTurnstile.reset();
+                  if (result.error) throw result.error;
+                  if (result.mfaRequired) {
+                    throw new Error("Two-step verification is required. Please continue from the Sign in screen.");
+                  }
 
                   if (signinRemember) {
                     localStorage.setItem("auth_login_identifier", signinEmail);
@@ -876,7 +924,7 @@ const SignupCredentials = () => {
                   setShowSignInModal(false);
                   goTo("/");
                 } catch (err: unknown) {
-                  setSigninError("Couldn’t sign you in.");
+                  setSigninError(err instanceof Error ? err.message : "Couldn’t sign you in.");
                 } finally {
                   setSigninLoading(false);
                 }

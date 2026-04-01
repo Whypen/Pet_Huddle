@@ -5,6 +5,9 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useSignup } from "@/contexts/SignupContext";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { authChangePassword } from "@/lib/publicAuthApi";
 import {
   SETPROFILE_PREFILL_KEY,
   buildScopedStorageKey,
@@ -14,8 +17,10 @@ import {
 const AuthCallback = () => {
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const { setFlowState } = useSignup();
+  const recoveryTurnstile = useTurnstile("change_password");
 
   useEffect(() => {
     const run = async () => {
@@ -81,7 +86,19 @@ const AuthCallback = () => {
   }, [navigate, setFlowState]);
 
   const updatePassword = async () => {
-    const { error } = await supabase.auth.updateUser({ password });
+    const token = String(recoveryTurnstile.token || "").trim();
+    if (!token) {
+      toast.error("Complete human verification first.");
+      return;
+    }
+    setSubmitting(true);
+    const { error } = await authChangePassword({
+      password,
+      turnstile_token: token,
+      turnstile_action: "change_password",
+    });
+    recoveryTurnstile.reset();
+    setSubmitting(false);
     if (error) {
       toast.error(error.message || "Failed to update password");
       return;
@@ -103,7 +120,12 @@ const AuthCallback = () => {
           onChange={(e) => setPassword(e.target.value)}
           placeholder="New password"
         />
-        <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8}>
+        <TurnstileWidget
+          siteKeyMissing={recoveryTurnstile.siteKeyMissing}
+          setContainer={recoveryTurnstile.setContainer}
+          className="min-h-[65px]"
+        />
+        <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8 || submitting}>
           Update password
         </NeuButton>
       </div>

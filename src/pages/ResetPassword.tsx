@@ -1,10 +1,12 @@
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { authResetPassword } from "@/lib/publicAuthApi";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 
 const schema = z.object({
   email: z.string().email("Invalid email format"),
@@ -13,15 +15,25 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const ResetPassword = () => {
+  const resetTurnstile = useTurnstile("reset_password");
   const { register, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
   });
 
   const onSubmit = async (values: FormData) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(values.email, {
+    const token = String(resetTurnstile.token || "").trim();
+    if (!token) {
+      toast.error("Complete human verification first.");
+      return;
+    }
+    const { error } = await authResetPassword({
+      email: values.email,
       redirectTo: `${window.location.origin}/auth/callback`,
+      turnstile_token: token,
+      turnstile_action: "reset_password",
     });
+    resetTurnstile.reset();
     if (error) {
       toast.error(error.message || "Failed to send reset link");
       return;
@@ -36,6 +48,11 @@ const ResetPassword = () => {
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">
         <Input type="email" className={`h-9 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
         {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+        <TurnstileWidget
+          siteKeyMissing={resetTurnstile.siteKeyMissing}
+          setContainer={resetTurnstile.setContainer}
+          className="min-h-[65px]"
+        />
         <Button type="submit" className="w-full h-10" disabled={!isValid}>Send reset link</Button>
       </form>
     </div>

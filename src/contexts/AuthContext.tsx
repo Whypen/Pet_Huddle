@@ -14,6 +14,7 @@ import {
 } from "@/lib/signupOnboarding";
 import { fetchLivePrices, resolvePricingHints } from "@/lib/stripePrices";
 import { normalizeMembershipTier } from "@/lib/membership";
+import { authLogin, authSignup } from "@/lib/publicAuthApi";
 
 export interface Profile {
   id: string;
@@ -104,12 +105,14 @@ interface AuthContextType {
     password: string,
     displayName: string,
     phone: string,
-    consent?: { acceptedAtIso: string; version: string }
+    consent?: { acceptedAtIso: string; version: string },
+    turnstileToken?: string,
   ) => Promise<{ error: Error | null }>;
   signIn: (
     email: string,
     password: string,
-    phone?: string
+    phone?: string,
+    turnstileToken?: string,
   ) => Promise<{ error: Error | null; mfaRequired: boolean; mfaFactorId: string | null; mfaMethod: "totp" | "passkey" | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -479,7 +482,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     password: string,
     displayName: string,
     phone: string,
-    consent?: { acceptedAtIso: string; version: string }
+    consent?: { acceptedAtIso: string; version: string },
+    turnstileToken?: string,
   ) => {
     const runtimeEnv = getAuthRuntimeEnv();
     if (import.meta.env.DEV) {
@@ -490,11 +494,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
     }
     const redirectUrl = `${window.location.origin}/`;
+    const turnstile = String(turnstileToken || "").trim();
+    if (!turnstile) {
+      return { error: new Error("Complete human verification first.") };
+    }
 
     let data: { user: { id: string } | null } | null = null;
     let error: { message?: string } | null = null;
     try {
-      const res = await supabase.auth.signUp({
+      const res = await authSignup({
         email,
         password,
         options: {
@@ -510,9 +518,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               : {}),
           },
         },
+        turnstile_token: turnstile,
+        turnstile_action: "signup",
       });
-      data = res.data as unknown as { user: { id: string } | null };
-      error = res.error as unknown as { message?: string } | null;
+      data = { user: (res.user as { id: string } | null) ?? null };
+      error = res.error as { message?: string } | null;
     } catch (e: unknown) {
       console.error("[AuthContext] signUp network error", e);
       return { error: e instanceof Error ? e : new Error(String(e)) };
@@ -542,7 +552,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { error: error as Error | null };
   };
 
-  const signIn = async (email: string, password: string, phone?: string) => {
+  const signIn = async (email: string, password: string, phone?: string, turnstileToken?: string) => {
     const runtimeEnv = getAuthRuntimeEnv();
     if (import.meta.env.DEV) {
       console.debug("[auth.signin] runtime", {
@@ -554,12 +564,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
     }
     try {
-      const signInResult = phone
-        ? await supabase.auth.signInWithPassword({ phone, password })
-        : await supabase.auth.signInWithPassword({ email, password });
-      const error = signInResult.error as Error | null;
-      if (error) {
-        return { error, mfaRequired: false, mfaFactorId: null, mfaMethod: null };
+      if (!String(turnstileToken || "").trim()) {
+        return {
+          error: new Error("Complete human verification first."),
+          mfaRequired: false,
+          mfaFactorId: null,
+          mfaMethod: null,
+        };
+      }
+      const loginResult = await authLogin({
+        email: phone ? undefined : email,
+        phone: phone || undefined,
+        password,
+        turnstile_token: String(turnstileToken || "").trim(),
+        turnstile_action: "login",
+      });
+      if (loginResult.error) {
+        return {
+          error: new Error(loginResult.error.message || "login_failed"),
+          mfaRequired: false,
+          mfaFactorId: null,
+          mfaMethod: null,
+        };
       }
 
       const aal = await getAuthenticatorAssurance(supabase);
