@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Bell, Shield, Users, PawPrint } from "lucide-react";
+import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Eye, Bell, Shield, Users, PawPrint } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
