@@ -88,12 +88,17 @@ function matchSearch(provider: ProviderSummary, raw: string): boolean {
   const proofSearchable = Object.values(provider.proofMetadata ?? {})
     .map((meta) => Object.values(meta ?? {}).join(" "))
     .join(" ");
+  // Expand service aliases so e.g. "Licensed Vet" matches "Vet / Licensed Care"
+  const serviceAliases = provider.servicesOffered
+    .flatMap((s) => SERVICE_TYPE_MAP[s] ?? [s])
+    .join(" ");
   const text = [
     provider.displayName,
     provider.areaName,
     provider.story,
     provider.skills.join(" "),
     provider.servicesOffered.join(" "),
+    serviceAliases,
     provider.servicesOther,
     provider.petTypes.join(" "),
     provider.petTypesOther,

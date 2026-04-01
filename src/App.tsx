@@ -14,7 +14,7 @@ import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { OfflineBanner } from "@/components/network/OfflineBanner";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { AppShell } from "@/components/layout/AppShell";
-import { Loader2 } from "lucide-react";
+import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import SignupDob from "./pages/signup/SignupDob";
@@ -104,7 +104,7 @@ const RouteSuspense = ({ children }: { children: React.ReactNode }) => (
   <Suspense
     fallback={
       <div className="min-h-svh flex items-center justify-center bg-background">
-        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+        <HuddleVideoLoader size={32} />
       </div>
     }
   >

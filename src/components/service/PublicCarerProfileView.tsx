@@ -107,7 +107,7 @@ function CertifiedSkillRow({
         side="top"
         align="start"
         sideOffset={6}
-        className="z-[4400] w-56 rounded-[14px] border border-brandText/10 bg-white p-3 shadow-elevated"
+        className="z-[6500] w-56 rounded-[14px] border border-brandText/10 bg-white p-3 shadow-elevated"
       >
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
           Credentials
