@@ -7,8 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CheckCircle, Lock, Mail, Phone } from "lucide-react";
-import { GlassSheet } from "@/components/ui/GlassSheet";
+import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
@@ -65,16 +64,6 @@ const SignupCredentials = () => {
     setTimeout(() => navigate(to), 180);
   };
 
-  const [verifySubState, setVerifySubState] = useState<"form" | "verifying">(
-    () => sessionStorage.getItem("huddle_presignup_token") ? "verifying" : "form"
-  );
-  const [verifyToken, setVerifyToken] = useState<string>(
-    () => sessionStorage.getItem("huddle_presignup_token") ?? ""
-  );
-  const [emailVerified, setEmailVerified] = useState(false);
-  const [sendState, setSendState] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [tokenExpired, setTokenExpired] = useState(false);
-  const [showMailSheet, setShowMailSheet] = useState(false);
   const [emailOptIn, setEmailOptIn] = useState(false);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [showSignInModal, setShowSignInModal] = useState(false);
@@ -91,7 +80,6 @@ const SignupCredentials = () => {
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
-  const presignupTurnstile = useTurnstile("send_pre_signup_verify");
   const loginTurnstile = useTurnstile("login");
 
   const {
@@ -254,38 +242,6 @@ const SignupCredentials = () => {
 
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
-  // Poll DB every 3s for pre-signup verification status.
-  // Replaces the old localStorage polling — works cross-browser / mobile email clients.
-  useEffect(() => {
-    if (verifySubState !== "verifying" || !verifyToken || emailVerified) return;
-    const poll = async () => {
-      try {
-        const { data, error } = await supabase.functions.invoke(
-          "get-pre-signup-verify-status",
-          { body: { token: verifyToken } },
-        );
-        if (error) return;
-        if (data?.verified) {
-          setEmailVerified(true);
-          toast.success("Email verified!");
-        } else if (data?.expired) {
-          setTokenExpired(true);
-        }
-      } catch {
-        // silent poll failure — retry on next tick
-      }
-    };
-    const id = setInterval(poll, 3000);
-    return () => clearInterval(id);
-  }, [verifySubState, verifyToken, emailVerified]);
-
-  // Attempt mailto: deep link 1s after the bottom sheet opens.
-  useEffect(() => {
-    if (!showMailSheet) return;
-    const id = setTimeout(() => { window.location.href = "mailto:"; }, 1000);
-    return () => clearTimeout(id);
-  }, [showMailSheet]);
-
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   // onSubmit receives RHF-validated values after handleSubmit runs the conditional
@@ -301,10 +257,6 @@ const SignupCredentials = () => {
     confirmPassword?: string;
   }) => {
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
-    if (!shouldBypassDuplicateCheck && !isOAuthOnboarding && !presignupTurnstile.token) {
-      toast.error("Complete human verification first.");
-      return;
-    }
     if (shouldBypassDuplicateCheck) {
       update({ email: values.email, phone: values.phone, email_opt_in: emailOptIn });
       setFlowState("signup");
@@ -327,6 +279,10 @@ const SignupCredentials = () => {
       return;
     }
     // Email signup path — credentialsSchema validated all fields including password.
+    // Store credentials in flow state — signUp() is deferred to /signup/name so
+    // the user's display name and social ID are collected before account creation.
+    // This prevents orphaned accounts when users abandon mid-flow.
+    // Email verification is handled by /signup/verify-email (presignup_tokens system).
     setSubmitting(true);
     try {
       const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
@@ -343,10 +299,6 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
-      // Store credentials in flow state — signUp() is deferred to /signup/name so
-      // the user's display name and social ID are collected before account creation.
-      // This prevents orphaned accounts when users abandon mid-flow.
-      // email_opt_in is stored in client state only; DB commit happens at account creation.
       update({
         email: values.email.trim(),
         password: values.password ?? "",
@@ -354,35 +306,11 @@ const SignupCredentials = () => {
         email_opt_in: emailOptIn,
       });
       setFlowState("signup");
-      // Send pre-signup verification email (awaited — no silent failures).
-      // DB token is created server-side; client polls get-pre-signup-verify-status.
-      const newToken = crypto.randomUUID();
-      const { data: sendData, error: sendError } = await supabase.functions.invoke(
-        "send-pre-signup-verify",
-        {
-          body: {
-            email: values.email.trim(),
-            token: newToken,
-            turnstile_token: presignupTurnstile.token,
-          },
-        },
-      );
-      presignupTurnstile.reset();
-      if (sendError || !sendData?.ok) {
-        setFlowState("idle");
-        toast.error("Couldn't send verification email. Please try again.");
-        return;
-      }
-      setVerifyToken(newToken);
-      sessionStorage.setItem("huddle_presignup_token", newToken);
-      sessionStorage.setItem("huddle_presignup_email", values.email.trim());
-      setSendState("sent");
-      setVerifySubState("verifying");
-      return;
+      goTo("/signup/verify-email");
     } catch (err) {
       console.error("Signup failed:", err);
       setFlowState("idle");
-      toast.error("Account creation failed. Please try again.");
+      toast.error("Something went wrong. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -410,76 +338,6 @@ const SignupCredentials = () => {
       sessionOnlyHandlerRef.current = clearAuthTokens;
       window.addEventListener("beforeunload", clearAuthTokens);
       window.addEventListener("pagehide", clearAuthTokens);
-    }
-  };
-
-  const handleResend = async () => {
-    if (sendState === "sending") return;
-    if (!presignupTurnstile.token) {
-      toast.error("Complete human verification first.");
-      return;
-    }
-    setSendState("sending");
-    const newToken = crypto.randomUUID();
-    try {
-      const { data, error } = await supabase.functions.invoke("send-pre-signup-verify", {
-        body: {
-          email: email.trim(),
-          token: newToken,
-          turnstile_token: presignupTurnstile.token,
-        },
-      });
-      presignupTurnstile.reset();
-      if (error || !data?.ok) throw new Error("send_failed");
-      setVerifyToken(newToken);
-      sessionStorage.setItem("huddle_presignup_token", newToken);
-      setTokenExpired(false);
-      setEmailVerified(false);
-      setSendState("sent");
-      toast.success("Verification email sent");
-    } catch {
-      setSendState("error");
-      toast.error("Couldn't send. Please try again.");
-    }
-  };
-
-  const handleImmediateCheck = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "get-pre-signup-verify-status",
-        { body: { token: verifyToken } },
-      );
-      if (error) throw error;
-      if (data?.verified) {
-        setEmailVerified(true);
-        toast.success("Email verified!");
-      } else if (data?.expired) {
-        setTokenExpired(true);
-      } else {
-        toast.message("Not yet verified. Check your inbox and click the link.");
-      }
-    } catch {
-      toast.error("Could not check status. Please try again.");
-    }
-  };
-
-  const handleContinue = async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        "get-pre-signup-verify-status",
-        { body: { token: verifyToken } },
-      );
-      if (error) throw error;
-      if (data?.verified) {
-        sessionStorage.removeItem("huddle_presignup_token");
-        sessionStorage.removeItem("huddle_presignup_email");
-        goTo("/signup/name");
-      } else {
-        setEmailVerified(false);
-        toast.message("Not yet verified. Check your inbox and click the link.");
-      }
-    } catch {
-      toast.error("Could not verify. Please try again.");
     }
   };
 
@@ -517,151 +375,7 @@ const SignupCredentials = () => {
             ? "Enter a valid phone number"
             : "Complete all required fields to continue");
 
-  // ── Verify sub-state screen ──────────────────────────────────────────────────
-
-  if (verifySubState === "verifying") {
-    return (
-      <>
-        <SignupShell
-          step={2}
-          onBack={() => {
-            setVerifySubState("form");
-            setEmailVerified(false);
-            setVerifyToken("");
-            setTokenExpired(false);
-            setSendState("idle");
-            sessionStorage.removeItem("huddle_presignup_token");
-            sessionStorage.removeItem("huddle_presignup_email");
-          }}
-          isExiting={isExiting}
-          cta={
-            <div className="space-y-3">
-              {!emailVerified ? (
-                <TurnstileWidget
-                  siteKeyMissing={presignupTurnstile.siteKeyMissing}
-                  setContainer={presignupTurnstile.setContainer}
-                  className="min-h-[65px]"
-                />
-              ) : null}
-              {emailVerified ? (
-                <NeuButton variant="primary" className="w-full h-12" onClick={handleContinue}>
-                  Continue
-                </NeuButton>
-              ) : (
-                <NeuButton
-                  variant="primary"
-                  className="w-full h-12"
-                  onClick={() => setShowMailSheet(true)}
-                >
-                  Check your email
-                </NeuButton>
-              )}
-            </div>
-          }
-        >
-          <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
-            Verify your email
-          </h1>
-          <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-2">
-            We sent a link to{" "}
-            <strong className="font-[600] text-[#424965]">{email}</strong>.
-            Tap the button in the email to verify.
-          </p>
-
-          {emailVerified && (
-            <div className="mt-4 flex items-center gap-2 text-[14px] font-[500] text-green-700">
-              <CheckCircle size={16} />
-              Email verified
-            </div>
-          )}
-
-          {tokenExpired && (
-            <div className="mt-4 p-3 rounded-xl bg-red-50 border border-red-100">
-              <p className="text-[13px] text-[#e84545]">
-                Your verification link has expired. Tap Resend below.
-              </p>
-            </div>
-          )}
-
-          {sendState === "error" && (
-            <div className="mt-4 p-3 rounded-xl bg-red-50 border border-red-100">
-              <p className="text-[13px] text-[#e84545]">
-                We couldn't send the email. Tap Resend to try again.
-              </p>
-            </div>
-          )}
-
-          <div className="mt-8">
-            <p className="text-[15px] font-[600] text-[#424965]">Didn't receive it?</p>
-            <p className="text-[14px] text-[rgba(74,73,101,0.70)] mt-1">
-              Check your spam and promotions folder.
-            </p>
-            <button
-              type="button"
-              className="mt-2 text-[14px] font-[500] text-[#2145CF] disabled:opacity-50"
-              onClick={handleResend}
-              disabled={sendState === "sending"}
-            >
-              {sendState === "sending" ? "Sending…" : "Resend email"}
-            </button>
-          </div>
-
-          <p className="mt-6 text-[11px] text-[rgba(74,73,101,0.50)]">
-            Wrong email?{" "}
-            <Link
-              to="/auth"
-              className="text-[#2145CF] underline"
-              onClick={() => {
-                setFlowState("idle");
-                sessionStorage.removeItem("huddle_presignup_token");
-                sessionStorage.removeItem("huddle_presignup_email");
-              }}
-            >
-              Start over
-            </Link>
-          </p>
-        </SignupShell>
-
-        <GlassSheet
-          isOpen={showMailSheet}
-          onClose={() => setShowMailSheet(false)}
-          title="Check your email"
-          className="pb-[max(env(safe-area-inset-bottom,0px),24px)]"
-        >
-          <p className="text-[14px] text-[rgba(74,73,101,0.70)] leading-relaxed mb-5">
-            We'll try to open your mail app. If it doesn't open, return here after verifying.
-          </p>
-          <div className="space-y-3">
-            <NeuButton
-              variant="secondary"
-              className="w-full h-12"
-              onClick={() => {
-                window.location.href = "mailto:";
-                setShowMailSheet(false);
-              }}
-            >
-              Open Mail App
-            </NeuButton>
-            <NeuButton
-              variant="ghost"
-              className="w-full h-11"
-              onClick={() => {
-                setShowMailSheet(false);
-                handleImmediateCheck();
-              }}
-            >
-              I've already verified
-            </NeuButton>
-          </div>
-        </GlassSheet>
-
-        <LegalModal isOpen={legalModal === "terms"}   onClose={() => setLegalModal(null)} type="terms" />
-        <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
-      </>
-    );
-  }
-
-  // ── Form screen (default) ────────────────────────────────────────────────────
+  // ── Form screen ──────────────────────────────────────────────────────────────
 
   return (
     <>
@@ -798,14 +512,6 @@ const SignupCredentials = () => {
                 We'll send you a separate email to confirm your subscription.
               </p>
             )}
-
-            {!isOAuthOnboarding ? (
-              <TurnstileWidget
-                siteKeyMissing={presignupTurnstile.siteKeyMissing}
-                setContainer={presignupTurnstile.setContainer}
-                className="min-h-[65px]"
-              />
-            ) : null}
 
             <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
               By tapping Continue, you agree to our{" "}

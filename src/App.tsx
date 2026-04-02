@@ -24,6 +24,7 @@ import SignupVerify from "./pages/signup/SignupVerify";
 import SignupEmailConfirmation from "./pages/signup/SignupEmailConfirmation";
 import SignupMarketingConfirmed from "./pages/signup/SignupMarketingConfirmed";
 import SignupVerifyEmail from "./pages/signup/SignupVerifyEmail";
+import VerifyCallback from "./pages/VerifyCallback";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
 import EditProfile from "./pages/EditProfile";
@@ -164,6 +165,8 @@ const App = () => (
                   <Route path="/signup/marketing-confirmed" element={<PublicRoute><SignupMarketingConfirmed /></PublicRoute>} />
                   {/* No PublicRoute wrapper — accessible from email client in-app browsers without a session */}
                   <Route path="/signup/verify-email" element={<SignupVerifyEmail />} />
+                  {/* Email verification callback — token in URL is the auth, no session required */}
+                  <Route path="/verify" element={<VerifyCallback />} />
 
                   {/* Protected Routes */}
                   <Route

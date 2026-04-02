@@ -112,7 +112,7 @@ const SignupName = () => {
         if (data.email_opt_in) {
           toast.message("We’ll send you a separate email to confirm your subscription.");
         }
-        goTo("/signup/email-confirmation");
+        goTo("/signup/verify");
         return;
       }
       if (data.email_opt_in) {

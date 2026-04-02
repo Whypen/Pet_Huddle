@@ -5,6 +5,10 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import {
+  getExpectedTurnstileHostnames,
+  validateTurnstile,
+} from "../_shared/turnstile.ts";
 
 const BREVO_API_KEY    = Deno.env.get("BREVO_API_KEY") ?? "";
 const BREVO_FROM_EMAIL = Deno.env.get("BREVO_FROM_EMAIL") ?? "noreply@huddle.pet";
@@ -32,11 +36,36 @@ serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
-    let body: { email?: string; token?: string };
+    let body: { email?: string; token?: string; turnstile_token?: string };
     try { body = await req.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
-    const { email, token } = body;
+    const { email, token, turnstile_token } = body;
     if (!email || !token) return json({ error: "email_and_token_required" }, 400);
+
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+    const turnstile = await validateTurnstile(
+      turnstile_token ?? null,
+      clientIp,
+      "send_pre_signup_verify",
+      getExpectedTurnstileHostnames(),
+    );
+    if (!turnstile.valid) {
+      console.warn("[send-pre-signup-verify] turnstile rejected", {
+        reason: turnstile.reason,
+        error_codes: turnstile.error_codes,
+        action: turnstile.action,
+        hostname: turnstile.hostname,
+        challenge_ts: turnstile.challenge_ts,
+        ip: clientIp,
+      });
+      return json({
+        error: "human_verification_failed",
+        turnstile_reason: turnstile.reason,
+      }, 403);
+    }
 
     // Cleanup expired tokens (best-effort; non-fatal)
     await supabase

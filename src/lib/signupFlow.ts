@@ -4,6 +4,7 @@ export const SIGNUP_PUBLIC_PATHS = [
   "/auth",
   "/signup/dob",
   "/signup/credentials",
+  "/signup/verify-email",
   "/signup/name",
   "/signup/verify",
   "/signup/email-confirmation",

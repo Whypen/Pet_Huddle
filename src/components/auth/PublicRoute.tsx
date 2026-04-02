@@ -19,7 +19,8 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const onboardingIncomplete = Boolean(user && profile && !isRegisteredUserProfile(profile));
   const isTokenGatedPath =
     location.pathname === "/signup/email-confirmation" ||
-    location.pathname === "/signup/marketing-confirmed";
+    location.pathname === "/signup/marketing-confirmed" ||
+    location.pathname === "/verify";
   if (isTokenGatedPath) {
     // Always allow — token in URL is the auth; user may arrive from inbox days later
     return <>{children}</>;
