@@ -90,7 +90,7 @@ serve(async (req: Request) => {
       return json({ error: "db_error" }, 500);
     }
 
-    const verifyUrl = `${APP_URL}/signup/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+    const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}`;
 
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
