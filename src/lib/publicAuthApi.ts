@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { postPublicFunction } from "@/lib/publicFunctionClient";
 
 type ApiError = {
   message: string;
@@ -52,42 +53,9 @@ type SignupResponse = {
   user?: unknown;
 };
 
-const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL || "").trim().replace(/\/+$/, "");
-const anonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
-
 async function postPublic<T>(functionName: string, body: unknown): Promise<{ data: T | null; error: ApiError | null }> {
-  if (!supabaseUrl || !anonKey) {
-    return { data: null, error: { message: "auth_client_misconfigured" } };
-  }
-  try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-      },
-      body: JSON.stringify(body),
-    });
-    const payload = (await res.json().catch(() => null)) as
-      | { data?: T; error?: string; message?: string; code?: string }
-      | null;
-    if (!res.ok) {
-      return {
-        data: null,
-        error: {
-          message: String(payload?.error || payload?.message || `http_${res.status}`),
-          code: payload?.code ?? null,
-        },
-      };
-    }
-    return { data: (payload?.data ?? null) as T | null, error: null };
-  } catch (error) {
-    return {
-      data: null,
-      error: { message: error instanceof Error ? error.message : "network_error" },
-    };
-  }
+  const res = await postPublicFunction<T>(functionName, body);
+  return { data: res.data, error: res.error };
 }
 
 async function applySession(session: SessionTokens | null | undefined): Promise<ApiError | null> {
@@ -124,9 +92,6 @@ export async function authResetPassword(payload: ResetPayload): Promise<{ error:
 }
 
 export async function authChangePassword(payload: ChangePasswordPayload): Promise<{ error: ApiError | null }> {
-  if (!supabaseUrl || !anonKey) {
-    return { error: { message: "auth_client_misconfigured" } };
-  }
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -134,33 +99,8 @@ export async function authChangePassword(payload: ChangePasswordPayload): Promis
   if (!accessToken) {
     return { error: { message: "auth_required" } };
   }
-  try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/auth-change-password`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
-        "x-huddle-access-token": accessToken,
-      },
-      body: JSON.stringify(payload),
-    });
-    const body = (await res.json().catch(() => null)) as
-      | { error?: string; message?: string; code?: string }
-      | null;
-    if (!res.ok) {
-      return {
-        error: {
-          message: String(body?.error || body?.message || `http_${res.status}`),
-          code: body?.code ?? null,
-        },
-      };
-    }
-  } catch (error) {
-    return {
-      error: { message: error instanceof Error ? error.message : "network_error" },
-    };
-  }
+  const res = await postPublicFunction<null>("auth-change-password", payload, { accessToken });
+  if (res.error) return { error: res.error };
   return {
     error: null,
   };

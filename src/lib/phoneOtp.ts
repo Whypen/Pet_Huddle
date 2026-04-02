@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { getVisitorId } from "@/lib/deviceFingerprint";
+import { postPublicFunction } from "@/lib/publicFunctionClient";
 import {
   isPhoneCountryAllowed,
   COUNTRY_NOT_ALLOWED_MESSAGE,
@@ -35,32 +36,16 @@ const TEST_OTP_SHORTCUT_CODE = "498005";
 
 let lastOtpType: "phone_change" | "sms" = "phone_change";
 
-// ── Raw fetch for the unauthenticated (sms) path ─────────────────────────────
-// invokeAuthedFunction requires a session and will return auth_required when
-// none exists. The unauthenticated path (phone-login users) has no session,
-// so we call the edge function directly with only the anon key.
-
-const EDGE_BASE = String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/$/, "") + "/functions/v1";
-const ANON_KEY  = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "");
-
-async function callAnon<T>(
+// ── Public edge call helper ───────────────────────────────────────────────────
+// Uses the configurable public functions base so OTP send can be fronted by
+// Cloudflare (e.g. api.huddle.pet) without changing business logic.
+async function callPublic<T>(
   fn: string,
   body: unknown,
+  accessToken?: string,
 ): Promise<{ data: T | null; error: string | null }> {
-  try {
-    const res = await fetch(`${EDGE_BASE}/${fn}`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json", apikey: ANON_KEY },
-      body:    JSON.stringify(body),
-    });
-    const payload = await res.json().catch(() => null) as { error?: string } & T | null;
-    if (!res.ok) {
-      return { data: null, error: payload?.error ?? `http_${res.status}` };
-    }
-    return { data: payload as T, error: null };
-  } catch (err) {
-    return { data: null, error: err instanceof Error ? err.message : String(err) };
-  }
+  const res = await postPublicFunction<T>(fn, body, { accessToken });
+  return { data: res.data, error: res.error?.message ?? null };
 }
 
 // ── requestPhoneOtp ───────────────────────────────────────────────────────────
@@ -71,9 +56,11 @@ async function callAnon<T>(
 
 export async function requestPhoneOtp(
   phone: string,
+  turnstileToken: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const normalized = phone.trim();
   if (!normalized) return { ok: false, error: "Phone number is required." };
+  if (!turnstileToken.trim()) return { ok: false, error: "Complete human verification first." };
 
   // Client-side country guard — UX only; server enforces authoritatively.
   if (!isPhoneCountryAllowed(normalized)) {
@@ -93,20 +80,32 @@ export async function requestPhoneOtp(
   type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
   let data: SendResponse | null = null;
   let errorMsg: string | null = null;
+  const accessToken = String(session?.access_token || "").trim();
 
   if (hasSession) {
-    // Authenticated path — invokeAuthedFunction injects JWT and handles refresh
-    const res = await invokeAuthedFunction<SendResponse>("send-phone-otp", {
-      body: { phone: normalized, device_id: deviceId },
-    });
-    data     = res.data;
-    errorMsg = res.error?.message ?? null;
+    // Authenticated path — send session token explicitly in x-huddle-access-token
+    // while keeping anon Authorization for browser-safe gateway traversal.
+    const res = await callPublic<SendResponse>(
+      "send-phone-otp",
+      {
+        phone: normalized,
+        device_id: deviceId,
+        turnstile_token: turnstileToken,
+        turnstile_action: "send_phone_otp",
+      },
+      accessToken,
+    );
+    data = res.data;
+    errorMsg = res.error;
   } else {
     // Unauthenticated path — no JWT; edge function uses signInWithOtp
-    const res = await callAnon<SendResponse>("send-phone-otp", {
-      phone: normalized, device_id: deviceId,
+    const res = await callPublic<SendResponse>("send-phone-otp", {
+      phone: normalized,
+      device_id: deviceId,
+      turnstile_token: turnstileToken,
+      turnstile_action: "send_phone_otp",
     });
-    data     = res.data;
+    data = res.data;
     errorMsg = res.error;
   }
 

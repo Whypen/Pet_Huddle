@@ -4,6 +4,9 @@ import type { Database } from './types';
 
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") : rawSupabaseUrl;
+const rawPublicAuthBase = String(
+  import.meta.env.VITE_PUBLIC_AUTH_BASE_URL || import.meta.env.VITE_API_URL || ""
+).trim().replace(/\/+$/, "");
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 if (!SUPABASE_ANON_KEY) {
   console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
@@ -12,15 +15,59 @@ console.log("Supabase URL initialized as:", SUPABASE_URL);
 console.log("[SUPABASE_ENV]", {
   url: SUPABASE_URL,
   keyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 8) : "missing",
+  publicAuthBase: rawPublicAuthBase || "unset",
 });
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
+
+const protectedFunctionNames = new Set([
+  "auth-login",
+  "auth-signup",
+  "auth-reset-password",
+  "auth-change-password",
+  "send-phone-otp",
+  "send-pre-signup-verify",
+]);
+
+const resolvePublicFunctionsBase = (): string => {
+  if (!rawPublicAuthBase) return "";
+  return rawPublicAuthBase.endsWith("/functions/v1")
+    ? rawPublicAuthBase
+    : `${rawPublicAuthBase}/functions/v1`;
+};
+
+const maybeRewriteProtectedFunctionUrl = (input: RequestInfo | URL): string | null => {
+  if (!SUPABASE_URL) return null;
+  const incoming = typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
+  if (!incoming.startsWith(`${SUPABASE_URL}/functions/v1/`)) return null;
+
+  const parsed = new URL(incoming);
+  const parts = parsed.pathname.split("/");
+  const fnName = parts[parts.length - 1] || "";
+  if (!protectedFunctionNames.has(fnName)) return null;
+
+  const publicBase = resolvePublicFunctionsBase();
+  if (!publicBase) return null;
+  return `${publicBase}/${fnName}${parsed.search}`;
+};
+
+const rewrittenFetch: typeof fetch = (input, init) => {
+  const rewritten = maybeRewriteProtectedFunctionUrl(input);
+  return fetch(rewritten ?? input, init);
+};
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY || "", {
   auth: {
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-  }
+  },
+  global: {
+    fetch: rewrittenFetch,
+  },
 });
