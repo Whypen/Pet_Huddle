@@ -1,17 +1,6 @@
--- ─────────────────────────────────────────────────────────────────────────────
--- Security advisor fixes (phase 2): crm_contacts_view, plan_metadata, spatial_ref_sys
--- ─────────────────────────────────────────────────────────────────────────────
-
--- 1. crm_contacts_view
--- Issues:
---   auth_users_exposed: view joins auth.users, exposed to anon/authenticated
---   security_definer_view: SECURITY DEFINER (implicit, because it queries auth schema)
--- Fix: replace auth.users join with profiles.email + profiles.created_at.
---      public.profiles has an email column (added in 20260211065241_remote_schema).
---      Restrict to service_role only — this view is only consumed by brevo-sync
---      edge function (service_role key) and must never be anon-readable.
-
+-- Drop and recreate crm_contacts_view without auth.users join
 drop view if exists public.crm_contacts_view;
+
 create view public.crm_contacts_view as
 with pets_agg as (
   select
@@ -67,8 +56,7 @@ device_flags as (
   group by d.user_id
 )
 select
-  -- Use profiles.email instead of auth.users.email to avoid auth schema exposure
-  p.email as "EMAIL",
+  p.email::varchar(255) as "EMAIL",
   p.display_name as "DISPLAY_NAME",
   p.social_id as "SOCIAL_ID",
   p.phone as "PHONE",
@@ -100,7 +88,6 @@ select
     when ts.trust_score <= 4 then 'medium'
     else 'high'
   end as "TRUST_TIER",
-  -- Use profiles.created_at as user signup approximation (synced at signup)
   to_char((p.created_at at time zone 'UTC')::date, 'YYYY-MM-DD') as "USER_CREATED_AT",
   case when coalesce(p.marketing_consent, false) then 'Yes' else 'No' end as "MARKETING_CONSENT",
   case when coalesce(p.marketing_opt_in_checked, false) then 'Yes' else 'No' end as "MARKETING_OPT_IN",
@@ -122,25 +109,12 @@ cross join lateral (
   )::int as trust_score
 ) ts;
 
--- Restrict: only service_role may read this view.
--- Removes anon/authenticated exposure that triggered both advisor errors.
 revoke all on public.crm_contacts_view from anon;
 revoke all on public.crm_contacts_view from authenticated;
 grant select on public.crm_contacts_view to service_role;
 
--- ─────────────────────────────────────────────────────────────────────────────
--- 2. plan_metadata — enable RLS + allow authenticated read
--- ─────────────────────────────────────────────────────────────────────────────
+-- plan_metadata RLS
 alter table public.plan_metadata enable row level security;
-
 drop policy if exists "plan_metadata_authenticated_read" on public.plan_metadata;
 create policy "plan_metadata_authenticated_read"
-  on public.plan_metadata
-  for select
-  to authenticated
-  using (true);
-
--- 3. spatial_ref_sys — skipped.
--- PostGIS system table is owned by supabase_admin (superuser); the migration
--- service role cannot ALTER it. PostGIS internal functions run as superuser and
--- bypass RLS regardless, so this security-advisor warning is a false positive.
+  on public.plan_metadata for select to authenticated using (true);;
