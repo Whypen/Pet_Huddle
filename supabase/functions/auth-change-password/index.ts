@@ -72,20 +72,24 @@ Deno.serve(async (req: Request) => {
     return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
   }
 
-  const userClient = createClient(supabaseUrl, anonKey, {
+  // Validate the JWT and confirm the user exists before proceeding.
+  const verifyClient = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false },
   });
 
-  const authUser = await userClient.auth.getUser(accessToken);
+  const authUser = await verifyClient.auth.getUser(accessToken);
   if (authUser.error || !authUser.data.user?.id) {
     return json(401, { error: "unauthorized" });
   }
 
-  const adminClient = createClient(supabaseUrl, serviceRole, {
+  // Use a user-scoped client so Supabase fires the built-in "Password Changed"
+  // security notification email. Admin API (updateUserById) bypasses that hook.
+  const userClient = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
   });
 
-  const update = await adminClient.auth.admin.updateUserById(authUser.data.user.id, { password });
+  const update = await userClient.auth.updateUser({ password });
   if (update.error) {
     return json(400, { error: update.error.message || "password_change_failed" });
   }
