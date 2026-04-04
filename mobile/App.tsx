@@ -7,6 +7,7 @@ import { supabase } from "./src/lib/supabase";
 import { COLORS } from "./src/theme/tokens";
 import { AuthProvider } from "./src/contexts/AuthContext";
 import { UpsellBannerProvider } from "./src/contexts/UpsellBannerContext";
+import { BiometricLockGate } from "./src/components/security/BiometricLockGate";
 
 export default function App() {
   const [connecting, setConnecting] = useState(true);
@@ -42,7 +43,10 @@ export default function App() {
     <SafeAreaProvider>
       <AuthProvider>
         <UpsellBannerProvider>
-          <RootNavigator />
+          <View style={{ flex: 1 }}>
+            <RootNavigator />
+            <BiometricLockGate />
+          </View>
         </UpsellBannerProvider>
       </AuthProvider>
       <StatusBar style="auto" />

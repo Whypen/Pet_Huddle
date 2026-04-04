@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, Re
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
-import { isPasskeySupportedBrowser, listPasskeyFactors } from "@/lib/passkey";
 import { trackDeviceFingerprint } from "@/lib/deviceFingerprint";
 import { getAuthRuntimeEnv } from "@/lib/authRuntimeEnv";
 import {
@@ -113,7 +112,7 @@ interface AuthContextType {
     password: string,
     phone?: string,
     turnstileToken?: string,
-  ) => Promise<{ error: Error | null; mfaRequired: boolean; mfaFactorId: string | null; mfaMethod: "totp" | "passkey" | null }>;
+  ) => Promise<{ error: Error | null; mfaRequired: boolean; mfaFactorId: string | null; mfaMethod: "totp" | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -589,23 +588,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const aal = await getAuthenticatorAssurance(supabase);
-      const verifiedPasskeys = (await listPasskeyFactors(supabase)).filter((factor) => factor.status === "verified");
       const factors = await listTotpFactors(supabase);
       const verifiedTotp = factors.find((factor) => factor.status === "verified") || null;
       const mfaRequired = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
       if (mfaRequired) {
         setMfaPending(true);
-        // Prefer passkey over TOTP — do NOT gate on passkeySupported here;
-        // if the device doesn't support WebAuthn the ceremony will fail
-        // gracefully in the UI rather than silently logging the user out.
-        if (verifiedPasskeys.length > 0) {
-          return {
-            error: null,
-            mfaRequired: true,
-            mfaFactorId: verifiedPasskeys[0].id,
-            mfaMethod: "passkey",
-          };
-        }
         if (verifiedTotp?.id) {
           return { error: null, mfaRequired: true, mfaFactorId: verifiedTotp.id, mfaMethod: "totp" };
         }

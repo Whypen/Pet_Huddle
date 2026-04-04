@@ -8,7 +8,17 @@ export type AuthContextValue = {
   profile: Profile | null;
   refreshingProfile: boolean;
   refreshProfile: () => Promise<void>;
+  biometricUnlockSupported: boolean;
+  biometricUnlockEnabled: boolean;
+  biometricUnlockLabel: string;
+  unlockConfigReady: boolean;
+  unlockRequired: boolean;
+  privacyCovered: boolean;
+  unlockError: string | null;
+  refreshBiometricUnlock: () => Promise<void>;
+  setBiometricUnlockEnabled: (next: boolean) => Promise<{ ok: boolean; error: string | null }>;
+  unlockApp: () => Promise<{ ok: boolean; error: string | null }>;
+  signInAgainFromLock: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
-

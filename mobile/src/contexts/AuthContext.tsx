@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppState } from "react-native";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { AuthContext, type AuthContextValue } from "./authContextValue";
+import {
+  authenticateBiometricUnlock,
+  disableBiometricUnlock,
+  enableBiometricUnlock,
+  getBiometricSupport,
+  getBiometricUnlockEnabled,
+} from "../lib/biometricUnlock";
 
 export type VerificationStatus = "Pending" | "Verified" | "Rejected";
 
@@ -21,6 +29,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [refreshingProfile, setRefreshingProfile] = useState(false);
+  const [biometricUnlockSupported, setBiometricUnlockSupported] = useState(false);
+  const [biometricUnlockEnabled, setBiometricUnlockEnabledState] = useState(false);
+  const [biometricUnlockLabel, setBiometricUnlockLabel] = useState("Use Biometrics");
+  const [unlockConfigReady, setUnlockConfigReady] = useState(false);
+  const [unlockRequired, setUnlockRequired] = useState(false);
+  const [privacyCovered, setPrivacyCovered] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
 
   const user = session?.user ?? null;
 
@@ -43,6 +58,86 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user]);
 
+  const refreshBiometricUnlock = useCallback(async () => {
+    if (!session) {
+      setUnlockConfigReady(true);
+      setBiometricUnlockSupported(false);
+      setBiometricUnlockEnabledState(false);
+      setUnlockRequired(false);
+      setPrivacyCovered(false);
+      return;
+    }
+    try {
+      setPrivacyCovered(true);
+      const [support, enabled] = await Promise.all([
+        getBiometricSupport(),
+        getBiometricUnlockEnabled(),
+      ]);
+      setBiometricUnlockSupported(support.supported);
+      setBiometricUnlockLabel(support.label);
+      const effectiveEnabled = support.supported && enabled;
+      setBiometricUnlockEnabledState(effectiveEnabled);
+      if (!support.supported) {
+        setUnlockRequired(false);
+        setPrivacyCovered(false);
+      } else if (effectiveEnabled) {
+        setUnlockRequired(true);
+      } else {
+        setUnlockRequired(false);
+        setPrivacyCovered(false);
+      }
+    } catch {
+      setBiometricUnlockSupported(false);
+      setBiometricUnlockEnabledState(false);
+      setBiometricUnlockLabel("Use Biometrics");
+      setUnlockRequired(false);
+      setPrivacyCovered(false);
+    } finally {
+      setUnlockConfigReady(true);
+    }
+  }, [session]);
+
+  const setBiometricUnlockEnabled = useCallback(async (next: boolean) => {
+    if (next) {
+      const result = await enableBiometricUnlock(biometricUnlockLabel);
+      if (!result.ok) {
+        setUnlockError(result.error);
+        setBiometricUnlockEnabledState(false);
+        return { ok: false, error: result.error };
+      }
+      setUnlockError(null);
+      setBiometricUnlockEnabledState(true);
+      if (session) setUnlockRequired(true);
+      return { ok: true, error: null };
+    }
+    await disableBiometricUnlock();
+    setUnlockError(null);
+    setBiometricUnlockEnabledState(false);
+    setUnlockRequired(false);
+    setPrivacyCovered(false);
+    return { ok: true, error: null };
+  }, [biometricUnlockLabel, session]);
+
+  const unlockApp = useCallback(async () => {
+    const result = await authenticateBiometricUnlock();
+    if (!result.ok) {
+      setUnlockError(result.error);
+      return { ok: false, error: result.error };
+    }
+    setUnlockError(null);
+    setUnlockRequired(false);
+    setPrivacyCovered(false);
+    return { ok: true, error: null };
+  }, []);
+
+  const signInAgainFromLock = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUnlockConfigReady(true);
+    setUnlockRequired(false);
+    setPrivacyCovered(false);
+    setUnlockError(null);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -60,6 +155,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!session) {
+      setUnlockConfigReady(true);
+      setUnlockRequired(false);
+      setPrivacyCovered(false);
+      return;
+    }
+    setUnlockConfigReady(false);
+    setPrivacyCovered(true);
+    void refreshBiometricUnlock();
+  }, [refreshBiometricUnlock, session]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (!session) {
+        setPrivacyCovered(false);
+        return;
+      }
+      if (nextState === "inactive" || nextState === "background") {
+        setPrivacyCovered(true);
+        if (biometricUnlockEnabled) setUnlockRequired(true);
+        return;
+      }
+      if (nextState === "active") {
+        if (!biometricUnlockEnabled) {
+          setPrivacyCovered(false);
+        } else {
+          setUnlockRequired(true);
+        }
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [biometricUnlockEnabled, session]);
+
+  useEffect(() => {
     refreshProfile().catch(() => {
       // no-op, errors are surfaced on screens where needed
     });
@@ -72,8 +203,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile,
       refreshingProfile,
       refreshProfile,
+      biometricUnlockSupported,
+      biometricUnlockEnabled,
+      biometricUnlockLabel,
+      unlockConfigReady,
+      unlockRequired,
+      privacyCovered,
+      unlockError,
+      refreshBiometricUnlock,
+      setBiometricUnlockEnabled,
+      unlockApp,
+      signInAgainFromLock,
     }),
-    [profile, refreshProfile, refreshingProfile, session, user]
+    [
+      biometricUnlockEnabled,
+      biometricUnlockLabel,
+      biometricUnlockSupported,
+      unlockConfigReady,
+      profile,
+      privacyCovered,
+      refreshBiometricUnlock,
+      refreshProfile,
+      refreshingProfile,
+      session,
+      setBiometricUnlockEnabled,
+      signInAgainFromLock,
+      unlockApp,
+      unlockError,
+      unlockRequired,
+      user,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

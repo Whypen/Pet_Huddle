@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
-import * as LocalAuthentication from "expo-local-authentication";
-import * as SecureStore from "expo-secure-store";
 import { useNavigation } from "@react-navigation/native";
 import { Header } from "../components/Header";
 import { InputField } from "../components/InputField";
@@ -31,12 +29,9 @@ type Form = {
   phone?: string;
 };
 
-const BIOMETRIC_PREF_KEY = "huddle_biometrics_enabled";
-
 export function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [busy, setBusy] = useState(false);
-  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [consent, setConsent] = useState(false);
   const navigation = useNavigation();
 
@@ -49,12 +44,6 @@ export function AuthScreen() {
     mode: "onChange",
     defaultValues: { email: "", password: "", phone: "" },
   });
-
-  useEffect(() => {
-    SecureStore.getItemAsync(BIOMETRIC_PREF_KEY)
-      .then((v) => setBiometricsEnabled(v === "true"))
-      .catch(() => setBiometricsEnabled(false));
-  }, []);
 
   const onSubmit = handleSubmit(async ({ email, password, phone }) => {
     setBusy(true);
@@ -108,22 +97,6 @@ export function AuthScreen() {
     }
   });
 
-  const toggleBiometrics = async () => {
-    try {
-      const has = await LocalAuthentication.hasHardwareAsync();
-      const enrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!has || !enrolled) {
-        Alert.alert("Biometrics unavailable", "Enable Face ID / Touch ID in system settings first.");
-        return;
-      }
-      const next = !biometricsEnabled;
-      setBiometricsEnabled(next);
-      await SecureStore.setItemAsync(BIOMETRIC_PREF_KEY, next ? "true" : "false");
-    } catch {
-      // ignore
-    }
-  };
-
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.white }}>
       <Header />
@@ -170,15 +143,6 @@ export function AuthScreen() {
             )}
           />
         ) : null}
-
-        <Pressable onPress={toggleBiometrics} style={{ paddingVertical: 6 }}>
-          <HText variant="body" style={{ color: COLORS.brandText, fontWeight: "600" }}>
-            Biometric Login: {biometricsEnabled ? "On" : "Off"}
-          </HText>
-          <HText variant="meta" style={{ color: COLORS.brandSubtext }}>
-            Enables Face ID / Touch ID choice on sign-in.
-          </HText>
-        </Pressable>
 
         {mode === "signup" ? (
           <Pressable

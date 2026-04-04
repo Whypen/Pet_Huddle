@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -16,7 +16,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LegalModal } from "@/components/modals/LegalModal";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
-import { addPasskeyHint, hasPasskeyHint, mapPasskeyError, verifyPasskeyFactor } from "@/lib/passkey";
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileWidget } from "@/components/security/TurnstileWidget";
@@ -32,8 +31,8 @@ type LoginForm = {
 
 // ── Step machine: email modal ──────────────────────────────────────────────────
 // "choice"        → Sign in / Create account picker
-// "signin"        → Email + password + optional "Continue with passkey" CTA
-// "mfa-challenge" → TOTP only (passkey fires invisibly — modal is closed)
+// "signin"        → Email + password
+// "mfa-challenge" → Authenticator app TOTP challenge
 type EmailModalStep = "choice" | "signin" | "mfa-challenge";
 
 const Auth = () => {
@@ -48,22 +47,10 @@ const Auth = () => {
 
   // ── MFA challenge state ────────────────────────────────────────────────────
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
-  const [mfaMethod, setMfaMethod] = useState<"totp" | "passkey">("totp");
   const [mfaOtpCode, setMfaOtpCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
-
-  // ── Credentials step state ─────────────────────────────────────────────────
-  const [passkeyInlineError, setPasskeyInlineError] = useState("");
   const loginTurnstile = useTurnstile("login");
-
-  // Auto-fire passkey challenge — no button needed
-  useEffect(() => {
-    if (emailModalStep === "mfa-challenge" && mfaMethod === "passkey") {
-      void onMfaVerify();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emailModalStep, mfaMethod]);
 
   const schema = useMemo(() => {
     return z.object({
@@ -138,15 +125,9 @@ const Auth = () => {
     }
 
     if (result.mfaRequired && result.mfaFactorId) {
-      const isPasskey = result.mfaMethod === "passkey";
       setMfaFactorId(result.mfaFactorId);
-      setMfaMethod(isPasskey ? "passkey" : "totp");
       setMfaOtpCode("");
       setMfaError("");
-      if (isPasskey) {
-        // Close modal first — OS biometric sheet takes over immediately
-        setEmailModalOpen(false);
-      }
       setEmailModalStep("mfa-challenge");
       return;
     }
@@ -157,29 +138,17 @@ const Auth = () => {
   // ── MFA: verify 6-digit code ───────────────────────────────────────────────
   const onMfaVerify = async () => {
     if (!mfaFactorId) return;
-    if (mfaMethod === "totp" && mfaOtpCode.length < 6) return;
+    if (mfaOtpCode.length < 6) return;
     setMfaLoading(true);
     setMfaError("");
     try {
-      if (mfaMethod === "passkey") {
-        await verifyPasskeyFactor(supabase, mfaFactorId);
-      } else {
-        await challengeAndVerifyTotp(supabase, mfaFactorId, mfaOtpCode);
-      }
+      await challengeAndVerifyTotp(supabase, mfaFactorId, mfaOtpCode);
       const aalData = await getAuthenticatorAssurance(supabase);
       if (aalData.currentLevel !== "aal2") throw new Error("aal_not_upgraded");
-      if (mfaMethod === "passkey") addPasskeyHint(watch("email") ?? "");
       setEmailModalOpen(false);
       navigate("/");
     } catch (error) {
-      if (mfaMethod === "passkey") {
-        const msg = mapPasskeyError(error as { message?: string }, "Couldn’t verify your passkey.");
-        toast.error(msg);
-        setEmailModalStep("signin");
-        setEmailModalOpen(true);
-      } else {
-        setMfaError(mapMfaError(error as { message?: string }, "Couldn’t verify your 2FA code."));
-      }
+      setMfaError(mapMfaError(error as { message?: string }, "Couldn’t verify your 2FA code."));
       setMfaOtpCode("");
     } finally {
       setMfaLoading(false);
@@ -192,23 +161,6 @@ const Auth = () => {
     setMfaOtpCode("");
     setMfaError("");
     setMfaFactorId(null);
-    setMfaMethod("totp");
-  };
-
-  // ── Sign-in step: passkey CTA handler ─────────────────────────────────────
-  const handlePasskeyContinue = () => {
-    const pwValue = watch("password");
-    if (!pwValue) {
-      setPasskeyInlineError("Enter your password once to continue with passkey.");
-      const el = document.querySelector<HTMLInputElement>('[autocomplete="current-password"]');
-      if (el) {
-        el.focus();
-        try { el.reportValidity(); } catch { /* best-effort */ }
-      }
-      return;
-    }
-    setPasskeyInlineError("");
-    void handleSubmit(onSubmit)();
   };
 
   const handleCreateAccount = () => {
@@ -366,9 +318,7 @@ const Auth = () => {
             setMfaError("");
             setMfaOtpCode("");
             setMfaFactorId(null);
-            setMfaMethod("totp");
             setEmailModalStep("choice");
-            setPasskeyInlineError("");
           }
         }}
       >
@@ -392,7 +342,7 @@ const Auth = () => {
             </div>
           )}
 
-          {/* ── Sign-in step: email + password + optional passkey CTA ── */}
+          {/* ── Sign-in step: email + password ── */}
           {emailModalStep === "signin" && (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
               <FormField
@@ -415,12 +365,6 @@ const Auth = () => {
                 {...register("password")}
               />
 
-              {passkeyInlineError && !errors.password?.message && !authError && (
-                <p className="text-xs text-[var(--color-error,#E84545)] -mt-1 pl-1">
-                  {passkeyInlineError}
-                </p>
-              )}
-
               <div className="flex items-center justify-between">
                 <NeuCheckbox
                   checked={watch("remember")}
@@ -435,22 +379,9 @@ const Auth = () => {
                 setContainer={loginTurnstile.setContainer}
                 className="min-h-[65px]"
               />
-
-              {hasPasskeyHint(watch("email") ?? "") ? (
-                <NeuButton
-                  type="button"
-                  className="w-full h-10"
-                  onClick={handlePasskeyContinue}
-                  loading={mfaLoading}
-                  disabled={mfaLoading}
-                >
-                  Continue with passkey
-                </NeuButton>
-              ) : (
-                <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading}>
-                  Sign in
-                </NeuButton>
-              )}
+              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading}>
+                Sign in
+              </NeuButton>
               {authError ? (
                 <NeuButton
                   type="button"
@@ -476,31 +407,25 @@ const Auth = () => {
           {/* ── MFA challenge step ── */}
           {emailModalStep === "mfa-challenge" && (
             <div className="space-y-4">
-              {mfaMethod === "passkey" ? null : (
-                <>
-                  <p className="text-sm text-brandText/70 leading-relaxed">
-                    Enter the 6-digit code from your authenticator app.
-                  </p>
-                  <FormFieldOtp
-                    value={mfaOtpCode}
-                    onChange={setMfaOtpCode}
-                    error={mfaError}
-                    disabled={mfaLoading}
-                  />
-                </>
-              )}
+              <p className="text-sm text-brandText/70 leading-relaxed">
+                Enter the 6-digit code from your authenticator app.
+              </p>
+              <FormFieldOtp
+                value={mfaOtpCode}
+                onChange={setMfaOtpCode}
+                error={mfaError}
+                disabled={mfaLoading}
+              />
 
-              {mfaMethod === "totp" && (
-                <NeuButton
-                  type="button"
-                  className="w-full h-10"
-                  disabled={mfaOtpCode.length < 6 || mfaLoading}
-                  loading={mfaLoading}
-                  onClick={() => void onMfaVerify()}
-                >
-                  Verify
-                </NeuButton>
-              )}
+              <NeuButton
+                type="button"
+                className="w-full h-10"
+                disabled={mfaOtpCode.length < 6 || mfaLoading}
+                loading={mfaLoading}
+                onClick={() => void onMfaVerify()}
+              >
+                Verify
+              </NeuButton>
 
               <button
                 type="button"

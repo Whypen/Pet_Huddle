@@ -1,5 +1,4 @@
 import { Alert, LayoutAnimation, Platform, Pressable, ScrollView, Switch, UIManager, View } from "react-native";
-import * as LocalAuthentication from "expo-local-authentication";
 import { Header } from "../components/Header";
 import { HText } from "../components/HText";
 import { COLORS, LAYOUT } from "../theme/tokens";
@@ -17,7 +16,15 @@ function statusColors(status: string | null | undefined) {
 }
 
 export function AccountSettingsScreen() {
-  const { profile, user } = useAuth();
+  const {
+    profile,
+    user,
+    biometricUnlockSupported,
+    biometricUnlockEnabled,
+    unlockError,
+    setBiometricUnlockEnabled,
+    refreshBiometricUnlock,
+  } = useAuth();
   const s = statusColors(profile?.verification_status);
   const prefs = (profile && typeof profile === "object" ? (profile as Record<string, unknown>).prefs : null) as
     | Record<string, unknown>
@@ -25,15 +32,7 @@ export function AccountSettingsScreen() {
   const pushEnabled = Boolean(prefs && prefs.push_notifications_enabled);
   const emailEnabled = Boolean(prefs && prefs.email_notifications_enabled);
 
-  const onBiometric = async () => {
-    const has = await LocalAuthentication.hasHardwareAsync();
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!has || !enrolled) {
-      Alert.alert("Biometrics unavailable", "Enable Face ID / Touch ID in system settings first.");
-      return;
-    }
-    Alert.alert("Biometric Login", "Biometrics are available on this device.");
-  };
+  const isBiometricVisible = Boolean(user?.id) && biometricUnlockSupported;
 
   const Item = ({ title, right, onPress, disabled }: { title: string; right?: React.ReactNode; onPress?: () => void; disabled?: boolean }) => (
     <Pressable
@@ -67,7 +66,7 @@ export function AccountSettingsScreen() {
       <ScrollView contentContainerStyle={{ padding: LAYOUT.sectionPaddingH, gap: 8 }}>
         {/* UAT: Remove Account Info section. */}
         <HText variant="heading" style={{ fontSize: 16, fontWeight: "800", marginTop: 4 }}>
-          Account Setting
+          Account Settings
         </HText>
 
         <Item
@@ -90,7 +89,52 @@ export function AccountSettingsScreen() {
           onPress={() => Alert.alert("Family", "Invite is gated by tier in the full spec. Tap Premium to upgrade.")}
         />
 
-        <Item title="Biometric Login" onPress={onBiometric} />
+        {isBiometricVisible ? (
+          <View style={{ marginTop: 10, gap: 8 }}>
+            <HText variant="heading" style={{ fontSize: 14, fontWeight: "800" }}>
+              Security
+            </HText>
+            <View
+              style={{
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: `${COLORS.brandText}1F`,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                gap: 8,
+                backgroundColor: COLORS.white,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <HText variant="body" style={{ fontWeight: "700", color: COLORS.brandText }}>
+                    Biometric Unlock
+                  </HText>
+                  <HText variant="meta" style={{ color: COLORS.brandSubtext, marginTop: 4 }}>
+                    Unlock easier with Face ID or fingerprint.
+                  </HText>
+                </View>
+                <Switch
+                  value={biometricUnlockEnabled}
+                  onValueChange={(next) => {
+                    void (async () => {
+                      const result = await setBiometricUnlockEnabled(next);
+                      if (!result.ok && result.error) {
+                        Alert.alert("Biometric Unlock", result.error);
+                      }
+                      await refreshBiometricUnlock();
+                    })();
+                  }}
+                />
+              </View>
+              {unlockError ? (
+                <HText variant="meta" style={{ color: COLORS.brandError }}>
+                  {unlockError}
+                </HText>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
 
         {/* Notification settings (profiles.prefs) */}
         <HText variant="heading" style={{ fontSize: 14, fontWeight: "800", marginTop: 12 }}>
