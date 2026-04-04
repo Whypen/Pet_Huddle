@@ -3896,6 +3896,13 @@ const Chats = () => {
                 {showDiscoverEmpty && (
                   <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
                     <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
+                      <img
+                        src={emptyChatImage}
+                        alt=""
+                        aria-hidden="true"
+                        className="mx-auto mb-4 h-14 w-14 object-contain opacity-95"
+                        loading="lazy"
+                      />
                       <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
                       <div className="mt-4 flex flex-col gap-2">
                         {canExpandSearch && (
