@@ -376,7 +376,9 @@ const SignupCredentials = () => {
             : phoneNotValid
               ? "Phone number length is not valid for the selected country"
               : "Enter your phone number to continue")
-    : (duplicateDetected
+    : (!presignupTurnstile.isTokenUsable
+        ? "Complete human verification to continue"
+        : duplicateDetected
         ? "This email or phone number is already registered"
         : checkingDuplicate
           ? "Checking account details…"
