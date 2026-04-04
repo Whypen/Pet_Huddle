@@ -3900,7 +3900,7 @@ const Chats = () => {
                         src={emptyChatImage}
                         alt=""
                         aria-hidden="true"
-                        className="mx-auto mb-4 h-14 w-14 object-contain opacity-95"
+                        className="mx-auto mb-4 w-full max-w-[320px] object-contain opacity-95"
                         loading="lazy"
                       />
                       <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
