@@ -130,7 +130,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
-  const [supportEmailOptIn, setSupportEmailOptIn] = useState(true);
+  const [supportWantsReply, setSupportWantsReply] = useState(true);
+  const [supportSubmitting, setSupportSubmitting] = useState(false);
+  const [supportTicketNumber, setSupportTicketNumber] = useState<string | null>(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [drawerView, setDrawerView] = useState<"main" | "legal">("main");
   const premiumReturnTo = `${location.pathname}${location.search}`;
@@ -418,25 +420,33 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   };
 
   const submitSupport = async () => {
-    const msg = supportMessage.trim();
+    if (supportSubmitting) return;
+    const msg  = supportMessage.trim();
+    const subj = supportSubject.trim() || "Support Request";
     if (!msg) return;
+    setSupportSubmitting(true);
     try {
-      const { error } = await supabase.from("support_requests").insert({
-        user_id: user?.id ?? null,
-        category: "help",
-        subject: supportSubject.trim() || "Support Request",
-        message: msg + (supportEmailOptIn ? "\n\n[You may follow up via email]" : ""),
-        email: (profile as Record<string, unknown> | null)?.email as string | null ?? null,
-        contact_method: supportEmailOptIn ? "email" : null,
-      } as never);
+      const userEmail   = (profile as Record<string, unknown> | null)?.email as string | null ?? user?.email ?? "";
+      const displayName = (profile as Record<string, unknown> | null)?.display_name as string | null ?? user?.email ?? "User";
+      const { data, error } = await supabase.functions.invoke("submit-support-ticket", {
+        body: {
+          name:        displayName,
+          email:       userEmail,
+          subject:     subj,
+          message:     msg,
+          wants_reply: supportWantsReply,
+        },
+      });
       if (error) throw error;
-      setSupportOpen(false);
+      const ticketNum = (data as { ticket_number?: string } | null)?.ticket_number ?? null;
+      setSupportTicketNumber(ticketNum);
       setSupportSubject("");
       setSupportMessage("");
-      setSupportEmailOptIn(true);
-      toast.success("Message sent. We'll be in touch soon.");
+      setSupportWantsReply(true);
     } catch {
       toast.error("Couldn't send your message. Please try again.");
+    } finally {
+      setSupportSubmitting(false);
     }
   };
 
@@ -867,62 +877,90 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       />
 
       {/* ── Help & Support dialog ── */}
-      <Dialog open={supportOpen} onOpenChange={(o) => { if (!o) setSupportOpen(false); }}>
+      <Dialog open={supportOpen} onOpenChange={(o) => {
+        if (!o) {
+          setSupportOpen(false);
+          setSupportTicketNumber(null);
+        }
+      }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Help &amp; Support</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Subject</label>
-              <div className="form-field-rest relative flex items-center">
-                <input
-                  value={supportSubject}
-                  onChange={(e) => setSupportSubject(e.target.value)}
-                  placeholder="Subject (optional)"
-                  className="field-input-core"
-                />
-              </div>
+          {supportTicketNumber ? (
+            <div className="space-y-3 py-2 text-center">
+              <p className="text-[15px] font-semibold text-[var(--text-primary)]">Message sent</p>
+              <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed">
+                Your ticket number is <span className="font-mono font-semibold text-brandBlue">{supportTicketNumber}</span>. We'll be in touch soon.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setSupportOpen(false); setSupportTicketNumber(null); }}
+                className="mt-2 w-full h-11 rounded-xl bg-brandBlue text-white text-[14px] font-[500]"
+              >
+                Done
+              </button>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Message</label>
-              <div className="form-field-rest relative h-auto min-h-[96px] py-3">
-                <textarea
-                  value={supportMessage}
-                  onChange={(e) => setSupportMessage(e.target.value)}
-                  placeholder="How can we help?"
-                  className="field-input-core resize-none min-h-[72px]"
-                />
+          ) : (
+            <>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Subject</label>
+                  <div className="form-field-rest relative flex items-center">
+                    <input
+                      value={supportSubject}
+                      onChange={(e) => setSupportSubject(e.target.value)}
+                      placeholder="Subject (optional)"
+                      className="field-input-core"
+                      disabled={supportSubmitting}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Message</label>
+                  <div className="form-field-rest relative h-auto min-h-[96px] py-3">
+                    <textarea
+                      value={supportMessage}
+                      onChange={(e) => setSupportMessage(e.target.value)}
+                      placeholder="How can we help?"
+                      className="field-input-core resize-none min-h-[72px]"
+                      disabled={supportSubmitting}
+                    />
+                  </div>
+                </div>
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={supportWantsReply}
+                    onChange={(e) => setSupportWantsReply(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded accent-brandBlue flex-shrink-0"
+                    disabled={supportSubmitting}
+                  />
+                  <span className="text-[13px] text-[var(--text-secondary)]">
+                    You may follow up with me via email if needed.
+                  </span>
+                </label>
               </div>
-            </div>
-            <label className="flex items-start gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={supportEmailOptIn}
-                onChange={(e) => setSupportEmailOptIn(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded accent-brandBlue flex-shrink-0"
-              />
-              <span className="text-[13px] text-[var(--text-secondary)]">
-                You may follow up with me via email if needed.
-              </span>
-            </label>
-          </div>
-          <DialogFooter className="!flex-row gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setSupportOpen(false)}
-              className="flex-1 h-11 rounded-xl border border-[var(--border)] text-[14px] font-[500] text-[var(--text-primary)]"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={submitSupport}
-              className="flex-1 h-11 rounded-xl bg-brandBlue text-white text-[14px] font-[500]"
-            >
-              Send
-            </button>
-          </DialogFooter>
+              <DialogFooter className="!flex-row gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSupportOpen(false)}
+                  disabled={supportSubmitting}
+                  className="flex-1 h-11 rounded-xl border border-[var(--border)] text-[14px] font-[500] text-[var(--text-primary)] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitSupport}
+                  disabled={supportSubmitting || !supportMessage.trim()}
+                  className="flex-1 h-11 rounded-xl bg-brandBlue text-white text-[14px] font-[500] disabled:opacity-50"
+                >
+                  {supportSubmitting ? "Sending…" : "Send"}
+                </button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
