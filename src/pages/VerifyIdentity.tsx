@@ -34,6 +34,8 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useSignup } from "@/contexts/SignupContext";
 import { requestPhoneOtp, verifyPhoneOtp } from "@/lib/phoneOtp";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 
@@ -172,7 +174,9 @@ interface PhoneVerificationCardProps {
   onSendOtp: () => void;
   onVerifyOtp: () => void;
   loading: boolean;
+  tokenReady?: boolean;
   errorMessage?: string | null;
+  turnstileSlot?: React.ReactNode;
 }
 
 function PhoneVerificationCard({
@@ -186,7 +190,9 @@ function PhoneVerificationCard({
   onSendOtp,
   onVerifyOtp,
   loading,
+  tokenReady = false,
   errorMessage,
+  turnstileSlot,
 }: PhoneVerificationCardProps) {
   const isVerified = state === "verified";
   const otpSent = state === "sent" || state === "failed";
@@ -220,7 +226,7 @@ function PhoneVerificationCard({
     };
   }, []);
 
-  const canResend = countdown === 0 && !loading;
+  const canResend = countdown === 0 && !loading && tokenReady;
   const sendLabel = useMemo(() => {
     if (loading && !otpSent) return "Sending…";
     if (countdown > 0) return `Resend in ${countdown}s`;
@@ -228,9 +234,9 @@ function PhoneVerificationCard({
   }, [loading, otpSent, countdown]);
 
   const handleSend = useCallback(() => {
-    if (loading || countdown > 0) return;
+    if (loading || countdown > 0 || !tokenReady) return;
     onSendOtp();
-  }, [loading, countdown, onSendOtp]);
+  }, [loading, countdown, onSendOtp, tokenReady]);
 
   return (
     <InsetPanel>
@@ -269,7 +275,7 @@ function PhoneVerificationCard({
         <>
           <InsetDivider />
           <div id="phone-verification-panel" className="px-4 py-4 flex flex-col gap-3">
-            {/* Phone input row with inline Send OTP button */}
+            {/* Phone input */}
             <div className="space-y-1.5">
               <p className="text-[13px] text-[var(--text-secondary)]">Mobile number</p>
               <div className="form-field-rest relative flex items-center">
@@ -278,8 +284,8 @@ function PhoneVerificationCard({
                   international
                   value={phone}
                   onChange={(value) => onPhoneChange(value || "")}
-                  disabled={otpSent && countdown > 0}
-                  className="w-full pl-10 pr-[110px] [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none"
+                  disabled={loading}
+                  className="w-full pl-10 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none"
                   inputStyle={{
                     width: "100%",
                     height: "100%",
@@ -289,53 +295,65 @@ function PhoneVerificationCard({
                     color: "var(--text-primary, #424965)",
                   }}
                 />
-                {/* Inline Send OTP button */}
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!canResend && countdown > 0}
-                  className={cn(
-                    "absolute right-2 h-[30px] px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
-                    canResend || !otpSent
-                      ? "bg-brandBlue text-white active:opacity-80"
-                      : "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
-                  )}
-                >
-                  {sendLabel}
-                </button>
               </div>
             </div>
 
-            {/* OTP code input — revealed after sending */}
-            {otpSent && (
-              <div className="space-y-1.5">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
                 <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
-                <div className="relative flex items-center">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={otpCode}
-                    onChange={(event) => onOtpChange(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                    placeholder="6-digit code"
-                    className="w-full h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white pl-3 pr-[90px] text-[15px] text-[var(--text-primary,#424965)] outline-none focus:border-brandBlue tracking-[0.2em]"
-                    autoComplete="one-time-code"
-                  />
-                  <button
-                    type="button"
-                    onClick={onVerifyOtp}
-                    disabled={loading || otpCode.length < 6}
-                    className={cn(
-                      "absolute right-2 h-[30px] px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
-                      !loading && otpCode.length >= 6
-                        ? "bg-brandBlue text-white active:opacity-80"
-                        : "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
-                    )}
-                  >
-                    {loading ? "…" : "Verify"}
-                  </button>
-                </div>
+                {countdown > 0 ? (
+                  <span className="text-[12px] text-[var(--text-tertiary)]">
+                    Resend in {countdown}s
+                  </span>
+                ) : null}
               </div>
-            )}
+              <input
+                type="text"
+                inputMode="numeric"
+                value={otpCode}
+                onChange={(event) => onOtpChange(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit code"
+                disabled={!otpSent}
+                className="w-full h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white px-3 text-[15px] text-[var(--text-primary,#424965)] outline-none focus:border-brandBlue tracking-[0.2em] disabled:bg-[rgba(248,249,255,0.85)] disabled:text-[var(--text-tertiary)]"
+                autoComplete="one-time-code"
+              />
+              {!otpSent ? (
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  Request an OTP first, then enter the 6-digit code here.
+                </p>
+              ) : null}
+            </div>
+
+            {turnstileSlot}
+
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={loading || countdown > 0 || !tokenReady}
+                className={cn(
+                  "h-[38px] rounded-[10px] px-4 text-[13px] font-semibold transition-colors",
+                  canResend || !otpSent
+                    ? "bg-brandBlue text-white active:opacity-80"
+                    : "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
+                )}
+              >
+                {sendLabel}
+              </button>
+              <button
+                type="button"
+                onClick={onVerifyOtp}
+                disabled={loading || !otpSent || otpCode.length < 6}
+                className={cn(
+                  "h-[38px] rounded-[10px] px-4 text-[13px] font-semibold transition-colors",
+                  !loading && otpSent && otpCode.length >= 6
+                    ? "bg-brandBlue text-white active:opacity-80"
+                    : "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
+                )}
+              >
+                {loading && otpSent ? "Verifying…" : "Verify code"}
+              </button>
+            </div>
 
             {errorMessage ? (
               <p className="text-[12px] text-[var(--color-error,#E84545)]">{errorMessage}</p>
@@ -816,6 +834,7 @@ export function VerifyIdentity({
   const [phoneOtpCode, setPhoneOtpCode] = useState("");
   const [phoneVerificationError, setPhoneVerificationError] = useState<string | null>(null);
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false);
+  const phoneOtpTurnstile = useTurnstile("send_phone_otp");
 
   const [humanAttemptId, setHumanAttemptId] = useState<string | null>(null);
   const [humanChallenge, setHumanChallenge] = useState<HumanChallenge | null>(null);
@@ -1432,10 +1451,16 @@ export function VerifyIdentity({
       setPhoneVerificationError("Please enter a phone number first.");
       return;
     }
+    const turnstileToken = phoneOtpTurnstile.getToken();
+    if (!turnstileToken) {
+      setPhoneVerificationError("Complete human verification first.");
+      return;
+    }
     setPhoneVerificationLoading(true);
     setPhoneVerificationError(null);
-    const result = await requestPhoneOtp(normalized);
+    const result = await requestPhoneOtp(normalized, turnstileToken);
     setPhoneVerificationLoading(false);
+    phoneOtpTurnstile.reset();
     if (!result.ok) {
       setPhoneVerificationState("failed");
       setPhoneVerificationError(result.error || "Failed to send OTP.");
@@ -1962,7 +1987,15 @@ export function VerifyIdentity({
             onSendOtp={onSendPhoneOtp}
             onVerifyOtp={onVerifyPhoneOtp}
             loading={phoneVerificationLoading}
+            tokenReady={phoneOtpTurnstile.isTokenUsable}
             errorMessage={phoneVerificationError}
+            turnstileSlot={
+              <TurnstileWidget
+                siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
+                setContainer={phoneOtpTurnstile.setContainer}
+                className="min-h-[65px]"
+              />
+            }
           />
 
           <HumanVerificationCard

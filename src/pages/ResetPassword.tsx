@@ -22,7 +22,7 @@ const ResetPassword = () => {
   });
 
   const onSubmit = async (values: FormData) => {
-    const token = String(resetTurnstile.token || "").trim();
+    const token = String(resetTurnstile.getToken() || "").trim();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
@@ -53,7 +53,7 @@ const ResetPassword = () => {
           setContainer={resetTurnstile.setContainer}
           className="min-h-[65px]"
         />
-        <Button type="submit" className="w-full h-10" disabled={!isValid}>Send reset link</Button>
+        <Button type="submit" className="w-full h-10" disabled={!isValid || !resetTurnstile.isTokenUsable}>Send reset link</Button>
       </form>
     </div>
   );
