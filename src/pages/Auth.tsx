@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { FormField, NeuCheckbox } from "@/components/ui";
 import { FormFieldOtp } from "@/components/ui/FormFieldOtp";
 import { toast } from "sonner";
 import huddleVideo from "@/assets/huddle video.mp4";
+import huddleLogoImage from "@/assets/huddle-logo-transparent.png";
 import appleIcon from "@/assets/Apple icon.png";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -50,7 +51,35 @@ const Auth = () => {
   const [mfaOtpCode, setMfaOtpCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
+  const [videoStarted, setVideoStarted] = useState(false);
+  const [useStaticLogo, setUseStaticLogo] = useState(false);
+  const logoVideoRef = useRef<HTMLVideoElement | null>(null);
   const loginTurnstile = useTurnstile("login");
+
+  useEffect(() => {
+    const videoEl = logoVideoRef.current;
+    if (!videoEl) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (!cancelled && !videoStarted) {
+        setUseStaticLogo(true);
+      }
+    }, 1500);
+
+    const tryPlay = async () => {
+      try {
+        await videoEl.play();
+      } catch {
+        if (!cancelled) setUseStaticLogo(true);
+      }
+    };
+    void tryPlay();
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [videoStarted]);
 
   const schema = useMemo(() => {
     return z.object({
@@ -224,16 +253,32 @@ const Auth = () => {
         <div className="flex flex-col items-center">
           {/* video has ~41px blank at top + ~42px blank at bottom; shift up 41px and clip to logo content */}
           <div className="overflow-hidden relative -top-2" style={{ height: "84px", width: "160px" }}>
-            <video
-              autoPlay
-              muted
-              playsInline
-              loop
-              className="block h-[160px] w-[160px] object-contain -mt-[41px]"
-              aria-label={t("app.name")}
-            >
-              <source src={huddleVideo} type="video/mp4" />
-            </video>
+            {useStaticLogo ? (
+              <img
+                src={huddleLogoImage}
+                alt={t("app.name")}
+                className="block h-[84px] w-[160px] object-contain"
+                loading="eager"
+                decoding="async"
+              />
+            ) : (
+              <video
+                ref={logoVideoRef}
+                autoPlay
+                muted
+                playsInline
+                loop
+                preload="auto"
+                disablePictureInPicture
+                controlsList="nodownload nofullscreen noremoteplayback"
+                className="block h-[160px] w-[160px] object-contain -mt-[41px]"
+                aria-label={t("app.name")}
+                onPlaying={() => setVideoStarted(true)}
+                onError={() => setUseStaticLogo(true)}
+              >
+                <source src={huddleVideo} type="video/mp4" />
+              </video>
+            )}
           </div>
           <p className="mt-1 text-center text-lg font-bold leading-none" style={{ color: "#1e4ad4" }}>
             huddle
