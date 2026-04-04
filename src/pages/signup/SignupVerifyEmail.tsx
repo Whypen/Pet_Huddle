@@ -80,6 +80,14 @@ const SignupVerifyEmail = () => {
   const sendInFlight = useRef(false);
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const readTurnstileToken = useCallback(() => {
+    const maybeGetToken = (presignupTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String(presignupTurnstile.token || "").trim();
+  }, [presignupTurnstile]);
+
   // ── Guard: no draft email → back to credentials ──────────────────────────────
   useEffect(() => {
     if (!draftEmail) {
@@ -152,13 +160,13 @@ const SignupVerifyEmail = () => {
       }
       return;
     }
-    const turnstileToken = presignupTurnstile.getToken();
+    const turnstileToken = readTurnstileToken();
     if (!turnstileToken) return; // wait for Turnstile to complete
     if (initialSendDone.current) return;
     initialSendDone.current = true;
     void sendEmail(turnstileToken, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftEmail, presignupTurnstile.token, presignupTurnstile.getToken]);
+  }, [draftEmail, presignupTurnstile.token, readTurnstileToken]);
 
   // ── Cooldown countdown ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -209,7 +217,7 @@ const SignupVerifyEmail = () => {
 
   const handleResend = () => {
     if (cooldown > 0 || sendState === "sending") return;
-    const turnstileToken = presignupTurnstile.getToken();
+    const turnstileToken = readTurnstileToken();
     if (!turnstileToken) {
       toast.error("Complete human verification first.");
       return;
