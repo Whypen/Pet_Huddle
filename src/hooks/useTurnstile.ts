@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getClientEnv } from "@/lib/env";
 
 declare global {
@@ -65,12 +65,49 @@ export function useTurnstile(action: string) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [widgetId, setWidgetId] = useState<string | null>(null);
+  const tokenRef = useRef<string>("");
+  const issuedAtRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const storeToken = useCallback((nextToken: string | null) => {
+    const normalized = String(nextToken || "").trim();
+    tokenRef.current = normalized;
+    issuedAtRef.current = normalized ? Date.now() : 0;
+    setToken(normalized || null);
+    setReady(Boolean(normalized));
+  }, []);
+
+  const readTokenFromDom = useCallback(() => {
+    const root = containerRef.current;
+    if (!root) return "";
+    const field = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+      'input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]',
+    );
+    return String(field?.value || field?.textContent || "").trim();
+  }, []);
+
+  const getToken = useCallback(() => {
+    const fromState = String(tokenRef.current || "").trim();
+    if (fromState) return fromState;
+    const fromDom = readTokenFromDom();
+    if (fromDom) {
+      storeToken(fromDom);
+      return fromDom;
+    }
+    return "";
+  }, [readTokenFromDom, storeToken]);
 
   useEffect(() => {
+    tokenRef.current = "";
+    issuedAtRef.current = 0;
     setToken(null);
     setError(null);
     setReady(false);
   }, [action]);
+
+  useEffect(() => {
+    containerRef.current = container;
+  }, [container]);
 
   useEffect(() => {
     if (!enabled || !container) return;
@@ -90,27 +127,15 @@ export function useTurnstile(action: string) {
           "refresh-expired": "auto",
           "refresh-timeout": "auto",
           callback: (nextToken) => {
-            setToken(nextToken);
+            storeToken(nextToken);
             setError(null);
-            setReady(true);
           },
           "expired-callback": () => {
-            setToken(null);
-            setReady(false);
+            storeToken(null);
             setError("Verification expired. Please complete it again.");
           },
           "error-callback": () => {
-            setToken(null);
-            setReady(false);
-            setError("Verification hiccup. Retrying challenge…");
-            if (localWidgetId && window.turnstile) {
-              try {
-                window.turnstile.reset(localWidgetId);
-                return;
-              } catch {
-                // fall through to user-facing fallback
-              }
-            }
+            storeToken(null);
             setError("Verification failed to load. Please retry.");
           },
         });
@@ -132,34 +157,67 @@ export function useTurnstile(action: string) {
         }
       }
     };
-  }, [action, container, enabled, siteKey]);
+  }, [action, container, enabled, siteKey, storeToken]);
+
+  useEffect(() => {
+    if (!enabled || !container) return;
+    const sync = () => {
+      const domToken = readTokenFromDom();
+      if (domToken && domToken !== tokenRef.current) {
+        storeToken(domToken);
+        setError(null);
+      }
+    };
+    sync();
+    const interval = window.setInterval(sync, 350);
+    const observer = new MutationObserver(sync);
+    observer.observe(container, { childList: true, subtree: true, attributes: true, characterData: true });
+    return () => {
+      window.clearInterval(interval);
+      observer.disconnect();
+    };
+  }, [container, enabled, readTokenFromDom, storeToken]);
 
   const reset = useCallback(() => {
-    setToken(null);
-    setReady(false);
+    storeToken(null);
     if (widgetId && window.turnstile) {
       try {
         window.turnstile.reset(widgetId);
+        const domToken = readTokenFromDom();
+        if (domToken) storeToken(domToken);
       } catch {
         setError("Verification failed to reset. Refresh and try again.");
       }
     }
-  }, [widgetId]);
+  }, [readTokenFromDom, storeToken, widgetId]);
+
+  const isTokenUsable = useMemo(() => {
+    const current = String(token || "").trim() || readTokenFromDom();
+    if (!current) return false;
+    if (!tokenRef.current && current) {
+      tokenRef.current = current;
+      issuedAtRef.current = issuedAtRef.current || Date.now();
+    }
+    const ageMs = Date.now() - issuedAtRef.current;
+    return ageMs >= 0 && ageMs < 4 * 60 * 1000;
+  }, [readTokenFromDom, token]);
 
   const state = useMemo(
     () => ({
       enabled,
       token,
       ready,
+      isTokenUsable,
       error,
       siteKeyMissing: !enabled,
     }),
-    [enabled, token, ready, error],
+    [enabled, token, ready, isTokenUsable, error],
   );
 
   return {
     ...state,
     setContainer,
+    getToken,
     reset,
   };
 }
