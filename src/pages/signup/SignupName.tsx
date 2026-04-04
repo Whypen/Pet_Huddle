@@ -184,7 +184,7 @@ const SignupName = () => {
     SOCIAL_ID_REGEX.test(normalizedSocialId) &&
     availabilityState === "available" &&
     (user ? true : signupTurnstile.isTokenUsable);
-  const showTurnstileWidget = !user && !signupTurnstile.isTokenUsable;
+  const hiddenTurnstileRequired = !user && !signupTurnstile.isTokenUsable;
 
   return (
     <SignupShell
@@ -193,12 +193,18 @@ const SignupName = () => {
       isExiting={isExiting}
       cta={
         <div className="space-y-3">
-          {showTurnstileWidget ? (
-            <TurnstileWidget
-              siteKeyMissing={signupTurnstile.siteKeyMissing}
-              setContainer={signupTurnstile.setContainer}
-              className="min-h-[65px]"
-            />
+          {hiddenTurnstileRequired ? (
+            <div
+              data-testid="signup-name-turnstile-hidden"
+              className="h-0 overflow-hidden opacity-0 pointer-events-none"
+              aria-hidden="true"
+            >
+              <TurnstileWidget
+                siteKeyMissing={signupTurnstile.siteKeyMissing}
+                setContainer={signupTurnstile.setContainer}
+                className="min-h-[65px]"
+              />
+            </div>
           ) : null}
           <Button
             variant="primary"

@@ -28,6 +28,7 @@ import { useTurnstile } from "@/hooks/useTurnstile";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
+const PRESIGNUP_TURNSTILE_TOKEN_KEY = "huddle_presignup_turnstile_token";
 const appEnv = String(import.meta.env.VITE_APP_ENV ?? "").toLowerCase();
 const shouldBypassDuplicateCheck =
   import.meta.env.PROD === false &&
@@ -81,6 +82,7 @@ const SignupCredentials = () => {
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
   const loginTurnstile = useTurnstile("login");
+  const presignupTurnstile = useTurnstile("send_pre_signup_verify");
 
   const {
     register,
@@ -285,6 +287,11 @@ const SignupCredentials = () => {
     // Email verification is handled by /signup/verify-email (presignup_tokens system).
     setSubmitting(true);
     try {
+      const presignupToken = String(presignupTurnstile.getToken() || "").trim();
+      if (!presignupToken) {
+        toast.error("Complete human verification first.");
+        return;
+      }
       const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
         p_email: values.email,
         p_phone: values.phone,
@@ -305,6 +312,7 @@ const SignupCredentials = () => {
         phone: values.phone.trim(),
         email_opt_in: emailOptIn,
       });
+      sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
       setFlowState("signup");
       goTo("/signup/verify-email");
     } catch (err) {
@@ -355,7 +363,8 @@ const SignupCredentials = () => {
       duplicateDetected ||
       checkingDuplicate ||
       submitting ||
-      (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError));
+      (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError)) ||
+      !presignupTurnstile.isTokenUsable;
 
   const hintText = isOAuthOnboarding
     ? (duplicateDetected
@@ -385,6 +394,15 @@ const SignupCredentials = () => {
         isExiting={isExiting}
         cta={
           <div className="space-y-2">
+            {!isOAuthOnboarding ? (
+              <div data-testid="signup-credentials-turnstile">
+                <TurnstileWidget
+                  siteKeyMissing={presignupTurnstile.siteKeyMissing}
+                  setContainer={presignupTurnstile.setContainer}
+                  className="min-h-[65px]"
+                />
+              </div>
+            ) : null}
             <NeuButton
               variant="primary"
               type="submit"

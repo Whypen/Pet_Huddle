@@ -39,6 +39,7 @@ import { SignupShell } from "@/components/signup/SignupShell";
 
 const PRESIGNUP_TOKEN_KEY  = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY  = "huddle_presignup_email";
+const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 const RESEND_COOLDOWN_SECS = 60;
 const POLL_INTERVAL_MS     = 3_000;
 
@@ -81,6 +82,10 @@ const SignupVerifyEmail = () => {
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const readTurnstileToken = useCallback(() => {
+    const fromCredentials = String(
+      sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "",
+    ).trim();
+    if (fromCredentials) return fromCredentials;
     const maybeGetToken = (presignupTurnstile as { getToken?: unknown }).getToken;
     if (typeof maybeGetToken === "function") {
       return String((maybeGetToken as () => string)() || "").trim();
@@ -111,6 +116,7 @@ const SignupVerifyEmail = () => {
       );
       presignupTurnstile.reset();
       if (error || !resp?.ok) throw new Error("send_failed");
+      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
 
       // Persist token scoped to this draft email
       try {
@@ -140,6 +146,7 @@ const SignupVerifyEmail = () => {
     try {
       sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
       sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
+      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
     } catch { /* best-effort */ }
     setToken("");
     setSendState("idle");
@@ -229,6 +236,7 @@ const SignupVerifyEmail = () => {
     try {
       sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
       sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
+      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
     } catch { /* best-effort */ }
     navigate("/signup/credentials");
   };
@@ -258,57 +266,21 @@ const SignupVerifyEmail = () => {
   };
 
   const handleOpenMail = () => {
-    // Intent: open inbox app if available, never open compose.
-    // If not supported, fail quietly and keep user on this page.
-    const ua = navigator.userAgent || "";
-    const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    const isAndroid = /Android/i.test(ua);
-
-    const candidates = isIOS
-      ? [
-          "message://",
-          "googlegmail://",
-          "ms-outlook://",
-          "ymail://",
-        ]
-      : isAndroid
-        ? [
-            "intent://mail.google.com/#Intent;scheme=https;package=com.google.android.gm;end",
-            "intent://#Intent;scheme=outlook;package=com.microsoft.office.outlook;end",
-            "intent://#Intent;scheme=ymail;package=com.yahoo.mobile.client.android.mail;end",
-          ]
-        : [];
-
-    if (candidates.length === 0) return;
-    let delay = 0;
-    for (const url of candidates) {
-      window.setTimeout(() => {
-        const frame = document.createElement("iframe");
-        frame.style.display = "none";
-        frame.src = url;
-        document.body.appendChild(frame);
-        window.setTimeout(() => {
-          try {
-            document.body.removeChild(frame);
-          } catch {
-            // no-op
-          }
-        }, 900);
-      }, delay);
-      delay += 300;
-    }
+    const inboxUrl = "https://mail.google.com/mail/u/0/#inbox";
+    const opened = window.open(inboxUrl, "_blank", "noopener,noreferrer");
+    if (!opened) window.location.assign(inboxUrl);
   };
 
   // ── Derived display ───────────────────────────────────────────────────────────
 
   const showExpiredBanner = incomingExpired && sendState === "idle" && !token;
-  const showTurnstileWidget = !presignupTurnstile.isTokenUsable;
+  const hiddenTurnstileRequired = !readTurnstileToken();
   const resendLabel = cooldown > 0
     ? `Resend link (${cooldown}s)`
     : sendState === "sending"
       ? "Sending…"
       : "Resend link";
-  const resendDisabled = cooldown > 0 || sendState === "sending" || !presignupTurnstile.isTokenUsable;
+  const resendDisabled = cooldown > 0 || sendState === "sending" || !readTurnstileToken();
   const manualLabel = manualCheck === "checking"
     ? "Checking…"
     : manualCheck === "not_yet"
@@ -332,12 +304,18 @@ const SignupVerifyEmail = () => {
             <Mail size={16} className="mr-2" />
             Open Mail
           </NeuButton>
-          {showTurnstileWidget ? (
-            <TurnstileWidget
-              siteKeyMissing={presignupTurnstile.siteKeyMissing}
-              setContainer={presignupTurnstile.setContainer}
-              className="min-h-[65px]"
-            />
+          {hiddenTurnstileRequired ? (
+            <div
+              data-testid="signup-verify-email-turnstile-hidden"
+              className="h-0 overflow-hidden opacity-0 pointer-events-none"
+              aria-hidden="true"
+            >
+              <TurnstileWidget
+                siteKeyMissing={presignupTurnstile.siteKeyMissing}
+                setContainer={presignupTurnstile.setContainer}
+                className="min-h-[65px]"
+              />
+            </div>
           ) : null}
           <NeuButton
             variant="ghost"
