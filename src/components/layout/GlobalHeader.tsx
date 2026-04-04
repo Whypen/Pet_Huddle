@@ -10,6 +10,7 @@ import {
   Heart,
   HelpCircle,
   Info,
+  LogOut,
   MessageSquare,
   Settings,
   Shield,
@@ -115,7 +116,7 @@ interface Pet {
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -586,11 +587,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
               </NeuControl>
             </SheetTrigger>
 
-            <SheetContent className="w-[320px] sm:max-w-sm flex flex-col gap-4 pt-6 px-4 pb-4">
+            <SheetContent className="w-[320px] sm:max-w-sm flex flex-col [&>button]:hidden">
               <SheetHeader className="sr-only">
                 <SheetTitle>{t("Settings")}</SheetTitle>
                 <SheetDescription>{t("Settings drawer")}</SheetDescription>
               </SheetHeader>
+
+              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 pt-6 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+16px)]">
 
               {drawerView === "main" && (
               <>
@@ -721,6 +724,16 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   onClick={() => setDrawerView("legal")}
                 />
               </InsetPanel>
+
+              {/* 5. Sign out */}
+              <InsetPanel>
+                <InsetRow
+                  label="Sign Out"
+                  icon={<LogOut size={16} strokeWidth={1.75} />}
+                  variant="danger"
+                  onClick={() => { setMenuOpen(false); void signOut(); }}
+                />
+              </InsetPanel>
               </>
               )}
 
@@ -795,6 +808,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   </InsetPanel>
                 </div>
               )}
+              </div>
 
             </SheetContent>
           </Sheet>
