@@ -72,7 +72,8 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
-        if (!signupTurnstile.token) {
+        const turnstileToken = signupTurnstile.getToken();
+        if (!turnstileToken) {
           toast.error("Complete human verification first.");
           return;
         }
@@ -87,7 +88,7 @@ const SignupName = () => {
               marketing_email_opt_in: data.email_opt_in,
             },
           },
-          turnstile_token: signupTurnstile.token,
+          turnstile_token: turnstileToken,
           turnstile_action: "signup",
         });
         signupTurnstile.reset();
@@ -181,7 +182,9 @@ const SignupName = () => {
     Boolean(displayName.trim()) &&
     Boolean(normalizedSocialId) &&
     SOCIAL_ID_REGEX.test(normalizedSocialId) &&
-    availabilityState === "available";
+    availabilityState === "available" &&
+    (user ? true : signupTurnstile.isTokenUsable);
+  const showTurnstileWidget = !user && !signupTurnstile.isTokenUsable;
 
   return (
     <SignupShell
@@ -190,7 +193,7 @@ const SignupName = () => {
       isExiting={isExiting}
       cta={
         <div className="space-y-3">
-          {!user ? (
+          {showTurnstileWidget ? (
             <TurnstileWidget
               siteKeyMissing={signupTurnstile.siteKeyMissing}
               setContainer={signupTurnstile.setContainer}

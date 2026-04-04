@@ -152,12 +152,13 @@ const SignupVerifyEmail = () => {
       }
       return;
     }
-    if (!presignupTurnstile.token) return; // wait for Turnstile to complete
+    const turnstileToken = presignupTurnstile.getToken();
+    if (!turnstileToken) return; // wait for Turnstile to complete
     if (initialSendDone.current) return;
     initialSendDone.current = true;
-    void sendEmail(presignupTurnstile.token, false);
+    void sendEmail(turnstileToken, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftEmail, presignupTurnstile.token]);
+  }, [draftEmail, presignupTurnstile.token, presignupTurnstile.getToken]);
 
   // ── Cooldown countdown ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -208,11 +209,12 @@ const SignupVerifyEmail = () => {
 
   const handleResend = () => {
     if (cooldown > 0 || sendState === "sending") return;
-    if (!presignupTurnstile.token) {
+    const turnstileToken = presignupTurnstile.getToken();
+    if (!turnstileToken) {
       toast.error("Complete human verification first.");
       return;
     }
-    void sendEmail(presignupTurnstile.token, true);
+    void sendEmail(turnstileToken, true);
   };
 
   const handleChangeEmail = () => {
@@ -247,17 +249,58 @@ const SignupVerifyEmail = () => {
     }
   };
 
-  const handleOpenMail = () => { window.location.href = "mailto:"; };
+  const handleOpenMail = () => {
+    // Intent: open inbox app if available, never open compose.
+    // If not supported, fail quietly and keep user on this page.
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+
+    const candidates = isIOS
+      ? [
+          "message://",
+          "googlegmail://",
+          "ms-outlook://",
+          "ymail://",
+        ]
+      : isAndroid
+        ? [
+            "intent://mail.google.com/#Intent;scheme=https;package=com.google.android.gm;end",
+            "intent://#Intent;scheme=outlook;package=com.microsoft.office.outlook;end",
+            "intent://#Intent;scheme=ymail;package=com.yahoo.mobile.client.android.mail;end",
+          ]
+        : [];
+
+    if (candidates.length === 0) return;
+    let delay = 0;
+    for (const url of candidates) {
+      window.setTimeout(() => {
+        const frame = document.createElement("iframe");
+        frame.style.display = "none";
+        frame.src = url;
+        document.body.appendChild(frame);
+        window.setTimeout(() => {
+          try {
+            document.body.removeChild(frame);
+          } catch {
+            // no-op
+          }
+        }, 900);
+      }, delay);
+      delay += 300;
+    }
+  };
 
   // ── Derived display ───────────────────────────────────────────────────────────
 
   const showExpiredBanner = incomingExpired && sendState === "idle" && !token;
+  const showTurnstileWidget = !presignupTurnstile.isTokenUsable;
   const resendLabel = cooldown > 0
     ? `Resend link (${cooldown}s)`
     : sendState === "sending"
       ? "Sending…"
       : "Resend link";
-  const resendDisabled = cooldown > 0 || sendState === "sending";
+  const resendDisabled = cooldown > 0 || sendState === "sending" || !presignupTurnstile.isTokenUsable;
   const manualLabel = manualCheck === "checking"
     ? "Checking…"
     : manualCheck === "not_yet"
@@ -281,11 +324,13 @@ const SignupVerifyEmail = () => {
             <Mail size={16} className="mr-2" />
             Open Mail
           </NeuButton>
-          <TurnstileWidget
-            siteKeyMissing={presignupTurnstile.siteKeyMissing}
-            setContainer={presignupTurnstile.setContainer}
-            className="min-h-[65px]"
-          />
+          {showTurnstileWidget ? (
+            <TurnstileWidget
+              siteKeyMissing={presignupTurnstile.siteKeyMissing}
+              setContainer={presignupTurnstile.setContainer}
+              className="min-h-[65px]"
+            />
+          ) : null}
           <NeuButton
             variant="ghost"
             className="w-full h-11"
