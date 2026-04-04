@@ -36,6 +36,13 @@ const SignupName = () => {
   const [isExiting, setIsExiting]     = useState(false);
   const normalizedSocialId = useMemo(() => socialId.trim(), [socialId]);
   const signupTurnstile = useTurnstile("signup");
+  const readSignupTurnstileToken = () => {
+    const maybeGetToken = (signupTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((signupTurnstile as { token?: string | null }).token || "").trim();
+  };
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -72,7 +79,7 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
-        const turnstileToken = signupTurnstile.getToken();
+        const turnstileToken = readSignupTurnstileToken();
         if (!turnstileToken) {
           toast.error("Complete human verification first.");
           return;
