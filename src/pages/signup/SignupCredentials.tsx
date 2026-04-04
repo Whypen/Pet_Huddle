@@ -289,7 +289,8 @@ const SignupCredentials = () => {
     try {
       const presignupToken = String(presignupTurnstile.getToken() || "").trim();
       if (!presignupToken) {
-        toast.error("Complete human verification first.");
+        presignupTurnstile.reset();
+        toast.error("Human verification failed. Please retry.");
         return;
       }
       const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
@@ -363,8 +364,7 @@ const SignupCredentials = () => {
       duplicateDetected ||
       checkingDuplicate ||
       submitting ||
-      (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError)) ||
-      !presignupTurnstile.isTokenUsable;
+      (!shouldBypassDuplicateCheck && Boolean(duplicateCheckError));
 
   const hintText = isOAuthOnboarding
     ? (duplicateDetected
@@ -376,9 +376,7 @@ const SignupCredentials = () => {
             : phoneNotValid
               ? "Phone number length is not valid for the selected country"
               : "Enter your phone number to continue")
-    : (!presignupTurnstile.isTokenUsable
-        ? "Complete human verification to continue"
-        : duplicateDetected
+    : (duplicateDetected
         ? "This email or phone number is already registered"
         : checkingDuplicate
           ? "Checking account details…"
