@@ -539,6 +539,13 @@ const Settings: React.FC = () => {
         <p className="text-[12px] font-[500] uppercase tracking-[0.06em] text-[var(--text-tertiary)] px-1 pt-2">SECURITY</p>
         <InsetPanel>
           <InsetRow
+            label="Security"
+            variant="nav"
+            icon={<Shield size={16} strokeWidth={1.75} />}
+            onClick={() => navigate("/settings/security")}
+          />
+          <InsetDivider />
+          <InsetRow
             label="Change password"
             variant="nav"
             icon={<Lock size={16} strokeWidth={1.75} />}

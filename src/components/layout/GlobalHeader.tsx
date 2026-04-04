@@ -37,6 +37,7 @@ import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
 import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
+import { GlassModal } from "@/components/ui/GlassModal";
 
 // ─── Notification types & helpers ────────────────────────────────────────────
 
@@ -130,6 +131,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [supportSubject, setSupportSubject] = useState("");
   const [supportMessage, setSupportMessage] = useState("");
   const [supportEmailOptIn, setSupportEmailOptIn] = useState(true);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [drawerView, setDrawerView] = useState<"main" | "legal">("main");
   const premiumReturnTo = `${location.pathname}${location.search}`;
 
@@ -731,7 +733,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   label="Sign Out"
                   icon={<LogOut size={16} strokeWidth={1.75} />}
                   variant="danger"
-                  onClick={() => { setMenuOpen(false); void signOut(); }}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setLogoutOpen(true);
+                  }}
                 />
               </InsetPanel>
               </>
@@ -920,6 +925,28 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <GlassModal isOpen={logoutOpen} onClose={() => setLogoutOpen(false)} title="Log out?" hideClose>
+        <p className="text-[14px] leading-[1.55] text-[var(--text-secondary)] text-center mb-5">
+          You&apos;ll need to sign in again.
+        </p>
+        <div className="flex gap-3">
+          <NeuControl size="lg" variant="secondary" fullWidth onClick={() => setLogoutOpen(false)}>
+            Cancel
+          </NeuControl>
+          <NeuControl
+            size="lg"
+            variant="danger"
+            fullWidth
+            onClick={async () => {
+              await signOut();
+              navigate("/auth", { replace: true });
+            }}
+          >
+            Log out
+          </NeuControl>
+        </div>
+      </GlassModal>
     </header>
   );
 };
