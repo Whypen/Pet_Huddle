@@ -835,6 +835,13 @@ export function VerifyIdentity({
   const [phoneVerificationError, setPhoneVerificationError] = useState<string | null>(null);
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false);
   const phoneOtpTurnstile = useTurnstile("send_phone_otp");
+  const readPhoneOtpTurnstileToken = () => {
+    const maybeGetToken = (phoneOtpTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((phoneOtpTurnstile as { token?: string | null }).token || "").trim();
+  };
 
   const [humanAttemptId, setHumanAttemptId] = useState<string | null>(null);
   const [humanChallenge, setHumanChallenge] = useState<HumanChallenge | null>(null);
@@ -1451,7 +1458,7 @@ export function VerifyIdentity({
       setPhoneVerificationError("Please enter a phone number first.");
       return;
     }
-    const turnstileToken = phoneOtpTurnstile.getToken();
+    const turnstileToken = readPhoneOtpTurnstileToken();
     if (!turnstileToken) {
       setPhoneVerificationError("Complete human verification first.");
       return;

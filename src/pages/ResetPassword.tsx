@@ -1,12 +1,14 @@
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { ChevronLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { authResetPassword } from "@/lib/publicAuthApi";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { useNavigate } from "react-router-dom";
 
 const schema = z.object({
   email: z.string().email("Invalid email format"),
@@ -15,14 +17,22 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const ResetPassword = () => {
+  const navigate = useNavigate();
   const resetTurnstile = useTurnstile("reset_password");
+  const readTurnstileToken = () => {
+    const maybeGetToken = (resetTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((resetTurnstile as { token?: string | null }).token || "").trim();
+  };
   const { register, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
   });
 
   const onSubmit = async (values: FormData) => {
-    const token = String(resetTurnstile.getToken() || "").trim();
+    const token = readTurnstileToken();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
@@ -43,6 +53,14 @@ const ResetPassword = () => {
 
   return (
     <div className="min-h-screen bg-background px-6 pt-10">
+      <button
+        type="button"
+        onClick={() => navigate("/auth")}
+        className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-border text-brandText"
+        aria-label="Back to sign in"
+      >
+        <ChevronLeft size={18} strokeWidth={1.75} />
+      </button>
       <h1 className="text-xl font-bold text-brandText">Reset Password</h1>
       <p className="text-sm text-muted-foreground">Enter your email to receive a reset link.</p>
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">

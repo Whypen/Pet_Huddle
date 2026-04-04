@@ -22,6 +22,13 @@ const AuthCallback = () => {
   const navigate = useNavigate();
   const { setFlowState } = useSignup();
   const recoveryTurnstile = useTurnstile("change_password");
+  const readTurnstileToken = () => {
+    const maybeGetToken = (recoveryTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((recoveryTurnstile as { token?: string | null }).token || "").trim();
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -89,7 +96,7 @@ const AuthCallback = () => {
   }, [navigate, setFlowState]);
 
   const updatePassword = async () => {
-    const token = String(recoveryTurnstile.getToken() || "").trim();
+    const token = readTurnstileToken();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
