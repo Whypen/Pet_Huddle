@@ -55,6 +55,13 @@ const Auth = () => {
   const [useStaticLogo, setUseStaticLogo] = useState(false);
   const logoVideoRef = useRef<HTMLVideoElement | null>(null);
   const loginTurnstile = useTurnstile("login");
+  const readLoginTurnstileToken = () => {
+    const maybeGetToken = (loginTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((loginTurnstile as { token?: string | null }).token || "").trim();
+  };
 
   useEffect(() => {
     const videoEl = logoVideoRef.current;
@@ -134,11 +141,12 @@ const Auth = () => {
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
     if (!values.email) return;
-    if (!loginTurnstile.token) {
+    const turnstileToken = readLoginTurnstileToken();
+    if (!turnstileToken) {
       setAuthError("Complete human verification first.");
       return;
     }
-    const result = await signIn(values.email, values.password, undefined, loginTurnstile.token);
+    const result = await signIn(values.email, values.password, undefined, turnstileToken);
     loginTurnstile.reset();
     if (result.error) {
       setAuthError(result.error.message || "Couldn't sign you in.");
@@ -424,7 +432,7 @@ const Auth = () => {
                 setContainer={loginTurnstile.setContainer}
                 className="min-h-[65px]"
               />
-              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading}>
+              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || !loginTurnstile.isTokenUsable}>
                 Sign in
               </NeuButton>
               {authError ? (

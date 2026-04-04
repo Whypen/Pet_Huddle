@@ -61,6 +61,13 @@ const Settings: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [starsRemaining, setStarsRemaining] = useState<number>(0);
   const changePasswordTurnstile = useTurnstile("change_password");
+  const readChangePasswordTurnstileToken = () => {
+    const maybeGetToken = (changePasswordTurnstile as { getToken?: unknown }).getToken;
+    if (typeof maybeGetToken === "function") {
+      return String((maybeGetToken as () => string)() || "").trim();
+    }
+    return String((changePasswordTurnstile as { token?: string | null }).token || "").trim();
+  };
 
   const p = (profile ?? {}) as Record<string, unknown>;
   const displayName = String(p.display_name || "Profile");
@@ -306,7 +313,8 @@ const Settings: React.FC = () => {
       return;
     }
 
-    if (!changePasswordTurnstile.token) {
+    const turnstileToken = readChangePasswordTurnstileToken();
+    if (!turnstileToken) {
       toast.error("Complete human verification first.");
       return;
     }
@@ -314,7 +322,7 @@ const Settings: React.FC = () => {
     setBusy(true);
     const { error } = await authChangePassword({
       password: newPassword,
-      turnstile_token: changePasswordTurnstile.token,
+      turnstile_token: turnstileToken,
       turnstile_action: "change_password",
     });
     setBusy(false);
@@ -611,7 +619,7 @@ const Settings: React.FC = () => {
           />
           <DialogFooter className="!flex-row gap-2 pt-2">
             <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setPasswordOpen(false)}>Cancel</NeuControl>
-            <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy} onClick={submitPasswordChange}>Update</NeuControl>
+            <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy || !changePasswordTurnstile.isTokenUsable} onClick={submitPasswordChange}>Update</NeuControl>
           </DialogFooter>
         </DialogContent>
       </Dialog>
