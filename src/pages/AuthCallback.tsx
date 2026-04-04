@@ -32,6 +32,8 @@ const AuthCallback = () => {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
           toast.error(type === "recovery" ? "Invalid reset link" : "Sign-in failed. Please try again.");
+          navigate(type === "recovery" ? "/reset-password" : "/auth");
+          return;
         }
       }
       if (type !== "recovery") {
@@ -87,7 +89,7 @@ const AuthCallback = () => {
   }, [navigate, setFlowState]);
 
   const updatePassword = async () => {
-    const token = String(recoveryTurnstile.token || "").trim();
+    const token = String(recoveryTurnstile.getToken() || "").trim();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
@@ -128,7 +130,7 @@ const AuthCallback = () => {
           setContainer={recoveryTurnstile.setContainer}
           className="min-h-[65px]"
         />
-        <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8 || submitting}>
+        <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8 || submitting || !recoveryTurnstile.isTokenUsable}>
           Update password
         </NeuButton>
       </div>

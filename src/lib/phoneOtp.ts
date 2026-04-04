@@ -163,7 +163,7 @@ export async function verifyPhoneOtp(
     }
   } else {
     // Unauthenticated path — no JWT; edge function uses sms verifyOtp
-    const res = await callAnon<VerifyResponse>("verify-phone-otp", {
+    const res = await callPublic<VerifyResponse>("verify-phone-otp", {
       phone:    normalizedPhone,
       token:    normalizedToken,
       otp_type: "sms",

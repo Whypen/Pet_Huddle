@@ -17,6 +17,10 @@ import {
   parseAllowedIsos,
   isPhoneCountryAllowed,
 } from "../_shared/phoneCountry.ts";
+import {
+  getExpectedTurnstileHostnames,
+  validateTurnstile,
+} from "../_shared/turnstile.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +28,8 @@ interface RequestBody {
   phone: string;
   device_id?: string;   // FingerprintJS visitorId, optional
   session_id?: string;  // optional
+  turnstile_token?: string;
+  turnstile_action?: string;
 }
 
 interface RateLimitRow {
@@ -156,6 +162,7 @@ Deno.serve(async (req: Request) => {
   const rawPhone = (body.phone ?? "").trim();
   const deviceId  = body.device_id  ?? null;
   const sessionId = body.session_id ?? null;
+  const turnstileToken = body.turnstile_token ?? null;
 
   if (!rawPhone) {
     return new Response(JSON.stringify({ error: "Phone number is required" }), {
@@ -165,6 +172,37 @@ Deno.serve(async (req: Request) => {
 
   // ── Hash phone — never passes raw phone to DB ────────────────────────────
   const phoneHash = await sha256Hex(rawPhone);
+  const turnstile = await validateTurnstile(
+    turnstileToken,
+    clientIp,
+    "send_phone_otp",
+    getExpectedTurnstileHostnames(),
+  );
+  if (!turnstile.valid) {
+    await logAttempt(serviceClient, {
+      phoneHash,
+      ip: clientIp,
+      attemptType: "request",
+      status: "failed",
+      userId: null,
+      deviceId,
+      sessionId,
+      reason: `turnstile_${turnstile.reason}`,
+      flags: [
+        "turnstile_failed",
+        `turnstile_action:${turnstile.action || "missing"}`,
+        `turnstile_hostname:${turnstile.hostname || "missing"}`,
+      ],
+      error: turnstile.error_codes.join(",") || turnstile.reason,
+    });
+    return new Response(JSON.stringify({
+      error: "Human verification failed.",
+      turnstile_reason: turnstile.reason,
+    }), {
+      status: 403,
+      headers: CORS,
+    });
+  }
 
   // ── Country allowlist gate ────────────────────────────────────────────────
   // Authoritative enforcement. Uses libphonenumber-js to validate and extract
@@ -186,12 +224,16 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Resolve authenticated user from JWT (if present) ──────────────────────
-  // Pattern mirrors create-stripe-connect-link: accept both header variants.
+  // x-huddle-access-token carries the user JWT when authenticated.
+  // Authorization always carries the anon key (a valid 3-part JWT) so it must
+  // not be checked first — the anon key is not a user JWT and would cause
+  // getUser() to return an error, incorrectly triggering a 401.
+  // Prefer huddleToken; fall back to bearerToken only if huddle is absent.
   const authHeader   = req.headers.get("Authorization") ?? "";
   const huddleHeader = req.headers.get("x-huddle-access-token") ?? "";
   const bearerToken  = authHeader.replace(/^Bearer\s+/i, "").trim();
   const huddleToken  = huddleHeader.replace(/^Bearer\s+/i, "").trim();
-  const accessToken  = [bearerToken, huddleToken].find(
+  const accessToken  = [huddleToken, bearerToken].find(
     (t) => t.split(".").length === 3,
   ) ?? null;
 
@@ -308,8 +350,14 @@ Deno.serve(async (req: Request) => {
     attemptType: "request",
     status: flags.length > 0 ? "suspicious" : "success",
     userId, deviceId, sessionId,
-    reason: flags.length > 0 ? flags.join(",") : null,
-    flags,
+    reason: flags.length > 0 ? flags.join(",") : "turnstile_ok",
+    flags: [
+      ...flags,
+      "turnstile_success",
+      `turnstile_action:${turnstile.action || "send_phone_otp"}`,
+      `turnstile_hostname:${turnstile.hostname || "missing"}`,
+      `turnstile_challenge_ts:${turnstile.challenge_ts || "missing"}`,
+    ],
   });
 
   return new Response(
