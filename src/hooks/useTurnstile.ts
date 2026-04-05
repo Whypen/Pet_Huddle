@@ -68,6 +68,9 @@ export function useTurnstile(action: string) {
   const tokenRef = useRef<string>("");
   const issuedAtRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const renderedContainerRef = useRef<HTMLDivElement | null>(null);
+  const renderingRef = useRef(false);
 
   const storeToken = useCallback((nextToken: string | null) => {
     const normalized = String(nextToken || "").trim();
@@ -109,16 +112,52 @@ export function useTurnstile(action: string) {
     containerRef.current = container;
   }, [container]);
 
+  const removeWidget = useCallback((targetContainer?: HTMLDivElement | null) => {
+    const currentWidgetId = widgetIdRef.current;
+    if (currentWidgetId && window.turnstile) {
+      try {
+        window.turnstile.remove(currentWidgetId);
+      } catch {
+        // no-op
+      }
+    }
+    const containerToClear = targetContainer ?? renderedContainerRef.current;
+    if (containerToClear) {
+      containerToClear.innerHTML = "";
+    }
+    widgetIdRef.current = null;
+    renderedContainerRef.current = null;
+    renderingRef.current = false;
+    setWidgetId(null);
+  }, []);
+
   useEffect(() => {
     if (!enabled || !container) return;
     let cancelled = false;
-    let localWidgetId: string | null = null;
+
+    if (renderingRef.current) return;
+    if (widgetIdRef.current && renderedContainerRef.current === container) {
+      return;
+    }
+
+    if (widgetIdRef.current && renderedContainerRef.current && renderedContainerRef.current !== container) {
+      removeWidget(renderedContainerRef.current);
+    }
+
+    renderingRef.current = true;
 
     void loadTurnstileScript()
       .then(() => {
-        if (cancelled || !window.turnstile) return;
+        if (cancelled || !window.turnstile) {
+          renderingRef.current = false;
+          return;
+        }
+        if (widgetIdRef.current && renderedContainerRef.current === container) {
+          renderingRef.current = false;
+          return;
+        }
         container.innerHTML = "";
-        localWidgetId = window.turnstile.render(container, {
+        const nextWidgetId = window.turnstile.render(container, {
           sitekey: siteKey,
           action,
           theme: "light",
@@ -139,25 +178,25 @@ export function useTurnstile(action: string) {
             setError("Verification failed to load. Please retry.");
           },
         });
-        setWidgetId(localWidgetId);
+        widgetIdRef.current = nextWidgetId;
+        renderedContainerRef.current = container;
+        renderingRef.current = false;
+        setWidgetId(nextWidgetId);
       })
       .catch(() => {
         if (cancelled) return;
+        renderingRef.current = false;
         setError("Verification failed to load. Please retry.");
         setReady(false);
       });
 
     return () => {
       cancelled = true;
-      if (localWidgetId && window.turnstile) {
-        try {
-          window.turnstile.remove(localWidgetId);
-        } catch {
-          // no-op
-        }
+      if (renderedContainerRef.current === container) {
+        removeWidget(container);
       }
     };
-  }, [action, container, enabled, siteKey, storeToken]);
+  }, [action, container, enabled, removeWidget, siteKey, storeToken]);
 
   useEffect(() => {
     if (!enabled || !container) return;
@@ -180,16 +219,17 @@ export function useTurnstile(action: string) {
 
   const reset = useCallback(() => {
     storeToken(null);
-    if (widgetId && window.turnstile) {
+    const currentWidgetId = widgetIdRef.current;
+    if (currentWidgetId && window.turnstile) {
       try {
-        window.turnstile.reset(widgetId);
+        window.turnstile.reset(currentWidgetId);
         const domToken = readTokenFromDom();
         if (domToken) storeToken(domToken);
       } catch {
         setError("Verification failed to reset. Refresh and try again.");
       }
     }
-  }, [readTokenFromDom, storeToken, widgetId]);
+  }, [readTokenFromDom, storeToken]);
 
   const isTokenUsable = useMemo(() => {
     const current = String(token || "").trim() || readTokenFromDom();
