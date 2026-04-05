@@ -64,13 +64,15 @@ export function useTurnstile(action: string) {
   const [token, setToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [widgetId, setWidgetId] = useState<string | null>(null);
   const tokenRef = useRef<string>("");
   const issuedAtRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
   const renderedContainerRef = useRef<HTMLDivElement | null>(null);
   const renderingRef = useRef(false);
+  const actionRef = useRef(action);
+  const storeTokenRef = useRef<(nextToken: string | null) => void>(() => undefined);
+  const setErrorRef = useRef(setError);
 
   const storeToken = useCallback((nextToken: string | null) => {
     const normalized = String(nextToken || "").trim();
@@ -101,6 +103,7 @@ export function useTurnstile(action: string) {
   }, [readTokenFromDom, storeToken]);
 
   useEffect(() => {
+    actionRef.current = action;
     tokenRef.current = "";
     issuedAtRef.current = 0;
     setToken(null);
@@ -111,6 +114,11 @@ export function useTurnstile(action: string) {
   useEffect(() => {
     containerRef.current = container;
   }, [container]);
+
+  useEffect(() => {
+    storeTokenRef.current = storeToken;
+    setErrorRef.current = setError;
+  }, [storeToken]);
 
   const removeWidget = useCallback((targetContainer?: HTMLDivElement | null) => {
     const currentWidgetId = widgetIdRef.current;
@@ -128,7 +136,6 @@ export function useTurnstile(action: string) {
     widgetIdRef.current = null;
     renderedContainerRef.current = null;
     renderingRef.current = false;
-    setWidgetId(null);
   }, []);
 
   useEffect(() => {
@@ -159,29 +166,28 @@ export function useTurnstile(action: string) {
         container.innerHTML = "";
         const nextWidgetId = window.turnstile.render(container, {
           sitekey: siteKey,
-          action,
+          action: actionRef.current,
           theme: "light",
           retry: "auto",
           "retry-interval": 800,
           "refresh-expired": "auto",
           "refresh-timeout": "auto",
           callback: (nextToken) => {
-            storeToken(nextToken);
-            setError(null);
+            storeTokenRef.current(nextToken);
+            setErrorRef.current(null);
           },
           "expired-callback": () => {
-            storeToken(null);
-            setError("Verification expired. Please complete it again.");
+            storeTokenRef.current(null);
+            setErrorRef.current("Verification expired. Please complete it again.");
           },
           "error-callback": () => {
-            storeToken(null);
-            setError("Verification failed to load. Please retry.");
+            storeTokenRef.current(null);
+            setErrorRef.current("Verification failed to load. Please retry.");
           },
         });
         widgetIdRef.current = nextWidgetId;
         renderedContainerRef.current = container;
         renderingRef.current = false;
-        setWidgetId(nextWidgetId);
       })
       .catch(() => {
         if (cancelled) return;
@@ -196,7 +202,7 @@ export function useTurnstile(action: string) {
         removeWidget(container);
       }
     };
-  }, [action, container, enabled, removeWidget, siteKey, storeToken]);
+  }, [container, enabled, removeWidget, siteKey]);
 
   useEffect(() => {
     if (!enabled || !container) return;
