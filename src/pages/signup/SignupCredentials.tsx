@@ -83,17 +83,6 @@ const SignupCredentials = () => {
   const duplicateCheckRef = useRef(0);
   const loginTurnstile = useTurnstile("login");
   const presignupTurnstile = useTurnstile("send_pre_signup_verify");
-  const ensureTurnstileToken = async (turnstileState: { ensureToken?: unknown; getToken?: unknown; token?: string | null }) => {
-    const maybeEnsureToken = turnstileState.ensureToken;
-    if (typeof maybeEnsureToken === "function") {
-      return String(await (maybeEnsureToken as () => Promise<string>)() || "").trim();
-    }
-    const maybeGetToken = turnstileState.getToken;
-    if (typeof maybeGetToken === "function") {
-      return String((maybeGetToken as () => string)() || "").trim();
-    }
-    return String(turnstileState.token || "").trim();
-  };
   const readTurnstileToken = (turnstileState: { getToken?: unknown; token?: string | null }) => {
     const maybeGetToken = turnstileState.getToken;
     if (typeof maybeGetToken === "function") {
@@ -305,7 +294,7 @@ const SignupCredentials = () => {
     // Email verification is handled by /signup/verify-email (presignup_tokens system).
     setSubmitting(true);
     try {
-      const presignupToken = await ensureTurnstileToken(presignupTurnstile);
+      const presignupToken = readTurnstileToken(presignupTurnstile);
       if (!presignupToken) {
         presignupTurnstile.reset();
         toast.error("Human verification failed. Please retry.");
@@ -645,7 +634,7 @@ const SignupCredentials = () => {
                 setSigninLoading(true);
                 setSigninError("");
                 try {
-                  const token = await ensureTurnstileToken(loginTurnstile);
+                  const token = readTurnstileToken(loginTurnstile);
                   if (!token) throw new Error("Complete human verification first.");
                   const result = await signIn(signinEmail, signinPassword, undefined, token);
                   loginTurnstile.reset();
