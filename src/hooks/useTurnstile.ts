@@ -19,6 +19,7 @@ declare global {
           theme?: "light" | "dark" | "auto";
         },
       ) => string;
+      execute?: (widgetId?: string) => void;
       reset: (widgetId?: string) => void;
       remove: (widgetId?: string) => void;
     };
@@ -54,6 +55,17 @@ function loadTurnstileScript(): Promise<void> {
   });
 
   return turnstileScriptPromise;
+}
+
+function triggerTurnstileExecution(widgetId: string | null) {
+  if (!widgetId || typeof window === "undefined" || !window.turnstile) return;
+  const maybeExecute = window.turnstile.execute;
+  if (typeof maybeExecute !== "function") return;
+  try {
+    maybeExecute(widgetId);
+  } catch {
+    // no-op: some widget modes do not support explicit execute
+  }
 }
 
 export function useTurnstile(action: string) {
@@ -140,6 +152,8 @@ export function useTurnstile(action: string) {
           },
         });
         setWidgetId(localWidgetId);
+        // Some widget modes require explicit execution before a token is issued.
+        triggerTurnstileExecution(localWidgetId);
       })
       .catch(() => {
         if (cancelled) return;
@@ -183,6 +197,7 @@ export function useTurnstile(action: string) {
     if (widgetId && window.turnstile) {
       try {
         window.turnstile.reset(widgetId);
+        triggerTurnstileExecution(widgetId);
         const domToken = readTokenFromDom();
         if (domToken) storeToken(domToken);
       } catch {
