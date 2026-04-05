@@ -19,20 +19,16 @@ type FormData = z.infer<typeof schema>;
 const ResetPassword = () => {
   const navigate = useNavigate();
   const resetTurnstile = useTurnstile("reset_password");
-  const readTurnstileToken = () => {
-    const maybeGetToken = (resetTurnstile as { getToken?: unknown }).getToken;
-    if (typeof maybeGetToken === "function") {
-      return String((maybeGetToken as () => string)() || "").trim();
-    }
-    return String((resetTurnstile as { token?: string | null }).token || "").trim();
-  };
   const { register, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
   });
 
   const onSubmit = async (values: FormData) => {
-    const token = readTurnstileToken();
+    const maybeEnsureToken = (resetTurnstile as { ensureToken?: unknown }).ensureToken;
+    const token = typeof maybeEnsureToken === "function"
+      ? String(await (maybeEnsureToken as () => Promise<string>)() || "").trim()
+      : String((resetTurnstile as { getToken?: () => string }).getToken?.() || "").trim();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
@@ -71,7 +67,7 @@ const ResetPassword = () => {
           setContainer={resetTurnstile.setContainer}
           className="min-h-[65px]"
         />
-        <Button type="submit" className="w-full h-10" disabled={!isValid || !resetTurnstile.isTokenUsable}>Send reset link</Button>
+        <Button type="submit" className="w-full h-10" disabled={!isValid}>Send reset link</Button>
       </form>
     </div>
   );

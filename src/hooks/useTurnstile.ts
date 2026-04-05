@@ -13,6 +13,7 @@ declare global {
           "retry-interval"?: number;
           "refresh-expired"?: "auto" | "manual" | "never";
           "refresh-timeout"?: "auto" | "manual" | "never";
+          execution?: "render" | "execute";
           callback?: (token: string) => void;
           "expired-callback"?: () => void;
           "error-callback"?: () => void;
@@ -133,6 +134,7 @@ export function useTurnstile(action: string) {
         localWidgetId = window.turnstile.render(container, {
           sitekey: siteKey,
           action,
+          execution: "execute",
           theme: "light",
           retry: "auto",
           "retry-interval": 800,
@@ -152,8 +154,6 @@ export function useTurnstile(action: string) {
           },
         });
         setWidgetId(localWidgetId);
-        // Some widget modes require explicit execution before a token is issued.
-        triggerTurnstileExecution(localWidgetId);
       })
       .catch(() => {
         if (cancelled) return;
@@ -197,7 +197,6 @@ export function useTurnstile(action: string) {
     if (widgetId && window.turnstile) {
       try {
         window.turnstile.reset(widgetId);
-        triggerTurnstileExecution(widgetId);
         const domToken = readTokenFromDom();
         if (domToken) storeToken(domToken);
       } catch {
@@ -229,10 +228,27 @@ export function useTurnstile(action: string) {
     [enabled, token, ready, isTokenUsable, error],
   );
 
+  const ensureToken = useCallback(async () => {
+    const existing = getToken();
+    if (existing) return existing;
+    if (!widgetId || !window.turnstile) return "";
+
+    triggerTurnstileExecution(widgetId);
+
+    const started = Date.now();
+    while (Date.now() - started < 10000) {
+      const next = getToken();
+      if (next) return next;
+      await new Promise((resolve) => window.setTimeout(resolve, 125));
+    }
+    return "";
+  }, [getToken, widgetId]);
+
   return {
     ...state,
     setContainer,
     getToken,
+    ensureToken,
     reset,
   };
 }
