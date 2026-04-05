@@ -1,5 +1,24 @@
 project_id = "ztrbourwcnhrpmzwlrcn"
 
+# Pre-auth functions: gateway JWT verification disabled.
+# verify_jwt = true expects legacy JWT-shaped API keys and is incompatible
+# with sb_publishable/sb_secret keys. These are called before a user session
+# exists; Turnstile validation is the internal access gate for each.
+[functions.auth-login]
+verify_jwt = false
+
+[functions.auth-signup]
+verify_jwt = false
+
+[functions.auth-reset-password]
+verify_jwt = false
+
+[functions.send-pre-signup-verify]
+verify_jwt = false
+
+[functions.auth-protection-health]
+verify_jwt = false
+
 [functions.verify-device-fingerprint]
 verify_jwt = false
 

@@ -26,6 +26,7 @@ dist-ssr
 *.sw?
 Platform Keys.rtf
 Backend.env.md
+Backend.env.local.md
 supabase/config.toml.bak
 
 # Large media / source assets (use copies inside app packages instead)
