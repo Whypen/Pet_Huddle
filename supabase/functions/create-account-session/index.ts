@@ -10,7 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-huddle-access-token, x-client-info, apikey, content-type",
+    "authorization, x-huddle-access-token, x-client-info, x-supabase-client-platform, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -68,16 +68,24 @@ serve(async (req) => {
     if (authErr || !user)
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
 
-    // ── Require existing stripe_account_id ────────────────────────────────
-    const { data: profile } = await supabase
-      .from("pet_care_profiles")
-      .select("stripe_account_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // ── Require existing stripe_account_id + fetch prefill data ─────────
+    const [careProfileResult, huddleProfileResult] = await Promise.all([
+      supabase
+        .from("pet_care_profiles")
+        .select("stripe_account_id, skills")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("profiles")
+        .select("social_id, display_name, legal_name")
+        .eq("id", user.id)
+        .maybeSingle(),
+    ]);
 
-    const accountId = String(
-      (profile as Record<string, unknown> | null)?.stripe_account_id || "",
-    ).trim();
+    const careProfile = careProfileResult.data as Record<string, unknown> | null;
+    const hp = huddleProfileResult.data as Record<string, unknown> | null;
+
+    const accountId = String(careProfile?.stripe_account_id || "").trim();
 
     if (!accountId) {
       return Response.json(
@@ -92,6 +100,22 @@ serve(async (req) => {
       apiVersion: "2023-10-16",
       httpClient: Stripe.createFetchHttpClient(),
     });
+
+    // Backfill business_profile for accounts created before the wallet prefill flow.
+    // Fire-and-forget — session creation is not blocked by this.
+    const skills = (careProfile?.skills as string[]) ?? [];
+    const mcc = skills.includes("Vet / Licensed Care") ? "0742" : "7299";
+    const productDesc = mcc === "0742"
+      ? "Professional veterinary pet care services provided via the Huddle platform."
+      : "Independent pet sitting and dog walking services provided via the Huddle platform.";
+    const socialId = String(hp?.social_id || "").trim();
+    const displayName = String(hp?.display_name || "").trim();
+    const slug = (socialId || displayName || user.id)
+      .toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+    const appUrl = cleanEnv(Deno.env.get("SITE_URL") || "https://huddle.pet").replace(/\/+$/, "");
+    stripe.accounts.update(accountId, {
+      business_profile: { mcc, url: `${appUrl}/@${slug}`, product_description: productDesc },
+    }).catch(() => { /* non-fatal */ });
 
     const session = await stripe.accountSessions.create({
       account: accountId,
