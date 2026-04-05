@@ -22,6 +22,22 @@ declare global {
       reset: (widgetId?: string) => void;
       remove: (widgetId?: string) => void;
     };
+    __huddleTurnstileDiag?: {
+      nextInstanceId: number;
+      routes: Record<string, {
+        hookInstanceCount: number;
+        maxHookInstanceCount: number;
+        renderCount: number;
+        widgetIds: string[];
+        actions: string[];
+        callbackFired: boolean;
+        errorCallbackFired: boolean;
+        expiredCallbackFired: boolean;
+        tokenLengthAtCallback: number;
+        tokenLengthAtSubmit: number;
+        events: Array<{ type: string; action: string; tokenLength?: number; widgetId?: string | null }>;
+      }>;
+    };
   }
 }
 
@@ -29,6 +45,44 @@ const TURNSTILE_SCRIPT_ID = "cf-turnstile-script";
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
 let turnstileScriptPromise: Promise<void> | null = null;
+
+function getTurnstileDiagRouteKey() {
+  if (typeof window === "undefined") return "server";
+  return window.location.pathname || "unknown";
+}
+
+function getTurnstileDiagRoute(action: string) {
+  if (typeof window === "undefined") return null;
+  if (!window.__huddleTurnstileDiag) {
+    window.__huddleTurnstileDiag = { nextInstanceId: 1, routes: {} };
+  }
+  const routeKey = getTurnstileDiagRouteKey();
+  if (!window.__huddleTurnstileDiag.routes[routeKey]) {
+    window.__huddleTurnstileDiag.routes[routeKey] = {
+      hookInstanceCount: 0,
+      maxHookInstanceCount: 0,
+      renderCount: 0,
+      widgetIds: [],
+      actions: [],
+      callbackFired: false,
+      errorCallbackFired: false,
+      expiredCallbackFired: false,
+      tokenLengthAtCallback: 0,
+      tokenLengthAtSubmit: 0,
+      events: [],
+    };
+  }
+  const route = window.__huddleTurnstileDiag.routes[routeKey];
+  if (!route.actions.includes(action)) route.actions.push(action);
+  return route;
+}
+
+function recordTurnstileDiag(action: string, type: string, details: { tokenLength?: number; widgetId?: string | null } = {}) {
+  const route = getTurnstileDiagRoute(action);
+  if (!route) return;
+  route.events.push({ type, action, ...details });
+  if (route.events.length > 20) route.events = route.events.slice(-20);
+}
 
 function loadTurnstileScript(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
@@ -57,6 +111,7 @@ function loadTurnstileScript(): Promise<void> {
 }
 
 export function useTurnstile(action: string) {
+  const instanceIdRef = useRef<number>(0);
   const env = getClientEnv();
   const siteKey = String(env.turnstileSiteKey || "").trim();
   const enabled = Boolean(siteKey);
@@ -97,8 +152,14 @@ export function useTurnstile(action: string) {
     const fromDom = readTokenFromDom();
     if (fromDom) {
       storeToken(fromDom);
+      const route = getTurnstileDiagRoute(actionRef.current);
+      if (route) route.tokenLengthAtSubmit = fromDom.length;
+      recordTurnstileDiag(actionRef.current, "get-token-dom", { tokenLength: fromDom.length });
       return fromDom;
     }
+    const route = getTurnstileDiagRoute(actionRef.current);
+    if (route) route.tokenLengthAtSubmit = 0;
+    recordTurnstileDiag(actionRef.current, "get-token-empty", { tokenLength: 0 });
     return "";
   }, [readTokenFromDom, storeToken]);
 
@@ -110,6 +171,27 @@ export function useTurnstile(action: string) {
     setError(null);
     setReady(false);
   }, [action]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.__huddleTurnstileDiag) {
+      window.__huddleTurnstileDiag = { nextInstanceId: 1, routes: {} };
+    }
+    if (!instanceIdRef.current) {
+      instanceIdRef.current = window.__huddleTurnstileDiag.nextInstanceId++;
+    }
+    const route = getTurnstileDiagRoute(actionRef.current);
+    if (!route) return;
+    route.hookInstanceCount += 1;
+    route.maxHookInstanceCount = Math.max(route.maxHookInstanceCount, route.hookInstanceCount);
+    recordTurnstileDiag(actionRef.current, 'hook-mount', { widgetId: String(instanceIdRef.current) });
+    return () => {
+      const currentRoute = getTurnstileDiagRoute(actionRef.current);
+      if (!currentRoute) return;
+      currentRoute.hookInstanceCount = Math.max(0, currentRoute.hookInstanceCount - 1);
+      recordTurnstileDiag(actionRef.current, 'hook-unmount', { widgetId: String(instanceIdRef.current) });
+    };
+  }, []);
 
   useEffect(() => {
     containerRef.current = container;
@@ -142,8 +224,12 @@ export function useTurnstile(action: string) {
     if (!enabled || !container) return;
     let cancelled = false;
 
-    if (renderingRef.current) return;
+    if (renderingRef.current) {
+      recordTurnstileDiag(actionRef.current, "render-skip-rendering", { widgetId: widgetIdRef.current });
+      return;
+    }
     if (widgetIdRef.current && renderedContainerRef.current === container) {
+      recordTurnstileDiag(actionRef.current, "render-skip-existing", { widgetId: widgetIdRef.current });
       return;
     }
 
@@ -164,6 +250,9 @@ export function useTurnstile(action: string) {
           return;
         }
         container.innerHTML = "";
+        const route = getTurnstileDiagRoute(actionRef.current);
+        if (route) route.renderCount += 1;
+        recordTurnstileDiag(actionRef.current, "render-call", { widgetId: widgetIdRef.current });
         const nextWidgetId = window.turnstile.render(container, {
           sitekey: siteKey,
           action: actionRef.current,
@@ -173,25 +262,41 @@ export function useTurnstile(action: string) {
           "refresh-expired": "auto",
           "refresh-timeout": "auto",
           callback: (nextToken) => {
+            const route = getTurnstileDiagRoute(actionRef.current);
+            if (route) {
+              route.callbackFired = true;
+              route.tokenLengthAtCallback = String(nextToken || "").trim().length;
+            }
+            recordTurnstileDiag(actionRef.current, "callback", { tokenLength: String(nextToken || "").trim().length, widgetId: nextWidgetId });
             storeTokenRef.current(nextToken);
             setErrorRef.current(null);
           },
           "expired-callback": () => {
+            const route = getTurnstileDiagRoute(actionRef.current);
+            if (route) route.expiredCallbackFired = true;
+            recordTurnstileDiag(actionRef.current, "expired-callback", { widgetId: nextWidgetId });
             storeTokenRef.current(null);
             setErrorRef.current("Verification expired. Please complete it again.");
           },
           "error-callback": () => {
+            const route = getTurnstileDiagRoute(actionRef.current);
+            if (route) route.errorCallbackFired = true;
+            recordTurnstileDiag(actionRef.current, "error-callback", { widgetId: nextWidgetId });
             storeTokenRef.current(null);
             setErrorRef.current("Verification failed to load. Please retry.");
           },
         });
         widgetIdRef.current = nextWidgetId;
         renderedContainerRef.current = container;
+        const nextRoute = getTurnstileDiagRoute(actionRef.current);
+        if (nextRoute && !nextRoute.widgetIds.includes(nextWidgetId)) nextRoute.widgetIds.push(nextWidgetId);
+        recordTurnstileDiag(actionRef.current, "render-success", { widgetId: nextWidgetId });
         renderingRef.current = false;
       })
       .catch(() => {
         if (cancelled) return;
         renderingRef.current = false;
+        recordTurnstileDiag(actionRef.current, "render-error");
         setError("Verification failed to load. Please retry.");
         setReady(false);
       });
@@ -224,6 +329,7 @@ export function useTurnstile(action: string) {
   }, [container, enabled, readTokenFromDom, storeToken]);
 
   const reset = useCallback(() => {
+    recordTurnstileDiag(actionRef.current, "reset");
     storeToken(null);
     const currentWidgetId = widgetIdRef.current;
     if (currentWidgetId && window.turnstile) {
@@ -231,7 +337,9 @@ export function useTurnstile(action: string) {
         window.turnstile.reset(currentWidgetId);
         const domToken = readTokenFromDom();
         if (domToken) storeToken(domToken);
+        recordTurnstileDiag(actionRef.current, "reset-dom-token", { tokenLength: domToken.length, widgetId: currentWidgetId });
       } catch {
+        recordTurnstileDiag(actionRef.current, "reset-error", { widgetId: currentWidgetId });
         setError("Verification failed to reset. Refresh and try again.");
       }
     }
