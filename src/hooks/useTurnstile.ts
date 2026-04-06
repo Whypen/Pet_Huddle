@@ -125,6 +125,7 @@ export function useTurnstile(action: string) {
   const widgetIdRef = useRef<string | null>(null);
   const renderedContainerRef = useRef<HTMLDivElement | null>(null);
   const renderingRef = useRef(false);
+  const mountedRef = useRef(false);
   const actionRef = useRef(action);
   const storeTokenRef = useRef<(nextToken: string | null) => void>(() => undefined);
   const setErrorRef = useRef(setError);
@@ -173,6 +174,7 @@ export function useTurnstile(action: string) {
   }, [action]);
 
   useEffect(() => {
+    mountedRef.current = true;
     if (typeof window === "undefined") return;
     if (!window.__huddleTurnstileDiag) {
       window.__huddleTurnstileDiag = { nextInstanceId: 1, routes: {} };
@@ -186,6 +188,7 @@ export function useTurnstile(action: string) {
     route.maxHookInstanceCount = Math.max(route.maxHookInstanceCount, route.hookInstanceCount);
     recordTurnstileDiag(actionRef.current, 'hook-mount', { widgetId: String(instanceIdRef.current) });
     return () => {
+      mountedRef.current = false;
       const currentRoute = getTurnstileDiagRoute(actionRef.current);
       if (!currentRoute) return;
       currentRoute.hookInstanceCount = Math.max(0, currentRoute.hookInstanceCount - 1);
@@ -221,8 +224,13 @@ export function useTurnstile(action: string) {
   }, []);
 
   useEffect(() => {
+    return () => {
+      removeWidget();
+    };
+  }, [removeWidget]);
+
+  useEffect(() => {
     if (!enabled || !container) return;
-    let cancelled = false;
 
     if (renderingRef.current) {
       recordTurnstileDiag(actionRef.current, "render-skip-rendering", { widgetId: widgetIdRef.current });
@@ -241,7 +249,7 @@ export function useTurnstile(action: string) {
 
     void loadTurnstileScript()
       .then(() => {
-        if (cancelled || !window.turnstile) {
+        if (!mountedRef.current || !window.turnstile) {
           renderingRef.current = false;
           return;
         }
@@ -294,39 +302,13 @@ export function useTurnstile(action: string) {
         renderingRef.current = false;
       })
       .catch(() => {
-        if (cancelled) return;
+        if (!mountedRef.current) return;
         renderingRef.current = false;
         recordTurnstileDiag(actionRef.current, "render-error");
         setError("Verification failed to load. Please retry.");
         setReady(false);
       });
-
-    return () => {
-      cancelled = true;
-      if (renderedContainerRef.current === container) {
-        removeWidget(container);
-      }
-    };
   }, [container, enabled, removeWidget, siteKey]);
-
-  useEffect(() => {
-    if (!enabled || !container) return;
-    const sync = () => {
-      const domToken = readTokenFromDom();
-      if (domToken && domToken !== tokenRef.current) {
-        storeToken(domToken);
-        setError(null);
-      }
-    };
-    sync();
-    const interval = window.setInterval(sync, 350);
-    const observer = new MutationObserver(sync);
-    observer.observe(container, { childList: true, subtree: true, attributes: true, characterData: true });
-    return () => {
-      window.clearInterval(interval);
-      observer.disconnect();
-    };
-  }, [container, enabled, readTokenFromDom, storeToken]);
 
   const reset = useCallback(() => {
     recordTurnstileDiag(actionRef.current, "reset");
