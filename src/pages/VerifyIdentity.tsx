@@ -965,25 +965,11 @@ export function VerifyIdentity({
 
   useEffect(() => {
     if (overallVerificationStatus !== "verified") return;
-    void (async () => {
-      // Directly persist verified state so badge shows immediately even if edge function is slow
-      if (user?.id) {
-        await supabase
-          .from("profiles")
-          .update({ is_verified: true, verification_status: "verified" })
-          .eq("id", user.id)
-          .then(() => {/* best-effort */});
-      }
-      await refreshProfile();
-      // Brevo CRM sync — fire-and-forget, reflects pending status immediately.
-      // Note: approval/rejection sync requires a DB trigger (admin flow is server-side).
-      if (user?.id) {
-        void supabase.functions.invoke("brevo-sync", {
-          body: { event: "verification_completed", user_id: user.id },
-        }).catch((err) => console.warn("[brevo-sync] verification_completed failed silently", err));
-      }
-    })();
-  }, [overallVerificationStatus, refreshProfile, user?.id]);
+    // is_verified / verification_status are set server-side by edge functions via service_role;
+    // direct client update is blocked by trg_prevent_sensitive_profile_updates.
+    // brevo-sync is called server-side by trg_brevo_verification_status_changed trigger.
+    void refreshProfile();
+  }, [overallVerificationStatus, refreshProfile]);
 
   const onContinueAfterVerification = useCallback(() => {
     allowVerifiedReturnRef.current = false;
@@ -1932,7 +1918,7 @@ export function VerifyIdentity({
     void pollPending();
     const intervalId = window.setInterval(() => {
       void pollPending();
-    }, 7000);
+    }, 2500);
 
     return () => {
       cancelled = true;
