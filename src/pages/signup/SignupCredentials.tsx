@@ -299,8 +299,7 @@ const SignupCredentials = () => {
     try {
       const presignupToken = readTurnstileToken(presignupTurnstile);
       if (!presignupToken) {
-        presignupTurnstile.reset();
-        toast.error("Human verification failed. Please retry.");
+        toast.error("Human verification is still loading. Please try again in a moment.");
         return;
       }
       const { data: checkResult, error: checkError } = await supabase.rpc("check_identifier_registered", {
@@ -371,6 +370,7 @@ const SignupCredentials = () => {
   const ctaDisabled = isOAuthOnboarding
     ? !phone || phoneNotValid || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
     : !isValid ||
+      !presignupTurnstile.isTokenUsable ||
       duplicateDetected ||
       checkingDuplicate ||
       submitting ||
@@ -390,6 +390,8 @@ const SignupCredentials = () => {
         ? "This email or phone number is already registered"
         : checkingDuplicate
           ? "Checking account details…"
+          : !presignupTurnstile.isTokenUsable
+            ? "Preparing verification…"
           : phoneInvalid
             ? "Enter a valid phone number"
             : "Complete all required fields to continue");

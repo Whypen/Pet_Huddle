@@ -30,6 +30,9 @@ export function TurnstileDebugPanel({ visible, diag }: TurnstileDebugPanelProps)
     ["expired callback fired", diag.expiredCallbackFired ? "yes" : "no"],
     ["token length", String(diag.tokenLength)],
     ["widget id", diag.widgetId ?? "none"],
+    ["render count", String(diag.renderCount)],
+    ["reset count", String(diag.resetCount)],
+    ["remove count", String(diag.removeCount)],
   ];
 
   return (

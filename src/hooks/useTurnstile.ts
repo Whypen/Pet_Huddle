@@ -8,6 +8,9 @@ export type TurnstileDiagnostics = {
   expiredCallbackFired: boolean;
   tokenLength: number;
   widgetId: string | null;
+  renderCount: number;
+  resetCount: number;
+  removeCount: number;
 };
 
 declare global {
@@ -135,6 +138,9 @@ export function useTurnstile(action: string) {
     expiredCallbackFired: false,
     tokenLength: 0,
     widgetId: null,
+    renderCount: 0,
+    resetCount: 0,
+    removeCount: 0,
   });
   const tokenRef = useRef<string>("");
   const issuedAtRef = useRef<number>(0);
@@ -199,6 +205,9 @@ export function useTurnstile(action: string) {
       expiredCallbackFired: false,
       tokenLength: 0,
       widgetId: null,
+      renderCount: 0,
+      resetCount: 0,
+      removeCount: 0,
     });
   }, [action]);
 
@@ -239,6 +248,10 @@ export function useTurnstile(action: string) {
     if (currentWidgetId && window.turnstile) {
       try {
         window.turnstile.remove(currentWidgetId);
+        setDiag((current) => ({
+          ...current,
+          removeCount: current.removeCount + 1,
+        }));
       } catch {
         // no-op
       }
@@ -347,6 +360,7 @@ export function useTurnstile(action: string) {
           ...current,
           widgetRendered: true,
           widgetId: nextWidgetId,
+          renderCount: current.renderCount + 1,
         }));
         const nextRoute = getTurnstileDiagRoute(actionRef.current);
         if (nextRoute && !nextRoute.widgetIds.includes(nextWidgetId)) nextRoute.widgetIds.push(nextWidgetId);
@@ -364,14 +378,24 @@ export function useTurnstile(action: string) {
 
   const reset = useCallback(() => {
     recordTurnstileDiag(actionRef.current, "reset");
-    storeToken(null);
     const currentWidgetId = widgetIdRef.current;
+    const domToken = readTokenFromDom();
+    const hasUsableToken = Boolean(String(tokenRef.current || "").trim() || domToken);
+    if (!currentWidgetId || !hasUsableToken) {
+      recordTurnstileDiag(actionRef.current, "reset-skipped", { widgetId: currentWidgetId });
+      return;
+    }
+    storeToken(null);
     if (currentWidgetId && window.turnstile) {
       try {
         window.turnstile.reset(currentWidgetId);
-        const domToken = readTokenFromDom();
-        if (domToken) storeToken(domToken);
-        recordTurnstileDiag(actionRef.current, "reset-dom-token", { tokenLength: domToken.length, widgetId: currentWidgetId });
+        setDiag((current) => ({
+          ...current,
+          resetCount: current.resetCount + 1,
+        }));
+        const nextDomToken = readTokenFromDom();
+        if (nextDomToken) storeToken(nextDomToken);
+        recordTurnstileDiag(actionRef.current, "reset-dom-token", { tokenLength: nextDomToken.length, widgetId: currentWidgetId });
       } catch {
         recordTurnstileDiag(actionRef.current, "reset-error", { widgetId: currentWidgetId });
         setError("Verification failed to reset. Refresh and try again.");
