@@ -26,6 +26,8 @@ import SignupMarketingConfirmed from "./pages/signup/SignupMarketingConfirmed";
 import SignupVerifyEmail from "./pages/signup/SignupVerifyEmail";
 import VerifyCallback from "./pages/VerifyCallback";
 import ResetPassword from "./pages/ResetPassword";
+import ResetPasswordDirect from "./pages/ResetPasswordDirect";
+import ResetPasswordInline from "./pages/ResetPasswordInline";
 import AuthCallback from "./pages/AuthCallback";
 import TurnstileHealth from "./pages/TurnstileHealth";
 import EditProfile from "./pages/EditProfile";
@@ -157,6 +159,8 @@ const App = () => (
                   {/* Public Routes */}
                   <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
                   <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
+                  <Route path="/reset-password-direct" element={<ResetPasswordDirect />} />
+                  <Route path="/reset-password-inline" element={<ResetPasswordInline />} />
                   <Route path="/auth/callback" element={<PublicRoute><AuthCallback /></PublicRoute>} />
                   <Route path="/signup/dob" element={<PublicRoute><SignupDob /></PublicRoute>} />
                   <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />
