@@ -194,8 +194,7 @@ const MapPage = () => {
   const isPickingBroadcastLocationRef = useRef(false);
   const isBroadcastOpenRef = useRef(false);
   const initialViewportAppliedRef = useRef(false);
-  const geoWatchIdRef = useRef<number | null>(null);
-  const lastGeoSyncAtRef = useRef<number>(0);
+  const pinSnapAppliedRef = useRef(false);
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [showAlerts, setShowAlerts] = useState(true);
@@ -330,57 +329,6 @@ const MapPage = () => {
       window.removeEventListener("offline", goOffline);
     };
   }, []);
-
-  // Live follow: when pinned and location permission is allowed, keep pin updated as user moves.
-  useEffect(() => {
-    if (!user || (!isPinned && !visibleEnabled) || !navigator.geolocation) {
-      if (geoWatchIdRef.current != null) {
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
-        geoWatchIdRef.current = null;
-      }
-      return;
-    }
-
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setUserLocation({ lat, lng });
-
-        const now = Date.now();
-        if (now - lastGeoSyncAtRef.current < 15000) return;
-        lastGeoSyncAtRef.current = now;
-
-        void supabase.rpc("set_user_location", {
-          p_lat: lat,
-          p_lng: lng,
-          p_pin_hours: 24 * 365 * 10,
-          p_retention_hours: 24 * 365 * 10,
-          p_address: pinAddressSnapshot,
-        }).then(({ error }) => {
-          if (error && import.meta.env.DEV) {
-            console.error("[PIN] live-follow set_user_location failed", error);
-          }
-        });
-      },
-      () => {
-        // noop: keep last known pin if GPS temporarily unavailable
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000,
-      }
-    );
-    geoWatchIdRef.current = watchId;
-
-    return () => {
-      if (geoWatchIdRef.current != null) {
-        navigator.geolocation.clearWatch(geoWatchIdRef.current);
-        geoWatchIdRef.current = null;
-      }
-    };
-  }, [isPinned, user, visibleEnabled]);
 
   useEffect(() => {
     isPickingBroadcastLocationRef.current = isPickingBroadcastLocation;
@@ -909,18 +857,22 @@ const MapPage = () => {
   }, []);
 
   // First viewport priority:
-  // 1) existing pin/userLocation
-  // 2) last known profile coordinates
-  // 3) profile location text geocoded to area
+  // 1) existing pin/userLocation — always wins, even overrides a fallback already applied
+  // 2) last known profile coordinates — applied once if pin not yet available
+  // 3) profile location text geocoded to area — applied once if no coords either
   useEffect(() => {
-    if (!map.current || !mapLoaded || initialViewportAppliedRef.current) return;
+    if (!map.current || !mapLoaded) return;
     const apply = async () => {
-      if (!map.current || initialViewportAppliedRef.current) return;
-      if (userLocation) {
+      if (!map.current) return;
+      // Pin snap always wins — overrides any previously applied fallback
+      if (userLocation && !pinSnapAppliedRef.current) {
         flyToWithDebug("init.userPin", { center: [userLocation.lng, userLocation.lat], zoom: 15.5 });
+        pinSnapAppliedRef.current = true;
         initialViewportAppliedRef.current = true;
         return;
       }
+      // Fallback: only apply once, while pin hasn't arrived yet
+      if (initialViewportAppliedRef.current) return;
       if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
         flyToWithDebug("init.profileLast", { center: [profile.last_lng, profile.last_lat], zoom: 14.5 });
         initialViewportAppliedRef.current = true;
