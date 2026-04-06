@@ -139,9 +139,8 @@ const SignupVerifyEmail = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── On mount: send email only if no valid token exists AND Turnstile is ready ─
-  // Fires whenever presignupTurnstile.token becomes available; the ref guards
-  // against sending more than once per page visit.
+  // ── On mount: send email only if no valid token exists AND the presignup
+  // Turnstile token from /signup/credentials is already in sessionStorage.
   const initialSendDone = useRef(false);
   useEffect(() => {
     if (!draftEmail) return;
@@ -159,7 +158,7 @@ const SignupVerifyEmail = () => {
     initialSendDone.current = true;
     void sendEmail(turnstileToken, false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftEmail, presignupTurnstile.token, readTurnstileToken]);
+  }, [draftEmail, token, readTurnstileToken]);
 
   // ── Cooldown countdown ───────────────────────────────────────────────────────
   useEffect(() => {
