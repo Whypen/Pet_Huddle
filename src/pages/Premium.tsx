@@ -160,6 +160,10 @@ export default function PremiumPage() {
   const [pricingCountry, setPricingCountry] = useState<string | null>(null);
   const [pricingCurrency, setPricingCurrency] = useState<string | null>(null);
   const normalizedTier = normalizeQuotaTier(profile?.effective_tier ?? profile?.tier ?? "free");
+  // ownTierNormalized reflects only what the user has personally subscribed to,
+  // excluding any family-boost from effective_tier. Used for all subscription gates
+  // so family-boosted users can still subscribe to their own plan.
+  const ownTierNormalized = normalizeQuotaTier(profile?.tier ?? "free");
   const returnToFromState = (() => {
     const raw = (location.state as { returnTo?: unknown } | null)?.returnTo;
     return typeof raw === "string" && raw.startsWith("/") ? raw : null;
@@ -294,8 +298,8 @@ export default function PremiumPage() {
     () => ADD_ONS.filter((a) => addonSelected[a.id]),
     [addonSelected]
   );
-  const isPlusActive = normalizedTier === "plus";
-  const isGoldActive = normalizedTier === "gold";
+  const isPlusActive = ownTierNormalized === "plus";
+  const isGoldActive = ownTierNormalized === "gold";
   const profileSharePerksIds = Array.isArray((profilePrefs as { share_perks_subscription_ids?: unknown } | null)?.share_perks_subscription_ids)
     ? ((profilePrefs as { share_perks_subscription_ids?: unknown[] }).share_perks_subscription_ids || []).filter((v) => typeof v === "string" && String(v).trim().length > 0)
     : [];
@@ -337,8 +341,8 @@ export default function PremiumPage() {
   const startPlanCheckout = async (tier: "plus" | "gold") => {
     if (!user) { navigate("/auth"); return; }
     if (isCheckingOut) return;
-    if (normalizedTier === "gold") return;
-    if (normalizedTier === "plus" && tier === "plus") return;
+    if (ownTierNormalized === "gold") return;
+    if (ownTierNormalized === "plus" && tier === "plus") return;
 
     const billing = tier === "plus" ? plusBilling : goldBilling;
 
@@ -553,10 +557,10 @@ export default function PremiumPage() {
     const features = tier === "plus" ? PLUS_FEATURES : GOLD_FEATURES;
     const isAnnual = billing === "annual";
     const isBlockedByTier =
-      normalizedTier === "gold" ||
-      (normalizedTier === "plus" && tier === "plus");
+      ownTierNormalized === "gold" ||
+      (ownTierNormalized === "plus" && tier === "plus");
     const ctaLabel = isBlockedByTier
-      ? (normalizedTier === "gold" ? "You're on Huddle Gold" : "You're on Huddle+")
+      ? (ownTierNormalized === "gold" ? "You're on Huddle Gold" : "You're on Huddle+")
       : (tier === "plus" ? "Get Huddle+" : "Get Huddle Gold");
 
     return (
