@@ -28,8 +28,10 @@ import VerifyCallback from "./pages/VerifyCallback";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordDirect from "./pages/ResetPasswordDirect";
 import ResetPasswordInline from "./pages/ResetPasswordInline";
+import ResetPasswordInlineHealthAction from "./pages/ResetPasswordInlineHealthAction";
 import AuthCallback from "./pages/AuthCallback";
 import TurnstileHealth from "./pages/TurnstileHealth";
+import TurnstileHealthResetAction from "./pages/TurnstileHealthResetAction";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
 import SetProfile from "./pages/SetProfile";
@@ -161,6 +163,7 @@ const App = () => (
                   <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
                   <Route path="/reset-password-direct" element={<ResetPasswordDirect />} />
                   <Route path="/reset-password-inline" element={<ResetPasswordInline />} />
+                  <Route path="/reset-password-inline-healthaction" element={<ResetPasswordInlineHealthAction />} />
                   <Route path="/auth/callback" element={<PublicRoute><AuthCallback /></PublicRoute>} />
                   <Route path="/signup/dob" element={<PublicRoute><SignupDob /></PublicRoute>} />
                   <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />
@@ -171,6 +174,7 @@ const App = () => (
                   {/* No PublicRoute wrapper — accessible from email client in-app browsers without a session */}
                   <Route path="/signup/verify-email" element={<SignupVerifyEmail />} />
                   <Route path="/turnstile-health" element={<TurnstileHealth />} />
+                  <Route path="/turnstile-health-resetaction" element={<TurnstileHealthResetAction />} />
                   {/* Email verification callback — token in URL is the auth, no session required */}
                   <Route path="/verify" element={<VerifyCallback />} />
 
