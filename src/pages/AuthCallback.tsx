@@ -4,10 +4,10 @@ import { Lock } from "lucide-react";
 import { FormField } from "@/components/ui";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useSignup } from "@/contexts/SignupContext";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { authChangePassword } from "@/lib/publicAuthApi";
 import {
   SETPROFILE_PREFILL_KEY,
@@ -20,8 +20,10 @@ const AuthCallback = () => {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { setFlowState } = useSignup();
   const recoveryTurnstile = useTurnstile("change_password");
+  const showTurnstileDiag = new URLSearchParams(location.search).get("turnstile_diag") === "1";
   const readTurnstileToken = () => {
     const maybeGetToken = (recoveryTurnstile as { getToken?: unknown }).getToken;
     if (typeof maybeGetToken === "function") {
@@ -137,6 +139,7 @@ const AuthCallback = () => {
           setContainer={recoveryTurnstile.setContainer}
           className="min-h-[65px]"
         />
+        <TurnstileDebugPanel visible={showTurnstileDiag} diag={recoveryTurnstile.diag} />
         <NeuButton className="w-full h-10" onClick={updatePassword} disabled={password.length < 8 || submitting || !recoveryTurnstile.isTokenUsable}>
           Update password
         </NeuButton>

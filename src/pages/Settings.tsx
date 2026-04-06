@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { CircleAlert, Lock, MessagesSquare, MapPin, Briefcase, Bell, Shield, Users, PawPrint, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +17,7 @@ import strayDogImage from "@/assets/Notifications/Stray dog.jpg";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
 import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { authChangePassword } from "@/lib/publicAuthApi";
 
 type NotificationPrefs = {
@@ -42,7 +42,12 @@ const DEFAULT_PREFS: NotificationPrefs = {
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, profile, signOut, refreshProfile } = useAuth();
+  const showTurnstileDiag = useMemo(
+    () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
+    [location.search],
+  );
 
   const [loadingPrefs, setLoadingPrefs] = useState(true);
   const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_PREFS);
@@ -133,6 +138,11 @@ const Settings: React.FC = () => {
     setNonSocial(nonSocialValue);
     setHideFromMap(hideFromMapValue);
   }, [profile]);
+
+  useEffect(() => {
+    if (!showTurnstileDiag) return;
+    setPasswordOpen(true);
+  }, [showTurnstileDiag]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -617,6 +627,7 @@ const Settings: React.FC = () => {
             setContainer={changePasswordTurnstile.setContainer}
             className="min-h-[65px]"
           />
+          <TurnstileDebugPanel visible={showTurnstileDiag} diag={changePasswordTurnstile.diag} />
           <DialogFooter className="!flex-row gap-2 pt-2">
             <NeuControl size="lg" variant="secondary" className="flex-1 min-w-0" onClick={() => setPasswordOpen(false)}>Cancel</NeuControl>
             <NeuControl size="lg" className="flex-1 min-w-0" disabled={busy || !changePasswordTurnstile.isTokenUsable} onClick={submitPasswordChange}>Update</NeuControl>

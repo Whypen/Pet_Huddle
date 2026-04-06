@@ -35,7 +35,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSignup } from "@/contexts/SignupContext";
 import { requestPhoneOtp, verifyPhoneOtp } from "@/lib/phoneOtp";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 
@@ -823,6 +823,10 @@ export function VerifyIdentity({
   const location = useLocation();
   const { user, profile, loading: authLoading, refreshProfile } = useAuth();
   const { flowState, setFlowState, data: signupData } = useSignup();
+  const showTurnstileDiag = useMemo(
+    () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
+    [location.search],
+  );
 
   const [activeCard, setActiveCard] = useState<"phone" | "human" | "card" | null>(null);
   const [humanVerificationState, setHumanVerificationState] = useState<HumanVerificationState>("idle");
@@ -1437,6 +1441,11 @@ export function VerifyIdentity({
     setPhoneValue((prev) => (prev.trim() ? prev : resolved));
   }, [profile?.phone, signupData.phone, user?.phone]);
 
+  useEffect(() => {
+    if (!showTurnstileDiag) return;
+    setActiveCard("phone");
+  }, [showTurnstileDiag]);
+
   const onSendPhoneOtp = async () => {
     if (!(await ensureAuthForVerification())) return;
     const normalized = phoneValue.trim();
@@ -1983,11 +1992,14 @@ export function VerifyIdentity({
             tokenReady={phoneOtpTurnstile.isTokenUsable}
             errorMessage={phoneVerificationError}
             turnstileSlot={
-              <TurnstileWidget
-                siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
-                setContainer={phoneOtpTurnstile.setContainer}
-                className="min-h-[65px]"
-              />
+              <div className="space-y-3">
+                <TurnstileWidget
+                  siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
+                  setContainer={phoneOtpTurnstile.setContainer}
+                  className="min-h-[65px]"
+                />
+                <TurnstileDebugPanel visible={showTurnstileDiag} diag={phoneOtpTurnstile.diag} />
+              </div>
             }
           />
 

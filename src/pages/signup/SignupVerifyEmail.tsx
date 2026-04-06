@@ -30,8 +30,6 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
 import { useSignup } from "@/contexts/SignupContext";
-import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 
@@ -53,7 +51,6 @@ const SignupVerifyEmail = () => {
   const navigate   = useNavigate();
   const location   = useLocation();
   const { data, setFlowState } = useSignup();
-  const presignupTurnstile = useTurnstile("send_pre_signup_verify");
 
   // Redirect to credentials if there's no draft email in context
   const draftEmail = data.email?.trim() ?? "";
@@ -82,16 +79,8 @@ const SignupVerifyEmail = () => {
   const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const readTurnstileToken = useCallback(() => {
-    const fromCredentials = String(
-      sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "",
-    ).trim();
-    if (fromCredentials) return fromCredentials;
-    const maybeGetToken = (presignupTurnstile as { getToken?: unknown }).getToken;
-    if (typeof maybeGetToken === "function") {
-      return String((maybeGetToken as () => string)() || "").trim();
-    }
-    return String(presignupTurnstile.token || "").trim();
-  }, [presignupTurnstile]);
+    return String(sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "").trim();
+  }, []);
 
   // ── Guard: no draft email → back to credentials ──────────────────────────────
   useEffect(() => {
@@ -114,9 +103,7 @@ const SignupVerifyEmail = () => {
         "send-pre-signup-verify",
         { email: draftEmail, token: newToken, turnstile_token: turnstileToken },
       );
-      presignupTurnstile.reset();
       if (error || !resp?.ok) throw new Error("send_failed");
-      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
 
       // Persist token scoped to this draft email
       try {
@@ -136,7 +123,6 @@ const SignupVerifyEmail = () => {
     } finally {
       sendInFlight.current = false;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftEmail]);
 
   // ── On expired state from /verify: clear stale token, show expired copy ──────
@@ -304,19 +290,6 @@ const SignupVerifyEmail = () => {
             <Mail size={16} className="mr-2" />
             Open Mail
           </NeuButton>
-          {hiddenTurnstileRequired ? (
-            <div
-              data-testid="signup-verify-email-turnstile-hidden"
-              className="h-0 overflow-hidden opacity-0 pointer-events-none"
-              aria-hidden="true"
-            >
-              <TurnstileWidget
-                siteKeyMissing={presignupTurnstile.siteKeyMissing}
-                setContainer={presignupTurnstile.setContainer}
-                className="min-h-[65px]"
-              />
-            </div>
-          ) : null}
           <NeuButton
             variant="ghost"
             className="w-full h-11"
