@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -40,10 +40,15 @@ const Auth = () => {
   const { t } = useLanguage();
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const showTurnstileDiag = useMemo(
+    () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
+    [location.search],
+  );
   const [authError, setAuthError] = useState("");
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>("choice");
+  const [emailModalOpen, setEmailModalOpen] = useState(showTurnstileDiag);
+  const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>(showTurnstileDiag ? "signin" : "choice");
   const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
 
   // ── MFA challenge state ────────────────────────────────────────────────────
@@ -62,6 +67,13 @@ const Auth = () => {
     }
     return String((loginTurnstile as { token?: string | null }).token || "").trim();
   };
+
+  useEffect(() => {
+    if (showTurnstileDiag) {
+      setEmailModalOpen(true);
+      setEmailModalStep("signin");
+    }
+  }, [showTurnstileDiag]);
 
   useEffect(() => {
     const videoEl = logoVideoRef.current;
@@ -432,6 +444,7 @@ const Auth = () => {
                 setContainer={loginTurnstile.setContainer}
                 className="min-h-[65px]"
               />
+              <TurnstileDebugPanel visible={showTurnstileDiag} diag={loginTurnstile.diag} />
               <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || !loginTurnstile.isTokenUsable}>
                 Sign in
               </NeuButton>

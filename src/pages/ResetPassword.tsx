@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { authResetPassword } from "@/lib/publicAuthApi";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useNavigate } from "react-router-dom";
 
 const schema = z.object({
@@ -18,6 +18,9 @@ type FormData = z.infer<typeof schema>;
 
 const ResetPassword = () => {
   const navigate = useNavigate();
+  const showTurnstileDiag =
+    typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
   const resetTurnstile = useTurnstile("reset_password");
   const readTurnstileToken = () => {
     const maybeGetToken = (resetTurnstile as { getToken?: unknown }).getToken;
@@ -71,6 +74,7 @@ const ResetPassword = () => {
           setContainer={resetTurnstile.setContainer}
           className="min-h-[65px]"
         />
+        <TurnstileDebugPanel visible={showTurnstileDiag} diag={resetTurnstile.diag} />
         <Button type="submit" className="w-full h-10" disabled={!isValid || !resetTurnstile.isTokenUsable}>Send reset link</Button>
       </form>
     </div>

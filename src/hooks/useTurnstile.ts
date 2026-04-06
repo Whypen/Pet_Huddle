@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getClientEnv } from "@/lib/env";
 
+export type TurnstileDiagnostics = {
+  widgetRendered: boolean;
+  callbackFired: boolean;
+  errorCallbackFired: boolean;
+  expiredCallbackFired: boolean;
+  tokenLength: number;
+  widgetId: string | null;
+};
+
 declare global {
   interface Window {
     turnstile?: {
@@ -119,6 +128,14 @@ export function useTurnstile(action: string) {
   const [token, setToken] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [diag, setDiag] = useState<TurnstileDiagnostics>({
+    widgetRendered: false,
+    callbackFired: false,
+    errorCallbackFired: false,
+    expiredCallbackFired: false,
+    tokenLength: 0,
+    widgetId: null,
+  });
   const tokenRef = useRef<string>("");
   const issuedAtRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +153,10 @@ export function useTurnstile(action: string) {
     issuedAtRef.current = normalized ? Date.now() : 0;
     setToken(normalized || null);
     setReady(Boolean(normalized));
+    setDiag((current) => ({
+      ...current,
+      tokenLength: normalized.length,
+    }));
   }, []);
 
   const readTokenFromDom = useCallback(() => {
@@ -171,6 +192,14 @@ export function useTurnstile(action: string) {
     setToken(null);
     setError(null);
     setReady(false);
+    setDiag({
+      widgetRendered: false,
+      callbackFired: false,
+      errorCallbackFired: false,
+      expiredCallbackFired: false,
+      tokenLength: 0,
+      widgetId: null,
+    });
   }, [action]);
 
   useEffect(() => {
@@ -276,6 +305,12 @@ export function useTurnstile(action: string) {
               route.tokenLengthAtCallback = String(nextToken || "").trim().length;
             }
             recordTurnstileDiag(actionRef.current, "callback", { tokenLength: String(nextToken || "").trim().length, widgetId: nextWidgetId });
+            setDiag((current) => ({
+              ...current,
+              callbackFired: true,
+              tokenLength: String(nextToken || "").trim().length,
+              widgetId: nextWidgetId,
+            }));
             storeTokenRef.current(nextToken);
             setErrorRef.current(null);
           },
@@ -283,6 +318,12 @@ export function useTurnstile(action: string) {
             const route = getTurnstileDiagRoute(actionRef.current);
             if (route) route.expiredCallbackFired = true;
             recordTurnstileDiag(actionRef.current, "expired-callback", { widgetId: nextWidgetId });
+            setDiag((current) => ({
+              ...current,
+              expiredCallbackFired: true,
+              tokenLength: 0,
+              widgetId: nextWidgetId,
+            }));
             storeTokenRef.current(null);
             setErrorRef.current("Verification expired. Please complete it again.");
           },
@@ -290,12 +331,23 @@ export function useTurnstile(action: string) {
             const route = getTurnstileDiagRoute(actionRef.current);
             if (route) route.errorCallbackFired = true;
             recordTurnstileDiag(actionRef.current, "error-callback", { widgetId: nextWidgetId });
+            setDiag((current) => ({
+              ...current,
+              errorCallbackFired: true,
+              tokenLength: 0,
+              widgetId: nextWidgetId,
+            }));
             storeTokenRef.current(null);
             setErrorRef.current("Verification failed to load. Please retry.");
           },
         });
         widgetIdRef.current = nextWidgetId;
         renderedContainerRef.current = container;
+        setDiag((current) => ({
+          ...current,
+          widgetRendered: true,
+          widgetId: nextWidgetId,
+        }));
         const nextRoute = getTurnstileDiagRoute(actionRef.current);
         if (nextRoute && !nextRoute.widgetIds.includes(nextWidgetId)) nextRoute.widgetIds.push(nextWidgetId);
         recordTurnstileDiag(actionRef.current, "render-success", { widgetId: nextWidgetId });
@@ -346,8 +398,9 @@ export function useTurnstile(action: string) {
       isTokenUsable,
       error,
       siteKeyMissing: !enabled,
+      diag,
     }),
-    [enabled, token, ready, isTokenUsable, error],
+    [enabled, token, ready, isTokenUsable, error, diag],
   );
 
   return {

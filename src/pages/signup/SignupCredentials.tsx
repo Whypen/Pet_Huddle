@@ -23,7 +23,7 @@ import { LegalModal } from "@/components/modals/LegalModal";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useTurnstile } from "@/hooks/useTurnstile";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,9 @@ const shouldBypassDuplicateCheck =
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
+  const showTurnstileDiag =
+    typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
   const { data, update, setFlowState, flowState } = useSignup();
   const { user, profile, signIn } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
@@ -409,6 +412,9 @@ const SignupCredentials = () => {
                   className="min-h-[65px]"
                 />
               </div>
+            ) : null}
+            {!isOAuthOnboarding ? (
+              <TurnstileDebugPanel visible={showTurnstileDiag} diag={presignupTurnstile.diag} />
             ) : null}
             <NeuButton
               variant="primary"
