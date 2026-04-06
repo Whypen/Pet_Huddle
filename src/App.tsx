@@ -27,6 +27,7 @@ import SignupVerifyEmail from "./pages/signup/SignupVerifyEmail";
 import VerifyCallback from "./pages/VerifyCallback";
 import ResetPassword from "./pages/ResetPassword";
 import AuthCallback from "./pages/AuthCallback";
+import TurnstileHealth from "./pages/TurnstileHealth";
 import EditProfile from "./pages/EditProfile";
 import EditPetProfile from "./pages/EditPetProfile";
 import SetProfile from "./pages/SetProfile";
@@ -165,6 +166,7 @@ const App = () => (
                   <Route path="/signup/marketing-confirmed" element={<PublicRoute><SignupMarketingConfirmed /></PublicRoute>} />
                   {/* No PublicRoute wrapper — accessible from email client in-app browsers without a session */}
                   <Route path="/signup/verify-email" element={<SignupVerifyEmail />} />
+                  <Route path="/turnstile-health" element={<TurnstileHealth />} />
                   {/* Email verification callback — token in URL is the auth, no session required */}
                   <Route path="/verify" element={<VerifyCallback />} />
 
