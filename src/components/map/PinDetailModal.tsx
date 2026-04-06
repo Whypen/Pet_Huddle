@@ -232,33 +232,20 @@ interface PinDetailModalProps {
 
     // Not yet liked → add support
     try {
-      const { error } = await supabase.from("broadcast_alert_interactions" as "profiles").insert({
-        alert_id: alert.id,
-        user_id: user.id,
-        interaction_type: "support",
-      });
+      const { error } = await (supabase.from("broadcast_alert_interactions" as "profiles") as unknown as {
+        upsert: (v: object, o: object) => Promise<{ error: unknown }>;
+      }).upsert(
+        { alert_id: alert.id, user_id: user.id, interaction_type: "support" },
+        { onConflict: "alert_id,user_id,interaction_type", ignoreDuplicates: true },
+      );
       if (error) throw error;
 
       setLiked(true);
       await syncSupportCount();
       await enqueueSupportNotification();
       onRefresh();
-    } catch (error: unknown) {
-      const code =
-        typeof error === "object" && error !== null && "code" in error
-          ? String((error as Record<string, unknown>).code)
-          : "";
-      const message =
-        typeof error === "object" && error !== null && "message" in error
-          ? String((error as Record<string, unknown>).message || "")
-          : "";
-      if (code === "23505" || message.includes("duplicate key") || message.includes("conflict")) {
-        toast.info("You've already supported this alert");
-        setLiked(true);
-        await syncSupportCount();
-      } else {
-        toast.error("Failed to support alert");
-      }
+    } catch {
+      toast.error("Failed to support alert");
     }
   };
 
@@ -277,25 +264,18 @@ interface PinDetailModalProps {
     }
     setShowMenu(false);
     try {
-      const { error } = await supabase.from("broadcast_alert_interactions" as "profiles").insert({
-        alert_id: alert.id,
-        user_id: user.id,
-        interaction_type: "report",
-      });
+      const { error } = await (supabase.from("broadcast_alert_interactions" as "profiles") as unknown as {
+        upsert: (v: object, o: object) => Promise<{ error: unknown }>;
+      }).upsert(
+        { alert_id: alert.id, user_id: user.id, interaction_type: "report" },
+        { onConflict: "alert_id,user_id,interaction_type", ignoreDuplicates: true },
+      );
       if (error) throw error;
 
       toast.success("Alert reported");
       onRefresh();
-    } catch (error: unknown) {
-      const code =
-        typeof error === "object" && error !== null && "code" in error
-          ? String((error as Record<string, unknown>).code)
-          : "";
-      if (code === "23505") {
-        toast.info("You've already reported this alert");
-      } else {
-        toast.error("Failed to report alert");
-      }
+    } catch {
+      toast.error("Failed to report alert");
     }
   };
 
