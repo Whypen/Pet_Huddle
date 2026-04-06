@@ -45,3 +45,34 @@ verify_jwt = false
 # publishable key as Bearer; verify_jwt = true would reject that immediately.
 [functions.link-preview]
 verify_jwt = false
+
+# auth-change-password: called via postPublicFunction (publishable key as Bearer).
+# Internal gate: Turnstile + extractToken() (3-part JWT, excludes anon/service keys)
+# + supabase.auth.getUser() ownership check.
+[functions.auth-change-password]
+verify_jwt = false
+
+# send-phone-otp: called via postPublicFunction (publishable key as Bearer).
+# Internal gate: Turnstile (required) + JWT extraction + DB rate limit + country allowlist.
+[functions.send-phone-otp]
+verify_jwt = false
+
+# verify-phone-otp: sms path called via postPublicFunction; phone_change path via
+# invokeAuthedFunction. Internal gate: JWT extraction + phone_change requires userId
+# + DB 3-attempt cap per phone per 24 h.
+[functions.verify-phone-otp]
+verify_jwt = false
+
+# health-check: internal infra probe, no sensitive data returned.
+[functions.health-check]
+verify_jwt = false
+
+# stripe-pricing: public pricing data, no user data exposed. Optional JWT used
+# only to resolve user currency preference; falls back to USD.
+[functions.stripe-pricing]
+verify_jwt = false
+
+# send-signup-verify-email: called from signup flow with user session JWT.
+# Internal gate: requires valid user JWT + JWT sub must match body user_id.
+[functions.send-signup-verify-email]
+verify_jwt = false

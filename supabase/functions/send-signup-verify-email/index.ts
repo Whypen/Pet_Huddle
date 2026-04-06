@@ -104,6 +104,17 @@ serve(async (req: Request) => {
     const { user_id } = body;
     if (!user_id) return json({ error: "user_id required" }, 400);
 
+    // Require a real user JWT — prevents arbitrary callers from triggering
+    // verification emails to any user_id now that verify_jwt = false at gateway.
+    const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    const anonKeyVal = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
+    const serviceRoleVal = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+    const isUserJwt = (t: string) => t.split(".").length === 3 && t !== anonKeyVal && t !== serviceRoleVal;
+    if (!isUserJwt(bearerToken)) return json({ error: "auth_required" }, 401);
+    const { data: authData, error: authErr } = await supabase.auth.getUser(bearerToken);
+    if (authErr || !authData?.user?.id) return json({ error: "auth_required" }, 401);
+    if (authData.user.id !== user_id) return json({ error: "forbidden" }, 403);
+
     // Fetch profile
     const { data: profile, error } = await supabase
       .from("profiles")
