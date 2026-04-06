@@ -76,6 +76,15 @@ serve(async (req: Request) => {
         if (error) console.warn("[send-pre-signup-verify] cleanup error", error.message);
       });
 
+    // Keep one active presignup row per email so the later signup proof path is deterministic.
+    await supabase
+      .from("presignup_tokens")
+      .delete()
+      .eq("email", email)
+      .then(({ error }) => {
+        if (error) console.warn("[send-pre-signup-verify] existing token cleanup error", error.message);
+      });
+
     // Insert token row — fail hard if this fails (no token = no verify path)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const { error: insertError } = await supabase.from("presignup_tokens").insert({
@@ -83,6 +92,10 @@ serve(async (req: Request) => {
       email,
       verified: false,
       expires_at: expiresAt,
+      signup_proof: null,
+      signup_proof_issued_at: null,
+      signup_proof_expires_at: null,
+      signup_proof_used_at: null,
     });
 
     if (insertError) {

@@ -26,8 +26,9 @@ type SignupPayload = {
     emailRedirectTo?: string;
     data?: Record<string, unknown>;
   };
-  turnstile_token: string;
-  turnstile_action: "signup";
+  turnstile_token?: string;
+  turnstile_action?: "signup";
+  signup_proof?: string;
 };
 
 type ResetPayload = {

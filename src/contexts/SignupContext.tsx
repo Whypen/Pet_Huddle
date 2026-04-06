@@ -15,6 +15,7 @@ type SignupData = {
   email: string;
   phone: string;
   password: string;
+  signup_proof: string;
   legal_name: string;
   otp_verified: boolean;
   email_opt_in: boolean;
@@ -37,6 +38,7 @@ const defaultData: SignupData = {
   email: "",
   phone: "",
   password: "",
+  signup_proof: "",
   legal_name: "",
   otp_verified: false,
   email_opt_in: false,
@@ -55,6 +57,7 @@ const defaultPersistedData: PersistedSignupData = {
 
 const SignupContext = createContext<SignupContextValue | undefined>(undefined);
 const SIGNUP_FLOW_STATE_KEY = "huddle_signup_flow_state_v1";
+const SIGNUP_PROOF_SESSION_KEY = "huddle_signup_proof_v1";
 
 export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
   const resolveRememberedOwner = () =>
@@ -71,9 +74,10 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       const scopedPasswordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, rememberedOwner);
       const raw = localStorage.getItem(scopedDraftKey);
       const password = sessionStorage.getItem(scopedPasswordKey) || "";
-      if (!raw) return { ...defaultData, password };
+      const signupProof = sessionStorage.getItem(SIGNUP_PROOF_SESSION_KEY) || "";
+      if (!raw) return { ...defaultData, password, signup_proof: signupProof };
       const parsed = JSON.parse(raw) as Partial<PersistedSignupData>;
-      return { ...defaultData, ...parsed, password };
+      return { ...defaultData, ...parsed, password, signup_proof: signupProof };
     } catch {
       return defaultData;
     }
@@ -101,6 +105,7 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     setFlowStateInternal("idle");
     try {
       sessionStorage.removeItem(SIGNUP_FLOW_STATE_KEY);
+      sessionStorage.removeItem(SIGNUP_PROOF_SESSION_KEY);
     } catch {
       // best-effort only
     }
@@ -175,6 +180,11 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     } else {
       sessionStorage.removeItem(passwordKey);
       sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+    }
+    if (data.signup_proof) {
+      sessionStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);
+    } else {
+      sessionStorage.removeItem(SIGNUP_PROOF_SESSION_KEY);
     }
   }, [data, isAuthenticated]);
 

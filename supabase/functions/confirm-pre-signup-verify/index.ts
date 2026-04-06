@@ -5,6 +5,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { ensureSignupProof, readPresignupTokenRow } from "../_shared/signupProof.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -34,21 +35,25 @@ serve(async (req: Request) => {
     const { token } = body;
     if (!token) return json({ error: "token_required" }, 400);
 
-    const { data: row, error: fetchErr } = await supabase
-      .from("presignup_tokens")
-      .select("verified, expires_at")
-      .eq("token", token)
-      .maybeSingle();
+    const { data: row, error: fetchErr } = await readPresignupTokenRow(supabase, token);
 
     if (fetchErr) {
       console.error("[confirm-pre-signup-verify] fetch error", fetchErr.message);
       return json({ error: "server_error" }, 500);
     }
-    if (!row) return json({ verified: false, expired: false });
+    if (!row) return json({ verified: false, expired: false, signup_proof: null });
 
     const expired = new Date(row.expires_at) < new Date();
-    if (expired) return json({ verified: false, expired: true });
-    if (row.verified) return json({ verified: true, expired: false });
+    if (expired) return json({ verified: false, expired: true, signup_proof: null });
+    if (row.verified) {
+      const proof = await ensureSignupProof(supabase, row);
+      return json({
+        verified: true,
+        expired: false,
+        signup_proof: proof.proof,
+        signup_proof_expires_at: proof.expires_at,
+      });
+    }
 
     const { error: updateErr } = await supabase
       .from("presignup_tokens")
@@ -60,7 +65,18 @@ serve(async (req: Request) => {
       return json({ error: "server_error" }, 500);
     }
 
-    return json({ verified: true, expired: false });
+    const refreshed = await readPresignupTokenRow(supabase, token);
+    if (refreshed.error || !refreshed.data) {
+      return json({ verified: true, expired: false, signup_proof: null });
+    }
+    const proof = await ensureSignupProof(supabase, refreshed.data);
+
+    return json({
+      verified: true,
+      expired: false,
+      signup_proof: proof.proof,
+      signup_proof_expires_at: proof.expires_at,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[confirm-pre-signup-verify] unexpected error", msg);

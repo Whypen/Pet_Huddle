@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 import { getExpectedTurnstileHostnames, validateTurnstile } from "../_shared/turnstile.ts";
+import { hasUsableSignupProof } from "../_shared/signupProof.ts";
 
 type SignupBody = {
   email?: string;
@@ -10,6 +11,7 @@ type SignupBody = {
   };
   turnstile_token?: string;
   turnstile_action?: string;
+  signup_proof?: string;
 };
 
 const CORS = {
@@ -37,7 +39,8 @@ Deno.serve(async (req: Request) => {
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  if (!supabaseUrl || !anonKey) return json(500, { error: "server_misconfigured" });
+  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) return json(500, { error: "server_misconfigured" });
 
   let body: SignupBody;
   try {
@@ -52,14 +55,38 @@ Deno.serve(async (req: Request) => {
     return json(400, { error: "email_and_password_required" });
   }
 
-  const turnstile = await validateTurnstile(
-    body.turnstile_token ?? null,
-    clientIp(req),
-    "signup",
-    getExpectedTurnstileHostnames(),
-  );
-  if (!turnstile.valid) {
-    return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
+  const signupProof = String(body.signup_proof || "").trim();
+  const serviceClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+  if (signupProof) {
+    const { data: row, error } = await serviceClient
+      .from("presignup_tokens")
+      .select("token,email,verified,expires_at,signup_proof,signup_proof_expires_at,signup_proof_used_at")
+      .eq("signup_proof", signupProof)
+      .maybeSingle();
+
+    if (error) return json(500, { error: "signup_proof_lookup_failed" });
+    if (!row) return json(403, { error: "signup_proof_invalid" });
+    if (String(row.email || "").trim().toLowerCase() !== email.toLowerCase()) {
+      return json(403, { error: "signup_proof_email_mismatch" });
+    }
+    if (!row.verified) return json(403, { error: "signup_proof_not_verified" });
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      return json(403, { error: "signup_proof_parent_expired" });
+    }
+    if (!hasUsableSignupProof(row)) {
+      return json(403, { error: row.signup_proof_used_at ? "signup_proof_reused" : "signup_proof_expired" });
+    }
+  } else {
+    const turnstile = await validateTurnstile(
+      body.turnstile_token ?? null,
+      clientIp(req),
+      "signup",
+      getExpectedTurnstileHostnames(),
+    );
+    if (!turnstile.valid) {
+      return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
+    }
   }
 
   const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
@@ -74,6 +101,13 @@ Deno.serve(async (req: Request) => {
 
   if (signUp.error) {
     return json(400, { error: signUp.error.message || "signup_failed" });
+  }
+
+  if (signupProof) {
+    await serviceClient
+      .from("presignup_tokens")
+      .update({ signup_proof_used_at: new Date().toISOString() })
+      .eq("signup_proof", signupProof);
   }
 
   const session = signUp.data.session

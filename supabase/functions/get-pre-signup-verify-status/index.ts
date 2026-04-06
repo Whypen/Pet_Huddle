@@ -4,6 +4,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { ensureSignupProof, readPresignupTokenRow } from "../_shared/signupProof.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -33,20 +34,30 @@ serve(async (req: Request) => {
     const { token } = body;
     if (!token) return json({ error: "token_required" }, 400);
 
-    const { data: row, error } = await supabase
-      .from("presignup_tokens")
-      .select("verified, expires_at")
-      .eq("token", token)
-      .maybeSingle();
+    const { data: row, error } = await readPresignupTokenRow(supabase, token);
 
     if (error) {
       console.error("[get-pre-signup-verify-status] fetch error", error.message);
       return json({ error: "server_error" }, 500);
     }
-    if (!row) return json({ verified: false, expired: false });
+    if (!row) return json({ verified: false, expired: false, signup_proof: null });
 
     const expired = new Date(row.expires_at) < new Date();
-    return json({ verified: row.verified, expired });
+    if (!row.verified || expired) {
+      return json({ verified: row.verified, expired, signup_proof: null });
+    }
+
+    const proof = await ensureSignupProof(supabase, row);
+    if (!proof.proof) {
+      return json({ verified: true, expired: false, signup_proof: null });
+    }
+
+    return json({
+      verified: true,
+      expired: false,
+      signup_proof: proof.proof,
+      signup_proof_expires_at: proof.expires_at,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[get-pre-signup-verify-status] unexpected error", msg);

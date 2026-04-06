@@ -21,11 +21,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSignup } from "@/contexts/SignupContext";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
+const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
+const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 
 const VerifyCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { setFlowState } = useSignup();
+  const { setFlowState, update } = useSignup();
   const ran = useRef(false);
 
   useEffect(() => {
@@ -62,7 +64,12 @@ const VerifyCallback = () => {
 
         if (data?.verified) {
           // Clear stored token — verification is complete
-          try { sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY); } catch { /* best-effort */ }
+          try {
+            sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
+            sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
+            sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
+          } catch { /* best-effort */ }
+          update({ signup_proof: String(data?.signup_proof || "") });
           // Restore signup flow state so guards pass at /signup/name
           setFlowState("signup");
           navigate("/signup/name", { replace: true });

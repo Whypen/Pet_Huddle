@@ -12,8 +12,6 @@ import { Button, FormField } from "@/components/ui";
 import { supabase } from "@/integrations/supabase/client";
 import { SignupShell } from "@/components/signup/SignupShell";
 import signupNameImg from "@/assets/Sign up/Signup_Name.png";
-import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { authSignup } from "@/lib/publicAuthApi";
 
 // ─── Validation (unchanged) ───────────────────────────────────────────────────
@@ -35,14 +33,6 @@ const SignupName = () => {
   const [submitting, setSubmitting]   = useState(false);
   const [isExiting, setIsExiting]     = useState(false);
   const normalizedSocialId = useMemo(() => socialId.trim(), [socialId]);
-  const signupTurnstile = useTurnstile("signup");
-  const readSignupTurnstileToken = () => {
-    const maybeGetToken = (signupTurnstile as { getToken?: unknown }).getToken;
-    if (typeof maybeGetToken === "function") {
-      return String((maybeGetToken as () => string)() || "").trim();
-    }
-    return String((signupTurnstile as { token?: string | null }).token || "").trim();
-  };
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -79,9 +69,9 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
-        const turnstileToken = readSignupTurnstileToken();
-        if (!turnstileToken) {
-          toast.error("Complete human verification first.");
+        const signupProof = String(data.signup_proof || "").trim();
+        if (!signupProof) {
+          toast.error("Email verification is required. Please resend your verification link.");
           return;
         }
         // New user — create account now that we have display name + social ID
@@ -95,13 +85,11 @@ const SignupName = () => {
               marketing_email_opt_in: data.email_opt_in,
             },
           },
-          turnstile_token: turnstileToken,
-          turnstile_action: "signup",
+          signup_proof: signupProof,
         });
-        signupTurnstile.reset();
         if (signUpError) {
           setFlowState("idle");
-          toast.error("Account creation failed. Please try again.");
+          toast.error(signUpError.message || "Account creation failed. Please try again.");
           return;
         }
         // Fire account verify email + optional marketing DOI email (both fire-and-forget)
@@ -190,8 +178,7 @@ const SignupName = () => {
     Boolean(normalizedSocialId) &&
     SOCIAL_ID_REGEX.test(normalizedSocialId) &&
     availabilityState === "available" &&
-    (user ? true : signupTurnstile.isTokenUsable);
-  const hiddenTurnstileRequired = !user && !signupTurnstile.isTokenUsable;
+    (user ? true : Boolean(String(data.signup_proof || "").trim()));
 
   return (
     <SignupShell
@@ -200,19 +187,6 @@ const SignupName = () => {
       isExiting={isExiting}
       cta={
         <div className="space-y-3">
-          {hiddenTurnstileRequired ? (
-            <div
-              data-testid="signup-name-turnstile-hidden"
-              className="h-0 overflow-hidden opacity-0 pointer-events-none"
-              aria-hidden="true"
-            >
-              <TurnstileWidget
-                siteKeyMissing={signupTurnstile.siteKeyMissing}
-                setContainer={signupTurnstile.setContainer}
-                className="min-h-[65px]"
-              />
-            </div>
-          ) : null}
           <Button
             variant="primary"
             type="submit"

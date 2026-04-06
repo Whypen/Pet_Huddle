@@ -321,6 +321,7 @@ const SignupCredentials = () => {
         password: values.password ?? "",
         phone: values.phone.trim(),
         email_opt_in: emailOptIn,
+        signup_proof: "",
       });
       sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
       setFlowState("signup");

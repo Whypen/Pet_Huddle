@@ -50,7 +50,7 @@ type SendState = "idle" | "sending" | "sent" | "error";
 const SignupVerifyEmail = () => {
   const navigate   = useNavigate();
   const location   = useLocation();
-  const { data, setFlowState } = useSignup();
+  const { data, setFlowState, update } = useSignup();
 
   // Redirect to credentials if there's no draft email in context
   const draftEmail = data.email?.trim() ?? "";
@@ -96,6 +96,7 @@ const SignupVerifyEmail = () => {
     if (sendInFlight.current) return;
     sendInFlight.current = true;
     setSendState("sending");
+    update({ signup_proof: "" });
 
     const newToken = crypto.randomUUID();
     try {
@@ -123,7 +124,7 @@ const SignupVerifyEmail = () => {
     } finally {
       sendInFlight.current = false;
     }
-  }, [draftEmail]);
+  }, [draftEmail, update]);
 
   // ── On expired state from /verify: clear stale token, show expired copy ──────
   useEffect(() => {
@@ -134,6 +135,7 @@ const SignupVerifyEmail = () => {
       sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
       sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
     } catch { /* best-effort */ }
+    update({ signup_proof: "" });
     setToken("");
     setSendState("idle");
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,7 +180,10 @@ const SignupVerifyEmail = () => {
           { body: { token } },
         );
         if (error) return;
-        if (resp?.verified) setVerified(true);
+        if (resp?.verified) {
+          update({ signup_proof: String(resp?.signup_proof || "") });
+          setVerified(true);
+        }
         if (resp?.expired) {
           // Token expired while polling — prompt resend
           try {
@@ -195,7 +200,7 @@ const SignupVerifyEmail = () => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [token, verified]);
+  }, [token, update, verified]);
 
   // ── Navigate on verified (poll detected it) ──────────────────────────────────
   useEffect(() => {
@@ -223,6 +228,7 @@ const SignupVerifyEmail = () => {
       sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
       sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
     } catch { /* best-effort */ }
+    update({ signup_proof: "" });
     navigate("/signup/credentials");
   };
 
@@ -239,6 +245,7 @@ const SignupVerifyEmail = () => {
         { body: { token } },
       );
       if (!error && resp?.verified) {
+        update({ signup_proof: String(resp?.signup_proof || "") });
         setVerified(true); // triggers navigation via effect above
         return;
       }
