@@ -39,3 +39,9 @@ verify_jwt = false
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+# link-preview is a public OG-scraping utility: no user session exists when
+# fetching share previews in the social feed. Frontend sends only the
+# publishable key as Bearer; verify_jwt = true would reject that immediately.
+[functions.link-preview]
+verify_jwt = false
