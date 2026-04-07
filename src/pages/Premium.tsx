@@ -6,7 +6,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Briefcase,
   Globe,
   Heart,
   Megaphone,
@@ -42,6 +41,7 @@ type FeatureRow = {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
   label: string;
   sublabel: string;
+  sublabelNote?: string;
 };
 
 type AddOnItem = {
@@ -49,6 +49,7 @@ type AddOnItem = {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
   title: string;
   subtitle: string;
+  subtitleNote?: string;
   price: number;
   billingNote?: string; // e.g. "/mo" for recurring add-ons
 };
@@ -71,45 +72,45 @@ const CARD_FLOAT_STYLE: React.CSSProperties = {
 };
 
 const PLUS_FEATURES: FeatureRow[] = [
-  { icon: Users,             label: "×2 Discovery",            sublabel: "More connections, less noise" },
-  { icon: Star,              label: "4 Stars / month",          sublabel: "Trigger conversations directly" },
-  { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Alert your neighbourhood" },
-  { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Find your kind of people" },
-  { icon: Heart,             label: "Link Family",              sublabel: "Connect all your pet accounts" },
-  { icon: Briefcase,         label: "Priority Services placement", sublabel: quotaConfig.capsByTier.plus.serviceVisibilityLabel },
+  { icon: Users,             label: "Open Discovery",           sublabel: "Double the chances. Better matches." },
+  { icon: TrendingUp,        label: "Profile Boost",            sublabel: "Get seen earlier in Discover and Services." },
+  { icon: Star,              label: "4 Stars / month",          sublabel: "Reach out without waiting." },
+  { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Reach more nearby members for longer." },
+  { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Sharper search. Better fit." },
+  { icon: Heart,             label: "Family Sharing",           sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
 
 const GOLD_FEATURES: FeatureRow[] = [
-  { icon: Globe,             label: "Wide Open Discovery",      sublabel: "Keep discovering" },
-  { icon: TrendingUp,        label: "3× Visibility priority",   sublabel: "Become a top profile" },
-  { icon: Star,              label: "10 Stars / month",         sublabel: "The most direct connections" },
-  { icon: Radio,             label: "Broadcasts · 50km · 48h",  sublabel: "Maximum reach" },
-  { icon: SlidersHorizontal, label: "All Filters Access",       sublabel: "Including Active Now + Same Energy" },
-  { icon: Video,             label: "Video upload",             sublabel: "Gold-exclusive" },
-  { icon: Users2,            label: "Link Family",              sublabel: "Connect all your pet accounts" },
-  { icon: Briefcase,         label: "Top Services placement",   sublabel: quotaConfig.capsByTier.gold.serviceVisibilityLabel },
+  { icon: Globe,             label: "Max Discovery",            sublabel: "Keep discovering without the usual limits." },
+  { icon: TrendingUp,        label: "Top Profile Boost",        sublabel: "Priority placement in Discover and Services." },
+  { icon: Star,              label: "10 Stars / month",         sublabel: "Your fastest way to connect." },
+  { icon: Radio,             label: "Broadcasts · 50km · 48h",  sublabel: "Your widest reach, for even longer." },
+  { icon: SlidersHorizontal, label: "All Filters",              sublabel: "Every filter unlocked. Less noise, better matches." },
+  { icon: Video,             label: "Video Uploads",            sublabel: "Gold exclusive." },
+  { icon: Users2,            label: "Family Sharing",           sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
 
 const ADD_ONS: AddOnItem[] = [
   {
     id: "superBroadcast",
     icon: Megaphone,
-    title: "Super Broadcast",
-    subtitle: "Highlighted for 72h · range 150km",
+    title: "Super Broadcast · 150km · 72h",
+    subtitle: "Ultra-wide reach. Stay visible the longest.",
     price: 4.99,
   },
   {
     id: "topProfileBooster",
     icon: Zap,
-    title: "Top Profile Booster",
-    subtitle: "3x Prioritized Profile Visibility · 24h",
+    title: "Profile Booster",
+    subtitle: "Maximum visibility for 24h.",
     price: 2.99,
   },
   {
     id: "sharePerks",
     icon: Users2,
-    title: "Share Perks",
-    subtitle: "Mirrors tier's access to exclusive features",
+    title: "Family Sharing",
+    subtitle: "Extend your plan benefits to one other account",
+    subtitleNote: "(except Stars)",
     price: 4.99,
   },
 ];
@@ -676,6 +677,7 @@ export default function PremiumPage() {
                     style={{ color: theme.textOnBg, opacity: 0.72 }}
                   >
                     {f.sublabel}
+                    {f.sublabelNote && <><br /><em>{f.sublabelNote}</em></>}
                   </p>
                 </div>
               </div>
@@ -772,6 +774,7 @@ export default function PremiumPage() {
                       style={{ color: BRAND_BLUE, opacity: 0.65 }}
                     >
                       {addon.subtitle}
+                      {addon.subtitleNote && <><br /><em>{addon.subtitleNote}</em></>}
                     </p>
                     <p
                       className="text-[13px] font-[600] mt-1"
