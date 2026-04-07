@@ -76,7 +76,7 @@ const PLUS_FEATURES: FeatureRow[] = [
   { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Alert your neighbourhood" },
   { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Find your kind of people" },
   { icon: Heart,             label: "Link Family",              sublabel: "Connect all your pet accounts" },
-  { icon: Briefcase,         label: "Priority Services placement", sublabel: "Appear higher in carer search" },
+  { icon: Briefcase,         label: "Priority Services placement", sublabel: quotaConfig.capsByTier.plus.serviceVisibilityLabel },
 ];
 
 const GOLD_FEATURES: FeatureRow[] = [
@@ -87,6 +87,7 @@ const GOLD_FEATURES: FeatureRow[] = [
   { icon: SlidersHorizontal, label: "All Filters Access",       sublabel: "Including Active Now + Same Energy" },
   { icon: Video,             label: "Video upload",             sublabel: "Gold-exclusive" },
   { icon: Users2,            label: "Link Family",              sublabel: "Connect all your pet accounts" },
+  { icon: Briefcase,         label: "Top Services placement",   sublabel: quotaConfig.capsByTier.gold.serviceVisibilityLabel },
 ];
 
 const ADD_ONS: AddOnItem[] = [

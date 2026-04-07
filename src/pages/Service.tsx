@@ -13,6 +13,7 @@ import { ServiceSkeleton } from "@/components/service/ServiceSkeleton";
 import { ServiceSortDropdown } from "@/components/service/ServiceSortDropdown";
 import { filterAndSortProviders, type ServiceFilterState } from "@/components/service/filterProviders";
 import { useServiceProviders } from "@/hooks/useServiceProviders";
+import { useServiceAnalytics } from "@/hooks/useServiceAnalytics";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -94,6 +95,8 @@ const Service = () => {
     () => filterAndSortProviders(providers, filters),
     [providers, filters],
   );
+
+  useServiceAnalytics(profile?.id, visibleProviders, filters.sort, activeProviderId, loading);
 
   const leftColumn = visibleProviders.filter((_, index) => index % 2 === 0);
   const rightColumn = visibleProviders.filter((_, index) => index % 2 === 1);

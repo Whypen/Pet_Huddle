@@ -70,6 +70,7 @@ export function PublicCarerProfileModal({
                 "updated_at",
                 "agreement_accepted",
                 "stripe_payout_status",
+                "service_rank_weight",
               ].join(","),
             )
             .eq("user_id", providerUserId)
