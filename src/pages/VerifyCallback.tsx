@@ -8,7 +8,7 @@
  * Routes:
  *   success  → /signup/name  (flow continues; no auth user created yet)
  *   expired  → /signup/verify-email  with { state: { expired: true } }
- *   invalid  → /signup/credentials  with { state: { invalid_link: true } }
+ *   invalid  → /signup/verify-email with { state: { invalid_link: true } }
  *
  * No user-facing error text on this page — all error paths redirect with state.
  * Old presignup links (to /signup/verify-email?token=) won't hit this route.
@@ -41,9 +41,9 @@ const VerifyCallback = () => {
 
     if (!token) {
       // No token — malformed link
-      navigate("/signup/credentials", {
+      navigate("/signup/verify-email", {
         replace: true,
-        state: { invalid_link: true },
+        state: { invalid_link: true, email: emailHint },
       });
       return;
     }
@@ -52,20 +52,20 @@ const VerifyCallback = () => {
       try {
         const { data, error } = await supabase.functions.invoke(
           "confirm-pre-signup-verify",
-          { body: { token } },
+          { body: { token, email: emailHint || undefined } },
         );
 
         if (error) {
-          // Network / edge function failure — treat as invalid link
-          navigate("/signup/credentials", {
+          navigate("/signup/verify-email", {
             replace: true,
-            state: { invalid_link: true },
+            state: { invalid_link: true, email: emailHint },
           });
           return;
         }
 
         if (data?.verified) {
-          const restoredDraft = loadSignupDraft(emailHint);
+          const canonicalEmail = String(data?.email || emailHint || "").trim().toLowerCase();
+          const restoredDraft = loadSignupDraft(canonicalEmail);
           // Clear stored token — verification is complete
           try {
             sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
@@ -74,7 +74,7 @@ const VerifyCallback = () => {
           } catch { /* best-effort */ }
           update({
             ...(restoredDraft?.data as Record<string, unknown> | undefined),
-            email: String((restoredDraft?.data as { email?: string } | undefined)?.email || emailHint || ""),
+            email: String((restoredDraft?.data as { email?: string } | undefined)?.email || canonicalEmail || ""),
             password: restoredDraft?.password || "",
             signup_proof: String(data?.signup_proof || ""),
           });
@@ -87,18 +87,20 @@ const VerifyCallback = () => {
         if (data?.expired) {
           navigate("/signup/verify-email", {
             replace: true,
-            state: { expired: true, email: emailHint },
+            state: { expired: true, email: String(data?.email || emailHint || "").trim().toLowerCase() },
           });
           return;
         }
 
-        // verified=false, expired=false → token not found or already used
-        navigate("/signup/credentials", {
+        navigate("/signup/verify-email", {
           replace: true,
-          state: { invalid_link: true, email: emailHint },
+          state: {
+            invalid_link: true,
+            email: String(data?.email || emailHint || "").trim().toLowerCase(),
+          },
         });
       } catch {
-        navigate("/signup/credentials", {
+        navigate("/signup/verify-email", {
           replace: true,
           state: { invalid_link: true, email: emailHint },
         });

@@ -4,6 +4,7 @@ import {
   clearSignupScopedStorage,
   loadSignupDraft,
   SIGNUP_PASSWORD_SESSION_KEY,
+  SIGNUP_PROOF_STORAGE_KEY,
   SIGNUP_STORAGE_KEY,
   buildScopedStorageKey,
   normalizeStorageOwner,
@@ -58,7 +59,7 @@ const defaultPersistedData: PersistedSignupData = {
 
 const SignupContext = createContext<SignupContextValue | undefined>(undefined);
 const SIGNUP_FLOW_STATE_KEY = "huddle_signup_flow_state_v1";
-const SIGNUP_PROOF_SESSION_KEY = "huddle_signup_proof_v1";
+const SIGNUP_PROOF_SESSION_KEY = SIGNUP_PROOF_STORAGE_KEY;
 
 export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
   const resolveRememberedOwner = () =>
@@ -70,11 +71,19 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
 
   const [data, setData] = useState<SignupData>(() => {
     try {
-      const signupProof = sessionStorage.getItem(SIGNUP_PROOF_SESSION_KEY) || "";
+      const signupProof =
+        localStorage.getItem(SIGNUP_PROOF_SESSION_KEY) ||
+        sessionStorage.getItem(SIGNUP_PROOF_SESSION_KEY) ||
+        "";
       const draft = loadSignupDraft(resolveRememberedOwner());
       if (!draft) return { ...defaultData, signup_proof: signupProof };
       const parsed = draft.data as Partial<PersistedSignupData>;
-      return { ...defaultData, ...parsed, password: draft.password, signup_proof: signupProof };
+      return {
+        ...defaultData,
+        ...parsed,
+        password: draft.password,
+        signup_proof: draft.signupProof || signupProof,
+      };
     } catch {
       return defaultData;
     }
@@ -154,6 +163,7 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     const owner = normalizeStorageOwner(data.email || resolveRememberedOwner());
     const draftKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner);
     const passwordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner);
+    const signupProofKey = buildScopedStorageKey(SIGNUP_PROOF_STORAGE_KEY, owner);
     const persisted: PersistedSignupData = {
       ...defaultPersistedData,
       dob: data.dob,
@@ -184,8 +194,14 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     }
     if (data.signup_proof) {
       sessionStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);
+      localStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);
+      sessionStorage.setItem(signupProofKey, data.signup_proof);
+      localStorage.setItem(signupProofKey, data.signup_proof);
     } else {
       sessionStorage.removeItem(SIGNUP_PROOF_SESSION_KEY);
+      localStorage.removeItem(SIGNUP_PROOF_SESSION_KEY);
+      sessionStorage.removeItem(signupProofKey);
+      localStorage.removeItem(signupProofKey);
     }
   }, [data, isAuthenticated]);
 

@@ -1,5 +1,6 @@
 export const SIGNUP_STORAGE_KEY = "huddle_signup_v2";
 export const SIGNUP_PASSWORD_SESSION_KEY = "huddle_signup_password_v1";
+export const SIGNUP_PROOF_STORAGE_KEY = "huddle_signup_proof_v1";
 export const SIGNUP_VERIFY_SUBMITTED_KEY = "signup_verify_docs_submitted";
 export const SIGNUP_PENDING_VERIFICATION_KEY = "signup_pending_verification_v1";
 export const SETPROFILE_PREFILL_KEY = "setprofile_prefill";
@@ -15,6 +16,7 @@ export type LoadedSignupDraft = {
   owner: string;
   data: Record<string, unknown>;
   password: string;
+  signupProof: string;
 };
 
 export const normalizeStorageOwner = (owner: string | null | undefined): string => {
@@ -63,10 +65,18 @@ export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | 
         sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
         localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
         "";
+      const signupProofKey = buildScopedStorageKey(SIGNUP_PROOF_STORAGE_KEY, owner);
+      const signupProof =
+        localStorage.getItem(signupProofKey) ||
+        sessionStorage.getItem(signupProofKey) ||
+        localStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
+        sessionStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
+        "";
       return {
         owner,
         data: JSON.parse(rawDraft) as Record<string, unknown>,
         password,
+        signupProof,
       };
     }
 
@@ -78,6 +88,10 @@ export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | 
       password:
         sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
         localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
+        "",
+      signupProof:
+        localStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
+        sessionStorage.getItem(SIGNUP_PROOF_STORAGE_KEY) ||
         "",
     };
   } catch {
@@ -91,6 +105,7 @@ export const clearSignupScopedStorage = (ownerHints: Array<string | null | undef
     SIGNUP_STORAGE_KEY,
     SIGNUP_PASSWORD_SESSION_KEY,
     SIGNUP_PENDING_VERIFICATION_KEY,
+    SIGNUP_PROOF_STORAGE_KEY,
     SETPROFILE_PREFILL_KEY,
     SETPET_PREFILL_KEY,
   ] as const;

@@ -1,5 +1,6 @@
 // send-pre-signup-verify — v2
-// Creates a DB token row then sends a Brevo verification email.
+// Reuses an active pending DB token row on passive re-entry, or creates one
+// only when needed / explicitly forced.
 // Cleans up expired tokens on each call.
 // Returns { ok: true } or { error: string } — never swallows failures.
 
@@ -36,11 +37,12 @@ serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
-    let body: { email?: string; token?: string; turnstile_token?: string };
+    let body: { email?: string; token?: string; turnstile_token?: string; force_new_token?: boolean };
     try { body = await req.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
-    const { email, token, turnstile_token } = body;
-    if (!email || !token) return json({ error: "email_and_token_required" }, 400);
+    const { email, token, turnstile_token, force_new_token } = body;
+    if (!email) return json({ error: "email_required" }, 400);
+    const normalizedEmail = String(email).trim().toLowerCase();
 
     const clientIp =
       req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
@@ -76,20 +78,49 @@ serve(async (req: Request) => {
         if (error) console.warn("[send-pre-signup-verify] cleanup error", error.message);
       });
 
-    // Keep one active presignup row per email so the later signup proof path is deterministic.
-    await supabase
+    const { data: existingRows, error: existingRowsError } = await supabase
       .from("presignup_tokens")
-      .delete()
-      .eq("email", email)
-      .then(({ error }) => {
-        if (error) console.warn("[send-pre-signup-verify] existing token cleanup error", error.message);
+      .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
+      .eq("email", normalizedEmail)
+      .order("created_at", { ascending: false });
+
+    if (existingRowsError) {
+      console.error("[send-pre-signup-verify] existing row fetch failed", existingRowsError.message);
+      return json({ error: "server_error" }, 500);
+    }
+
+    const nowMs = Date.now();
+    const activePendingRow = (existingRows || []).find((row) => {
+      const expiresAtMs = new Date(String(row.expires_at || "")).getTime();
+      return !row.verified && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+    });
+
+    if (!force_new_token && activePendingRow) {
+      return json({
+        ok: true,
+        token: activePendingRow.token,
+        email: activePendingRow.email,
+        reused: true,
+        email_sent: false,
       });
+    }
+
+    if (force_new_token) {
+      await supabase
+        .from("presignup_tokens")
+        .delete()
+        .eq("email", normalizedEmail)
+        .then(({ error }) => {
+          if (error) console.warn("[send-pre-signup-verify] existing token cleanup error", error.message);
+        });
+    }
 
     // Insert token row — fail hard if this fails (no token = no verify path)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const nextToken = String(token || crypto.randomUUID());
     const { error: insertError } = await supabase.from("presignup_tokens").insert({
-      token,
-      email,
+      token: nextToken,
+      email: normalizedEmail,
       verified: false,
       expires_at: expiresAt,
       signup_proof: null,
@@ -103,7 +134,7 @@ serve(async (req: Request) => {
       return json({ error: "db_error" }, 500);
     }
 
-    const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+    const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(nextToken)}&email=${encodeURIComponent(normalizedEmail)}`;
     const emailHtml = `<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
@@ -209,7 +240,7 @@ serve(async (req: Request) => {
       },
       body: JSON.stringify({
         sender:      { name: "Team Huddle", email: BREVO_FROM_EMAIL },
-        to:          [{ email }],
+        to:          [{ email: normalizedEmail }],
         subject:     "Verify your email to join huddle",
         htmlContent: emailHtml,
         textContent: `Verify your email to join huddle\n\nTap the link below:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
@@ -222,7 +253,7 @@ serve(async (req: Request) => {
       return json({ error: "email_send_failed" }, 500);
     }
 
-    return json({ ok: true });
+    return json({ ok: true, token: nextToken, email: normalizedEmail, reused: false, email_sent: true });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[send-pre-signup-verify] unexpected error", msg);

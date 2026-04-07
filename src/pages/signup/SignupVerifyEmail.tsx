@@ -1,29 +1,8 @@
 /**
  * SignupVerifyEmail — /signup/verify-email
- *
- * "Check your inbox" waiting page shown after /signup/credentials.
- * The user is NOT a registered auth user yet — they are a draft in SignupContext.
- *
- * Responsibilities:
- *  - On first entry: wait for Turnstile → generate UUID token → call send-pre-signup-verify → store token
- *  - On refresh/back: detect existing valid token for same email — do NOT resend
- *  - Poll get-pre-signup-verify-status every 3s → navigate to /signup/name on verified
- *  - Resend: explicit only, new token, 60s cooldown, requires Turnstile token
- *  - Change email: clear token → navigate to /signup/credentials
- *  - "I've verified": manual poll → navigate or show "not yet" feedback
- *  - Receives state from /verify: { expired: true } or is used fresh from /signup/credentials
- *
- * Copy:
- *  - expired state: "This link has expired for your protection. No worries—click below to send a new one."
- *  - invalid link: same as expired (user is already redirected to /signup/credentials for truly invalid)
- *  - no raw auth or DB errors surfaced
- *
- * Old /signup/verify-email?token= links (from legacy presignup emails):
- *  - They arrive here but ?token= is ignored — the page shows the waiting UI benignly
- *  - User can use Resend to get a fresh /verify?token= link
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Mail, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -34,43 +13,55 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const PRESIGNUP_TOKEN_KEY  = "huddle_presignup_token";
-const PRESIGNUP_EMAIL_KEY  = "huddle_presignup_email";
+const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
+const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
 const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 const RESEND_COOLDOWN_SECS = 60;
-const POLL_INTERVAL_MS     = 3_000;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
+const POLL_INTERVAL_MS = 3_000;
 
 type SendState = "idle" | "sending" | "sent" | "error";
+type VerifyRouteState = { expired?: boolean; invalid_link?: boolean; email?: string } | null;
+type VerifyStatusResponse = {
+  verified?: boolean;
+  expired?: boolean;
+  signup_proof?: string | null;
+  signup_proof_expires_at?: string | null;
+  email?: string | null;
+  token?: string | null;
+};
+type SendVerifyResponse = {
+  ok?: boolean;
+  token?: string | null;
+  email?: string | null;
+  reused?: boolean;
+  email_sent?: boolean;
+};
 
-// ─── Component ────────────────────────────────────────────────────────────────
+type StatusOutcome = "verified" | "pending" | "expired" | "missing" | "error";
 
 const SignupVerifyEmail = () => {
-  const navigate   = useNavigate();
-  const location   = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { data, setFlowState, update } = useSignup();
-  const incomingState = location.state as { expired?: boolean; email?: string } | null;
+  const incomingState = location.state as VerifyRouteState;
 
-  // Redirect to credentials if there's no draft email in context
-  const draftEmail = data.email?.trim() ?? "";
-
+  const draftEmail = data.email?.trim().toLowerCase() ?? "";
   const incomingExpired = incomingState?.expired === true;
+  const incomingInvalid = incomingState?.invalid_link === true;
   const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
 
-  // ── Token state ──────────────────────────────────────────────────────────────
-  const [token, setToken] = useState<string>("");
-
-  const [sendState,   setSendState]   = useState<SendState>("idle");
-  const [cooldown,    setCooldown]    = useState(0);
-  const [verified,    setVerified]    = useState(false);
+  const [token, setToken] = useState("");
+  const [sendState, setSendState] = useState<SendState>("idle");
+  const [cooldown, setCooldown] = useState(0);
+  const [verified, setVerified] = useState(false);
   const [manualCheck, setManualCheck] = useState<"idle" | "checking" | "not_yet">("idle");
-  const [isExiting,   setIsExiting]   = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
 
   const sendInFlight = useRef(false);
-  const pollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSendStarted = useRef(false);
+  const statusInFlight = useRef(false);
 
   const readTurnstileToken = useCallback(() => {
     return String(sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "").trim();
@@ -84,12 +75,33 @@ const SignupVerifyEmail = () => {
       const storedEmail = String(sessionStorage.getItem(PRESIGNUP_EMAIL_KEY) || "").trim().toLowerCase();
       if (storedToken && storedEmail === normalizedEmail) return storedToken;
     } catch {
-      // best-effort only
+      // best-effort storage read only
     }
     return "";
   }, []);
 
-  // ── Guard: no draft email → back to credentials ──────────────────────────────
+  const persistPresignupIdentity = useCallback((nextToken: string, nextEmail: string) => {
+    const normalizedToken = String(nextToken || "").trim();
+    const normalizedEmail = String(nextEmail || "").trim().toLowerCase();
+    if (!normalizedToken || !normalizedEmail) return;
+    try {
+      sessionStorage.setItem(PRESIGNUP_TOKEN_KEY, normalizedToken);
+      sessionStorage.setItem(PRESIGNUP_EMAIL_KEY, normalizedEmail);
+    } catch {
+      // best-effort storage write only
+    }
+  }, []);
+
+  const clearPresignupIdentity = useCallback(() => {
+    try {
+      sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
+      sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
+      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
+    } catch {
+      // best-effort storage cleanup only
+    }
+  }, []);
+
   useEffect(() => {
     if (draftEmail) return;
     const fallbackEmail =
@@ -105,6 +117,7 @@ const SignupVerifyEmail = () => {
         ...(restoredDraft.data as Record<string, unknown>),
         email: String((restoredDraft.data as { email?: string }).email || fallbackEmail),
         password: restoredDraft.password || "",
+        signup_proof: restoredDraft.signupProof || "",
       });
     } else {
       update({ email: fallbackEmail });
@@ -112,145 +125,168 @@ const SignupVerifyEmail = () => {
     setFlowState("signup");
   }, [draftEmail, incomingEmail, navigate, setFlowState, update]);
 
-  // ── Send verification email ───────────────────────────────────────────────────
-  // Takes the current Turnstile token as a parameter so the callback stays stable.
+  const applyResolvedStatus = useCallback((resp: VerifyStatusResponse | null | undefined): StatusOutcome => {
+    const canonicalEmail = String(resp?.email || draftEmail || incomingEmail || "").trim().toLowerCase();
+    const canonicalToken = String(resp?.token || "").trim();
+    const signupProof = String(resp?.signup_proof || "").trim();
+
+    if (canonicalEmail && canonicalToken) {
+      persistPresignupIdentity(canonicalToken, canonicalEmail);
+      setToken(canonicalToken);
+      setSendState("sent");
+    } else if (!resp?.verified) {
+      setToken("");
+    }
+
+    if (resp?.verified) {
+      update({
+        email: canonicalEmail || draftEmail,
+        signup_proof: signupProof,
+      });
+      setVerified(true);
+      setSendState("sent");
+      return "verified";
+    }
+
+    if (resp?.expired) {
+      clearPresignupIdentity();
+      update({ signup_proof: "" });
+      setToken("");
+      setSendState("idle");
+      return "expired";
+    }
+
+    if (canonicalToken) return "pending";
+    clearPresignupIdentity();
+    setSendState("idle");
+    return "missing";
+  }, [clearPresignupIdentity, draftEmail, incomingEmail, persistPresignupIdentity, update]);
+
+  const lookupStatus = useCallback(async (emailOverride?: string): Promise<StatusOutcome> => {
+    const canonicalEmail = String(emailOverride || draftEmail || incomingEmail || "").trim().toLowerCase();
+    if (!canonicalEmail || statusInFlight.current) return "error";
+    statusInFlight.current = true;
+    try {
+      const storedToken = readStoredPresignupToken(canonicalEmail);
+      const requestBody: { token?: string; email: string } = { email: canonicalEmail };
+      if (storedToken) requestBody.token = storedToken;
+      const { data: resp, error } = await supabase.functions.invoke("get-pre-signup-verify-status", {
+        body: requestBody,
+      });
+      if (error) return "error";
+      return applyResolvedStatus(resp as VerifyStatusResponse);
+    } catch {
+      return "error";
+    } finally {
+      statusInFlight.current = false;
+    }
+  }, [applyResolvedStatus, draftEmail, incomingEmail, readStoredPresignupToken]);
+
   const sendEmail = useCallback(async (turnstileToken: string, forceNewToken = false) => {
-    if (!draftEmail || !turnstileToken) return;
-    if (sendInFlight.current) return;
+    if (!draftEmail || !turnstileToken) return false;
+    if (sendInFlight.current) return false;
     sendInFlight.current = true;
     setSendState("sending");
     update({ signup_proof: "" });
 
-    const newToken = crypto.randomUUID();
     try {
-      const { data: resp, error } = await postPublicFunction<{ ok?: boolean }>(
+      const { data: resp, error } = await postPublicFunction<SendVerifyResponse>(
         "send-pre-signup-verify",
-        { email: draftEmail, token: newToken, turnstile_token: turnstileToken },
+        {
+          email: draftEmail,
+          turnstile_token: turnstileToken,
+          force_new_token: forceNewToken,
+        },
       );
       if (error || !resp?.ok) throw new Error("send_failed");
 
-      // Persist token scoped to this draft email
-      try {
-        sessionStorage.setItem(PRESIGNUP_TOKEN_KEY, newToken);
-        sessionStorage.setItem(PRESIGNUP_EMAIL_KEY, draftEmail);
-      } catch { /* best-effort */ }
-
-      setToken(newToken);
+      const nextToken = String(resp?.token || "").trim();
+      const nextEmail = String(resp?.email || draftEmail).trim().toLowerCase();
+      if (nextToken) {
+        persistPresignupIdentity(nextToken, nextEmail);
+        setToken(nextToken);
+      }
       setSendState("sent");
       if (forceNewToken) {
-        // Resend: start cooldown
         setCooldown(RESEND_COOLDOWN_SECS);
         toast.success("Verification email sent");
       }
+      return true;
     } catch {
       setSendState("error");
+      return false;
     } finally {
       sendInFlight.current = false;
     }
-  }, [draftEmail, update]);
+  }, [draftEmail, persistPresignupIdentity, update]);
 
-  // ── Rehydrate stored token after draft recovery / cold boot ───────────────────
   useEffect(() => {
-    if (!draftEmail || token) return;
-    const storedToken = readStoredPresignupToken(draftEmail);
-    if (!storedToken) return;
-    setToken(storedToken);
-    setSendState("sent");
-    initialSendDone.current = true;
-  }, [draftEmail, token, readStoredPresignupToken]);
+    autoSendStarted.current = false;
+    setRecoveryReady(false);
+  }, [draftEmail]);
 
-  // ── On expired state from /verify: clear stale token, show expired copy ──────
   useEffect(() => {
-    if (!incomingExpired) return;
-    // Clear the stale token so resend works cleanly
-    try {
-      sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
-      sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
-      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
-    } catch { /* best-effort */ }
+    if (!incomingExpired && !incomingInvalid) return;
+    clearPresignupIdentity();
     update({ signup_proof: "" });
     setToken("");
     setSendState("idle");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setVerified(false);
+  }, [clearPresignupIdentity, incomingExpired, incomingInvalid, update]);
 
-  // ── On mount: send email only if no valid token exists AND the presignup
-  // Turnstile token from /signup/credentials is already in sessionStorage.
-  const initialSendDone = useRef(false);
   useEffect(() => {
     if (!draftEmail) return;
-    const storedToken = readStoredPresignupToken(draftEmail);
-    if (storedToken) {
-      if (token !== storedToken) setToken(storedToken);
-      if (!initialSendDone.current) {
-        initialSendDone.current = true;
-        setSendState("sent");
-      }
-      return;
-    }
-    if (token) {
-      if (!initialSendDone.current) {
-        initialSendDone.current = true;
-        setSendState("sent");
-      }
-      return;
-    }
-    const turnstileToken = readTurnstileToken();
-    if (!turnstileToken) return; // wait for Turnstile to complete
-    if (initialSendDone.current) return;
-    initialSendDone.current = true;
-    void sendEmail(turnstileToken, false);
-  }, [draftEmail, token, readStoredPresignupToken, readTurnstileToken, sendEmail]);
+    let cancelled = false;
+    const recover = async () => {
+      const outcome = await lookupStatus(draftEmail);
+      if (cancelled) return;
+      if (outcome === "verified") return;
+      setRecoveryReady(true);
+    };
+    void recover();
+    return () => {
+      cancelled = true;
+    };
+  }, [draftEmail, lookupStatus]);
 
-  // ── Cooldown countdown ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!draftEmail || verified || incomingExpired || incomingInvalid) return;
+    if (!recoveryReady || token || sendState === "sending" || autoSendStarted.current) return;
+    const turnstileToken = readTurnstileToken();
+    if (!turnstileToken) return;
+    autoSendStarted.current = true;
+    void sendEmail(turnstileToken, false);
+  }, [draftEmail, incomingExpired, incomingInvalid, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
+
   useEffect(() => {
     if (cooldown <= 0) return;
     const id = setTimeout(() => setCooldown((c) => Math.max(0, c - 1)), 1_000);
     return () => clearTimeout(id);
   }, [cooldown]);
 
-  // ── Poll for verification status ─────────────────────────────────────────────
   useEffect(() => {
-    if (!token || verified) return;
+    if (!draftEmail || verified) return;
 
     const poll = async () => {
-      try {
-        const { data: resp, error } = await supabase.functions.invoke(
-          "get-pre-signup-verify-status",
-          { body: { token } },
-        );
-        if (error) return;
-        if (resp?.verified) {
-          update({ signup_proof: String(resp?.signup_proof || "") });
-          setVerified(true);
-        }
-        if (resp?.expired) {
-          // Token expired while polling — prompt resend
-          try {
-            sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
-            sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
-          } catch { /* best-effort */ }
-          setToken("");
-          setSendState("idle");
-        }
-      } catch { /* silent poll failure — retry on next tick */ }
+      const outcome = await lookupStatus(draftEmail);
+      if (outcome === "expired") {
+        autoSendStarted.current = false;
+      }
     };
 
+    void poll();
     pollRef.current = setInterval(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [token, update, verified]);
+  }, [draftEmail, lookupStatus, verified]);
 
-  // ── Navigate on verified (poll detected it) ──────────────────────────────────
   useEffect(() => {
     if (!verified) return;
     setFlowState("signup");
     setIsExiting(true);
     setTimeout(() => navigate("/signup/name"), 180);
   }, [verified, navigate, setFlowState]);
-
-  // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleResend = () => {
     if (cooldown > 0 || sendState === "sending") return;
@@ -259,42 +295,22 @@ const SignupVerifyEmail = () => {
       toast.error("Complete human verification first.");
       return;
     }
+    autoSendStarted.current = true;
     void sendEmail(turnstileToken, true);
   };
 
   const handleChangeEmail = () => {
-    try {
-      sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
-      sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
-      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
-    } catch { /* best-effort */ }
+    clearPresignupIdentity();
     update({ signup_proof: "" });
     navigate("/signup/credentials");
   };
 
   const handleManualContinue = async () => {
-    if (!token) {
-      // No token yet — ask them to resend first
-      toast.message("Send a verification link first, then click the link in your email.");
-      return;
-    }
     setManualCheck("checking");
-    try {
-      const { data: resp, error } = await supabase.functions.invoke(
-        "get-pre-signup-verify-status",
-        { body: { token } },
-      );
-      if (!error && resp?.verified) {
-        update({ signup_proof: String(resp?.signup_proof || "") });
-        setVerified(true); // triggers navigation via effect above
-        return;
-      }
-      setManualCheck("not_yet");
-      setTimeout(() => setManualCheck("idle"), 3_000);
-    } catch {
-      setManualCheck("not_yet");
-      setTimeout(() => setManualCheck("idle"), 3_000);
-    }
+    const outcome = await lookupStatus(draftEmail);
+    if (outcome === "verified") return;
+    setManualCheck("not_yet");
+    setTimeout(() => setManualCheck("idle"), 3_000);
   };
 
   const handleOpenMail = () => {
@@ -303,7 +319,6 @@ const SignupVerifyEmail = () => {
       ...(userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os") ? ["message://"] : []),
       ...(userAgent.includes("android") ? ["googlegmail://", "ms-outlook://", "ymail://mail"] : []),
       "ms-outlook://",
-      "mailto:",
     ].filter((value, index, arr) => arr.indexOf(value) === index);
 
     candidates.forEach((target, index) => {
@@ -317,12 +332,14 @@ const SignupVerifyEmail = () => {
         window.setTimeout(() => anchor.remove(), 1200);
       }, index * 220);
     });
+
+    toast.message("If your mail app does not open, open it manually and check your inbox.");
   };
 
-  // ── Derived display ───────────────────────────────────────────────────────────
-
-  const showExpiredBanner = incomingExpired && sendState === "idle" && !token;
-  const hiddenTurnstileRequired = !readTurnstileToken();
+  const showExpiredBanner = (incomingExpired || incomingInvalid) && sendState === "idle" && !token;
+  const expiredCopy = incomingExpired
+    ? "This link has expired for your protection. No worries — click below to send a new one."
+    : "That verification link is no longer usable. Click below to send a fresh one.";
   const resendLabel = cooldown > 0
     ? `Resend link (${cooldown}s)`
     : sendState === "sending"
@@ -334,8 +351,7 @@ const SignupVerifyEmail = () => {
     : manualCheck === "not_yet"
       ? "Not verified yet"
       : "I've verified, continue";
-
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const showOpenMail = useMemo(() => !showExpiredBanner && sendState !== "error", [showExpiredBanner, sendState]);
 
   return (
     <SignupShell
@@ -370,7 +386,6 @@ const SignupVerifyEmail = () => {
         </div>
       }
     >
-      {/* Sending spinner */}
       {sendState === "sending" && (
         <div className="flex items-center gap-2 mb-4">
           <RefreshCw size={14} className="animate-spin text-primary" />
@@ -378,15 +393,13 @@ const SignupVerifyEmail = () => {
         </div>
       )}
 
-      {/* Headline */}
       <h1 className="text-[28px] font-[600] leading-[1.1] tracking-[-0.02em] text-[#424965]">
         Verify your email
       </h1>
 
-      {/* Expired banner */}
       {showExpiredBanner ? (
         <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
-          This link has expired for your protection. No worries — click below to send a new one.
+          {expiredCopy}
         </p>
       ) : sendState === "error" ? (
         <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
@@ -395,20 +408,21 @@ const SignupVerifyEmail = () => {
       ) : (
         <>
           <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
-            We've sent a verification link to{" "}
-            <strong className="font-[600] text-[#424965]">{draftEmail}</strong>.
+            We've sent a verification link to <strong className="font-[600] text-[#424965]">{draftEmail}</strong>.
             Check your inbox to continue.
           </p>
-          <NeuButton
-            variant="primary"
-            className="w-full h-12 mt-6"
-            onClick={handleOpenMail}
-          >
-            <Mail size={16} className="mr-2" />
-            Open Mail
-          </NeuButton>
+          {showOpenMail ? (
+            <NeuButton
+              variant="primary"
+              className="w-full h-12 mt-6"
+              onClick={handleOpenMail}
+            >
+              <Mail size={16} className="mr-2" />
+              Open Mail
+            </NeuButton>
+          ) : null}
           <p className="text-[13px] text-[rgba(74,73,101,0.50)] mt-2">
-            Didn't get it? Check spam or resend below.
+            If nothing opens, open your mail app manually. Didn&apos;t get it? Check spam or resend below.
           </p>
         </>
       )}
