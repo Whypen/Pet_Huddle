@@ -152,5 +152,6 @@ export function mapProviderRow(
     agreementAccepted:    Boolean(row.agreement_accepted ?? false),
     stripePayoutStatus:   (row.stripe_payout_status as string | null) ?? null,
     story:                String(row.story ?? ""),
+    serviceRankWeight:    Number(row.service_rank_weight ?? 0),
   };
 }

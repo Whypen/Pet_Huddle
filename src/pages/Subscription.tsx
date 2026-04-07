@@ -42,6 +42,7 @@ const FEATURES = [
   { label: "Gold verified badge",           icon: "lock" as const,  badge: "gold" as const },
   { label: "Exclusive Gold community",      icon: "lock" as const,  badge: "gold" as const },
   { label: "Priority nanny matching",       icon: "lock" as const,  badge: "gold" as const },
+  { label: "Priority Services placement",   icon: "lock" as const,  badge: "plus" as const },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────

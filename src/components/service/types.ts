@@ -43,4 +43,5 @@ export interface ProviderSummary {
   stripePayoutStatus: string | null;
   story: string;
   distanceKm?: number | null;
+  serviceRankWeight: number;
 }

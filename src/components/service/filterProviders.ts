@@ -72,6 +72,10 @@ function matchServiceTypes(provider: ProviderSummary, selected: string[]): boole
   });
 }
 
+function tierTiebreak(a: ProviderSummary, b: ProviderSummary): number {
+  return (b.serviceRankWeight ?? 0) - (a.serviceRankWeight ?? 0);
+}
+
 function toLatestTime(provider: ProviderSummary): number {
   const source = provider.updatedAt ?? provider.createdAt;
   if (!source) return 0;
@@ -146,24 +150,35 @@ export function filterAndSortProviders(
         const ad = typeof a.distanceKm === "number" && Number.isFinite(a.distanceKm) ? a.distanceKm : Number.POSITIVE_INFINITY;
         const bd = typeof b.distanceKm === "number" && Number.isFinite(b.distanceKm) ? b.distanceKm : Number.POSITIVE_INFINITY;
         if (ad !== bd) return ad - bd;
+        const tb = tierTiebreak(a, b);
+        if (tb !== 0) return tb;
         return toLatestTime(b) - toLatestTime(a);
       });
     case "price_low_to_high":
       return [...filtered].sort((a, b) => {
         const ap = a.startingPrice ? Number.parseFloat(a.startingPrice) : Number.POSITIVE_INFINITY;
         const bp = b.startingPrice ? Number.parseFloat(b.startingPrice) : Number.POSITIVE_INFINITY;
-        return ap - bp;
+        if (ap !== bp) return ap - bp;
+        return tierTiebreak(a, b);
       });
     case "price_high_to_low":
       return [...filtered].sort((a, b) => {
         const ap = a.startingPrice ? Number.parseFloat(a.startingPrice) : Number.NEGATIVE_INFINITY;
         const bp = b.startingPrice ? Number.parseFloat(b.startingPrice) : Number.NEGATIVE_INFINITY;
-        return bp - ap;
+        if (bp !== ap) return bp - ap;
+        return tierTiebreak(a, b);
       });
     case "popularity":
-      return [...filtered].sort((a, b) => b.viewCount - a.viewCount);
+      return [...filtered].sort((a, b) => {
+        if (b.viewCount !== a.viewCount) return b.viewCount - a.viewCount;
+        return tierTiebreak(a, b);
+      });
     case "latest":
     default:
-      return [...filtered].sort((a, b) => toLatestTime(b) - toLatestTime(a));
+      return [...filtered].sort((a, b) => {
+        const td = toLatestTime(b) - toLatestTime(a);
+        if (td !== 0) return td;
+        return tierTiebreak(a, b);
+      });
   }
 }

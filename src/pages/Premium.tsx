@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Briefcase,
   Globe,
   Heart,
   Megaphone,
@@ -75,6 +76,7 @@ const PLUS_FEATURES: FeatureRow[] = [
   { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Alert your neighbourhood" },
   { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Find your kind of people" },
   { icon: Heart,             label: "Link Family",              sublabel: "Connect all your pet accounts" },
+  { icon: Briefcase,         label: "Priority Services placement", sublabel: "Appear higher in carer search" },
 ];
 
 const GOLD_FEATURES: FeatureRow[] = [

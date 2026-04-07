@@ -20,6 +20,7 @@ export type QuotaCaps = {
   hasVideoUpload: boolean;
   canLinkFamily: boolean;
   sharePerksAddonAvailable: boolean;
+  serviceVisibilityLabel: string;
 };
 
 export type QuotaCopy = {
@@ -127,6 +128,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     hasVideoUpload: false,
     canLinkFamily: true,
     sharePerksAddonAvailable: true,
+    serviceVisibilityLabel: "Standard",
   },
   plus: {
     aiVetUploadsPerDay: 20,
@@ -147,6 +149,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     hasVideoUpload: false,
     canLinkFamily: true,
     sharePerksAddonAvailable: true,
+    serviceVisibilityLabel: "Priority placement",
   },
   gold: {
     aiVetUploadsPerDay: 40,
@@ -167,6 +170,7 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     hasVideoUpload: true,
     canLinkFamily: true,
     sharePerksAddonAvailable: true,
+    serviceVisibilityLabel: "Top placement",
   },
 };
 

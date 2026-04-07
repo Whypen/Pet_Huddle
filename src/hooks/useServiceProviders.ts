@@ -59,6 +59,7 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
             "updated_at",
             "agreement_accepted",
             "stripe_payout_status",
+            "service_rank_weight",
           ].join(","),
         )
         .eq("listed", true)
