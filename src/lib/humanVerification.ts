@@ -262,7 +262,7 @@ export async function runHumanVerificationChallenge(
       };
     }
 
-    const minSamples = 6;
+    const minSamples = 4;
     if (centers.length < minSamples) {
       return {
         passed: false,
@@ -300,13 +300,13 @@ export async function runHumanVerificationChallenge(
 
     let passed = false;
     if (challenge.challengeType === "turn_left_right") {
-      passed = horizontalShift >= 0.36 && leftTravel >= 0.12 && rightTravel >= 0.12;
+      passed = horizontalShift >= 0.25 && leftTravel >= 0.08 && rightTravel >= 0.08;
     } else if (challenge.challengeType === "look_up_down") {
-      passed = verticalShift >= 0.30 && upTravel >= 0.10 && downTravel >= 0.10;
+      passed = verticalShift >= 0.20 && upTravel >= 0.07 && downTravel >= 0.07;
     } else {
       passed =
-        (horizontalShift >= 0.36 && leftTravel >= 0.12 && rightTravel >= 0.12)
-        || (verticalShift >= 0.30 && upTravel >= 0.10 && downTravel >= 0.10);
+        (horizontalShift >= 0.25 && leftTravel >= 0.08 && rightTravel >= 0.08)
+        || (verticalShift >= 0.20 && upTravel >= 0.07 && downTravel >= 0.07);
     }
 
     return {

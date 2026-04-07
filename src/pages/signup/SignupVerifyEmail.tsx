@@ -328,7 +328,12 @@ const SignupVerifyEmail = () => {
       return;
     }
     setManualCheck("checking");
-    const outcome = await lookupStatus(draftEmail);
+    let outcome = await lookupStatus(draftEmail);
+    if (outcome !== "verified") {
+      // One retry after a short pause — handles DB propagation lag and cross-tab timing.
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+      outcome = await lookupStatus(draftEmail);
+    }
     if (outcome === "verified") {
       proceedToSignupName();
       return;
@@ -338,26 +343,23 @@ const SignupVerifyEmail = () => {
   };
 
   const handleOpenMail = () => {
-    const userAgent = navigator.userAgent.toLowerCase();
-    const target = userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os")
-      ? "message://"
-      : userAgent.includes("android")
-        ? "googlegmail://"
-        : userAgent.includes("windows")
-          ? "ms-outlook://"
-          : "";
-    if (!target) {
-      toast.message("Open your mail app manually and check your inbox.");
+    const ua = navigator.userAgent.toLowerCase();
+    const isMobile = ua.includes("iphone") || ua.includes("ipad") || ua.includes("android");
+    if (!isMobile) {
+      // On desktop there is no reliable universal "open inbox" link — guide the user instead.
+      toast.message("Open your email client and check your inbox for the verification link.");
       return;
     }
+    // mailto: opens the device's default mail app on iOS and Android.
+    // message:// was intentionally removed — it opens the SMS/Messages app, not Mail.
     const anchor = document.createElement("a");
-    anchor.href = target;
+    anchor.href = "mailto:";
     anchor.rel = "noopener noreferrer";
     anchor.style.display = "none";
     document.body.appendChild(anchor);
     anchor.click();
     window.setTimeout(() => anchor.remove(), 1200);
-    toast.message("If nothing opens, open your mail app manually and check your inbox.");
+    toast.message("Check your inbox for the verification email.");
   };
 
   const showExpiredBanner = (incomingExpired || incomingInvalid) && sendState === "idle" && !token;

@@ -28,6 +28,51 @@ const TEST_OTP_SHORTCUT_ENABLED =
   );
 const TEST_OTP_SHORTCUT_CODE = "498005";
 
+// ── User-friendly error mapping ───────────────────────────────────────────────
+// Maps raw HTTP error codes / server strings to copy-safe UI messages.
+// Never exposes internal codes (http_4xx, JWT strings, etc.) to the user.
+
+function friendlyOtpSendError(raw: string): string {
+  const r = String(raw || "").toLowerCase();
+  if (r.startsWith("http_401") || r.includes("invalid or exp") || r.includes("jwt") || r.includes("invalid_token")) {
+    return "Session expired. Please go back and sign in again.";
+  }
+  if (r.startsWith("http_403") || r.includes("human_verification") || r.includes("turnstile")) {
+    return "Human verification failed. Please complete the check above and try again.";
+  }
+  if (r.startsWith("http_429") || r.includes("too_many") || r.includes("rate_limit")) {
+    return "Too many attempts. Please wait a few minutes and try again.";
+  }
+  if (r.includes("country_not_allowed") || r.includes("country") || r.includes("not_allowed")) {
+    return "Phone verification isn't available in your region yet.";
+  }
+  if (r.startsWith("http_5") || r.includes("server_error") || r.includes("misconfigured") || r.includes("db_error")) {
+    return "Couldn't send the code right now. Please try again in a moment.";
+  }
+  if (r === "network_error" || r.includes("fetch") || r.includes("networkerror")) {
+    return "Network error. Check your connection and try again.";
+  }
+  return "Couldn't send the verification code. Please try again.";
+}
+
+function friendlyOtpVerifyError(raw: string): string {
+  const r = String(raw || "").toLowerCase();
+  if (r.includes("expired") || r.startsWith("http_401")) {
+    return "Code expired. Request a new one and try again.";
+  }
+  if (r.startsWith("http_429") || r.includes("too_many") || r.includes("rate")) {
+    return "Too many attempts. Please wait and request a new code.";
+  }
+  if (r.startsWith("http_5") || r.includes("server_error")) {
+    return "Verification failed. Please try again.";
+  }
+  if (r === "network_error") {
+    return "Network error. Check your connection and try again.";
+  }
+  // Default covers "invalid code", "wrong code", etc.
+  return "Incorrect code. Check the SMS and try again.";
+}
+
 // ── Module-level OTP type ─────────────────────────────────────────────────────
 // Set by requestPhoneOtp from the send-phone-otp response.
 // Read by verifyPhoneOtp so the correct type is forwarded to verify-phone-otp.
@@ -110,7 +155,7 @@ export async function requestPhoneOtp(
   }
 
   if (errorMsg || !data?.ok) {
-    return { ok: false, error: errorMsg ?? "Failed to send OTP." };
+    return { ok: false, error: friendlyOtpSendError(errorMsg ?? data?.error ?? "") };
   }
 
   // Store otp_type for the subsequent verifyPhoneOtp call
@@ -174,6 +219,6 @@ export async function verifyPhoneOtp(
     }
   }
 
-  if (errorMsg) return { ok: false, error: errorMsg };
+  if (errorMsg) return { ok: false, error: friendlyOtpVerifyError(errorMsg) };
   return { ok: true };
 }
