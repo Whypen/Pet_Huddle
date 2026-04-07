@@ -178,7 +178,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   // Clear the countdown timer on unmount to avoid state updates on dead components
   useEffect(() => () => { if (otpCountdownRef.current) clearInterval(otpCountdownRef.current); }, []);
   const [phoneOtpVerified, setPhoneOtpVerified] = useState(false);
-  const phoneOtpTurnstile = useTurnstile("send_phone_otp");
+  const phoneOtpTurnstile = useTurnstile("send_pre_signup_verify");
   const [phoneOriginalValue, setPhoneOriginalValue] = useState("");
   // Duplicate-phone detection for the edit-phone flow.
   // Only runs when the user has changed the phone from its saved value.

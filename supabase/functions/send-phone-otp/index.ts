@@ -57,6 +57,11 @@ const CORS = {
     "authorization, x-huddle-access-token, x-client-info, apikey, content-type",
 };
 
+const ALLOWED_TURNSTILE_ACTIONS = new Set([
+  "send_phone_otp",
+  "send_pre_signup_verify",
+]);
+
 // ── SHA-256 hash helper ───────────────────────────────────────────────────────
 // Returns lowercase hex digest. Phone must already be E.164-normalised.
 
@@ -205,6 +210,14 @@ Deno.serve(async (req: Request) => {
   const deviceId  = body.device_id  ?? null;
   const sessionId = body.session_id ?? null;
   const turnstileToken = body.turnstile_token ?? null;
+  const turnstileAction = String(body.turnstile_action ?? "send_pre_signup_verify").trim() || "send_pre_signup_verify";
+
+  if (!ALLOWED_TURNSTILE_ACTIONS.has(turnstileAction)) {
+    return new Response(JSON.stringify({ error: "Invalid turnstile action" }), {
+      status: 400,
+      headers: CORS,
+    });
+  }
 
   if (!rawPhone) {
     return new Response(JSON.stringify({ error: "Phone number is required" }), {
@@ -217,7 +230,7 @@ Deno.serve(async (req: Request) => {
   const turnstile = await validateTurnstile(
     turnstileToken,
     clientIp,
-    "send_phone_otp",
+    turnstileAction,
     getExpectedTurnstileHostnames(),
   );
   if (!turnstile.valid) {

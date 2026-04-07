@@ -838,7 +838,7 @@ export function VerifyIdentity({
   const [phoneOtpCode, setPhoneOtpCode] = useState("");
   const [phoneVerificationError, setPhoneVerificationError] = useState<string | null>(null);
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false);
-  const phoneOtpTurnstile = useTurnstile("send_phone_otp");
+  const phoneOtpTurnstile = useTurnstile("send_pre_signup_verify");
   const readPhoneOtpTurnstileToken = () => {
     const maybeGetToken = (phoneOtpTurnstile as { getToken?: unknown }).getToken;
     if (typeof maybeGetToken === "function") {

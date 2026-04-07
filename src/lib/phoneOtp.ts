@@ -136,7 +136,7 @@ export async function requestPhoneOtp(
         phone: normalized,
         device_id: deviceId,
         turnstile_token: turnstileToken,
-        turnstile_action: "send_phone_otp",
+        turnstile_action: "send_pre_signup_verify",
       },
       accessToken,
     );
@@ -148,7 +148,7 @@ export async function requestPhoneOtp(
       phone: normalized,
       device_id: deviceId,
       turnstile_token: turnstileToken,
-      turnstile_action: "send_phone_otp",
+      turnstile_action: "send_pre_signup_verify",
     });
     data = res.data;
     errorMsg = res.error;
