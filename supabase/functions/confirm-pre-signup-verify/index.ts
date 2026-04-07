@@ -48,25 +48,49 @@ serve(async (req: Request) => {
         .from("presignup_tokens")
         .select("token,email,verified,expires_at,signup_proof,signup_proof_issued_at,signup_proof_expires_at,signup_proof_used_at,created_at")
         .eq("email", email)
-        .eq("verified", true)
         .order("created_at", { ascending: false })
-        .limit(1);
+        .limit(5);
       if (fallbackError) {
         console.error("[confirm-pre-signup-verify] fallback fetch error", fallbackError.message);
         return json({ error: "server_error" }, 500);
       }
-      const fallbackRow = fallbackRows?.[0];
+      const nowMs = Date.now();
+      const fallbackRow =
+        (fallbackRows || []).find((candidate) => {
+          const expiresAtMs = new Date(String(candidate.expires_at || "")).getTime();
+          return candidate.verified && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+        }) ||
+        (fallbackRows || []).find((candidate) => {
+          const expiresAtMs = new Date(String(candidate.expires_at || "")).getTime();
+          return !candidate.verified && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+        }) ||
+        fallbackRows?.[0];
       if (!fallbackRow) return json({ verified: false, expired: false, signup_proof: null, email, token: null });
       const fallbackExpired = new Date(fallbackRow.expires_at) < new Date();
       if (fallbackExpired) return json({ verified: false, expired: true, signup_proof: null, email: fallbackRow.email, token: fallbackRow.token });
-      const fallbackProof = await ensureSignupProof(supabase, fallbackRow);
+      if (!fallbackRow.verified) {
+        const { error: verifyFallbackError } = await supabase
+          .from("presignup_tokens")
+          .update({ verified: true })
+          .eq("token", fallbackRow.token);
+        if (verifyFallbackError) {
+          console.error("[confirm-pre-signup-verify] fallback verify error", verifyFallbackError.message);
+          return json({ error: "server_error" }, 500);
+        }
+      }
+      const refreshedFallback = await readPresignupTokenRow(supabase, String(fallbackRow.token || ""));
+      const finalFallbackRow = refreshedFallback.data || fallbackRow;
+      if (refreshedFallback.error) {
+        console.error("[confirm-pre-signup-verify] fallback refresh error", refreshedFallback.error.message);
+      }
+      const fallbackProof = await ensureSignupProof(supabase, finalFallbackRow);
       return json({
         verified: true,
         expired: false,
         signup_proof: fallbackProof.proof,
         signup_proof_expires_at: fallbackProof.expires_at,
-        email: fallbackRow.email,
-        token: fallbackRow.token,
+        email: finalFallbackRow.email,
+        token: finalFallbackRow.token,
       });
     }
 

@@ -105,16 +105,6 @@ serve(async (req: Request) => {
       }, 403);
     }
 
-    if (force_new_token) {
-      await supabase
-        .from("presignup_tokens")
-        .delete()
-        .eq("email", normalizedEmail)
-        .then(({ error }) => {
-          if (error) console.warn("[send-pre-signup-verify] existing token cleanup error", error.message);
-        });
-    }
-
     // Insert token row — fail hard if this fails (no token = no verify path)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const nextToken = String(token || crypto.randomUUID());
@@ -142,7 +132,7 @@ serve(async (req: Request) => {
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
     <meta name="x-apple-disable-message-reformatting">
-    <title>Verify email</title>
+    <title>Verify your email to join Huddle!</title>
   </head>
   <body aria-disabled="false" style="margin:0;padding:0;background-color:rgb(240,241,245);text-size-adjust:100%;">
     <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:rgb(240,241,245);border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
@@ -241,7 +231,7 @@ serve(async (req: Request) => {
       body: JSON.stringify({
         sender:      { name: "Team Huddle", email: BREVO_FROM_EMAIL },
         to:          [{ email: normalizedEmail }],
-        subject:     "Verify email",
+        subject:     "Verify your email to join Huddle!",
         htmlContent: emailHtml,
         textContent: `Verify email\n\nTap the link below:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
       }),

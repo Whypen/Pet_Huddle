@@ -169,6 +169,12 @@ const SignupVerifyEmail = () => {
     return "missing";
   }, [clearPresignupIdentity, draftEmail, incomingEmail, persistPresignupIdentity, update]);
 
+  const proceedToSignupName = useCallback(() => {
+    setFlowState("signup");
+    setIsExiting(true);
+    setTimeout(() => navigate("/signup/name"), 180);
+  }, [navigate, setFlowState]);
+
   const lookupStatus = useCallback(async (emailOverride?: string): Promise<StatusOutcome> => {
     const canonicalEmail = String(emailOverride || draftEmail || incomingEmail || "").trim().toLowerCase();
     if (!canonicalEmail || statusInFlight.current) return "error";
@@ -291,13 +297,6 @@ const SignupVerifyEmail = () => {
     };
   }, [draftEmail, lookupStatus, verified]);
 
-  useEffect(() => {
-    if (!verified) return;
-    setFlowState("signup");
-    setIsExiting(true);
-    setTimeout(() => navigate("/signup/name"), 180);
-  }, [verified, navigate, setFlowState]);
-
   const handleResend = () => {
     if (cooldown > 0 || sendState === "sending") return;
     const turnstileToken = readTurnstileToken();
@@ -316,9 +315,16 @@ const SignupVerifyEmail = () => {
   };
 
   const handleManualContinue = async () => {
+    if (verified) {
+      proceedToSignupName();
+      return;
+    }
     setManualCheck("checking");
     const outcome = await lookupStatus(draftEmail);
-    if (outcome === "verified") return;
+    if (outcome === "verified") {
+      proceedToSignupName();
+      return;
+    }
     setManualCheck("not_yet");
     setTimeout(() => setManualCheck("idle"), 3_000);
   };
@@ -360,8 +366,12 @@ const SignupVerifyEmail = () => {
     ? "Checking…"
     : manualCheck === "not_yet"
       ? "Not verified yet"
-      : "I've verified, continue";
+      : verified
+        ? "Verified - continue"
+        : "I've verified, continue";
   const showOpenMail = useMemo(() => !showExpiredBanner && sendState !== "error", [showExpiredBanner, sendState]);
+  const successCtaClass = verified ? "!bg-emerald-600 hover:!bg-emerald-700 !text-white border-emerald-700/30" : "";
+  const successGhostClass = verified ? "!bg-emerald-600 hover:!bg-emerald-700 !text-white border-emerald-700/30" : "";
 
   return (
     <SignupShell
@@ -371,24 +381,24 @@ const SignupVerifyEmail = () => {
       cta={
         <div className="space-y-3">
           <NeuButton
-            variant="ghost"
-            className="w-full h-11"
+            variant={verified ? "primary" : "ghost"}
+            className={`w-full h-11 ${successGhostClass}`}
             disabled={resendDisabled}
             onClick={handleResend}
           >
             {resendLabel}
           </NeuButton>
           <NeuButton
-            variant="ghost"
-            className="w-full h-11"
+            variant={verified ? "primary" : "ghost"}
+            className={`w-full h-11 ${successGhostClass}`}
             disabled={manualCheck === "checking"}
             onClick={handleManualContinue}
           >
             {manualLabel}
           </NeuButton>
           <NeuButton
-            variant="ghost"
-            className="w-full h-11 text-[rgba(74,73,101,0.55)]"
+            variant={verified ? "primary" : "ghost"}
+            className={`w-full h-11 ${verified ? successGhostClass : "text-[rgba(74,73,101,0.55)]"}`}
             onClick={handleChangeEmail}
           >
             Change email
@@ -425,7 +435,7 @@ const SignupVerifyEmail = () => {
           {showOpenMail ? (
             <NeuButton
               variant="primary"
-              className="w-full h-12 mt-6"
+              className={`w-full h-12 mt-6 ${successCtaClass}`}
               onClick={handleOpenMail}
             >
               <Mail size={16} className="mr-2" />
