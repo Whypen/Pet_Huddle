@@ -17,12 +17,6 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ProviderSummary } from "@/components/service/types";
 import type { ServiceSortOption } from "@/components/service/filterProviders";
 
-// Cast required: service_analytics is not yet in the generated Supabase types.
-// Fire-and-forget — the return type is never consumed.
-type AnyTable = { insert: (row: Record<string, unknown>) => Promise<unknown> };
-const analyticsFrom = (table: string): AnyTable =>
-  (supabase.from as unknown as (t: string) => AnyTable)(table);
-
 export function useServiceAnalytics(
   userId: string | undefined,
   providers: ProviderSummary[],
@@ -40,7 +34,7 @@ export function useServiceAnalytics(
     hasFiredFeedRef.current = true;
 
     const top10 = providers.slice(0, 10);
-    void analyticsFrom("service_analytics").insert({
+    void supabase.from("service_analytics").insert({
       user_id: userId,
       event: "service_feed_rendered",
       payload: {
@@ -66,7 +60,7 @@ export function useServiceAnalytics(
     lastViewedRef.current = activeProviderId;
 
     const provider = providersRef.current.find((p) => p.userId === activeProviderId);
-    void analyticsFrom("service_analytics").insert({
+    void supabase.from("service_analytics").insert({
       user_id: userId,
       event: "service_profile_viewed",
       payload: {
