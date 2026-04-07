@@ -11,6 +11,12 @@ export const SIGNUP_VERIFY_STATUS_KEYS = [
   "signup_verify_docs_submitted",
 ] as const;
 
+export type LoadedSignupDraft = {
+  owner: string;
+  data: Record<string, unknown>;
+  password: string;
+};
+
 export const normalizeStorageOwner = (owner: string | null | undefined): string => {
   const next = String(owner || "").trim().toLowerCase();
   return next.replace(/[^a-z0-9_.@-]/g, "");
@@ -19,6 +25,64 @@ export const normalizeStorageOwner = (owner: string | null | undefined): string 
 export const buildScopedStorageKey = (base: string, owner: string | null | undefined): string => {
   const normalizedOwner = normalizeStorageOwner(owner);
   return normalizedOwner ? `${base}:${normalizedOwner}` : base;
+};
+
+export const loadSignupDraft = (ownerHint?: string | null): LoadedSignupDraft | null => {
+  try {
+    const candidates: string[] = [];
+    const pushCandidate = (value?: string | null) => {
+      const normalized = normalizeStorageOwner(value);
+      if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+    };
+
+    pushCandidate(ownerHint);
+    pushCandidate(
+      localStorage.getItem("auth_login_identifier") ||
+      localStorage.getItem("rememberedIdentifier") ||
+      "",
+    );
+
+    const scopedPrefix = `${SIGNUP_STORAGE_KEY}:`;
+    const scopedOwners = Object.keys(localStorage)
+      .filter((key) => key.startsWith(scopedPrefix))
+      .map((key) => normalizeStorageOwner(key.slice(scopedPrefix.length)))
+      .filter(Boolean);
+
+    if (!candidates.length && scopedOwners.length === 1) {
+      candidates.push(scopedOwners[0]);
+    }
+
+    for (const owner of candidates) {
+      const draftKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner);
+      const rawDraft = localStorage.getItem(draftKey);
+      if (!rawDraft) continue;
+      const passwordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner);
+      const password =
+        sessionStorage.getItem(passwordKey) ||
+        localStorage.getItem(passwordKey) ||
+        sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
+        localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
+        "";
+      return {
+        owner,
+        data: JSON.parse(rawDraft) as Record<string, unknown>,
+        password,
+      };
+    }
+
+    const baseDraft = localStorage.getItem(SIGNUP_STORAGE_KEY);
+    if (!baseDraft) return null;
+    return {
+      owner: "",
+      data: JSON.parse(baseDraft) as Record<string, unknown>,
+      password:
+        sessionStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
+        localStorage.getItem(SIGNUP_PASSWORD_SESSION_KEY) ||
+        "",
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const clearSignupScopedStorage = (ownerHints: Array<string | null | undefined>): void => {

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Lock, Mail, Phone } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { SignupShell } from "@/components/signup/SignupShell";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useTurnstile } from "@/hooks/useTurnstile";
+import { loadSignupDraft } from "@/lib/signupOnboarding";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
@@ -43,10 +44,13 @@ const shouldBypassDuplicateCheck =
 
 const SignupCredentials = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const showTurnstileDiag =
     typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
   const { data, update, setFlowState, flowState } = useSignup();
+  const incomingState = location.state as { email?: string; invalid_link?: boolean } | null;
+  const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
   const { user, profile, signIn } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
 
@@ -162,6 +166,34 @@ const SignupCredentials = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOAuthOnboarding]);
+
+  useEffect(() => {
+    if (!incomingEmail) return;
+    const restoredDraft = loadSignupDraft(incomingEmail);
+    if (restoredDraft) {
+      const restoredEmail = String((restoredDraft.data as { email?: string }).email || incomingEmail);
+      const restoredPhone = String((restoredDraft.data as { phone?: string }).phone || "");
+      const restoredPassword = restoredDraft.password || "";
+      if (!email && restoredEmail) setValue("email", restoredEmail, { shouldValidate: true });
+      if (!phone && restoredPhone) setValue("phone", restoredPhone, { shouldValidate: true });
+      if (!password && restoredPassword && !isOAuthOnboarding) {
+        setValue("password", restoredPassword, { shouldValidate: true });
+        setValue("confirmPassword", restoredPassword, { shouldValidate: true });
+      }
+      update({
+        ...(restoredDraft.data as Record<string, unknown>),
+        email: restoredEmail,
+        phone: restoredPhone,
+        password: restoredPassword,
+      });
+      if (flowState === "idle") setFlowState("signup");
+      return;
+    }
+    if (!email) {
+      setValue("email", incomingEmail, { shouldValidate: true });
+      update({ email: incomingEmail });
+    }
+  }, [email, flowState, incomingEmail, isOAuthOnboarding, password, phone, setFlowState, setValue, update]);
 
   useEffect(() => {
     if (isOAuthOnboarding) {

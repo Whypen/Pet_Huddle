@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { supabase } from "@/integrations/supabase/client";
 import {
   clearSignupScopedStorage,
+  loadSignupDraft,
   SIGNUP_PASSWORD_SESSION_KEY,
   SIGNUP_STORAGE_KEY,
   buildScopedStorageKey,
@@ -69,15 +70,11 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
 
   const [data, setData] = useState<SignupData>(() => {
     try {
-      const rememberedOwner = resolveRememberedOwner();
-      const scopedDraftKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, rememberedOwner);
-      const scopedPasswordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, rememberedOwner);
-      const raw = localStorage.getItem(scopedDraftKey);
-      const password = sessionStorage.getItem(scopedPasswordKey) || "";
       const signupProof = sessionStorage.getItem(SIGNUP_PROOF_SESSION_KEY) || "";
-      if (!raw) return { ...defaultData, password, signup_proof: signupProof };
-      const parsed = JSON.parse(raw) as Partial<PersistedSignupData>;
-      return { ...defaultData, ...parsed, password, signup_proof: signupProof };
+      const draft = loadSignupDraft(resolveRememberedOwner());
+      if (!draft) return { ...defaultData, signup_proof: signupProof };
+      const parsed = draft.data as Partial<PersistedSignupData>;
+      return { ...defaultData, ...parsed, password: draft.password, signup_proof: signupProof };
     } catch {
       return defaultData;
     }
@@ -174,12 +171,16 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     }
     if (data.password) {
       sessionStorage.setItem(passwordKey, data.password);
+      localStorage.setItem(passwordKey, data.password);
       if (passwordKey !== SIGNUP_PASSWORD_SESSION_KEY) {
         sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+        localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
       }
     } else {
       sessionStorage.removeItem(passwordKey);
+      localStorage.removeItem(passwordKey);
       sessionStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
+      localStorage.removeItem(SIGNUP_PASSWORD_SESSION_KEY);
     }
     if (data.signup_proof) {
       sessionStorage.setItem(SIGNUP_PROOF_SESSION_KEY, data.signup_proof);

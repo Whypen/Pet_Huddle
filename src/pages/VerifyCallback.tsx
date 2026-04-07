@@ -19,6 +19,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useSignup } from "@/contexts/SignupContext";
+import { loadSignupDraft } from "@/lib/signupOnboarding";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
@@ -36,6 +37,7 @@ const VerifyCallback = () => {
     ran.current = true;
 
     const token = searchParams.get("token");
+    const emailHint = String(searchParams.get("email") || "").trim().toLowerCase();
 
     if (!token) {
       // No token — malformed link
@@ -63,13 +65,19 @@ const VerifyCallback = () => {
         }
 
         if (data?.verified) {
+          const restoredDraft = loadSignupDraft(emailHint);
           // Clear stored token — verification is complete
           try {
             sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
             sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
             sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
           } catch { /* best-effort */ }
-          update({ signup_proof: String(data?.signup_proof || "") });
+          update({
+            ...(restoredDraft?.data as Record<string, unknown> | undefined),
+            email: String((restoredDraft?.data as { email?: string } | undefined)?.email || emailHint || ""),
+            password: restoredDraft?.password || "",
+            signup_proof: String(data?.signup_proof || ""),
+          });
           // Restore signup flow state so guards pass at /signup/name
           setFlowState("signup");
           navigate("/signup/name", { replace: true });
@@ -79,7 +87,7 @@ const VerifyCallback = () => {
         if (data?.expired) {
           navigate("/signup/verify-email", {
             replace: true,
-            state: { expired: true },
+            state: { expired: true, email: emailHint },
           });
           return;
         }
@@ -87,12 +95,12 @@ const VerifyCallback = () => {
         // verified=false, expired=false → token not found or already used
         navigate("/signup/credentials", {
           replace: true,
-          state: { invalid_link: true },
+          state: { invalid_link: true, email: emailHint },
         });
       } catch {
         navigate("/signup/credentials", {
           replace: true,
-          state: { invalid_link: true },
+          state: { invalid_link: true, email: emailHint },
         });
       }
     };

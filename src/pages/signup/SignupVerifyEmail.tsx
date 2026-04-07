@@ -32,6 +32,7 @@ import { postPublicFunction } from "@/lib/publicFunctionClient";
 import { useSignup } from "@/contexts/SignupContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
+import { loadSignupDraft } from "@/lib/signupOnboarding";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -51,11 +52,13 @@ const SignupVerifyEmail = () => {
   const navigate   = useNavigate();
   const location   = useLocation();
   const { data, setFlowState, update } = useSignup();
+  const incomingState = location.state as { expired?: boolean; email?: string } | null;
 
   // Redirect to credentials if there's no draft email in context
   const draftEmail = data.email?.trim() ?? "";
 
-  const incomingExpired = (location.state as { expired?: boolean } | null)?.expired === true;
+  const incomingExpired = incomingState?.expired === true;
+  const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
 
   // ── Token state ──────────────────────────────────────────────────────────────
   // Initialise from sessionStorage if the stored email matches the current draft.
@@ -84,10 +87,26 @@ const SignupVerifyEmail = () => {
 
   // ── Guard: no draft email → back to credentials ──────────────────────────────
   useEffect(() => {
-    if (!draftEmail) {
+    if (draftEmail) return;
+    const fallbackEmail =
+      incomingEmail ||
+      String(sessionStorage.getItem(PRESIGNUP_EMAIL_KEY) || "").trim().toLowerCase();
+    if (!fallbackEmail) {
       navigate("/signup/credentials", { replace: true });
+      return;
     }
-  }, [draftEmail, navigate]);
+    const restoredDraft = loadSignupDraft(fallbackEmail);
+    if (restoredDraft) {
+      update({
+        ...(restoredDraft.data as Record<string, unknown>),
+        email: String((restoredDraft.data as { email?: string }).email || fallbackEmail),
+        password: restoredDraft.password || "",
+      });
+    } else {
+      update({ email: fallbackEmail });
+    }
+    setFlowState("signup");
+  }, [draftEmail, incomingEmail, navigate, setFlowState, update]);
 
   // ── Send verification email ───────────────────────────────────────────────────
   // Takes the current Turnstile token as a parameter so the callback stays stable.
@@ -258,9 +277,22 @@ const SignupVerifyEmail = () => {
   };
 
   const handleOpenMail = () => {
-    const inboxUrl = "https://mail.google.com/mail/u/0/#inbox";
-    const opened = window.open(inboxUrl, "_blank", "noopener,noreferrer");
-    if (!opened) window.location.assign(inboxUrl);
+    const userAgent = navigator.userAgent.toLowerCase();
+    const candidates = [
+      ...(userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os") ? ["message://"] : []),
+      ...(userAgent.includes("android") ? ["googlegmail://", "ms-outlook://", "ymail://"] : []),
+      "ms-outlook://",
+    ].filter((value, index, arr) => arr.indexOf(value) === index);
+
+    candidates.forEach((scheme, index) => {
+      window.setTimeout(() => {
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = scheme;
+        document.body.appendChild(iframe);
+        window.setTimeout(() => iframe.remove(), 1200);
+      }, index * 180);
+    });
   };
 
   // ── Derived display ───────────────────────────────────────────────────────────
@@ -288,14 +320,6 @@ const SignupVerifyEmail = () => {
       isExiting={isExiting}
       cta={
         <div className="space-y-3">
-          <NeuButton
-            variant="secondary"
-            className="w-full h-12"
-            onClick={handleOpenMail}
-          >
-            <Mail size={16} className="mr-2" />
-            Open Mail
-          </NeuButton>
           <NeuButton
             variant="ghost"
             className="w-full h-11"
@@ -351,6 +375,14 @@ const SignupVerifyEmail = () => {
             <strong className="font-[600] text-[#424965]">{draftEmail}</strong>.
             Check your inbox to continue.
           </p>
+          <NeuButton
+            variant="primary"
+            className="w-full h-12 mt-6"
+            onClick={handleOpenMail}
+          >
+            <Mail size={16} className="mr-2" />
+            Open Mail
+          </NeuButton>
           <p className="text-[13px] text-[rgba(74,73,101,0.50)] mt-2">
             Didn't get it? Check spam or resend below.
           </p>

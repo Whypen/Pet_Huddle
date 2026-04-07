@@ -103,7 +103,7 @@ serve(async (req: Request) => {
       return json({ error: "db_error" }, 500);
     }
 
-    const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}`;
+    const verifyUrl = `${APP_URL}/verify?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
     const emailHtml = `<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
