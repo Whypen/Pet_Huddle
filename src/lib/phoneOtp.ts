@@ -34,6 +34,14 @@ const TEST_OTP_SHORTCUT_CODE = "498005";
 
 function friendlyOtpSendError(raw: string): string {
   const r = String(raw || "").toLowerCase();
+  if (
+    r.includes("provider_send_fail") ||
+    r.includes("provider_send_failed") ||
+    r.includes("provider_config_error") ||
+    r.includes("provider_send_error")
+  ) {
+    return "Couldn't send the code right now. Please try again in a moment.";
+  }
   if (r.startsWith("http_401") || r.includes("invalid or exp") || r.includes("jwt") || r.includes("invalid_token")) {
     return "Session expired. Please go back and sign in again.";
   }
@@ -51,6 +59,9 @@ function friendlyOtpSendError(raw: string): string {
   }
   if (r === "network_error" || r.includes("fetch") || r.includes("networkerror")) {
     return "Network error. Check your connection and try again.";
+  }
+  if (/^[a-z0-9_]+$/.test(r)) {
+    return "Couldn't send the verification code. Please try again.";
   }
   return "Couldn't send the verification code. Please try again.";
 }
