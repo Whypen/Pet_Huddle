@@ -61,16 +61,7 @@ const SignupVerifyEmail = () => {
   const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
 
   // ── Token state ──────────────────────────────────────────────────────────────
-  // Initialise from sessionStorage if the stored email matches the current draft.
-  // This prevents duplicate sends on refresh/back navigation.
-  const [token, setToken] = useState<string>(() => {
-    try {
-      const storedToken = sessionStorage.getItem(PRESIGNUP_TOKEN_KEY);
-      const storedEmail = sessionStorage.getItem(PRESIGNUP_EMAIL_KEY);
-      if (storedToken && storedEmail === draftEmail && draftEmail) return storedToken;
-    } catch { /* best-effort */ }
-    return "";
-  });
+  const [token, setToken] = useState<string>("");
 
   const [sendState,   setSendState]   = useState<SendState>("idle");
   const [cooldown,    setCooldown]    = useState(0);
@@ -83,6 +74,19 @@ const SignupVerifyEmail = () => {
 
   const readTurnstileToken = useCallback(() => {
     return String(sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "").trim();
+  }, []);
+
+  const readStoredPresignupToken = useCallback((email: string) => {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) return "";
+    try {
+      const storedToken = String(sessionStorage.getItem(PRESIGNUP_TOKEN_KEY) || "").trim();
+      const storedEmail = String(sessionStorage.getItem(PRESIGNUP_EMAIL_KEY) || "").trim().toLowerCase();
+      if (storedToken && storedEmail === normalizedEmail) return storedToken;
+    } catch {
+      // best-effort only
+    }
+    return "";
   }, []);
 
   // ── Guard: no draft email → back to credentials ──────────────────────────────
@@ -145,6 +149,16 @@ const SignupVerifyEmail = () => {
     }
   }, [draftEmail, update]);
 
+  // ── Rehydrate stored token after draft recovery / cold boot ───────────────────
+  useEffect(() => {
+    if (!draftEmail || token) return;
+    const storedToken = readStoredPresignupToken(draftEmail);
+    if (!storedToken) return;
+    setToken(storedToken);
+    setSendState("sent");
+    initialSendDone.current = true;
+  }, [draftEmail, token, readStoredPresignupToken]);
+
   // ── On expired state from /verify: clear stale token, show expired copy ──────
   useEffect(() => {
     if (!incomingExpired) return;
@@ -165,8 +179,16 @@ const SignupVerifyEmail = () => {
   const initialSendDone = useRef(false);
   useEffect(() => {
     if (!draftEmail) return;
+    const storedToken = readStoredPresignupToken(draftEmail);
+    if (storedToken) {
+      if (token !== storedToken) setToken(storedToken);
+      if (!initialSendDone.current) {
+        initialSendDone.current = true;
+        setSendState("sent");
+      }
+      return;
+    }
     if (token) {
-      // Valid token already stored for this email — do not re-send
       if (!initialSendDone.current) {
         initialSendDone.current = true;
         setSendState("sent");
@@ -178,8 +200,7 @@ const SignupVerifyEmail = () => {
     if (initialSendDone.current) return;
     initialSendDone.current = true;
     void sendEmail(turnstileToken, false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftEmail, token, readTurnstileToken]);
+  }, [draftEmail, token, readStoredPresignupToken, readTurnstileToken, sendEmail]);
 
   // ── Cooldown countdown ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -280,18 +301,21 @@ const SignupVerifyEmail = () => {
     const userAgent = navigator.userAgent.toLowerCase();
     const candidates = [
       ...(userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os") ? ["message://"] : []),
-      ...(userAgent.includes("android") ? ["googlegmail://", "ms-outlook://", "ymail://"] : []),
+      ...(userAgent.includes("android") ? ["googlegmail://", "ms-outlook://", "ymail://mail"] : []),
       "ms-outlook://",
+      "mailto:",
     ].filter((value, index, arr) => arr.indexOf(value) === index);
 
-    candidates.forEach((scheme, index) => {
+    candidates.forEach((target, index) => {
       window.setTimeout(() => {
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = scheme;
-        document.body.appendChild(iframe);
-        window.setTimeout(() => iframe.remove(), 1200);
-      }, index * 180);
+        const anchor = document.createElement("a");
+        anchor.href = target;
+        anchor.rel = "noopener noreferrer";
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        anchor.click();
+        window.setTimeout(() => anchor.remove(), 1200);
+      }, index * 220);
     });
   };
 
