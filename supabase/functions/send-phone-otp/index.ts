@@ -41,6 +41,13 @@ interface RateLimitRow {
   seconds_until_allow: number;
 }
 
+type OtpSendReasonCode =
+  | "provider_config_error"
+  | "sms_region_blocked"
+  | "rate_limited"
+  | "user_not_found"
+  | "provider_send_failed";
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -71,6 +78,41 @@ function getClientIp(req: Request): string {
     req.headers.get("x-real-ip") ||
     "unknown"
   );
+}
+
+function classifyOtpSendError(raw: string): OtpSendReasonCode {
+  const message = String(raw || "").toLowerCase();
+  if (
+    message.includes("provider") ||
+    message.includes("twilio") ||
+    message.includes("verify service") ||
+    message.includes("sms is disabled") ||
+    message.includes("phone provider is not configured")
+  ) {
+    return "provider_config_error";
+  }
+  if (
+    message.includes("country") ||
+    message.includes("region") ||
+    message.includes("geo")
+  ) {
+    return "sms_region_blocked";
+  }
+  if (
+    message.includes("too many requests") ||
+    message.includes("rate limit") ||
+    message.includes("too_many")
+  ) {
+    return "rate_limited";
+  }
+  if (
+    message.includes("user not found") ||
+    message.includes("user does not exist") ||
+    message.includes("no user")
+  ) {
+    return "user_not_found";
+  }
+  return "provider_send_failed";
 }
 
 // ── Logger helper ─────────────────────────────────────────────────────────────
@@ -332,15 +374,24 @@ Deno.serve(async (req: Request) => {
   }
 
   if (sendError) {
+    const reasonCode = classifyOtpSendError(sendError);
+    const statusCode = reasonCode === "rate_limited"
+      ? 429
+      : reasonCode === "sms_region_blocked"
+        ? 403
+        : 500;
     await logAttempt(serviceClient, {
       phoneHash, ip: clientIp,
       attemptType: "request", status: "failed",
       userId, deviceId, sessionId,
-      reason: "otp_send_error", error: sendError,
+      reason: `otp_send_error:${reasonCode}`, error: sendError,
     });
     return new Response(
-      JSON.stringify({ error: "Failed to send verification code. Please try again." }),
-      { status: 500, headers: CORS },
+      JSON.stringify({
+        error: reasonCode,
+        reason_code: reasonCode,
+      }),
+      { status: statusCode, headers: CORS },
     );
   }
 
