@@ -67,9 +67,9 @@ const SignupCredentials = () => {
     flowState === "signup" &&
     !isRegisteredUserProfile(profile ?? null);
 
-  const goTo = (to: string) => {
+  const goTo = (to: string, state?: Record<string, unknown>) => {
     setIsExiting(true);
-    setTimeout(() => navigate(to), 180);
+    setTimeout(() => navigate(to, state ? { state } : undefined), 180);
   };
 
   const [emailOptIn, setEmailOptIn] = useState(false);
@@ -357,7 +357,10 @@ const SignupCredentials = () => {
       });
       sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
       setFlowState("signup");
-      goTo("/signup/verify-email");
+      goTo("/signup/verify-email", {
+        from_credentials: true,
+        email: values.email.trim().toLowerCase(),
+      });
     } catch (err) {
       console.error("Signup failed:", err);
       setFlowState("idle");

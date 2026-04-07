@@ -20,7 +20,12 @@ const RESEND_COOLDOWN_SECS = 60;
 const POLL_INTERVAL_MS = 3_000;
 
 type SendState = "idle" | "sending" | "sent" | "error";
-type VerifyRouteState = { expired?: boolean; invalid_link?: boolean; email?: string } | null;
+type VerifyRouteState = {
+  expired?: boolean;
+  invalid_link?: boolean;
+  email?: string;
+  from_credentials?: boolean;
+} | null;
 type VerifyStatusResponse = {
   verified?: boolean;
   expired?: boolean;
@@ -48,6 +53,7 @@ const SignupVerifyEmail = () => {
   const draftEmail = data.email?.trim().toLowerCase() ?? "";
   const incomingExpired = incomingState?.expired === true;
   const incomingInvalid = incomingState?.invalid_link === true;
+  const incomingFromCredentials = incomingState?.from_credentials === true;
   const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
 
   const [token, setToken] = useState("");
@@ -57,6 +63,7 @@ const SignupVerifyEmail = () => {
   const [manualCheck, setManualCheck] = useState<"idle" | "checking" | "not_yet">("idle");
   const [isExiting, setIsExiting] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
+  const [lastSendSentEmail, setLastSendSentEmail] = useState<boolean | null>(null);
 
   const sendInFlight = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -202,6 +209,7 @@ const SignupVerifyEmail = () => {
 
       const nextToken = String(resp?.token || "").trim();
       const nextEmail = String(resp?.email || draftEmail).trim().toLowerCase();
+      setLastSendSentEmail(resp?.email_sent !== false);
       if (nextToken) {
         persistPresignupIdentity(nextToken, nextEmail);
         setToken(nextToken);
@@ -213,6 +221,7 @@ const SignupVerifyEmail = () => {
       }
       return true;
     } catch {
+      setLastSendSentEmail(null);
       setSendState("error");
       return false;
     } finally {
@@ -232,6 +241,7 @@ const SignupVerifyEmail = () => {
     setToken("");
     setSendState("idle");
     setVerified(false);
+    setLastSendSentEmail(null);
   }, [clearPresignupIdentity, incomingExpired, incomingInvalid, update]);
 
   useEffect(() => {
@@ -255,8 +265,8 @@ const SignupVerifyEmail = () => {
     const turnstileToken = readTurnstileToken();
     if (!turnstileToken) return;
     autoSendStarted.current = true;
-    void sendEmail(turnstileToken, false);
-  }, [draftEmail, incomingExpired, incomingInvalid, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
+    void sendEmail(turnstileToken, incomingFromCredentials);
+  }, [draftEmail, incomingExpired, incomingFromCredentials, incomingInvalid, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -315,25 +325,25 @@ const SignupVerifyEmail = () => {
 
   const handleOpenMail = () => {
     const userAgent = navigator.userAgent.toLowerCase();
-    const candidates = [
-      ...(userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os") ? ["message://"] : []),
-      ...(userAgent.includes("android") ? ["googlegmail://", "ms-outlook://", "ymail://mail"] : []),
-      "ms-outlook://",
-    ].filter((value, index, arr) => arr.indexOf(value) === index);
-
-    candidates.forEach((target, index) => {
-      window.setTimeout(() => {
-        const anchor = document.createElement("a");
-        anchor.href = target;
-        anchor.rel = "noopener noreferrer";
-        anchor.style.display = "none";
-        document.body.appendChild(anchor);
-        anchor.click();
-        window.setTimeout(() => anchor.remove(), 1200);
-      }, index * 220);
-    });
-
-    toast.message("If your mail app does not open, open it manually and check your inbox.");
+    const target = userAgent.includes("iphone") || userAgent.includes("ipad") || userAgent.includes("mac os")
+      ? "message://"
+      : userAgent.includes("android")
+        ? "googlegmail://"
+        : userAgent.includes("windows")
+          ? "ms-outlook://"
+          : "";
+    if (!target) {
+      toast.message("Open your mail app manually and check your inbox.");
+      return;
+    }
+    const anchor = document.createElement("a");
+    anchor.href = target;
+    anchor.rel = "noopener noreferrer";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    window.setTimeout(() => anchor.remove(), 1200);
+    toast.message("If nothing opens, open your mail app manually and check your inbox.");
   };
 
   const showExpiredBanner = (incomingExpired || incomingInvalid) && sendState === "idle" && !token;
@@ -408,8 +418,9 @@ const SignupVerifyEmail = () => {
       ) : (
         <>
           <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
-            We've sent a verification link to <strong className="font-[600] text-[#424965]">{draftEmail}</strong>.
-            Check your inbox to continue.
+            {lastSendSentEmail === false
+              ? <>A recent verification email is already active for <strong className="font-[600] text-[#424965]">{draftEmail}</strong>. Use that email or resend below.</>
+              : <>We've sent a verification link to <strong className="font-[600] text-[#424965]">{draftEmail}</strong>. Check your inbox to continue.</>}
           </p>
           {showOpenMail ? (
             <NeuButton
