@@ -44,31 +44,6 @@ serve(async (req: Request) => {
     if (!email) return json({ error: "email_required" }, 400);
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    const clientIp =
-      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
-    const turnstile = await validateTurnstile(
-      turnstile_token ?? null,
-      clientIp,
-      "send_pre_signup_verify",
-      getExpectedTurnstileHostnames(),
-    );
-    if (!turnstile.valid) {
-      console.warn("[send-pre-signup-verify] turnstile rejected", {
-        reason: turnstile.reason,
-        error_codes: turnstile.error_codes,
-        action: turnstile.action,
-        hostname: turnstile.hostname,
-        challenge_ts: turnstile.challenge_ts,
-        ip: clientIp,
-      });
-      return json({
-        error: "human_verification_failed",
-        turnstile_reason: turnstile.reason,
-      }, 403);
-    }
-
     // Cleanup expired tokens (best-effort; non-fatal)
     await supabase
       .from("presignup_tokens")
@@ -103,6 +78,31 @@ serve(async (req: Request) => {
         reused: true,
         email_sent: false,
       });
+    }
+
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      req.headers.get("x-real-ip") ||
+      "unknown";
+    const turnstile = await validateTurnstile(
+      turnstile_token ?? null,
+      clientIp,
+      "send_pre_signup_verify",
+      getExpectedTurnstileHostnames(),
+    );
+    if (!turnstile.valid) {
+      console.warn("[send-pre-signup-verify] turnstile rejected", {
+        reason: turnstile.reason,
+        error_codes: turnstile.error_codes,
+        action: turnstile.action,
+        hostname: turnstile.hostname,
+        challenge_ts: turnstile.challenge_ts,
+        ip: clientIp,
+      });
+      return json({
+        error: "human_verification_failed",
+        turnstile_reason: turnstile.reason,
+      }, 403);
     }
 
     if (force_new_token) {
@@ -142,7 +142,7 @@ serve(async (req: Request) => {
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
     <meta name="x-apple-disable-message-reformatting">
-    <title>Verify your email to join huddle</title>
+    <title>Verify email</title>
   </head>
   <body aria-disabled="false" style="margin:0;padding:0;background-color:rgb(240,241,245);text-size-adjust:100%;">
     <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:rgb(240,241,245);border:none;border-collapse:collapse;empty-cells:show;max-width:100%;font-size:16px;font-family:Arial;">
@@ -158,7 +158,7 @@ serve(async (req: Request) => {
                         <tr>
                           <td style="vertical-align:top;text-align:left;min-width:5px;user-select:text;border:0 solid transparent;">
                             <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#414141;">Email Update</p>
-                            <h1 style="margin:0;font-family:Georgia,serif;font-size:28px;font-weight:700;color:#414141;line-height:1.2;">Verify your email</h1>
+                            <h1 style="margin:0;font-family:Georgia,serif;font-size:28px;font-weight:700;color:#414141;line-height:1.2;">Verify email</h1>
                           </td>
                           <td width="60" style="vertical-align:top;text-align:right;padding-left:12px;min-width:5px;user-select:text;border:0 solid transparent;">
                             <img src="https://ztrbourwcnhrpmzwlrcn.supabase.co/storage/v1/object/public/email-assets/ac541fc72d074e9785486186866a00ab.png" width="44" alt="huddle" style="display:block;width:44px;height:auto;margin-left:auto;cursor:pointer;padding:0 1px;position:relative;max-width:100%;">
@@ -241,9 +241,9 @@ serve(async (req: Request) => {
       body: JSON.stringify({
         sender:      { name: "Team Huddle", email: BREVO_FROM_EMAIL },
         to:          [{ email: normalizedEmail }],
-        subject:     "Verify your email to join huddle",
+        subject:     "Verify email",
         htmlContent: emailHtml,
-        textContent: `Verify your email to join huddle\n\nTap the link below:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
+        textContent: `Verify email\n\nTap the link below:\n${verifyUrl}\n\nThis link expires in 24 hours.`,
       }),
     });
 
