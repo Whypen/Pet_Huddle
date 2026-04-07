@@ -19,6 +19,8 @@ import { useSignup } from "@/contexts/SignupContext";
 import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
+import { useTurnstile } from "@/hooks/useTurnstile";
+import { TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
@@ -176,6 +178,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   // Clear the countdown timer on unmount to avoid state updates on dead components
   useEffect(() => () => { if (otpCountdownRef.current) clearInterval(otpCountdownRef.current); }, []);
   const [phoneOtpVerified, setPhoneOtpVerified] = useState(false);
+  const phoneOtpTurnstile = useTurnstile("send_phone_otp");
   const [phoneOriginalValue, setPhoneOriginalValue] = useState("");
   // Duplicate-phone detection for the edit-phone flow.
   // Only runs when the user has changed the phone from its saved value.
@@ -1055,7 +1058,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
       return;
     }
-    const result = await requestPhoneOtpCode(formData.phone.trim());
+    const turnstileToken = phoneOtpTurnstile.getToken();
+    if (!turnstileToken || !phoneOtpTurnstile.isTokenUsable) {
+      toast.error("Complete human verification first.");
+      return;
+    }
+    const result = await requestPhoneOtpCode(formData.phone.trim(), turnstileToken);
+    phoneOtpTurnstile.reset();
     if (!result.ok) {
       toast.error(result.error || "Failed to send OTP. Please retry.");
       return;
@@ -1857,6 +1866,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       This phone number is already used by another account
                     </p>
                   )}
+                  <TurnstileWidget
+                    siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
+                    setContainer={phoneOtpTurnstile.setContainer}
+                    className="min-h-[65px]"
+                  />
+                  {phoneOtpTurnstile.error ? (
+                    <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                      {phoneOtpTurnstile.error}
+                    </p>
+                  ) : null}
                   {!phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">
                       <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
