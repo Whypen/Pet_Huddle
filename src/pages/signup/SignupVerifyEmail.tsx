@@ -68,6 +68,7 @@ const SignupVerifyEmail = () => {
   const sendInFlight = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoSendStarted = useRef(false);
+  const credentialEntryHandled = useRef(false);
   const statusInFlight = useRef(false);
 
   const readTurnstileToken = useCallback(() => {
@@ -238,6 +239,7 @@ const SignupVerifyEmail = () => {
   useEffect(() => {
     autoSendStarted.current = false;
     setRecoveryReady(false);
+    credentialEntryHandled.current = false;
   }, [draftEmail]);
 
   useEffect(() => {
@@ -267,11 +269,17 @@ const SignupVerifyEmail = () => {
 
   useEffect(() => {
     if (!draftEmail || verified || incomingExpired || incomingInvalid) return;
-    if (!recoveryReady || token || sendState === "sending" || autoSendStarted.current) return;
     const turnstileToken = readTurnstileToken();
     if (!turnstileToken) return;
+    if (incomingFromCredentials && !credentialEntryHandled.current && sendState !== "sending") {
+      credentialEntryHandled.current = true;
+      autoSendStarted.current = true;
+      void sendEmail(turnstileToken, true);
+      return;
+    }
+    if (!recoveryReady || token || sendState === "sending" || autoSendStarted.current) return;
     autoSendStarted.current = true;
-    void sendEmail(turnstileToken, incomingFromCredentials);
+    void sendEmail(turnstileToken, false);
   }, [draftEmail, incomingExpired, incomingFromCredentials, incomingInvalid, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
 
   useEffect(() => {
