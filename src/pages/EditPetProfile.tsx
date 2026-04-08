@@ -1269,9 +1269,15 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       const shouldGoHome = onboardingMode || location.pathname === "/set-pet";
       if (shouldGoHome) {
         if (onboardingMode) {
+          const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
+          const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
           const { data: onboardingRow, error: onboardingError } = await supabase
             .from("profiles")
-            .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
+            .update({
+              onboarding_completed: true,
+              email_verified: emailVerifiedByAuth,
+              updated_at: new Date().toISOString(),
+            })
             .eq("id", activeUser.id)
             .select("id")
             .maybeSingle();
@@ -1283,7 +1289,12 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
             const { error: onboardingUpsertError } = await supabase
               .from("profiles")
               .upsert(
-                { id: activeUser.id, onboarding_completed: true, updated_at: new Date().toISOString() },
+                {
+                  id: activeUser.id,
+                  onboarding_completed: true,
+                  email_verified: emailVerifiedByAuth,
+                  updated_at: new Date().toISOString(),
+                },
                 { onConflict: "id" },
               );
             if (onboardingUpsertError) {
@@ -1294,6 +1305,8 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
           await refreshProfile();
           clearOnboardingDraftKeys(activeUser.id);
           toast.success("Welcome to Huddle! Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!");
+          window.location.replace("/");
+          return;
         }
         navigate("/", { replace: true });
       } else {

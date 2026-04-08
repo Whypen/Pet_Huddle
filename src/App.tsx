@@ -83,7 +83,7 @@ const Chats = lazy(() => import("./pages/Chats"));
 const ChatDialogue = lazy(() => import("./pages/ChatDialogue"));
 const ServiceChat = lazy(() => import("./pages/ServiceChat"));
 const AIVet = lazy(() => import("./pages/AIVet"));
-const MapPage = lazy(() => import("./pages/Map"));
+const MapPage = lazyWithChunkRecovery("map", () => import("./pages/Map"));
 const PetDetails = lazy(() => import("./pages/PetDetails"));
 const Settings = lazy(() => import("./pages/Settings"));
 const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));

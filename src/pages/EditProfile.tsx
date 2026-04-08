@@ -1587,6 +1587,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       } else if (photoFile) {
         avatarUrl = await uploadProfilePhotoFile(photoFile, activeUser.id);
       }
+      const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
+      const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
 
       const profilePayload = {
           display_name: formData.display_name,
@@ -1650,6 +1652,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             id: activeUser.id,
             ...profilePayload,
             onboarding_completed: onboardingMode ? true : profile?.onboarding_completed ?? false,
+            email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
           },
           { onConflict: "id" },
         );
@@ -1666,6 +1669,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               id: activeUser.id,
               ...payloadWithoutSocialId,
               onboarding_completed: onboardingMode ? true : profile?.onboarding_completed ?? false,
+              email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
             },
             { onConflict: "id" },
           );

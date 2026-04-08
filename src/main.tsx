@@ -81,10 +81,20 @@ const reloadForChunkFailure = async () => {
   window.location.replace(current.toString());
 };
 window.addEventListener("error", (event) => {
+  const target = event.target as (EventTarget & { tagName?: string; src?: string }) | null;
+  const scriptSrc = typeof target?.src === "string" ? target.src : "";
+  const isChunkScriptLoadError =
+    target?.tagName === "SCRIPT" &&
+    scriptSrc.includes("/assets/") &&
+    scriptSrc.endsWith(".js");
+  if (isChunkScriptLoadError) {
+    void reloadForChunkFailure();
+    return;
+  }
   if (shouldReloadForChunkFailure(event.message)) {
     void reloadForChunkFailure();
   }
-});
+}, true);
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason as { message?: unknown } | unknown;
   const message = typeof reason === "object" && reason !== null ? (reason as { message?: unknown }).message : reason;
