@@ -22,12 +22,10 @@ export function AccountWall({ status, expiresAt }: AccountWallProps) {
         className="mb-6 h-48 w-48 object-contain opacity-80"
       />
       <h1 className="text-xl font-bold text-brandText mb-2">
-        {isRemoved ? "Account removed" : "Account suspended"}
+        Account unavailable
       </h1>
       <p className="text-sm text-muted-foreground mb-1 max-w-xs">
-        {isRemoved
-          ? "Your account has been permanently removed for violating community guidelines."
-          : "Your account has been temporarily suspended for violating community guidelines."}
+        Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.
       </p>
       {expiryLabel && !isRemoved && (
         <p className="text-xs text-muted-foreground mb-4">

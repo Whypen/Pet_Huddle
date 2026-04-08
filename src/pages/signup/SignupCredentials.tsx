@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -30,6 +31,9 @@ import { loadSignupDraft } from "@/lib/signupOnboarding";
 
 const FORM_ID = "signup-credentials-form";
 const PRESIGNUP_TURNSTILE_TOKEN_KEY = "huddle_presignup_turnstile_token";
+const emailSchema = z.string().trim().email();
+const ACCOUNT_UNAVAILABLE_MESSAGE =
+  "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
 const appEnv = String(import.meta.env.VITE_APP_ENV ?? "").toLowerCase();
 const shouldBypassDuplicateCheck =
   import.meta.env.PROD === false &&
@@ -78,6 +82,7 @@ const SignupCredentials = () => {
   const [duplicateDetected, setDuplicateDetected] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [duplicateCheckError, setDuplicateCheckError] = useState<string | null>(null);
+  const [signupBlockedMessage, setSignupBlockedMessage] = useState<string | null>(null);
   const [duplicateRetryToken, setDuplicateRetryToken] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [signinEmail, setSigninEmail] = useState("");
@@ -156,6 +161,7 @@ const SignupCredentials = () => {
 
   useEffect(() => {
     setDismissedDuplicateKey(null);
+    setSignupBlockedMessage(null);
   }, [email, phone]);
 
   // Sync email from OAuth provider metadata after first render (in case auth
@@ -207,6 +213,7 @@ const SignupCredentials = () => {
         setCheckingDuplicate(false);
         setDuplicateDetected(false);
         setDuplicateCheckError(null);
+        setSignupBlockedMessage(null);
         return;
       }
       const checkId = ++duplicateCheckRef.current;
@@ -222,15 +229,30 @@ const SignupCredentials = () => {
           if (checkError) {
             setDuplicateDetected(false);
             setDuplicateCheckError("Could not verify phone right now. Please retry.");
+            setSignupBlockedMessage(null);
+            return;
+          }
+          if (checkResult?.blocked) {
+            setDuplicateDetected(false);
+            setDuplicateCheckError(null);
+            setSignupBlockedMessage(String(checkResult?.public_message || ACCOUNT_UNAVAILABLE_MESSAGE));
+            return;
+          }
+          if (checkResult?.review_required) {
+            setDuplicateDetected(false);
+            setSignupBlockedMessage(null);
+            setDuplicateCheckError("Signup is temporarily unavailable. Please try again later.");
             return;
           }
           setDuplicateDetected(Boolean(checkResult?.registered));
+          setSignupBlockedMessage(null);
           // Do NOT open the sign-in dialog for OAuth users — collision is on
           // phone, not their own email. Error is shown inline on the field.
         } catch {
           if (checkId !== duplicateCheckRef.current) return;
           setDuplicateDetected(false);
           setDuplicateCheckError("Could not verify phone right now. Please retry.");
+          setSignupBlockedMessage(null);
         } finally {
           if (checkId === duplicateCheckRef.current) setCheckingDuplicate(false);
         }
@@ -241,6 +263,7 @@ const SignupCredentials = () => {
       setCheckingDuplicate(false);
       setDuplicateDetected(false);
       setDuplicateCheckError(null);
+      setSignupBlockedMessage(null);
       return;
     }
     const trimmedEmail = email.trim();
@@ -254,6 +277,7 @@ const SignupCredentials = () => {
     if (!emailReady || !phoneReady) {
       setDuplicateDetected(false);
       setDuplicateCheckError(null);
+      setSignupBlockedMessage(null);
       if (showSignInModal) setShowSignInModal(false);
       return;
     }
@@ -270,10 +294,26 @@ const SignupCredentials = () => {
         if (checkError) {
           setDuplicateDetected(false);
           setDuplicateCheckError("Could not verify account details right now. Please retry.");
+          setSignupBlockedMessage(null);
+          return;
+        }
+        if (checkResult?.blocked) {
+          setDuplicateDetected(false);
+          setDuplicateCheckError(null);
+          setSignupBlockedMessage(String(checkResult?.public_message || ACCOUNT_UNAVAILABLE_MESSAGE));
+          if (showSignInModal) setShowSignInModal(false);
+          return;
+        }
+        if (checkResult?.review_required) {
+          setDuplicateDetected(false);
+          setSignupBlockedMessage(null);
+          setDuplicateCheckError("Signup is temporarily unavailable. Please try again later.");
+          if (showSignInModal) setShowSignInModal(false);
           return;
         }
         const isRegistered = Boolean(checkResult?.registered);
         setDuplicateDetected(isRegistered);
+        setSignupBlockedMessage(null);
         if (isRegistered && dismissedDuplicateKey !== duplicateKey) {
           setSigninEmail(trimmedEmail);
           setShowSignInModal(true);
@@ -283,6 +323,7 @@ const SignupCredentials = () => {
         if (checkId !== duplicateCheckRef.current) return;
         setDuplicateDetected(false);
         setDuplicateCheckError("Could not verify account details right now. Please retry.");
+        setSignupBlockedMessage(null);
       } finally {
         if (checkId === duplicateCheckRef.current) setCheckingDuplicate(false);
       }
@@ -306,6 +347,10 @@ const SignupCredentials = () => {
     password?: string;
     confirmPassword?: string;
   }) => {
+    if (signupBlockedMessage) {
+      toast.error(signupBlockedMessage);
+      return;
+    }
     if (duplicateDetected || (!shouldBypassDuplicateCheck && duplicateCheckError)) return;
     if (shouldBypassDuplicateCheck) {
       update({ email: values.email, phone: values.phone, email_opt_in: emailOptIn });
@@ -347,6 +392,18 @@ const SignupCredentials = () => {
       if (checkError) {
         console.error("Duplicate check error:", checkError);
         setDuplicateCheckError("Could not verify account details right now. Please retry.");
+        return;
+      }
+      if (checkResult?.blocked) {
+        const blockedMessage = String(checkResult?.public_message || ACCOUNT_UNAVAILABLE_MESSAGE);
+        setSignupBlockedMessage(blockedMessage);
+        toast.error(blockedMessage);
+        return;
+      }
+      if (checkResult?.review_required) {
+        const reviewMessage = "Signup is temporarily unavailable. Please try again later.";
+        setDuplicateCheckError(reviewMessage);
+        toast.error(reviewMessage);
         return;
       }
       if (checkResult?.registered) {
@@ -413,6 +470,7 @@ const SignupCredentials = () => {
     ? !phone || phoneNotValid || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
     : !isValid ||
       !presignupTurnstile.isTokenUsable ||
+      Boolean(signupBlockedMessage) ||
       duplicateDetected ||
       checkingDuplicate ||
       submitting ||
@@ -432,6 +490,8 @@ const SignupCredentials = () => {
         ? "This email or phone number is already registered"
         : checkingDuplicate
           ? "Checking account details…"
+          : signupBlockedMessage
+            ? "Signup is currently unavailable for this account"
           : !presignupTurnstile.isTokenUsable
             ? "Preparing verification…"
           : phoneInvalid
@@ -459,6 +519,14 @@ const SignupCredentials = () => {
             ) : null}
             {!isOAuthOnboarding ? (
               <TurnstileDebugPanel visible={showTurnstileDiag} diag={presignupTurnstile.diag} />
+            ) : null}
+            {signupBlockedMessage ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-[#E84545]/30 bg-[#E84545]/8 px-3 py-2 text-xs text-[#A62424]"
+              >
+                {signupBlockedMessage}
+              </div>
             ) : null}
             <NeuButton
               variant="primary"

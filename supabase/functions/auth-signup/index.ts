@@ -4,6 +4,7 @@ import { hasUsableSignupProof } from "../_shared/signupProof.ts";
 
 type SignupBody = {
   email?: string;
+  phone?: string;
   password?: string;
   options?: {
     emailRedirectTo?: string;
@@ -12,6 +13,8 @@ type SignupBody = {
   turnstile_token?: string;
   turnstile_action?: string;
   signup_proof?: string;
+  device_id?: string;
+  install_id?: string;
 };
 
 const CORS = {
@@ -32,6 +35,11 @@ const clientIp = (req: Request) =>
   req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
   req.headers.get("x-real-ip") ||
   "unknown";
+
+const ACCOUNT_UNAVAILABLE_MESSAGE =
+  "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
+const SIGNUP_REVIEW_MESSAGE =
+  "Signup is temporarily unavailable. Please try again later.";
 
 const isAlreadyRegisteredError = (message: string) => {
   const text = message.toLowerCase();
@@ -106,9 +114,41 @@ Deno.serve(async (req: Request) => {
   if (!email || !password) {
     return json(400, { error: "email_and_password_required" });
   }
+  const serviceClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const phoneFromBody = String(body.phone || "").trim();
+  const phoneFromOptions = String(body.options?.data?.phone || "").trim();
+  const phone = phoneFromBody || phoneFromOptions || null;
+
+  const { data: blockStatus, error: blockStatusError } = await serviceClient.rpc("lookup_signup_blocks", {
+    p_email: email,
+    p_phone: phone,
+    p_device_id: String(body.device_id || "").trim() || null,
+    p_install_id: String(body.install_id || "").trim() || null,
+  });
+  if (blockStatusError) {
+    return json(500, { error: "signup_block_check_failed" });
+  }
+  const blocked = Boolean((blockStatus as { blocked?: unknown } | null)?.blocked);
+  if (blocked) {
+    return json(403, {
+      error: "account_unavailable",
+      public_message:
+        String((blockStatus as { public_message?: unknown } | null)?.public_message || "").trim() ||
+        ACCOUNT_UNAVAILABLE_MESSAGE,
+    });
+  }
+  const reviewRequired = Boolean((blockStatus as { review_required?: unknown } | null)?.review_required);
+  const cooldownUntil =
+    String((blockStatus as { cooldown_until?: unknown } | null)?.cooldown_until || "").trim() || null;
+  if (reviewRequired) {
+    return json(429, {
+      error: "signup_temporarily_unavailable",
+      public_message: SIGNUP_REVIEW_MESSAGE,
+      cooldown_until: cooldownUntil,
+    });
+  }
 
   const signupProof = String(body.signup_proof || "").trim();
-  const serviceClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
 
   if (signupProof) {
     const { data: row, error } = await serviceClient

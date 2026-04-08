@@ -4,6 +4,7 @@ import { postPublicFunction } from "@/lib/publicFunctionClient";
 type ApiError = {
   message: string;
   code?: string | null;
+  details?: unknown;
 };
 
 type SessionTokens = {

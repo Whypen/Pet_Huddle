@@ -18,6 +18,9 @@ import { authSignup } from "@/lib/publicAuthApi";
 
 const SOCIAL_ID_REGEX = /^[A-Za-z0-9_.-]{6,15}$/;
 const FORM_ID = "signup-name-form";
+const ACCOUNT_UNAVAILABLE_MESSAGE =
+  "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
+const SIGNUP_REVIEW_MESSAGE = "Signup is temporarily unavailable. Please try again later.";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -33,6 +36,18 @@ const SignupName = () => {
   const [submitting, setSubmitting]   = useState(false);
   const [isExiting, setIsExiting]     = useState(false);
   const normalizedSocialId = useMemo(() => socialId.trim(), [socialId]);
+  const resolveSignupError = (error: { message?: string; details?: unknown } | null) => {
+    if (!error) return "Account creation failed. Please try again.";
+    const details = (error.details && typeof error.details === "object")
+      ? (error.details as { public_message?: unknown })
+      : null;
+    const publicMessage = String(details?.public_message || "").trim();
+    if (publicMessage) return publicMessage;
+    const message = String(error.message || "").trim();
+    if (message === "account_unavailable") return ACCOUNT_UNAVAILABLE_MESSAGE;
+    if (message === "signup_temporarily_unavailable") return SIGNUP_REVIEW_MESSAGE;
+    return message || "Account creation failed. Please try again.";
+  };
 
   const goTo = (to: string) => {
     setIsExiting(true);
@@ -89,7 +104,7 @@ const SignupName = () => {
         });
         if (signUpError) {
           setFlowState("idle");
-          toast.error(signUpError.message || "Account creation failed. Please try again.");
+          toast.error(resolveSignupError(signUpError));
           return;
         }
         // Fire account verify email + optional marketing DOI email (both fire-and-forget)

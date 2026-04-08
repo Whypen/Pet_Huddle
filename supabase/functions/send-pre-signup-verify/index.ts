@@ -37,12 +37,52 @@ serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
-    let body: { email?: string; token?: string; turnstile_token?: string; force_new_token?: boolean };
+    let body: {
+      email?: string;
+      token?: string;
+      turnstile_token?: string;
+      force_new_token?: boolean;
+      device_id?: string;
+      install_id?: string;
+    };
     try { body = await req.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
     const { email, token, turnstile_token, force_new_token } = body;
     if (!email) return json({ error: "email_required" }, 400);
     const normalizedEmail = String(email).trim().toLowerCase();
+    const ACCOUNT_UNAVAILABLE_MESSAGE =
+      "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
+    const SIGNUP_REVIEW_MESSAGE = "Signup is temporarily unavailable. Please try again later.";
+
+    const { data: blockStatus, error: blockStatusError } = await supabase.rpc("lookup_signup_blocks", {
+      p_email: normalizedEmail,
+      p_phone: null,
+      p_device_id: String(body.device_id || "").trim() || null,
+      p_install_id: String(body.install_id || "").trim() || null,
+    });
+    if (blockStatusError) {
+      console.error("[send-pre-signup-verify] block lookup failed", blockStatusError.message);
+      return json({ error: "server_error" }, 500);
+    }
+    const blocked = Boolean((blockStatus as { blocked?: unknown } | null)?.blocked);
+    if (blocked) {
+      return json({
+        error: "account_unavailable",
+        public_message:
+          String((blockStatus as { public_message?: unknown } | null)?.public_message || "").trim() ||
+          ACCOUNT_UNAVAILABLE_MESSAGE,
+      }, 403);
+    }
+    const reviewRequired = Boolean((blockStatus as { review_required?: unknown } | null)?.review_required);
+    const cooldownUntil =
+      String((blockStatus as { cooldown_until?: unknown } | null)?.cooldown_until || "").trim() || null;
+    if (reviewRequired) {
+      return json({
+        error: "signup_temporarily_unavailable",
+        public_message: SIGNUP_REVIEW_MESSAGE,
+        cooldown_until: cooldownUntil,
+      }, 429);
+    }
 
     // Cleanup expired tokens (best-effort; non-fatal)
     await supabase
