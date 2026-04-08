@@ -12,13 +12,13 @@ import { useSignup } from "@/contexts/SignupContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
+import { isEmailInboxLauncherEnabled, launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
 const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 const RESEND_COOLDOWN_SECS = 60;
 const POLL_INTERVAL_MS = 3_000;
-
 type SendState = "idle" | "sending" | "sent" | "error";
 type VerifyRouteState = {
   expired?: boolean;
@@ -342,11 +342,17 @@ const SignupVerifyEmail = () => {
     setTimeout(() => setManualCheck("idle"), 3_000);
   };
 
-  const handleOpenMail = () => {
-    // There is no universal URL scheme to open an email inbox (without a compose
-    // window) on iOS, Android, or desktop. mailto: always opens compose.
-    // Guide the user instead — the toast is the action.
-    toast.message("Open your email app and check your inbox for the verification link.");
+  const handleOpenMail = async () => {
+    if (!isEmailInboxLauncherEnabled()) {
+      toast.message("Open your mail app manually.");
+      return;
+    }
+    const result = await launchEmailInboxBestEffort();
+    if (!result.launched) {
+      toast.message("Open your mail app manually.");
+      return;
+    }
+    toast.message("If your mail app opened, return here after verifying.");
   };
 
   const showExpiredBanner = (incomingExpired || incomingInvalid) && sendState === "idle" && !token;
@@ -436,7 +442,7 @@ const SignupVerifyEmail = () => {
               onClick={handleOpenMail}
             >
               <Mail size={16} className="mr-2" />
-              Open Mail
+              Open Mail app
             </NeuButton>
           ) : null}
           <p className="text-[13px] text-[rgba(74,73,101,0.50)] mt-2">

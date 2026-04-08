@@ -39,6 +39,9 @@ jobs:
       - name: Lint (if script exists)
         run: npm run lint --if-present
 
+      - name: Guard signup pages against mailto composer links
+        run: npm run lint:signup-mailto --if-present
+
       - name: Unit/Integration tests (if script exists)
         run: npm run test --if-present
 

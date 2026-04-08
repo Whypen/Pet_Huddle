@@ -11,7 +11,8 @@
     "ops:edge:harden": "bash scripts/ops/harden-local-edge-runtime.sh",
     "audit:map": "node scripts/self_audit_map.mjs",
     "audit:security": "node scripts/security_posture_audit.mjs",
-    "lint": "eslint .",
+    "lint:signup-mailto": "bash scripts/check-no-mailto-signup.sh",
+    "lint": "npm run lint:signup-mailto && eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest"

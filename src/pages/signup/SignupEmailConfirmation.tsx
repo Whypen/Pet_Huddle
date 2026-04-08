@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
+import { isEmailInboxLauncherEnabled, launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
 
 type PageState = "waiting" | "confirming" | "success" | "error";
 
@@ -72,8 +73,17 @@ const SignupEmailConfirmation = () => {
     }
   };
 
-  const handleOpenMail = () => {
-    window.location.href = "mailto:";
+  const handleOpenMail = async () => {
+    if (!isEmailInboxLauncherEnabled()) {
+      toast.message("Open your mail app manually.");
+      return;
+    }
+    const result = await launchEmailInboxBestEffort();
+    if (!result.launched) {
+      toast.message("Open your mail app manually.");
+      return;
+    }
+    toast.message("If your mail app opened, return here after verifying.");
   };
 
   const handleCheckVerified = async () => {
@@ -148,7 +158,7 @@ const SignupEmailConfirmation = () => {
             onClick={handleOpenMail}
           >
             <Mail size={16} className="mr-2" />
-            Open Mail
+            Open Mail app
           </NeuButton>
           <NeuButton
             variant="ghost"
@@ -181,7 +191,7 @@ const SignupEmailConfirmation = () => {
       <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
         {isError
           ? "This verification link has expired or is invalid. Request a new one below."
-          : "Open your inbox and click the link to verify your email."}
+          : "Open your mail app manually and tap the latest verification email link."}
       </p>
     </SignupShell>
   );
