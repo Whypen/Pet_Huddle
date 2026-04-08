@@ -33,6 +33,31 @@ const clientIp = (req: Request) =>
   req.headers.get("x-real-ip") ||
   "unknown";
 
+const isAlreadyRegisteredError = (message: string) => {
+  const text = message.toLowerCase();
+  return text.includes("already registered") || text.includes("user already exists");
+};
+
+const findAuthUserIdByEmail = async (
+  serviceClient: ReturnType<typeof createClient>,
+  email: string,
+): Promise<{ userId: string | null; error: string | null }> => {
+  const normalized = email.toLowerCase();
+  const perPage = 200;
+  const maxPages = 25;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const listed = await serviceClient.auth.admin.listUsers({ page, perPage });
+    if (listed.error) return { userId: null, error: listed.error.message || "auth_user_lookup_failed" };
+    const users = listed.data?.users || [];
+    const match = users.find((user) => String(user.email || "").trim().toLowerCase() === normalized);
+    if (match?.id) return { userId: match.id, error: null };
+    if (users.length < perPage) break;
+  }
+
+  return { userId: null, error: null };
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
@@ -100,7 +125,60 @@ Deno.serve(async (req: Request) => {
   });
 
   if (signUp.error) {
-    return json(400, { error: signUp.error.message || "signup_failed" });
+    const originalError = signUp.error.message || "signup_failed";
+    if (!isAlreadyRegisteredError(originalError)) {
+      return json(400, { error: originalError });
+    }
+
+    // Recovery path for orphan auth users:
+    // email exists in auth.users but no profile row (deleted/abandoned account).
+    const { userId, error: lookupError } = await findAuthUserIdByEmail(serviceClient, email);
+    if (lookupError) return json(500, { error: "auth_user_lookup_failed" });
+    if (!userId) return json(400, { error: originalError });
+
+    const { data: profileRow, error: profileLookupError } = await serviceClient
+      .from("profiles")
+      .select("id")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profileLookupError) return json(500, { error: "profile_lookup_failed" });
+    if (profileRow) return json(400, { error: originalError });
+
+    const deleteResult = await serviceClient.auth.admin.deleteUser(userId);
+    if (deleteResult.error) return json(500, { error: "orphan_auth_cleanup_failed" });
+
+    const retrySignUp = await authClient.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: body.options?.emailRedirectTo,
+        data: body.options?.data,
+      },
+    });
+    if (retrySignUp.error) {
+      return json(400, { error: retrySignUp.error.message || "signup_failed" });
+    }
+
+    if (signupProof) {
+      await serviceClient
+        .from("presignup_tokens")
+        .update({ signup_proof_used_at: new Date().toISOString() })
+        .eq("signup_proof", signupProof);
+    }
+
+    const retrySession = retrySignUp.data.session
+      ? {
+          access_token: retrySignUp.data.session.access_token,
+          refresh_token: retrySignUp.data.session.refresh_token,
+        }
+      : null;
+
+    return json(200, {
+      data: {
+        session: retrySession,
+        user: retrySignUp.data.user ?? null,
+      },
+    });
   }
 
   if (signupProof) {

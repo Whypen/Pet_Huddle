@@ -65,6 +65,22 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Defense-in-depth: ensure auth.users row is removed even if RPC implementation
+  // was partially applied in older environments.
+  const { error: hardDeleteError } = await admin.auth.admin.deleteUser(callerId);
+  if (hardDeleteError) {
+    const message = String(hardDeleteError.message || "").toLowerCase();
+    const alreadyGone =
+      message.includes("not found") ||
+      message.includes("user not found");
+    if (!alreadyGone) {
+      return new Response(JSON.stringify({ error: hardDeleteError.message || "auth_delete_failed" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
   return new Response(JSON.stringify({ success: true }), {
     status: 200,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
