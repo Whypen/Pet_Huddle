@@ -343,23 +343,10 @@ const SignupVerifyEmail = () => {
   };
 
   const handleOpenMail = () => {
-    const ua = navigator.userAgent.toLowerCase();
-    const isMobile = ua.includes("iphone") || ua.includes("ipad") || ua.includes("android");
-    if (!isMobile) {
-      // On desktop there is no reliable universal "open inbox" link — guide the user instead.
-      toast.message("Open your email client and check your inbox for the verification link.");
-      return;
-    }
-    // mailto: opens the device's default mail app on iOS and Android.
-    // message:// was intentionally removed — it opens the SMS/Messages app, not Mail.
-    const anchor = document.createElement("a");
-    anchor.href = "mailto:";
-    anchor.rel = "noopener noreferrer";
-    anchor.style.display = "none";
-    document.body.appendChild(anchor);
-    anchor.click();
-    window.setTimeout(() => anchor.remove(), 1200);
-    toast.message("Check your inbox for the verification email.");
+    // There is no universal URL scheme to open an email inbox (without a compose
+    // window) on iOS, Android, or desktop. mailto: always opens compose.
+    // Guide the user instead — the toast is the action.
+    toast.message("Open your email app and check your inbox for the verification link.");
   };
 
   const showExpiredBanner = (incomingExpired || incomingInvalid) && sendState === "idle" && !token;

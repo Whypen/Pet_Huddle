@@ -367,16 +367,24 @@ Deno.serve(async (req: Request) => {
   let sendError: string | null = null;
 
   if (accessToken && userId) {
-    // User-scoped client — auth.updateUser sends the phone_change OTP
-    const userClient = createClient(supabaseUrl, anonKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+    // Call /auth/v1/user PUT directly with the user's JWT.
+    // supabase-js auth.updateUser() throws "Auth session missing!" when
+    // persistSession:false because it reads from internal session state,
+    // not from global.headers.Authorization. The REST call is identical
+    // to what auth.updateUser() does internally and avoids that check.
+    const authResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "apikey": anonKey,
+        "Content-Type": "application/json",
       },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      body: JSON.stringify({ phone: rawPhone }),
     });
-    const { error } = await userClient.auth.updateUser({ phone: rawPhone });
-    if (error) sendError = error.message;
+    if (!authResp.ok) {
+      const authBody = await authResp.json().catch(() => ({})) as Record<string, string>;
+      sendError = authBody.msg || authBody.message || authBody.error_description || `auth_update_failed_${authResp.status}`;
+    }
   } else {
     // Unauthenticated path (phone-login users whose phone is in auth.users.phone)
     const { error } = await serviceClient.auth.signInWithOtp({
