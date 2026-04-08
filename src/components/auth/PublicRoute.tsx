@@ -4,18 +4,38 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
 import { Loader2 } from "lucide-react";
 import { isRegisteredUserProfile } from "@/lib/signupFlow";
+import { hasSignupDraft } from "@/lib/signupOnboarding";
 
 export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, session, profile, loading, mfaPending } = useAuth();
   const { flowState } = useSignup();
   const location = useLocation();
+  const isSignupPath = location.pathname.startsWith("/signup/");
+  const persistedSignupFlowState =
+    typeof window !== "undefined"
+    && (() => {
+      try {
+        const raw = sessionStorage.getItem("huddle_signup_flow_state_v1");
+        return raw === "signup" || raw === "verify_identity";
+      } catch {
+        return false;
+      }
+    })();
+  const hasPersistedSignupDraft = typeof window !== "undefined" && hasSignupDraft();
   // oauth_onboarding=1 is set by AuthCallback for new Google/Apple users being
   // routed through /signup/dob. The query param acts as a synchronous bypass
   // so the DOB page renders before the React flowState update settles.
   const isOAuthOnboarding =
     new URLSearchParams(location.search).get("oauth_onboarding") === "1";
   const allowSignupFlowWithSession =
-    location.pathname.startsWith("/signup/") && (flowState !== "idle" || isOAuthOnboarding);
+    isSignupPath
+    && !profile
+    && (
+      flowState !== "idle"
+      || persistedSignupFlowState
+      || hasPersistedSignupDraft
+      || isOAuthOnboarding
+    );
   const onboardingIncomplete = Boolean(user && profile && !isRegisteredUserProfile(profile));
   const isTokenGatedPath =
     location.pathname === "/signup/email-confirmation" ||
