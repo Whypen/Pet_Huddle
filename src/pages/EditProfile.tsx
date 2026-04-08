@@ -1271,12 +1271,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       return;
     }
 
-    // Gate: email must be verified before completing onboarding
-    if (onboardingMode && !profile?.email_verified) {
-      toast.error("Please verify your email before completing your profile.");
-      return;
-    }
-
     if (!formData.display_name.trim()) {
       setFieldErrors((prev) => ({ ...prev, displayName: REQUIRED_CONNECT_ERROR }));
       return;
@@ -1810,26 +1804,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                     </span>
                   </div>
 
-                  {profile?.email_verified ? (
-                    <span className="neu-chip text-[11px] font-semibold text-[rgba(74,73,101,0.45)] shrink-0 ml-2">
-                      Verified
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="neu-chip text-[11px] font-semibold text-[#2145CF] shrink-0 ml-2"
-                      onClick={async () => {
-                        const userId = user?.id;
-                        if (!userId) return;
-                        void supabase.functions
-                          .invoke("send-signup-verify-email", { body: { user_id: userId } })
-                          .catch(() => {/* silent */});
-                        navigate("/signup/email-confirmation");
-                      }}
-                    >
-                      Resend
-                    </button>
-                  )}
+                  <span className="neu-chip text-[11px] font-semibold text-[rgba(74,73,101,0.45)] shrink-0 ml-2">
+                    Verified
+                  </span>
                 </div>
               </div>
             )}
@@ -2719,17 +2696,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           <NeuButton
             variant="primary"
             className="w-full h-12"
-            disabled={loading || !profile?.email_verified}
+            disabled={loading}
             onClick={handleSave}
           >
             {loading ? "Saving…" : "Complete profile"}
           </NeuButton>
-
-          {!profile?.email_verified && (
-            <p className="text-[11px] text-[rgba(74,73,101,0.55)] text-center">
-              Please verify your email before completing your profile.
-            </p>
-          )}
 
           <NeuButton
             variant="ghost"

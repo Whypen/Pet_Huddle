@@ -42,6 +42,8 @@ export interface SignupShellProps {
   isExiting?: boolean;
   /** CTA slot — rendered inside glass-bar fixed bottom */
   cta: React.ReactNode;
+  /** Show the center step counter text */
+  showStepCounter?: boolean;
   children: React.ReactNode;
 }
 
@@ -55,6 +57,7 @@ export const SignupShell: React.FC<SignupShellProps> = ({
   onSkip,
   isExiting = false,
   cta,
+  showStepCounter = true,
   children,
 }) => {
   const fillPct = (step / totalSteps) * 100;
@@ -109,9 +112,13 @@ export const SignupShell: React.FC<SignupShellProps> = ({
           )}
 
           {/* Step counter */}
-          <span className="text-[13px] font-[400] text-[rgba(74,73,101,0.55)]">
-            Step {step} of {totalSteps}
-          </span>
+          {showStepCounter ? (
+            <span className="text-[13px] font-[400] text-[rgba(74,73,101,0.55)]">
+              Step {step} of {totalSteps}
+            </span>
+          ) : (
+            <div className="w-[88px]" />
+          )}
 
           {/* Skip button or empty spacer */}
           {skipLabel && onSkip ? (

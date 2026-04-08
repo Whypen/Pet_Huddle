@@ -25,6 +25,7 @@ type VerifyRouteState = {
   invalid_link?: boolean;
   email?: string;
   from_credentials?: boolean;
+  from_setprofile?: boolean;
 } | null;
 type VerifyStatusResponse = {
   verified?: boolean;
@@ -54,6 +55,7 @@ const SignupVerifyEmail = () => {
   const incomingExpired = incomingState?.expired === true;
   const incomingInvalid = incomingState?.invalid_link === true;
   const incomingFromCredentials = incomingState?.from_credentials === true;
+  const incomingFromSetProfile = incomingState?.from_setprofile === true;
   const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
 
   const [token, setToken] = useState("");
@@ -170,11 +172,11 @@ const SignupVerifyEmail = () => {
     return "missing";
   }, [clearPresignupIdentity, draftEmail, incomingEmail, persistPresignupIdentity, update]);
 
-  const proceedToSignupName = useCallback(() => {
+  const proceedAfterVerification = useCallback(() => {
     setFlowState("signup");
     setIsExiting(true);
-    setTimeout(() => navigate("/signup/name"), 180);
-  }, [navigate, setFlowState]);
+    setTimeout(() => navigate(incomingFromSetProfile ? "/set-profile" : "/signup/name"), 180);
+  }, [incomingFromSetProfile, navigate, setFlowState]);
 
   const lookupStatus = useCallback(async (emailOverride?: string): Promise<StatusOutcome> => {
     const canonicalEmail = String(emailOverride || draftEmail || incomingEmail || "").trim().toLowerCase();
@@ -324,7 +326,7 @@ const SignupVerifyEmail = () => {
 
   const handleManualContinue = async () => {
     if (verified) {
-      proceedToSignupName();
+      proceedAfterVerification();
       return;
     }
     setManualCheck("checking");
@@ -335,7 +337,7 @@ const SignupVerifyEmail = () => {
       outcome = await lookupStatus(draftEmail);
     }
     if (outcome === "verified") {
-      proceedToSignupName();
+      proceedAfterVerification();
       return;
     }
     setManualCheck("not_yet");
@@ -379,7 +381,8 @@ const SignupVerifyEmail = () => {
   return (
     <SignupShell
       step={3}
-      onBack={handleChangeEmail}
+      onBack={incomingFromSetProfile ? () => navigate("/set-profile", { replace: true }) : handleChangeEmail}
+      showStepCounter={!incomingFromSetProfile}
       isExiting={isExiting}
       cta={
         <div className="space-y-3">
