@@ -99,12 +99,13 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     }
   });
   const shouldKeepDraftForSession = useCallback((sessionEmail?: string | null, sessionUserId?: string | null) => {
+    if (flowState !== "idle") return true;
     const draftOwner = normalizeStorageOwner(data.email || resolveRememberedOwner());
     const emailOwner = normalizeStorageOwner(sessionEmail || "");
     const idOwner = normalizeStorageOwner(sessionUserId || "");
     if (!draftOwner) return false;
     return (emailOwner && draftOwner === emailOwner) || (idOwner && draftOwner === idOwner);
-  }, [data.email]);
+  }, [data.email, flowState]);
 
   const resetDraftState = useCallback((ownerHints: Array<string | null | undefined> = []) => {
     setData(defaultData);
