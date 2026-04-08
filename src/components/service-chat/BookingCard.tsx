@@ -149,6 +149,17 @@ export const BookingCard = ({
               ) : null}
             </div>
           </div>
+          {isProvider ? (() => {
+            const fp = Number(String(quoteCard.finalPrice || "0").trim());
+            if (!Number.isFinite(fp) || fp <= 0) return null;
+            const payout = Math.round(fp * 0.90 * 100) / 100;
+            const curr = String(quoteCard.currency || "HKD");
+            return (
+              <p className="mt-1 text-xs text-muted-foreground">
+                You receive: {curr} {payout % 1 === 0 ? payout : payout.toFixed(2)} after platform fee
+              </p>
+            );
+          })() : null}
           {String(quoteCard.note || "").trim() ? (
             <p className="mt-1 text-xs text-muted-foreground">{String(quoteCard.note)}</p>
           ) : null}
