@@ -32,6 +32,15 @@ interface RequestBody {
   session_id?: string;
 }
 
+type VerifyOtpReasonCode =
+  | "invalid_code"
+  | "expired_code"
+  | "code_already_used"
+  | "phone_mismatch"
+  | "session_missing"
+  | "too_many_incorrect_attempts"
+  | "verify_failed";
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -62,6 +71,28 @@ function getClientIp(req: Request): string {
     req.headers.get("x-real-ip") ||
     "unknown"
   );
+}
+
+function classifyVerifyOtpError(raw: string): VerifyOtpReasonCode {
+  const message = String(raw || "").toLowerCase();
+  if (message.includes("expired")) return "expired_code";
+  if (
+    (message.includes("already") && message.includes("used")) ||
+    message.includes("already verified")
+  ) return "code_already_used";
+  if (
+    message.includes("match this phone") ||
+    message.includes("phone mismatch") ||
+    message.includes("phone number does not")
+  ) return "phone_mismatch";
+  if (
+    message.includes("session") ||
+    message.includes("unauthorized") ||
+    message.includes("not authenticated") ||
+    message.includes("jwt")
+  ) return "session_missing";
+  if (message.includes("invalid") || message.includes("not found")) return "invalid_code";
+  return "verify_failed";
 }
 
 // ── Logger helper ─────────────────────────────────────────────────────────────
@@ -186,7 +217,10 @@ Deno.serve(async (req: Request) => {
   // to know whose phone_confirmed_at to update.
   if (otpType === "phone_change" && !userId) {
     return new Response(
-      JSON.stringify({ error: "Unauthorized: phone_change verification requires authentication" }),
+      JSON.stringify({
+        error: "Unauthorized: phone_change verification requires authentication",
+        reason_code: "session_missing",
+      }),
       { status: 401, headers: CORS },
     );
   }
@@ -224,6 +258,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         error: "Too many attempts. Please request a new code.",
         log_id: logId,
+        reason_code: "too_many_incorrect_attempts",
         retry_after: 86400,
       }),
       { status: 429, headers: { ...CORS, "Retry-After": "86400" } },
@@ -273,7 +308,8 @@ Deno.serve(async (req: Request) => {
   // ── Log and respond ───────────────────────────────────────────────────────
 
   if (verifyError) {
-    const isInvalid = /invalid|expired|not found/i.test(verifyError);
+    const reasonCode = classifyVerifyOtpError(verifyError);
+    const isInvalid = reasonCode !== "verify_failed" && reasonCode !== "session_missing";
     const logId = await logAttempt(serviceClient, {
       phoneHash, ip: clientIp,
       status: isInvalid ? "invalid_otp" : "failed",
@@ -281,14 +317,24 @@ Deno.serve(async (req: Request) => {
       reason: isInvalid ? "invalid_or_expired" : "verify_error",
       error: verifyError,
     });
+    const userMessage = reasonCode === "session_missing"
+      ? "Verification session missing. Request a new code."
+      : reasonCode === "expired_code"
+        ? "Code expired. Request a new code."
+        : reasonCode === "code_already_used"
+          ? "Code already used. Request a new code."
+          : reasonCode === "phone_mismatch"
+            ? "Code does not match this phone."
+            : reasonCode === "invalid_code"
+              ? "Incorrect code. Please try again."
+              : "Verification failed. Please try again.";
     return new Response(
       JSON.stringify({
-        error: isInvalid
-          ? "Invalid or expired code. Please try again."
-          : "Verification failed. Please try again.",
+        error: userMessage,
+        reason_code: reasonCode,
         log_id: logId,
       }),
-      { status: 401, headers: CORS },
+      { status: reasonCode === "verify_failed" ? 500 : 401, headers: CORS },
     );
   }
 

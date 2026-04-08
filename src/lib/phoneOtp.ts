@@ -1,10 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
-import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 import { getVisitorId } from "@/lib/deviceFingerprint";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
 import {
   isPhoneCountryAllowed,
-  COUNTRY_NOT_ALLOWED_MESSAGE,
 } from "@/config/allowedSmsCountries";
 
 // ── Dev/test shortcut (never active in PROD builds) ──────────────────────────
@@ -28,49 +26,44 @@ const TEST_OTP_SHORTCUT_ENABLED =
   );
 const TEST_OTP_SHORTCUT_CODE = "498005";
 
-// ── User-friendly error mapping ───────────────────────────────────────────────
-// Maps raw HTTP error codes / server strings to copy-safe UI messages.
-// Never exposes internal codes (http_4xx, JWT strings, etc.) to the user.
-
-function friendlyOtpSendError(raw: string): string {
-  const r = String(raw || "").toLowerCase();
-  if (
-    r.includes("provider_send_fail") ||
-    r.includes("provider_send_failed") ||
-    r.includes("provider_config_error") ||
-    r.includes("provider_send_error")
-  ) {
-    return "Couldn't send the code right now. Please try again in a moment.";
-  }
-  if (r.startsWith("http_401") || r.includes("invalid or exp") || r.includes("jwt") || r.includes("invalid_token")) {
-    return "Session expired. Please go back and sign in again.";
-  }
-  if (r.startsWith("http_403") || r.includes("human_verification") || r.includes("turnstile")) {
-    return "Human verification failed. Please complete the check above and try again.";
-  }
-  if (r.startsWith("http_429") || r.includes("too_many") || r.includes("rate_limit")) {
-    return "Too many attempts. Please wait a few minutes and try again.";
-  }
-  if (r.includes("country_not_allowed") || r.includes("country") || r.includes("not_allowed")) {
-    return "Phone verification isn't available in your region yet.";
-  }
-  if (r.startsWith("http_5") || r.includes("server_error") || r.includes("misconfigured") || r.includes("db_error")) {
-    return "Couldn't send the code right now. Please try again in a moment.";
-  }
-  if (r === "network_error" || r.includes("fetch") || r.includes("networkerror")) {
-    return "Network error. Check your connection and try again.";
-  }
-  if (/^[a-z0-9_]+$/.test(r)) {
-    return "Couldn't send the verification code. Please try again.";
-  }
-  return "Couldn't send the verification code. Please try again.";
-}
-
 type SendOtpRateLimitReason =
   | "resend_cooldown"
   | "phone_daily_cap"
   | "user_daily_cap"
   | "ip_daily_cap";
+
+type SendOtpReasonCode =
+  | "provider_config_error"
+  | "sms_region_blocked"
+  | "rate_limited"
+  | "user_not_found"
+  | "provider_send_failed";
+
+type VerifyOtpReasonCode =
+  | "invalid_code"
+  | "expired_code"
+  | "code_already_used"
+  | "phone_mismatch"
+  | "session_missing"
+  | "too_many_incorrect_attempts"
+  | "verify_failed";
+
+type SendOtpErrorDetails = {
+  error?: string;
+  reason_code?: SendOtpReasonCode;
+  rate_limit_reason?: SendOtpRateLimitReason;
+  retry_after?: number;
+};
+
+type VerifyOtpErrorDetails = {
+  error?: string;
+  reason_code?: VerifyOtpReasonCode;
+  retry_after?: number;
+};
+
+// ── User-friendly error mapping ───────────────────────────────────────────────
+// Maps raw HTTP error codes / server strings to copy-safe UI messages.
+// Never exposes internal codes (http_4xx, JWT strings, etc.) to the user.
 
 const formatRetryWindow = (seconds: number): string => {
   const clamped = Math.max(0, Number(seconds || 0));
@@ -101,35 +94,77 @@ const mapOtpRateLimitedMessage = (
   return `Too many verification attempts were made. ${formatRetryWindow(retryAfter)}`;
 };
 
-function friendlyOtpVerifyError(raw: string): string {
-  const r = String(raw || "").toLowerCase();
-  if (
-    r === "network_error" ||
-    r.includes("fetch") ||
-    r.includes("load failed") ||
-    r.includes("networkerror") ||
-    r.includes("failed to fetch")
-  ) {
-    return "Network error. Check your connection and try again.";
+const normalize = (value: unknown) => String(value || "").trim().toLowerCase();
+
+const mapSendOtpFailure = (
+  statusCode: number | null,
+  rawMessage: string | null | undefined,
+  details: SendOtpErrorDetails | null | undefined,
+): { message: string; unavailable: boolean } => {
+  const reasonCode = normalize(details?.reason_code);
+  const raw = normalize(rawMessage);
+
+  if (statusCode === 429) {
+    return {
+      message: mapOtpRateLimitedMessage(details?.rate_limit_reason, details?.retry_after),
+      unavailable: false,
+    };
   }
-  if (r.startsWith("http_403") || r.includes("human_verification") || r.includes("turnstile")) {
-    return "Human verification failed. Please complete the check above and try again.";
+  if (statusCode === 401 || raw.includes("unauthorized") || raw.includes("jwt") || raw.includes("auth_required")) {
+    return { message: "Please sign in again and try once more.", unavailable: false };
   }
-  if (r.startsWith("http_401") && !r.includes("invalid") && !r.includes("expired")) {
-    return "Session expired. Please sign in again and retry.";
+  if (statusCode === 403 && (raw.includes("turnstile") || raw.includes("human_verification"))) {
+    return { message: "Please complete the verification first.", unavailable: false };
   }
-  if (r.includes("expired") || r.startsWith("http_401")) {
-    return "Code expired. Request a new one and try again.";
+  if (reasonCode === "sms_region_blocked") {
+    return { message: "Phone verification is temporarily unavailable.", unavailable: true };
   }
-  if (r.startsWith("http_429") || r.includes("too_many") || r.includes("rate")) {
-    return "Too many attempts. Please wait and request a new code.";
+  if (reasonCode === "provider_config_error" || reasonCode === "provider_send_failed") {
+    return { message: "Phone verification is temporarily unavailable. Please try again later.", unavailable: true };
   }
-  if (r.startsWith("http_5") || r.includes("server_error")) {
-    return "Verification failed. Please try again.";
+  if (raw.includes("country") && raw.includes("unavailable")) {
+    return { message: "Phone verification is not available yet.", unavailable: true };
   }
-  // Default covers "invalid code", "wrong code", etc.
-  return "Incorrect code. Please try again.";
-}
+  if (raw === "network_error" || raw.includes("fetch") || raw.includes("networkerror")) {
+    return { message: "Phone verification is temporarily unavailable. Please try again later.", unavailable: false };
+  }
+  return { message: "Phone verification is temporarily unavailable. Please try again later.", unavailable: false };
+};
+
+const mapVerifyOtpFailure = (
+  statusCode: number | null,
+  rawMessage: string | null | undefined,
+  details: VerifyOtpErrorDetails | null | undefined,
+): string => {
+  const reasonCode = normalize(details?.reason_code);
+  const raw = normalize(rawMessage);
+
+  if (reasonCode === "invalid_code" || raw.includes("invalid")) {
+    return "Incorrect code. Please try again.";
+  }
+  if (statusCode === 429 || reasonCode === "too_many_incorrect_attempts") {
+    return "Too many incorrect attempts. Request a new code.";
+  }
+  if (reasonCode === "expired_code" || raw.includes("expired")) {
+    return "This code has expired. Request a new code.";
+  }
+  if (reasonCode === "code_already_used" || raw.includes("already used")) {
+    return "This code has already been used. Request a new code.";
+  }
+  if (reasonCode === "phone_mismatch" || raw.includes("match this phone") || raw.includes("phone mismatch")) {
+    return "This code does not match this phone number.";
+  }
+  if (reasonCode === "session_missing" || statusCode === 401 || raw.includes("unauthorized") || raw.includes("session")) {
+    return "Your verification session expired. Request a new code.";
+  }
+  if (raw === "network_error" || raw.includes("fetch") || raw.includes("load failed") || raw.includes("networkerror") || raw.includes("failed to fetch")) {
+    return "We couldn’t verify the code right now. Please try again.";
+  }
+  if (statusCode !== null && statusCode >= 500) {
+    return "We couldn’t verify the code right now. Please try again.";
+  }
+  return "We couldn’t verify the code right now. Please try again.";
+};
 
 // ── Module-level OTP type ─────────────────────────────────────────────────────
 // Set by requestPhoneOtp from the send-phone-otp response.
@@ -160,14 +195,14 @@ async function callPublic<T>(
 export async function requestPhoneOtp(
   phone: string,
   turnstileToken: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; unavailable?: boolean }> {
   const normalized = phone.trim();
-  if (!normalized) return { ok: false, error: "Phone number is required." };
-  if (!turnstileToken.trim()) return { ok: false, error: "Complete human verification first." };
+  if (!normalized) return { ok: false, error: "Enter a valid phone number." };
+  if (!turnstileToken.trim()) return { ok: false, error: "Please complete the verification first." };
 
   // Client-side country guard — UX only; server enforces authoritatively.
   if (!isPhoneCountryAllowed(normalized)) {
-    return { ok: false, error: COUNTRY_NOT_ALLOWED_MESSAGE };
+    return { ok: false, error: "Phone verification is not available yet.", unavailable: true };
   }
 
   // Dev shortcut — bypasses edge function entirely
@@ -180,16 +215,11 @@ export async function requestPhoneOtp(
   const { data: { session } } = await supabase.auth.getSession();
   const hasSession = Boolean(session?.access_token);
 
-type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
-  type SendErrorPayload = {
-    error?: string;
-    retry_after?: number;
-    rate_limit_reason?: string;
-  };
+  type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
   let data: SendResponse | null = null;
   let errorMsg: string | null = null;
   let statusCode: number | null = null;
-  let errorDetails: SendErrorPayload | null = null;
+  let errorDetails: SendOtpErrorDetails | null = null;
   const accessToken = String(session?.access_token || "").trim();
 
   if (hasSession) {
@@ -208,7 +238,7 @@ type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: str
     data = res.data;
     errorMsg = res.error?.message ?? null;
     statusCode = res.status;
-    errorDetails = (res.error?.details as SendErrorPayload | null | undefined) ?? null;
+    errorDetails = (res.error?.details as SendOtpErrorDetails | null | undefined) ?? null;
   } else {
     // Unauthenticated path — no JWT; edge function uses signInWithOtp
     const res = await postPublicFunction<SendResponse>(
@@ -223,17 +253,12 @@ type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: str
     data = res.data;
     errorMsg = res.error?.message ?? null;
     statusCode = res.status;
-    errorDetails = (res.error?.details as SendErrorPayload | null | undefined) ?? null;
+    errorDetails = (res.error?.details as SendOtpErrorDetails | null | undefined) ?? null;
   }
 
   if (errorMsg || !data?.ok) {
-    if (statusCode === 429) {
-      return {
-        ok: false,
-        error: mapOtpRateLimitedMessage(errorDetails?.rate_limit_reason, errorDetails?.retry_after),
-      };
-    }
-    return { ok: false, error: friendlyOtpSendError(errorMsg ?? data?.error ?? "") };
+    const mapped = mapSendOtpFailure(statusCode, errorMsg ?? data?.error ?? "", errorDetails);
+    return { ok: false, error: mapped.message, unavailable: mapped.unavailable };
   }
 
   // Store otp_type for the subsequent verifyPhoneOtp call
@@ -254,7 +279,7 @@ export async function verifyPhoneOtp(
   const normalizedPhone = phone.trim();
   const normalizedToken = token.trim();
   if (!normalizedPhone || !normalizedToken) {
-    return { ok: false, error: "OTP code is required." };
+    return { ok: false, error: "Enter the 6-digit code." };
   }
 
   // Dev shortcut — bypasses edge function entirely
@@ -270,33 +295,44 @@ export async function verifyPhoneOtp(
 
   type VerifyResponse = { ok: boolean; error?: string };
   let errorMsg: string | null = null;
+  let statusCode: number | null = null;
+  let errorDetails: VerifyOtpErrorDetails | null = null;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = String(session?.access_token || "").trim();
 
   if (otpType === "phone_change") {
     // Authenticated path — JWT required by edge function for phone_change
-    const res = await invokeAuthedFunction<VerifyResponse>("verify-phone-otp", {
-      body: {
-        phone:    normalizedPhone,
-        token:    normalizedToken,
+    const res = await postPublicFunction<VerifyResponse>(
+      "verify-phone-otp",
+      {
+        phone: normalizedPhone,
+        token: normalizedToken,
         otp_type: "phone_change",
         device_id: deviceId,
       },
-    });
+      { accessToken },
+    );
     if (res.error || !res.data?.ok) {
-      errorMsg = res.error?.message ?? res.data?.error ?? "Invalid code";
+      errorMsg = res.error?.message ?? res.data?.error ?? "invalid_code";
+      statusCode = res.status;
+      errorDetails = (res.error?.details as VerifyOtpErrorDetails | null | undefined) ?? null;
     }
   } else {
     // Unauthenticated path — no JWT; edge function uses sms verifyOtp
-    const res = await callPublic<VerifyResponse>("verify-phone-otp", {
+    const res = await postPublicFunction<VerifyResponse>("verify-phone-otp", {
       phone:    normalizedPhone,
       token:    normalizedToken,
       otp_type: "sms",
       device_id: deviceId,
     });
     if (res.error || !res.data?.ok) {
-      errorMsg = res.error ?? res.data?.error ?? "Invalid code";
+      errorMsg = res.error?.message ?? res.data?.error ?? "invalid_code";
+      statusCode = res.status;
+      errorDetails = (res.error?.details as VerifyOtpErrorDetails | null | undefined) ?? null;
     }
   }
 
-  if (errorMsg) return { ok: false, error: friendlyOtpVerifyError(errorMsg) };
+  if (errorMsg) return { ok: false, error: mapVerifyOtpFailure(statusCode, errorMsg, errorDetails) };
   return { ok: true };
 }

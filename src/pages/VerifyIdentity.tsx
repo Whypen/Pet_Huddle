@@ -38,6 +38,7 @@ import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
+import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
 
 type HumanVerificationState =
   | "idle" | "ready" | "capturing" | "pending" | "passed" | "failed";
@@ -49,7 +50,7 @@ type OverallVerificationStatus =
   | "unverified" | "pending" | "verified";
 
 type PhoneVerificationState =
-  | "idle" | "sent" | "verified" | "failed";
+  | "idle" | "sent" | "verified" | "failed" | "unavailable";
 
 const GENERIC_CARD_ERROR_MESSAGE = "Card verification could not be completed. Please try again.";
 
@@ -162,6 +163,16 @@ function CardStatusBadge({ state }: { state: CardVerificationState }) {
 
 const IS_DEV = import.meta.env.PROD === false;
 const OTP_COUNTDOWN_SECONDS = 60;
+const maskPhoneForOtpNotice = (phone: string): string => {
+  const trimmed = String(phone || "").trim();
+  if (!trimmed.startsWith("+")) return "••••";
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "••••";
+  const countryLen = digits.length <= 10 ? Math.max(1, digits.length - 4) : Math.max(1, digits.length - 8);
+  const country = digits.slice(0, countryLen);
+  const last4 = digits.slice(-4).padStart(4, "•");
+  return `+${country} •••• ${last4}`;
+};
 
 interface PhoneVerificationCardProps {
   state: PhoneVerificationState;
@@ -177,6 +188,8 @@ interface PhoneVerificationCardProps {
   tokenReady?: boolean;
   errorMessage?: string | null;
   turnstileSlot?: React.ReactNode;
+  unavailable?: boolean;
+  maskedPhoneHint?: string | null;
 }
 
 function PhoneVerificationCard({
@@ -193,8 +206,11 @@ function PhoneVerificationCard({
   tokenReady = false,
   errorMessage,
   turnstileSlot,
+  unavailable = false,
+  maskedPhoneHint = null,
 }: PhoneVerificationCardProps) {
   const isVerified = state === "verified";
+  const isUnavailable = state === "unavailable" || unavailable;
   const otpSent = state === "sent" || state === "failed";
 
   // Countdown timer
@@ -226,7 +242,7 @@ function PhoneVerificationCard({
     };
   }, []);
 
-  const canResend = countdown === 0 && !loading && tokenReady;
+  const canResend = countdown === 0 && !loading && tokenReady && !isUnavailable;
   const sendLabel = useMemo(() => {
     if (loading && !otpSent) return "Sending…";
     if (countdown > 0) return `Resend in ${countdown}s`;
@@ -234,21 +250,21 @@ function PhoneVerificationCard({
   }, [loading, otpSent, countdown]);
 
   const handleSend = useCallback(() => {
-    if (loading || countdown > 0 || !tokenReady) return;
+    if (loading || countdown > 0 || !tokenReady || isUnavailable) return;
     onSendOtp();
-  }, [loading, countdown, onSendOtp, tokenReady]);
+  }, [loading, countdown, isUnavailable, onSendOtp, tokenReady]);
 
   return (
     <InsetPanel>
       <button
         type="button"
-        disabled={isVerified}
-        onClick={isVerified ? undefined : onToggle}
-        aria-expanded={!isVerified && isOpen}
+        disabled={isVerified || isUnavailable}
+        onClick={(isVerified || isUnavailable) ? undefined : onToggle}
+        aria-expanded={!isVerified && !isUnavailable && isOpen}
         aria-controls="phone-verification-panel"
         className={cn(
           "flex items-center gap-3 w-full px-4 py-3.5 min-h-[52px] text-left",
-          isVerified
+          (isVerified || isUnavailable)
             ? "cursor-default"
             : "cursor-pointer active:bg-[rgba(255,255,255,0.55)] transition-[background] duration-100",
         )}
@@ -258,7 +274,11 @@ function PhoneVerificationCard({
           strokeWidth={1.75}
           className={cn(
             "shrink-0",
-            isVerified ? "text-[var(--color-success,#22C55E)]" : "text-[var(--text-secondary)]",
+            isVerified
+              ? "text-[var(--color-success,#22C55E)]"
+              : isUnavailable
+                ? "text-[var(--text-tertiary)]"
+                : "text-[var(--text-secondary)]",
           )}
         />
         <span className="flex-1 text-[15px] font-medium text-[var(--text-primary,#424965)]">
@@ -268,10 +288,14 @@ function PhoneVerificationCard({
           <span className="text-[11px] font-semibold text-[var(--color-success,#22C55E)] bg-[rgba(34,197,94,0.08)] px-2 py-0.5 rounded-full">
             Complete
           </span>
+        ) : isUnavailable ? (
+          <span className="text-[11px] font-semibold text-[var(--text-tertiary)] bg-[rgba(163,168,190,0.16)] px-2 py-0.5 rounded-full">
+            Unavailable
+          </span>
         ) : null}
       </button>
 
-      {isOpen && !isVerified && (
+      {isOpen && !isVerified && !isUnavailable && (
         <>
           <InsetDivider />
           <div id="phone-verification-panel" className="px-4 py-4 flex flex-col gap-3">
@@ -297,6 +321,9 @@ function PhoneVerificationCard({
                 />
               </div>
             </div>
+            <p className="text-[12px] text-[var(--text-tertiary)]">
+              Standard SMS rates may apply.
+            </p>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
@@ -358,9 +385,40 @@ function PhoneVerificationCard({
             {errorMessage ? (
               <p className="text-[12px] text-[var(--color-error,#E84545)]">{errorMessage}</p>
             ) : null}
+            {otpSent && maskedPhoneHint ? (
+              <p className="text-[12px] text-[var(--text-tertiary)]">
+                Code sent to {maskedPhoneHint}
+              </p>
+            ) : null}
+            {otpSent ? (
+              <>
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  SMS can take up to a minute to arrive.
+                </p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  Use the latest code only. Older codes may stop working.
+                </p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  Changing your phone number will require a new code.
+                </p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  After checking your messages, come back here to enter the code.
+                </p>
+              </>
+            ) : null}
           </div>
         </>
       )}
+      {isUnavailable ? (
+        <>
+          <InsetDivider />
+          <div className="px-4 py-3.5">
+            <p className="text-[13px] text-[var(--text-tertiary)]">
+              {errorMessage || "Phone verification is temporarily unavailable."}
+            </p>
+          </div>
+        </>
+      ) : null}
     </InsetPanel>
   );
 }
@@ -838,6 +896,7 @@ export function VerifyIdentity({
   const [phoneOtpCode, setPhoneOtpCode] = useState("");
   const [phoneVerificationError, setPhoneVerificationError] = useState<string | null>(null);
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false);
+  const [phoneSentMaskedHint, setPhoneSentMaskedHint] = useState<string | null>(null);
   const phoneOtpTurnstile = useTurnstile("send_pre_signup_verify");
   const readPhoneOtpTurnstileToken = () => {
     const maybeGetToken = (phoneOtpTurnstile as { getToken?: unknown }).getToken;
@@ -846,6 +905,7 @@ export function VerifyIdentity({
     }
     return String((phoneOtpTurnstile as { token?: string | null }).token || "").trim();
   };
+  const phoneCountryUnavailable = Boolean(phoneValue.trim()) && !isPhoneCountryAllowed(phoneValue.trim());
 
   const [humanAttemptId, setHumanAttemptId] = useState<string | null>(null);
   const [humanChallenge, setHumanChallenge] = useState<HumanChallenge | null>(null);
@@ -1450,12 +1510,17 @@ export function VerifyIdentity({
     if (!(await ensureAuthForVerification())) return;
     const normalized = phoneValue.trim();
     if (!normalized) {
-      setPhoneVerificationError("Please enter a phone number first.");
+      setPhoneVerificationError("Enter a valid phone number.");
+      return;
+    }
+    if (phoneCountryUnavailable) {
+      setPhoneVerificationState("unavailable");
+      setPhoneVerificationError("Phone verification is not available yet.");
       return;
     }
     const turnstileToken = readPhoneOtpTurnstileToken();
     if (!turnstileToken) {
-      setPhoneVerificationError("Complete human verification first.");
+      setPhoneVerificationError("Please complete the verification first.");
       return;
     }
     setPhoneVerificationLoading(true);
@@ -1463,12 +1528,13 @@ export function VerifyIdentity({
     const result = await requestPhoneOtp(normalized, turnstileToken);
     setPhoneVerificationLoading(false);
     if (!result.ok) {
-      setPhoneVerificationState("failed");
-      setPhoneVerificationError(result.error || "Failed to send OTP.");
+      setPhoneVerificationState(result.unavailable ? "unavailable" : "failed");
+      setPhoneVerificationError(result.error || "Phone verification is temporarily unavailable. Please try again later.");
       return;
     }
     setPhoneVerificationState("sent");
     setPhoneVerificationError(null);
+    setPhoneSentMaskedHint(maskPhoneForOtpNotice(normalized));
   };
 
   const onVerifyPhoneOtp = async () => {
@@ -1476,7 +1542,7 @@ export function VerifyIdentity({
     const normalizedPhone = phoneValue.trim();
     const normalizedCode = phoneOtpCode.trim();
     if (!normalizedPhone || !normalizedCode) {
-      setPhoneVerificationError("Please enter your phone and OTP.");
+      setPhoneVerificationError("Enter the 6-digit code.");
       return;
     }
     setPhoneVerificationLoading(true);
@@ -1485,7 +1551,7 @@ export function VerifyIdentity({
     setPhoneVerificationLoading(false);
     if (!result.ok) {
       setPhoneVerificationState("failed");
-      setPhoneVerificationError(result.error || "Invalid OTP.");
+      setPhoneVerificationError(result.error || "We couldn’t verify the code right now. Please try again.");
       return;
     }
     setPhoneVerificationState("verified");
@@ -1542,6 +1608,27 @@ export function VerifyIdentity({
           console.debug("[VerifyIdentity.phone] resolve state failed", error);
         }
       }
+    }
+  };
+
+  const onPhoneValueChange = (value: string) => {
+    const normalized = String(value || "").trim();
+    setPhoneValue(value);
+    setPhoneOtpCode("");
+    setPhoneSentMaskedHint(null);
+    if (!normalized) {
+      setPhoneVerificationState("idle");
+      setPhoneVerificationError(null);
+      return;
+    }
+    if (!isPhoneCountryAllowed(normalized)) {
+      setPhoneVerificationState("unavailable");
+      setPhoneVerificationError("Phone verification is not available yet.");
+      return;
+    }
+    if (phoneVerificationState === "sent" || phoneVerificationState === "failed" || phoneVerificationState === "unavailable") {
+      setPhoneVerificationState("idle");
+      setPhoneVerificationError(null);
     }
   };
 
@@ -1983,13 +2070,15 @@ export function VerifyIdentity({
             onToggle={() => toggleCard("phone")}
             phone={phoneValue}
             otpCode={phoneOtpCode}
-            onPhoneChange={setPhoneValue}
+            onPhoneChange={onPhoneValueChange}
             onOtpChange={setPhoneOtpCode}
             onSendOtp={onSendPhoneOtp}
             onVerifyOtp={onVerifyPhoneOtp}
             loading={phoneVerificationLoading}
             tokenReady={phoneOtpTurnstile.isTokenUsable}
             errorMessage={phoneVerificationError}
+            unavailable={phoneCountryUnavailable || phoneVerificationState === "unavailable"}
+            maskedPhoneHint={phoneSentMaskedHint}
             turnstileSlot={
               <div className="space-y-3">
                 <TurnstileWidget

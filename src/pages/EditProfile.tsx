@@ -23,6 +23,7 @@ import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
+import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import {
@@ -89,6 +90,17 @@ const inferCountryCodeFromPhone = (phone: string): string => {
   if (normalized.startsWith("+61")) return "AU";
   if (normalized.startsWith("+91")) return "IN";
   return "";
+};
+
+const maskPhoneForOtpNotice = (phone: string): string => {
+  const trimmed = String(phone || "").trim();
+  if (!trimmed.startsWith("+")) return "••••";
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return "••••";
+  const countryLen = digits.length <= 10 ? Math.max(1, digits.length - 4) : Math.max(1, digits.length - 8);
+  const country = digits.slice(0, countryLen);
+  const last4 = digits.slice(-4).padStart(4, "•");
+  return `+${country} •••• ${last4}`;
 };
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
@@ -176,6 +188,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const [phoneEditMode, setPhoneEditMode] = useState(false);
   const [phoneOtpRequested, setPhoneOtpRequested] = useState(false);
   const [phoneOtpCode, setPhoneOtpCode] = useState("");
+  const [phoneOtpUnavailable, setPhoneOtpUnavailable] = useState(false);
+  const [phoneOtpMessage, setPhoneOtpMessage] = useState<string | null>(null);
+  const [phoneSentMaskedHint, setPhoneSentMaskedHint] = useState<string | null>(null);
   const [otpCountdown, setOtpCountdown] = useState(0);
   const otpCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Clear the countdown timer on unmount to avoid state updates on dead components
@@ -1049,12 +1064,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
   const requestPhoneOtp = async () => {
     if (!formData.phone.trim()) {
-      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number is required") }));
+      setFieldErrors((prev) => ({ ...prev, phone: "Enter a valid phone number." }));
       return;
     }
     if (!isValidPhoneNumber(formData.phone.trim())) {
       // country-aware digit-count check — NOT OTP ownership
-      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number length is not valid for the selected country") }));
+      setFieldErrors((prev) => ({ ...prev, phone: "Enter a valid phone number." }));
+      return;
+    }
+    if (!isPhoneCountryAllowed(formData.phone.trim())) {
+      setPhoneOtpUnavailable(true);
+      setPhoneOtpRequested(false);
+      setPhoneOtpMessage("Phone verification is not available yet.");
       return;
     }
     if (phoneDuplicate) {
@@ -1063,16 +1084,23 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
     const turnstileToken = phoneOtpTurnstile.getToken();
     if (!turnstileToken || !phoneOtpTurnstile.isTokenUsable) {
-      toast.error("Complete human verification first.");
+      toast.error("Please complete the verification first.");
       return;
     }
+    setPhoneOtpUnavailable(false);
+    setPhoneOtpMessage(null);
     const result = await requestPhoneOtpCode(formData.phone.trim(), turnstileToken);
     if (!result.ok) {
-      toast.error(result.error || "Failed to send OTP. Please retry.");
+      setPhoneOtpUnavailable(Boolean(result.unavailable));
+      setPhoneOtpMessage(result.error || "Phone verification is temporarily unavailable. Please try again later.");
+      toast.error(result.error || "Phone verification is temporarily unavailable. Please try again later.");
       return;
     }
     setPhoneOtpRequested(true);
     setPhoneOtpVerified(false);
+    setPhoneOtpUnavailable(false);
+    setPhoneSentMaskedHint(maskPhoneForOtpNotice(formData.phone.trim()));
+    setPhoneOtpMessage(`Code sent to ${maskPhoneForOtpNotice(formData.phone.trim())}`);
     // Start 60-second resend countdown
     if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
     setOtpCountdown(60);
@@ -1086,19 +1114,24 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         return prev - 1;
       });
     }, 1000);
-    toast.success(t("OTP sent to your phone"));
+    toast.success(`Code sent to ${maskPhoneForOtpNotice(formData.phone.trim())}`);
   };
 
   const verifyPhoneOtp = async () => {
-    if (!phoneOtpCode.trim()) return;
+    if (!phoneOtpCode.trim()) {
+      toast.error("Enter the 6-digit code.");
+      return;
+    }
     const result = await verifyPhoneOtpCode(formData.phone.trim(), phoneOtpCode.trim());
     if (!result.ok) {
-      toast.error(result.error || "OTP verification failed");
+      toast.error(result.error || "We couldn’t verify the code right now. Please try again.");
       return;
     }
     setPhoneOtpVerified(true);
     setPhoneOtpRequested(false);
     setPhoneOtpCode("");
+    setPhoneSentMaskedHint(null);
+    setPhoneOtpMessage(null);
     setPhoneEditMode(false);
     setPhoneOriginalValue(formData.phone.trim());
     if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
@@ -1816,6 +1849,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       setPhoneOtpRequested(false);
                       setPhoneOtpVerified(false);
                       setPhoneOtpCode("");
+                      setPhoneOtpUnavailable(false);
+                      setPhoneOtpMessage(null);
+                      setPhoneSentMaskedHint(null);
                     }}
                     className="p-1 text-muted-foreground"
                     aria-label="Edit phone"
@@ -1833,7 +1869,17 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       onChange={(value) => {
                         const v = value || "";
                         setFormData((prev) => ({ ...prev, phone: v }));
-                        setPhoneOtpVerified(v.trim() === phoneOriginalValue.trim());
+                        const unchanged = v.trim() === phoneOriginalValue.trim();
+                        setPhoneOtpVerified(unchanged);
+                        if (!unchanged) {
+                          setPhoneOtpRequested(false);
+                          setPhoneOtpCode("");
+                          setPhoneSentMaskedHint(null);
+                          setPhoneOtpUnavailable(false);
+                          setPhoneOtpMessage("Changing your phone number will require a new code.");
+                        } else {
+                          setPhoneOtpMessage(null);
+                        }
                       }}
                       className="w-full pr-28 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
                       aria-invalid={Boolean(fieldErrors.phone)}
@@ -1843,6 +1889,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         type="button"
                         onClick={requestPhoneOtp}
                         disabled={
+                          phoneOtpUnavailable ||
                           otpCountdown > 0 ||
                           !phoneOtpTurnstile.isTokenUsable ||
                           phoneDuplicate ||
@@ -1851,7 +1898,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         }
                         className={cn(
                           "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
-                          (otpCountdown > 0 ||
+                          (phoneOtpUnavailable ||
+                            otpCountdown > 0 ||
                             !phoneOtpTurnstile.isTokenUsable ||
                             phoneDuplicate ||
                             phoneDuplicateChecking ||
@@ -1860,7 +1908,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                             : "bg-brandBlue text-white active:opacity-80"
                         )}
                       >
-                        {otpCountdown > 0 ? `${otpCountdown}s` : "Send OTP"}
+                        {otpCountdown > 0 ? `Resend in ${otpCountdown}s` : "Send OTP"}
                       </button>
                     )}
                   </div>
@@ -1870,17 +1918,56 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       This phone number is already used by another account
                     </p>
                   )}
-                  <TurnstileWidget
-                    siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
-                    setContainer={phoneOtpTurnstile.setContainer}
-                    className="min-h-[65px]"
-                  />
-                  {phoneOtpTurnstile.error ? (
-                    <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
-                      {phoneOtpTurnstile.error}
+                  {!phoneOtpUnavailable ? (
+                    <>
+                      <TurnstileWidget
+                        siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
+                        setContainer={phoneOtpTurnstile.setContainer}
+                        className="min-h-[65px]"
+                      />
+                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
+                        Standard SMS rates may apply.
+                      </p>
+                      {phoneOtpTurnstile.error ? (
+                        <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                          {phoneOtpTurnstile.error}
+                        </p>
+                      ) : null}
+                      <TurnstileDebugPanel visible={showTurnstileDiag} diag={phoneOtpTurnstile.diag} />
+                    </>
+                  ) : (
+                    <div className="rounded-[10px] border border-[rgba(163,168,190,0.28)] bg-[rgba(163,168,190,0.12)] px-3 py-2">
+                      <p className="text-[12px] font-semibold text-[var(--text-tertiary)]">Unavailable</p>
+                    </div>
+                  )}
+                  {phoneOtpMessage ? (
+                    <p className={cn(
+                      "text-[12px] font-medium pl-1",
+                      phoneOtpUnavailable
+                        ? "text-[var(--text-tertiary)]"
+                        : "text-[var(--text-secondary)]",
+                    )}>
+                      {phoneOtpMessage}
                     </p>
                   ) : null}
-                  <TurnstileDebugPanel visible={showTurnstileDiag} diag={phoneOtpTurnstile.diag} />
+                  {phoneOtpRequested && phoneSentMaskedHint ? (
+                    <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
+                      Code sent to {phoneSentMaskedHint}
+                    </p>
+                  ) : null}
+                  {phoneOtpRequested ? (
+                    <>
+                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
+                        SMS can take up to a minute to arrive.
+                      </p>
+                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
+                        Use the latest code only. Older codes may stop working.
+                      </p>
+                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
+                        After checking your messages, come back here to enter the code.
+                      </p>
+                    </>
+                  ) : null}
                   {!phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">
                       <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
