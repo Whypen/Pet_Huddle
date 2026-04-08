@@ -40,11 +40,38 @@ const isAlreadyRegisteredError = (message: string) => {
 
 const findAuthUserIdByEmail = async (
   serviceClient: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceRoleKey: string,
   email: string,
 ): Promise<{ userId: string | null; error: string | null }> => {
   const normalized = email.toLowerCase();
+
+  // Prefer direct admin email lookup to avoid pagination misses on large user sets.
+  try {
+    const response = await fetch(
+      `${supabaseUrl}/auth/v1/admin/users?email=${encodeURIComponent(normalized)}`,
+      {
+        method: "GET",
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    if (response.ok) {
+      const payload = (await response.json()) as { users?: Array<{ id?: string; email?: string }> };
+      const users = payload.users || [];
+      const match = users.find((user) => String(user.email || "").trim().toLowerCase() === normalized);
+      if (match?.id) return { userId: match.id, error: null };
+      if (users.length === 0) return { userId: null, error: null };
+    }
+  } catch {
+    // Fall through to paginated lookup.
+  }
+
   const perPage = 200;
-  const maxPages = 25;
+  const maxPages = 200;
 
   for (let page = 1; page <= maxPages; page += 1) {
     const listed = await serviceClient.auth.admin.listUsers({ page, perPage });
@@ -132,17 +159,31 @@ Deno.serve(async (req: Request) => {
 
     // Recovery path for orphan auth users:
     // email exists in auth.users but no profile row (deleted/abandoned account).
-    const { userId, error: lookupError } = await findAuthUserIdByEmail(serviceClient, email);
+    const { userId, error: lookupError } = await findAuthUserIdByEmail(
+      serviceClient,
+      supabaseUrl,
+      serviceRoleKey,
+      email,
+    );
     if (lookupError) return json(500, { error: "auth_user_lookup_failed" });
     if (!userId) return json(400, { error: originalError });
 
     const { data: profileRow, error: profileLookupError } = await serviceClient
       .from("profiles")
-      .select("id")
+      .select("id,account_status")
       .eq("id", userId)
       .maybeSingle();
     if (profileLookupError) return json(500, { error: "profile_lookup_failed" });
-    if (profileRow) return json(400, { error: originalError });
+    const isRemovedProfile = Boolean(profileRow && profileRow.account_status === "removed");
+    if (profileRow && !isRemovedProfile) return json(400, { error: originalError });
+
+    if (isRemovedProfile) {
+      const { error: profileDeleteError } = await serviceClient
+        .from("profiles")
+        .delete()
+        .eq("id", userId);
+      if (profileDeleteError) return json(500, { error: "removed_profile_cleanup_failed" });
+    }
 
     const deleteResult = await serviceClient.auth.admin.deleteUser(userId);
     if (deleteResult.error) return json(500, { error: "orphan_auth_cleanup_failed" });
