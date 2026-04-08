@@ -35,6 +35,7 @@ const speciesOptions = [
   { id: "dog", label: "Dogs" },
   { id: "cat", label: "Cats" },
   { id: "bird", label: "Birds" },
+  { id: "fish", label: "Fish" },
   { id: "reptile", label: "Reptiles" },
   { id: "small_mammal", label: "Small Mammals" },
   { id: "farm_animal", label: "Farm Animals" },
@@ -113,6 +114,25 @@ const speciesBreeds: Record<string, string[]> = {
     "Rosella",
     "Sun Conure",
     "Yellow-naped Amazon",
+    "Others",
+  ],
+  fish: [
+    "Angelfish",
+    "Betta",
+    "Corydoras Catfish",
+    "Danio",
+    "Tetras",
+    "Discus",
+    "Guppy",
+    "Goldfish",
+    "Koi",
+    "Molly",
+    "Oscar",
+    "Pleco",
+    "Platy",
+    "Rainbowfish",
+    "Rasbora",
+    "Swordtail",
     "Others",
   ],
   reptile: [
@@ -571,7 +591,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
   const [searchParams] = useSearchParams();
   const petIdParam = searchParams.get("id");
   const petId = onboardingMode ? null : petIdParam;
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const { data: signupData } = useSignup();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(!!petId);
@@ -1249,14 +1269,29 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       const shouldGoHome = onboardingMode || location.pathname === "/set-pet";
       if (shouldGoHome) {
         if (onboardingMode) {
-          const { error: onboardingError } = await supabase
+          const { data: onboardingRow, error: onboardingError } = await supabase
             .from("profiles")
             .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
-            .eq("id", activeUser.id);
+            .eq("id", activeUser.id)
+            .select("id")
+            .maybeSingle();
           if (onboardingError) {
             toast.error(humanizeNumericDbError(onboardingError.message || "Failed to finalize onboarding. Please retry."));
             return;
           }
+          if (!onboardingRow) {
+            const { error: onboardingUpsertError } = await supabase
+              .from("profiles")
+              .upsert(
+                { id: activeUser.id, onboarding_completed: true, updated_at: new Date().toISOString() },
+                { onConflict: "id" },
+              );
+            if (onboardingUpsertError) {
+              toast.error(humanizeNumericDbError(onboardingUpsertError.message || "Failed to finalize onboarding. Please retry."));
+              return;
+            }
+          }
+          await refreshProfile();
           clearOnboardingDraftKeys(activeUser.id);
           toast.success("Welcome to Huddle! Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!");
         }
