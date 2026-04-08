@@ -484,6 +484,12 @@
 /* Date input alignment: keep native picker, force trigger to far-right. */
 input.huddle-date-input {
   position: relative;
+  text-align: left;
+  text-align-last: left;
+  padding-left: 0;
+}
+input.huddle-date-input::-webkit-date-and-time-value {
+  text-align: left;
 }
 input.huddle-date-input::-webkit-calendar-picker-indicator {
   position: absolute;

@@ -1134,6 +1134,14 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       const shouldGoHome = onboardingMode || location.pathname === "/set-pet";
       if (shouldGoHome) {
         if (onboardingMode) {
+          const { error: onboardingError } = await supabase
+            .from("profiles")
+            .update({ onboarding_completed: true, updated_at: new Date().toISOString() })
+            .eq("id", activeUser.id);
+          if (onboardingError) {
+            toast.error(humanizeNumericDbError(onboardingError.message || "Failed to finalize onboarding. Please retry."));
+            return;
+          }
           clearOnboardingDraftKeys(activeUser.id);
           toast.success("Welcome to Huddle! Pet care tracking, nearby connections, and all pet community happenings – right in your palm now!");
         }
@@ -1353,7 +1361,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                     today.setHours(0, 0, 0, 0);
                     setFieldErrors((prev) => ({ ...prev, petDob: petDob > today ? "Pet DOB cannot be in the future" : "" }));
                   }}
-                  className="field-input-core pr-3"
+                  className="field-input-core pr-10 huddle-date-input"
                   aria-invalid={Boolean(fieldErrors.petDob)}
                 />
               </div>
@@ -1624,7 +1632,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                     type="date"
                     value={visitInput.visitDate}
                     onChange={(e) => setVisitInput((prev) => ({ ...prev, visitDate: e.target.value }))}
-                    className="field-input-core pr-3"
+                    className="field-input-core pr-10 huddle-date-input"
                   />
                 </div>
 
@@ -1738,7 +1746,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
                     type="date"
                     value={reminderInput.reminderDate}
                     onChange={(e) => setReminderInput((prev) => ({ ...prev, reminderDate: e.target.value }))}
-                    className="field-input-core pr-3"
+                    className="field-input-core pr-10 huddle-date-input"
                   />
                 </div>
 
