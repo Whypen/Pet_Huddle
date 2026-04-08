@@ -20,7 +20,7 @@ import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
@@ -151,6 +151,9 @@ type EditProfileProps = {
 
 const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const { t } = useLanguage();
+  const showTurnstileDiag =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
   const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
   const { data: signupData, reset: resetSignup, setFlowState } = useSignup();
@@ -1064,7 +1067,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       return;
     }
     const result = await requestPhoneOtpCode(formData.phone.trim(), turnstileToken);
-    phoneOtpTurnstile.reset();
     if (!result.ok) {
       toast.error(result.error || "Failed to send OTP. Please retry.");
       return;
@@ -1842,6 +1844,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         onClick={requestPhoneOtp}
                         disabled={
                           otpCountdown > 0 ||
+                          !phoneOtpTurnstile.isTokenUsable ||
                           phoneDuplicate ||
                           phoneDuplicateChecking ||
                           (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
@@ -1849,6 +1852,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         className={cn(
                           "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
                           (otpCountdown > 0 ||
+                            !phoneOtpTurnstile.isTokenUsable ||
                             phoneDuplicate ||
                             phoneDuplicateChecking ||
                             (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone)))
@@ -1876,6 +1880,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       {phoneOtpTurnstile.error}
                     </p>
                   ) : null}
+                  <TurnstileDebugPanel visible={showTurnstileDiag} diag={phoneOtpTurnstile.diag} />
                   {!phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">
                       <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>

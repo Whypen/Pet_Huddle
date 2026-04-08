@@ -1462,7 +1462,6 @@ export function VerifyIdentity({
     setPhoneVerificationError(null);
     const result = await requestPhoneOtp(normalized, turnstileToken);
     setPhoneVerificationLoading(false);
-    phoneOtpTurnstile.reset();
     if (!result.ok) {
       setPhoneVerificationState("failed");
       setPhoneVerificationError(result.error || "Failed to send OTP.");
