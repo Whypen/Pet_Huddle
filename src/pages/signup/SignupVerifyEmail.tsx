@@ -12,7 +12,7 @@ import { useSignup } from "@/contexts/SignupContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
-import { isEmailInboxLauncherEnabled, launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
+import { launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
@@ -345,10 +345,6 @@ const SignupVerifyEmail = () => {
   };
 
   const handleOpenMail = async () => {
-    if (!isEmailInboxLauncherEnabled()) {
-      toast.message("Open your mail app manually.");
-      return;
-    }
     const result = await launchEmailInboxBestEffort();
     if (!result.launched) {
       toast.message("Open your mail app manually.");

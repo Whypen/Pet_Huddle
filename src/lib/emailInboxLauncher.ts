@@ -1,6 +1,3 @@
-const ENABLE_TEST_INBOX_LAUNCHER =
-  String(import.meta.env.VITE_TEST_EMAIL_INBOX_LAUNCHER || "").toLowerCase() === "true";
-
 const WEB_INBOX_SCHEMES = [
   "message://",
   "googlegmail://",
@@ -9,21 +6,17 @@ const WEB_INBOX_SCHEMES = [
 ] as const;
 
 export type EmailInboxLaunchResult = {
-  enabled: boolean;
   launched: boolean;
   attemptedSchemes: string[];
-  reason: "disabled" | "launched" | "not_confirmed";
+  reason: "launched" | "not_confirmed";
 };
 
-export const isEmailInboxLauncherEnabled = (): boolean => ENABLE_TEST_INBOX_LAUNCHER;
-
 export const launchEmailInboxBestEffort = async (): Promise<EmailInboxLaunchResult> => {
-  if (!ENABLE_TEST_INBOX_LAUNCHER || typeof document === "undefined" || typeof window === "undefined") {
+  if (typeof document === "undefined" || typeof window === "undefined") {
     return {
-      enabled: ENABLE_TEST_INBOX_LAUNCHER,
       launched: false,
       attemptedSchemes: [],
-      reason: "disabled",
+      reason: "not_confirmed",
     };
   }
 
@@ -60,7 +53,6 @@ export const launchEmailInboxBestEffort = async (): Promise<EmailInboxLaunchResu
   }
 
   return {
-    enabled: true,
     launched,
     attemptedSchemes,
     reason: launched ? "launched" : "not_confirmed",

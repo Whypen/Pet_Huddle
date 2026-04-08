@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { isEmailInboxLauncherEnabled, launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
+import { launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
 
 type PageState = "waiting" | "confirming" | "success" | "error";
 
@@ -74,10 +74,6 @@ const SignupEmailConfirmation = () => {
   };
 
   const handleOpenMail = async () => {
-    if (!isEmailInboxLauncherEnabled()) {
-      toast.message("Open your mail app manually.");
-      return;
-    }
     const result = await launchEmailInboxBestEffort();
     if (!result.launched) {
       toast.message("Open your mail app manually.");

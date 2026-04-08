@@ -1827,7 +1827,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       setPhoneOtpVerified(false);
                       setPhoneOtpCode("");
                       setPhoneOtpUnavailable(false);
-                      setPhoneOtpMessage(null);
+                      setPhoneOtpMessage("Changing your phone number will require a new code.");
                       setPhoneSentMaskedHint(null);
                     }}
                     className="p-1 text-muted-foreground"
@@ -1853,7 +1853,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                           setPhoneOtpCode("");
                           setPhoneSentMaskedHint(null);
                           setPhoneOtpUnavailable(false);
-                          setPhoneOtpMessage("Changing your phone number will require a new code.");
                         } else {
                           setPhoneOtpMessage(null);
                         }
@@ -1931,19 +1930,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                     <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
                       Code sent to {phoneSentMaskedHint}
                     </p>
-                  ) : null}
-                  {phoneOtpRequested ? (
-                    <>
-                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
-                        SMS can take up to a minute to arrive.
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
-                        Use the latest code only. Older codes may stop working.
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
-                        After checking your messages, come back here to enter the code.
-                      </p>
-                    </>
                   ) : null}
                   {!phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">

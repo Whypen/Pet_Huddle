@@ -390,22 +390,6 @@ function PhoneVerificationCard({
                 Code sent to {maskedPhoneHint}
               </p>
             ) : null}
-            {otpSent ? (
-              <>
-                <p className="text-[12px] text-[var(--text-tertiary)]">
-                  SMS can take up to a minute to arrive.
-                </p>
-                <p className="text-[12px] text-[var(--text-tertiary)]">
-                  Use the latest code only. Older codes may stop working.
-                </p>
-                <p className="text-[12px] text-[var(--text-tertiary)]">
-                  Changing your phone number will require a new code.
-                </p>
-                <p className="text-[12px] text-[var(--text-tertiary)]">
-                  After checking your messages, come back here to enter the code.
-                </p>
-              </>
-            ) : null}
           </div>
         </>
       )}
