@@ -15,7 +15,6 @@ import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { TEMPERAMENT_OPTIONS } from "@/lib/constants";
 import { useLanguage } from "@/contexts/LanguageContext";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
@@ -36,7 +35,6 @@ const speciesOptions = [
   { id: "dog", label: "Dogs" },
   { id: "cat", label: "Cats" },
   { id: "bird", label: "Birds" },
-  { id: "fish", label: "Fish" },
   { id: "reptile", label: "Reptiles" },
   { id: "small_mammal", label: "Small Mammals" },
   { id: "farm_animal", label: "Farm Animals" },
@@ -44,16 +42,133 @@ const speciesOptions = [
 ];
 
 const speciesBreeds: Record<string, string[]> = {
-  dog: ["Labrador Retriever", "Golden Retriever", "French Bulldog", "Poodle", "Corgi", "Shiba Inu", "Other"],
-  cat: ["Siamese", "Persian", "Maine Coon", "Ragdoll", "Bengal", "British Shorthair", "Sphynx", "Scottish Fold", "Abyssinian", "Other"],
-  bird: ["Budgie", "Cockatiel", "Canary", "Parrot", "Other"],
-  fish: ["Betta", "Goldfish", "Guppy", "Tetra", "Other"],
-  reptile: ["Gecko", "Bearded Dragon", "Turtle", "Snake", "Other"],
-  small_mammal: ["Hamster", "Rabbit", "Guinea Pig", "Ferret", "Other"],
-  farm_animal: ["Goat", "Pig", "Chicken", "Duck", "Other"],
+  dog: [
+    "Beagle",
+    "Border Collie",
+    "Bulldog",
+    "Cavalier King Charles Spaniel",
+    "Chihuahua",
+    "Cocker Spaniel",
+    "Corgi",
+    "Dachshund",
+    "French Bulldog",
+    "German Shepherd",
+    "Golden Retriever",
+    "Husky",
+    "Jack Russell Terrier",
+    "Labrador Retriever",
+    "Local Mixed-Breed",
+    "Maltese",
+    "Pit Bull Terrier",
+    "Pomeranian",
+    "Poodle",
+    "Pug",
+    "Rottweiler",
+    "Shiba Inu",
+    "Shih Tzu",
+    "Yorkshire Terrier",
+    "Others",
+  ],
+  cat: [
+    "Abyssinian",
+    "American Shorthair",
+    "American Wirehair",
+    "Bengal",
+    "Birman",
+    "Bombay",
+    "British Shorthair",
+    "Burmese",
+    "Chartreux",
+    "Cornish Rex",
+    "Devon Rex",
+    "Domestic Shorthair",
+    "Egyptian Mau",
+    "Exotic Shorthair",
+    "Japanese Bobtail",
+    "Local Mixed-Breed",
+    "Maine Coon",
+    "Manx",
+    "Norwegian Forest Cat",
+    "Oriental Shorthair",
+    "Persian",
+    "Ragdoll",
+    "Russian Blue",
+    "Scottish Fold",
+    "Siamese",
+    "Sphynx",
+    "Others",
+  ],
+  bird: [
+    "Budgerigar",
+    "Caique",
+    "Canary",
+    "Cockatiel",
+    "Diamond Dove",
+    "Finch",
+    "Lovebird",
+    "Parakeet",
+    "Parrotlet",
+    "Parrots",
+    "Quaker Parrot",
+    "Rosella",
+    "Sun Conure",
+    "Yellow-naped Amazon",
+    "Others",
+  ],
+  reptile: [
+    "Bearded Dragon",
+    "Gecko",
+    "Snake",
+    "Turtle",
+    "Others",
+  ],
+  small_mammal: [
+    "Chinchilla",
+    "Ferret",
+    "Gerbil",
+    "Guinea Pig",
+    "Hamster",
+    "Hedgehog",
+    "Hermit Crab",
+    "Mouse",
+    "Rabbit",
+    "Rat",
+    "Sugar Glider",
+    "Others",
+  ],
+  farm_animal: [
+    "Alpaca",
+    "Chicken",
+    "Donkey",
+    "Duck",
+    "Goat",
+    "Llama",
+    "Miniature Horse",
+    "Pig",
+    "Quail",
+    "Sheep",
+    "Others",
+  ],
 };
 
 const genderOptions = ["Male", "Female"];
+const TEMPERAMENT_OPTIONS = [
+  "Affectionate",
+  "Aggressive",
+  "Anxious",
+  "Calm",
+  "Curious",
+  "Energetic",
+  "Fearful",
+  "Food-motivated",
+  "Friendly",
+  "Independent",
+  "Loyal",
+  "Playful",
+  "Protective",
+  "Shy",
+  "Trainable",
+];
 
 type EditPetProfileProps = {
   onboardingMode?: boolean;
@@ -1157,6 +1272,117 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
     }
   };
 
+  const handleSaveDraft = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const activeUser = user ?? sessionData.session?.user ?? null;
+    if (!activeUser) {
+      if (!onboardingMode) {
+        toast.error("Please sign in again to save your pet profile.");
+        return;
+      }
+      try {
+        const prefillKey = resolveSetPetPrefillKey();
+        const localId = savedPetId || `local-${crypto.randomUUID()}`;
+        if (prefillKey) {
+          localStorage.setItem(
+            prefillKey,
+            JSON.stringify({
+              prefill_owner: normalizeStorageOwner(signupData.email || ""),
+              ...formData,
+              saved_pet_id: localId,
+              photo_preview: photoPreview || "",
+              updated_at: new Date().toISOString(),
+            }),
+          );
+        }
+        setSavedPetId(localId);
+        toast.success("Draft saved");
+      } catch {
+        toast.error("Could not save draft. Please try again.");
+      }
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const draftPetId = savedPetId || petId || crypto.randomUUID();
+      let photoUrl = photoPreview;
+
+      if (photoFile) {
+        const fileExt = photoFile.name.split(".").pop();
+        const fileName = `${activeUser.id}/${draftPetId}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from("pets")
+          .upload(fileName, photoFile, { upsert: true });
+        if (uploadError) {
+          toast.error("Photo upload failed. Please retry.");
+          return;
+        }
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("pets").getPublicUrl(fileName);
+        photoUrl = publicUrl;
+      }
+
+      const petData = {
+        name: formData.name,
+        species: formData.species === "others" ? formData.custom_species : formData.species,
+        breed: formData.breed || null,
+        gender: formData.gender || null,
+        neutered_spayed: formData.neutered_spayed,
+        dob: formData.dob || null,
+        weight: parseDecimalInput(formData.weight),
+        weight_unit: formData.weight_unit,
+        bio: formData.bio || null,
+        routine: formData.routine || null,
+        clinic_name: formData.clinic_name || null,
+        preferred_vet: formData.preferred_vet || null,
+        phone_no: formData.phone_no || null,
+        vet_contact: [formData.clinic_name, formData.preferred_vet, formData.phone_no].filter(Boolean).join(" | ") || null,
+        microchip_id: formData.microchip_id || null,
+        temperament: formData.temperament.length > 0 ? formData.temperament : null,
+        vet_visit_records: (formData.vet_visit_records as unknown as Json[]).length > 0 ? (formData.vet_visit_records as unknown as Json[]) : [],
+        set_reminder: (formData.set_reminder as unknown as Json) ?? null,
+        medications: (formData.medications as unknown as Json[]).length > 0 ? (formData.medications as unknown as Json[]) : [],
+        is_active: formData.is_active,
+        is_public: formData.is_public,
+        photo_url: photoUrl,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (savedPetId || petId) {
+        const { error } = await supabase.from("pets").update(petData).eq("id", draftPetId);
+        if (error) {
+          toast.error(humanizeNumericDbError(error.message || "Failed to save pet draft. Please retry."));
+          return;
+        }
+      } else {
+        const { error } = await supabase.from("pets").insert({
+          id: draftPetId,
+          owner_id: activeUser.id,
+          ...petData,
+          created_at: new Date().toISOString(),
+        });
+        if (error) {
+          toast.error(humanizeNumericDbError(error.message || "Failed to save pet draft. Please retry."));
+          return;
+        }
+      }
+
+      setSavedPetId(draftPetId);
+      setIsNewPet(false);
+      setPhotoPreview(photoUrl);
+      setPhotoFile(null);
+      await queryClient.invalidateQueries({ queryKey: ["pets"] });
+      toast.success("Draft saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(humanizeNumericDbError(message || "Failed to save pet draft. Please retry."));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-full min-h-0 bg-background flex items-center justify-center">
@@ -1170,22 +1396,33 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       <GlobalHeader onUpgradeClick={() => setIsPremiumOpen(true)} />
 
       <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-muted">
+        <button
+          onClick={() => {
+            if (onboardingMode) {
+              navigate("/set-profile");
+              return;
+            }
+            navigate(-1);
+          }}
+          className="p-2 -ml-2 rounded-full hover:bg-muted"
+        >
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold">Tell us about your pet</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Helps improve their health tracking</p>
         </div>
-        <NeuControl
-          size="icon-md"
-          variant="tertiary"
-          onClick={handleSave}
-          disabled={profileMode !== "edit" || saving}
-          aria-label="Save"
-        >
-          {saving ? <Loader2 size={20} strokeWidth={1.75} className="animate-spin" aria-hidden /> : <Save size={20} strokeWidth={1.75} aria-hidden />}
-        </NeuControl>
+        {!onboardingMode && (
+          <NeuControl
+            size="icon-md"
+            variant="tertiary"
+            onClick={handleSave}
+            disabled={profileMode !== "edit" || saving}
+            aria-label="Save"
+          >
+            {saving ? <Loader2 size={20} strokeWidth={1.75} className="animate-spin" aria-hidden /> : <Save size={20} strokeWidth={1.75} aria-hidden />}
+          </NeuControl>
+        )}
       </header>
       <div className="px-4 pt-2">
         <div className="grid grid-cols-2 border-b border-border">
@@ -1309,7 +1546,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
               <label className="text-sm font-medium mb-2 block">{t("Breed")}</label>
               <NeuDropdown
                 placeholder="Select"
-                options={(speciesBreeds[formData.species] || ["Other"]).map((breed) => ({ value: breed, label: t(breed) }))}
+                options={(speciesBreeds[formData.species] || ["Others"]).map((breed) => ({ value: breed, label: t(breed) }))}
                 value={formData.breed}
                 onValueChange={(value) => setFormData((prev) => ({ ...prev, breed: value }))}
               />
@@ -1928,6 +2165,30 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
         </div>
         )}
       </StyledScrollArea>
+
+      {onboardingMode && profileMode === "edit" && (
+        <div
+          className="sticky bottom-0 left-0 right-0 bg-background border-t border-border/20 px-4 py-3 space-y-2"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom,0px) + 12px)" }}
+        >
+          <NeuButton
+            variant="primary"
+            className="w-full h-12"
+            disabled={saving}
+            onClick={handleSave}
+          >
+            {saving ? "Saving…" : "Complete profile"}
+          </NeuButton>
+          <NeuButton
+            variant="ghost"
+            className="w-full h-11"
+            disabled={saving}
+            onClick={handleSaveDraft}
+          >
+            Save Draft
+          </NeuButton>
+        </div>
+      )}
 
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
     </div>

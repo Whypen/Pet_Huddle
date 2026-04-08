@@ -1737,7 +1737,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         toast.success("Profile completed successfully.");
         navigate(shouldSetPet ? "/set-pet" : "/", {
           state: shouldSetPet ? null : { fromSetProfileNoPet: true },
-          replace: true,
+          replace: !shouldSetPet,
         });
       } else {
         // Stay on Edit Profile after save (no auto-navigation bounce).
