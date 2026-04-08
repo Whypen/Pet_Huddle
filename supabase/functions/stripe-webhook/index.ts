@@ -768,16 +768,36 @@ async function handlePaymentIntentSucceeded(
     const escrowRelease = new Date();
     escrowRelease.setHours(escrowRelease.getHours() + 48);
 
+    // Derive fee amounts from payment intent metadata (set by checkout creation)
+    // or from Stripe's captured application_fee_amount. Never recalculate from
+    // paymentIntent.amount alone because that is now the customer total (quote × 1.10),
+    // not the quote, so a raw × 0.1 multiply would produce incorrect values.
+    const nannyQuoteCents = Number(meta?.quote_amount_cents || 0);
+    const nannyPlatformGross = Number(meta?.platform_gross_cents || 0)
+      || (typeof paymentIntent.application_fee_amount === "number" ? paymentIntent.application_fee_amount : 0);
+    const nannyRequesterFee = Number(meta?.requester_fee_cents || 0);
+    const nannyProviderFee = Number(meta?.provider_fee_cents || 0);
+    const nannySitterPayout = Number(meta?.provider_payout_cents || 0)
+      || (paymentIntent.amount - nannyPlatformGross);
+
+    const nannyLatestCharge =
+      typeof paymentIntent.latest_charge === "string"
+        ? paymentIntent.latest_charge
+        : paymentIntent.latest_charge?.id;
+
     await supabase
       .from("marketplace_bookings")
       .insert({
         client_id: meta["user_id"] || "unknown",
         sitter_id: meta.nanny_id,
         stripe_payment_intent_id: paymentIntent.id,
-        stripe_charge_id: latestCharge || null,
-        amount: paymentIntent.amount,
-        platform_fee: Math.round(paymentIntent.amount * 0.1),
-        sitter_payout: paymentIntent.amount - Math.round(paymentIntent.amount * 0.1),
+        stripe_charge_id: nannyLatestCharge || null,
+        amount: paymentIntent.amount,           // customer total
+        platform_fee: nannyPlatformGross,        // gross platform capture
+        sitter_payout: nannySitterPayout,        // provider payout
+        quote_amount: nannyQuoteCents || null,
+        requester_fee: nannyRequesterFee || null,
+        provider_fee: nannyProviderFee || null,
         status: "confirmed",
         paid_at: new Date().toISOString(),
         escrow_release_date: escrowRelease.toISOString(),

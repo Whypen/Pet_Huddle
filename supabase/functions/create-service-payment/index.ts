@@ -131,8 +131,15 @@ serve(async (req) => {
       await supabase.from("profiles").update({ stripe_customer_id: customerId }).eq("id", user.id);
     }
 
-    const platformFee = Math.round(amountCents * 0.1);
-    const providerPayout = amountCents - platformFee;
+    // Dual-sided fee: 10% added to requester charge, 10% deducted from provider payout
+    const REQUESTER_FEE_RATE = 0.10;
+    const PROVIDER_FEE_RATE = 0.10;
+    const quoteCents = amountCents; // authoritative from server-side quote_card
+    const requesterFee = Math.round(quoteCents * REQUESTER_FEE_RATE);
+    const providerFee = Math.round(quoteCents * PROVIDER_FEE_RATE);
+    const customerTotal = quoteCents + requesterFee;
+    const providerPayout = quoteCents - providerFee;
+    const platformGross = requesterFee + providerFee;
 
     // Idempotency key scoped to this service chat prevents duplicate checkout
     // sessions if the client retries on network failure.
@@ -145,10 +152,10 @@ serve(async (req) => {
           {
             price_data: {
               currency,
-              unit_amount: amountCents,
+              unit_amount: customerTotal,
               product_data: {
                 name: "Pet Care Service Booking",
-                description: rate ? `Service booking (${rate})` : "Service booking",
+                description: rate ? `Service booking (${rate}) — includes 10% platform service fee` : "Service booking — includes 10% platform service fee",
               },
             },
             quantity: 1,
@@ -161,7 +168,12 @@ serve(async (req) => {
             requester_id: user.id,
             provider_id: serviceChat.provider_id,
             provider_stripe_account_id: providerCarer.stripe_account_id,
-            platform_fee_cents: String(platformFee),
+            quote_cents: String(quoteCents),
+            requester_fee_cents: String(requesterFee),
+            provider_fee_cents: String(providerFee),
+            customer_total_cents: String(customerTotal),
+            platform_gross_cents: String(platformGross),
+            platform_fee_cents: String(platformGross),   // kept for backward compat with any tooling
             provider_payout_cents: String(providerPayout),
           },
         },

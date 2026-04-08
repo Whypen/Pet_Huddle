@@ -99,9 +99,15 @@ serve(async (req: Request) => {
       );
     }
 
-    // Calculate fees
-    const platformFee = Math.round(amount * 0.1); // 10% platform fee
-    const sitterPayout = amount - platformFee;
+    // Calculate dual-sided fees (10% from requester + 10% from provider)
+    const REQUESTER_FEE_RATE = 0.10;
+    const PROVIDER_FEE_RATE = 0.10;
+    const quoteAmount = amount; // validated quote in cents (provider's price)
+    const requesterFee = Math.round(quoteAmount * REQUESTER_FEE_RATE); // added to customer charge
+    const providerFee = Math.round(quoteAmount * PROVIDER_FEE_RATE);   // deducted from provider payout
+    const customerTotal = quoteAmount + requesterFee;   // what Stripe charges the customer
+    const sitterPayout = quoteAmount - providerFee;     // what sitter receives
+    const platformGross = requesterFee + providerFee;   // what Huddle keeps
 
     // Generate idempotency key (required format)
     if (!clientIdempotencyKey) {
@@ -133,15 +139,15 @@ serve(async (req: Request) => {
                 currency: normalizedCurrency,
                 product_data: {
                   name: "Pet Sitting Service",
-                  description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()}`,
+                  description: `Service from ${new Date(serviceStartDate).toLocaleDateString()} to ${new Date(serviceEndDate).toLocaleDateString()} (includes 10% platform service fee)`,
                 },
-                unit_amount: amount,
+                unit_amount: customerTotal,
               },
               quantity: 1,
             },
           ],
           payment_intent_data: {
-            application_fee_amount: platformFee,
+            application_fee_amount: platformGross,
             metadata: {
               client_id: clientId,
               sitter_id: sitterId,
@@ -151,6 +157,12 @@ serve(async (req: Request) => {
               location_name: locationName || "",
               safe_harbor_accepted: "true",
               type: "marketplace_booking",
+              quote_amount_cents: String(quoteAmount),
+              requester_fee_cents: String(requesterFee),
+              provider_fee_cents: String(providerFee),
+              customer_total_cents: String(customerTotal),
+              platform_gross_cents: String(platformGross),
+              provider_payout_cents: String(sitterPayout),
             },
           },
           metadata: {
@@ -185,9 +197,12 @@ serve(async (req: Request) => {
         client_id: clientId,
         sitter_id: sitterId,
         stripe_payment_intent_id: paymentIntentId,
-        amount,
-        platform_fee: platformFee,
+        amount: customerTotal,
+        platform_fee: platformGross,
         sitter_payout: sitterPayout,
+        quote_amount: quoteAmount,
+        requester_fee: requesterFee,
+        provider_fee: providerFee,
         service_start_date: serviceStartDate,
         service_end_date: serviceEndDate,
         location_name: locationName || null,

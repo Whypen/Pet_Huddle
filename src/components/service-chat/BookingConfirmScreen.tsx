@@ -31,6 +31,13 @@ export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceT
   const amountCents = useMemo(() => toAmountCents(String(quoteCard?.finalPrice || "")), [quoteCard?.finalPrice]);
   const currency = String(quoteCard?.currency || "HKD").toLowerCase();
 
+  // Fee breakdown for display — server enforces these same rates
+  const quotePrice = Number(String(quoteCard?.finalPrice || "0").trim());
+  const hasValidPrice = Number.isFinite(quotePrice) && quotePrice > 0;
+  const serviceFeeAmount = hasValidPrice ? Math.round(quotePrice * 0.10 * 100) / 100 : 0;
+  const totalDue = hasValidPrice ? quotePrice + serviceFeeAmount : 0;
+  const displayCurrency = String(quoteCard?.currency || "HKD");
+
   const pay = async () => {
     if (!quoteCard || !roomId || amountCents <= 0 || !canContinue) return;
     setLoading(true);
@@ -61,11 +68,22 @@ export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceT
           <DialogHeader>
             <DialogTitle>Confirm booking</DialogTitle>
           </DialogHeader>
-          <div className="rounded-2xl border border-border/40 bg-muted/20 p-3 text-sm">
-            <p className="font-semibold text-brandText">
-              {String(quoteCard?.currency || "HKD")} {String(quoteCard?.finalPrice || "—")} / {String(quoteCard?.rate || "visit")}
-            </p>
-            <p className="text-muted-foreground mt-1">{String(requestServiceType || "Service")}</p>
+          <div className="rounded-2xl border border-border/40 bg-muted/20 p-3 text-sm space-y-1">
+            <p className="text-muted-foreground">{String(requestServiceType || "Service")}</p>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Provider quote ({String(quoteCard?.rate || "visit")})</span>
+              <span>{displayCurrency} {String(quoteCard?.finalPrice || "—")}</span>
+            </div>
+            {hasValidPrice && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>Platform service fee (10%)</span>
+                <span>{displayCurrency} {serviceFeeAmount.toFixed(serviceFeeAmount % 1 === 0 ? 0 : 2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-semibold text-brandText border-t border-border/30 pt-1 mt-1">
+              <span>Total you pay</span>
+              <span>{hasValidPrice ? `${displayCurrency} ${totalDue % 1 === 0 ? totalDue : totalDue.toFixed(2)}` : "—"}</span>
+            </div>
           </div>
           <label className="flex items-start gap-2 text-sm text-muted-foreground">
             <input type="checkbox" checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />

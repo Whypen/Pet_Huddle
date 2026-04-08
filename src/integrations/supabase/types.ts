@@ -1361,6 +1361,9 @@ export type Database = {
           location_name: string | null
           paid_at: string | null
           platform_fee: number
+          provider_fee: number | null
+          quote_amount: number | null
+          requester_fee: number | null
           service_end_date: string
           service_start_date: string
           sitter_id: string
@@ -1383,6 +1386,9 @@ export type Database = {
           location_name?: string | null
           paid_at?: string | null
           platform_fee: number
+          provider_fee?: number | null
+          quote_amount?: number | null
+          requester_fee?: number | null
           service_end_date: string
           service_start_date: string
           sitter_id: string
@@ -1405,6 +1411,9 @@ export type Database = {
           location_name?: string | null
           paid_at?: string | null
           platform_fee?: number
+          provider_fee?: number | null
+          quote_amount?: number | null
+          requester_fee?: number | null
           service_end_date?: string
           service_start_date?: string
           sitter_id?: string
