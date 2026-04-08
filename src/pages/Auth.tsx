@@ -14,6 +14,7 @@ import huddleLogoImage from "@/assets/huddle-logo-transparent.png";
 import appleIcon from "@/assets/Apple icon.png";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSignup } from "@/contexts/SignupContext";
 import { LegalModal } from "@/components/modals/LegalModal";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
@@ -39,6 +40,7 @@ type EmailModalStep = "choice" | "signin" | "mfa-challenge";
 const Auth = () => {
   const { t } = useLanguage();
   const { signIn } = useAuth();
+  const { setFlowState } = useSignup();
   const navigate = useNavigate();
   const location = useLocation();
   const showTurnstileDiag = useMemo(
@@ -230,6 +232,7 @@ const Auth = () => {
     setEmailModalOpen(false);
     setEmailModalStep("choice");
     reset({ email: "", password: "", remember: true });
+    setFlowState("signup");
     navigate("/signup/dob");
   };
 
