@@ -246,9 +246,15 @@ const SignupCredentials = () => {
     const trimmedEmail = email.trim();
     const trimmedPhone = phone.trim();
     const duplicateKey = `${trimmedEmail.toLowerCase()}|${trimmedPhone}`;
-    if (!trimmedEmail && !trimmedPhone) {
+    const emailReady = emailSchema.safeParse(trimmedEmail).success;
+    const phoneReady = Boolean(trimmedPhone) && isValidPhoneNumber(trimmedPhone);
+
+    // Do not trigger duplicate checks (or sign-in modal) while user is still typing.
+    // Only check once both identifiers are structurally valid.
+    if (!emailReady || !phoneReady) {
       setDuplicateDetected(false);
       setDuplicateCheckError(null);
+      if (showSignInModal) setShowSignInModal(false);
       return;
     }
     const checkId = ++duplicateCheckRef.current;
