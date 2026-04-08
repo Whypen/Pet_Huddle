@@ -66,6 +66,41 @@ function friendlyOtpSendError(raw: string): string {
   return "Couldn't send the verification code. Please try again.";
 }
 
+type SendOtpRateLimitReason =
+  | "resend_cooldown"
+  | "phone_daily_cap"
+  | "user_daily_cap"
+  | "ip_daily_cap";
+
+const formatRetryWindow = (seconds: number): string => {
+  const clamped = Math.max(0, Number(seconds || 0));
+  if (clamped < 60) return `Please try again in ${clamped}s.`;
+  if (clamped < 3600) return `Please try again in ${Math.ceil(clamped / 60)} min.`;
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.ceil((clamped % 3600) / 60);
+  if (minutes <= 0) return `Please try again in ${hours}h.`;
+  return `Please try again in ${hours}h ${minutes}min.`;
+};
+
+const mapOtpRateLimitedMessage = (
+  reason: SendOtpRateLimitReason | string | null | undefined,
+  retryAfterSeconds: number | null | undefined,
+): string => {
+  const normalizedReason = String(reason || "").trim().toLowerCase();
+  const retryAfter = Math.max(0, Number(retryAfterSeconds || 0));
+  if (normalizedReason === "resend_cooldown") {
+    return formatRetryWindow(retryAfter);
+  }
+  if (
+    normalizedReason === "phone_daily_cap" ||
+    normalizedReason === "user_daily_cap" ||
+    normalizedReason === "ip_daily_cap"
+  ) {
+    return `Too many verification attempts were made. ${formatRetryWindow(retryAfter)}`;
+  }
+  return `Too many verification attempts were made. ${formatRetryWindow(retryAfter)}`;
+};
+
 function friendlyOtpVerifyError(raw: string): string {
   const r = String(raw || "").toLowerCase();
   if (
@@ -145,15 +180,22 @@ export async function requestPhoneOtp(
   const { data: { session } } = await supabase.auth.getSession();
   const hasSession = Boolean(session?.access_token);
 
-  type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
+type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
+  type SendErrorPayload = {
+    error?: string;
+    retry_after?: number;
+    rate_limit_reason?: string;
+  };
   let data: SendResponse | null = null;
   let errorMsg: string | null = null;
+  let statusCode: number | null = null;
+  let errorDetails: SendErrorPayload | null = null;
   const accessToken = String(session?.access_token || "").trim();
 
   if (hasSession) {
     // Authenticated path — send session token explicitly in x-huddle-access-token
     // while keeping anon Authorization for browser-safe gateway traversal.
-    const res = await callPublic<SendResponse>(
+    const res = await postPublicFunction<SendResponse>(
       "send-phone-otp",
       {
         phone: normalized,
@@ -161,23 +203,36 @@ export async function requestPhoneOtp(
         turnstile_token: turnstileToken,
         turnstile_action: "send_pre_signup_verify",
       },
-      accessToken,
+      { accessToken },
     );
     data = res.data;
-    errorMsg = res.error;
+    errorMsg = res.error?.message ?? null;
+    statusCode = res.status;
+    errorDetails = (res.error?.details as SendErrorPayload | null | undefined) ?? null;
   } else {
     // Unauthenticated path — no JWT; edge function uses signInWithOtp
-    const res = await callPublic<SendResponse>("send-phone-otp", {
-      phone: normalized,
-      device_id: deviceId,
-      turnstile_token: turnstileToken,
-      turnstile_action: "send_pre_signup_verify",
-    });
+    const res = await postPublicFunction<SendResponse>(
+      "send-phone-otp",
+      {
+        phone: normalized,
+        device_id: deviceId,
+        turnstile_token: turnstileToken,
+        turnstile_action: "send_pre_signup_verify",
+      },
+    );
     data = res.data;
-    errorMsg = res.error;
+    errorMsg = res.error?.message ?? null;
+    statusCode = res.status;
+    errorDetails = (res.error?.details as SendErrorPayload | null | undefined) ?? null;
   }
 
   if (errorMsg || !data?.ok) {
+    if (statusCode === 429) {
+      return {
+        ok: false,
+        error: mapOtpRateLimitedMessage(errorDetails?.rate_limit_reason, errorDetails?.retry_after),
+      };
+    }
     return { ok: false, error: friendlyOtpSendError(errorMsg ?? data?.error ?? "") };
   }
 

@@ -341,6 +341,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         error: `Too many attempts. Please try again in ${limit.seconds_until_allow} seconds.`,
+        rate_limit_reason: String(limit.reason || "unknown"),
         retry_after: limit.seconds_until_allow,
       }),
       {

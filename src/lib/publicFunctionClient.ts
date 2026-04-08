@@ -1,6 +1,7 @@
 type ApiError = {
   message: string;
   code?: string | null;
+  details?: unknown;
 };
 
 type PostOptions = {
@@ -64,6 +65,7 @@ export async function postPublicFunction<T>(
         error: {
           message: String(payload?.error || payload?.message || `http_${res.status}`),
           code: payload?.code ?? null,
+          details: payload ?? null,
         },
         status: res.status,
         headers: res.headers,
