@@ -68,6 +68,21 @@ function friendlyOtpSendError(raw: string): string {
 
 function friendlyOtpVerifyError(raw: string): string {
   const r = String(raw || "").toLowerCase();
+  if (
+    r === "network_error" ||
+    r.includes("fetch") ||
+    r.includes("load failed") ||
+    r.includes("networkerror") ||
+    r.includes("failed to fetch")
+  ) {
+    return "Network error. Check your connection and try again.";
+  }
+  if (r.startsWith("http_403") || r.includes("human_verification") || r.includes("turnstile")) {
+    return "Human verification failed. Please complete the check above and try again.";
+  }
+  if (r.startsWith("http_401") && !r.includes("invalid") && !r.includes("expired")) {
+    return "Session expired. Please sign in again and retry.";
+  }
   if (r.includes("expired") || r.startsWith("http_401")) {
     return "Code expired. Request a new one and try again.";
   }
@@ -77,11 +92,8 @@ function friendlyOtpVerifyError(raw: string): string {
   if (r.startsWith("http_5") || r.includes("server_error")) {
     return "Verification failed. Please try again.";
   }
-  if (r === "network_error") {
-    return "Network error. Check your connection and try again.";
-  }
   // Default covers "invalid code", "wrong code", etc.
-  return "Incorrect code. Check the SMS and try again.";
+  return "Incorrect code. Please try again.";
 }
 
 // ── Module-level OTP type ─────────────────────────────────────────────────────
