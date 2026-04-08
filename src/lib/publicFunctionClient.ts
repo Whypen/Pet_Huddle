@@ -46,7 +46,7 @@ export async function postPublicFunction<T>(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     apikey: anonKey,
-    Authorization: `Bearer ${anonKey}`,
+    Authorization: `Bearer ${accessToken || anonKey}`,
   };
   if (accessToken) headers["x-huddle-access-token"] = accessToken;
 
