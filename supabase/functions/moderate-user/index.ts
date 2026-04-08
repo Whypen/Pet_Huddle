@@ -1,13 +1,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 
 type BanBody = {
-  action: "ban" | "unban";
+  action: "ban" | "unban" | "flag_abuse_signal";
   user_id?: string;
   reason_internal?: string;
   public_message?: string;
   block_email?: boolean;
   block_phone?: boolean;
   clear_identifiers?: boolean;
+  signal_type?: "device" | "install";
+  signal_value?: string;
+  risk_level?: "low" | "medium" | "high";
+  review_required?: boolean;
+  cooldown_seconds?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -48,11 +53,37 @@ Deno.serve(async (req: Request) => {
   }
 
   const action = body.action;
-  const userId = String(body.user_id || "").trim();
-  if (!userId) return json(400, { error: "user_id_required" });
-  if (action !== "ban" && action !== "unban") return json(400, { error: "invalid_action" });
+  if (action !== "ban" && action !== "unban" && action !== "flag_abuse_signal") {
+    return json(400, { error: "invalid_action" });
+  }
 
   const admin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+  if (action === "flag_abuse_signal") {
+    const signalType = String(body.signal_type || "").trim();
+    const signalValue = String(body.signal_value || "").trim();
+    const riskLevel = String(body.risk_level || "medium").trim();
+    if (!signalType || !signalValue) return json(400, { error: "signal_type_and_value_required" });
+    const cooldownSeconds = Number(body.cooldown_seconds || 0);
+    const cooldownUntil = cooldownSeconds > 0
+      ? new Date(Date.now() + cooldownSeconds * 1000).toISOString()
+      : null;
+    const { data, error } = await admin.rpc("admin_upsert_abuse_signal", {
+      p_signal_type: signalType,
+      p_signal_value: signalValue,
+      p_risk_level: riskLevel,
+      p_review_required: body.review_required !== false,
+      p_cooldown_until: cooldownUntil,
+      p_reason_internal: String(body.reason_internal || "").trim() || null,
+      p_source_user_id: String(body.user_id || "").trim() || null,
+      p_metadata: body.metadata ?? {},
+    });
+    if (error) return json(500, { error: "abuse_signal_upsert_failed", details: error.message || null });
+    return json(200, { ok: true, action: "flag_abuse_signal", data, cooldown_until: cooldownUntil });
+  }
+
+  const userId = String(body.user_id || "").trim();
+  if (!userId) return json(400, { error: "user_id_required" });
 
   if (action === "ban") {
     const { data, error } = await admin.rpc("admin_ban_user", {
@@ -63,7 +94,7 @@ Deno.serve(async (req: Request) => {
       p_block_phone: body.block_phone !== false,
       p_metadata: body.metadata ?? {},
     });
-    if (error) return json(500, { error: "ban_rpc_failed" });
+    if (error) return json(500, { error: "ban_rpc_failed", details: error.message || null });
 
     const banRes = await admin.auth.admin.updateUserById(userId, {
       ban_duration: "876000h",
@@ -80,7 +111,7 @@ Deno.serve(async (req: Request) => {
     p_clear_identifiers: body.clear_identifiers === true,
     p_metadata: body.metadata ?? {},
   });
-  if (error) return json(500, { error: "unban_rpc_failed" });
+  if (error) return json(500, { error: "unban_rpc_failed", details: error.message || null });
 
   const unbanRes = await admin.auth.admin.updateUserById(userId, {
     ban_duration: "none",

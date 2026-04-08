@@ -43,6 +43,9 @@ const Auth = () => {
   const { setFlowState } = useSignup();
   const navigate = useNavigate();
   const location = useLocation();
+  const blockedMessageFromState = String(
+    ((location.state as { blocked_message?: string } | null)?.blocked_message || ""),
+  ).trim();
   const showTurnstileDiag = useMemo(
     () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
     [location.search],
@@ -76,6 +79,12 @@ const Auth = () => {
       setEmailModalStep("signin");
     }
   }, [showTurnstileDiag]);
+
+  useEffect(() => {
+    if (!blockedMessageFromState) return;
+    setAuthError(blockedMessageFromState);
+    toast.error(blockedMessageFromState);
+  }, [blockedMessageFromState]);
 
   useEffect(() => {
     const videoEl = logoVideoRef.current;

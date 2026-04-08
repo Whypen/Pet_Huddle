@@ -54,6 +54,36 @@ const AuthCallback = () => {
           return;
         }
 
+        const email = String(user.email || "").trim().toLowerCase();
+        const phone = String((user.user_metadata as { phone?: string } | null)?.phone || user.phone || "").trim();
+        const { data: signupGateStatus, error: signupGateError } = await supabase.rpc("check_identifier_registered", {
+          p_email: email || "",
+          p_phone: phone || "",
+        });
+        if (!signupGateError && signupGateStatus?.blocked) {
+          await supabase.auth.signOut({ scope: "local" });
+          navigate("/auth", {
+            replace: true,
+            state: {
+              blocked_message: String(
+                signupGateStatus?.public_message ||
+                "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.",
+              ),
+            },
+          });
+          return;
+        }
+        if (!signupGateError && signupGateStatus?.review_required) {
+          await supabase.auth.signOut({ scope: "local" });
+          navigate("/auth", {
+            replace: true,
+            state: {
+              blocked_message: "Signup is temporarily unavailable. Please try again later.",
+            },
+          });
+          return;
+        }
+
         // Check if this is a brand-new OAuth user (no profile row yet).
         const isOAuth = user.app_metadata?.provider !== "email";
         if (isOAuth) {
