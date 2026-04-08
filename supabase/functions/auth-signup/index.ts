@@ -166,27 +166,43 @@ Deno.serve(async (req: Request) => {
       email,
     );
     if (lookupError) return json(500, { error: "auth_user_lookup_failed" });
-    if (!userId) return json(400, { error: originalError });
+
+    let resolvedUserId = userId;
+    if (!resolvedUserId) {
+      const { data: profileByEmail, error: profileByEmailError } = await serviceClient
+        .from("profiles")
+        .select("id,account_status,email")
+        .ilike("email", email)
+        .maybeSingle();
+      if (profileByEmailError) return json(500, { error: "profile_email_lookup_failed" });
+      if (profileByEmail?.id && profileByEmail.account_status === "removed") {
+        resolvedUserId = profileByEmail.id;
+      } else if (profileByEmail?.id) {
+        return json(400, { error: originalError });
+      }
+    }
+
+    if (!resolvedUserId) return json(400, { error: originalError });
 
     const { data: profileRow, error: profileLookupError } = await serviceClient
       .from("profiles")
       .select("id,account_status")
-      .eq("id", userId)
+      .eq("id", resolvedUserId)
       .maybeSingle();
     if (profileLookupError) return json(500, { error: "profile_lookup_failed" });
     const isRemovedProfile = Boolean(profileRow && profileRow.account_status === "removed");
     if (profileRow && !isRemovedProfile) return json(400, { error: originalError });
 
+    const deleteResult = await serviceClient.auth.admin.deleteUser(resolvedUserId);
+    if (deleteResult.error) return json(500, { error: "orphan_auth_cleanup_failed" });
+
     if (isRemovedProfile) {
       const { error: profileDeleteError } = await serviceClient
         .from("profiles")
         .delete()
-        .eq("id", userId);
+        .eq("id", resolvedUserId);
       if (profileDeleteError) return json(500, { error: "removed_profile_cleanup_failed" });
     }
-
-    const deleteResult = await serviceClient.auth.admin.deleteUser(userId);
-    if (deleteResult.error) return json(500, { error: "orphan_auth_cleanup_failed" });
 
     const retrySignUp = await authClient.auth.signUp({
       email,
