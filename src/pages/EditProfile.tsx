@@ -228,11 +228,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const [profileMode, setProfileMode] = useState<"edit" | "view">("edit");
   const isIdentityLocked = profile?.is_verified === true;
   const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
+  const [socialAlbumFallbackPreviews, setSocialAlbumFallbackPreviews] = useState<Record<string, string>>({});
+  const [socialAlbumLoadErrors, setSocialAlbumLoadErrors] = useState<Record<string, boolean>>({});
   const [photoUploadState, setPhotoUploadState] = useState<UploadProgressState>({ status: "idle", progress: 0 });
   const [pendingSocialUploads, setPendingSocialUploads] = useState<PendingSocialUpload[]>([]);
   const [recentlyUploadedAlbumPaths, setRecentlyUploadedAlbumPaths] = useState<Record<string, boolean>>({});
   const pendingPhotoUploadRef = useRef<Promise<string | null> | null>(null);
   const pendingSocialUploadRefs = useRef<Map<string, Promise<string | null>>>(new Map());
+  const socialAlbumRef = useRef<string[]>([]);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [prefillHydrated, setPrefillHydrated] = useState(false);
@@ -744,6 +747,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false),
       social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
     });
+    socialAlbumRef.current = canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum);
     setSelectedCountry(matchedCountry?.code || "");
     if (profile?.avatar_url) {
       setPhotoPreview(profile.avatar_url);
@@ -777,6 +781,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.social_id,
     user?.id,
   ]);
+
+  useEffect(() => {
+    socialAlbumRef.current = canonicalizeSocialAlbumEntries(formData.social_album);
+  }, [formData.social_album]);
 
   useEffect(() => {
     if (!onboardingMode || user?.id) return;
@@ -994,14 +1002,47 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     return () => clearTimeout(timer);
   }, [formData.phone, phoneEditMode, phoneOriginalValue]);
 
-  const refreshSocialAlbumUrls = async (paths: string[]) => {
+  const releaseSocialAlbumFallbackPreview = useCallback((path: string) => {
+    setSocialAlbumFallbackPreviews((prev) => {
+      const current = prev[path];
+      if (!current) return prev;
+      window.setTimeout(() => URL.revokeObjectURL(current), 0);
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+  }, []);
+
+  const refreshSocialAlbumUrls = async (
+    paths: string[],
+    options?: { allowClear?: boolean },
+  ) => {
     const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
     if (!normalizedPaths.length) {
-      setSocialAlbumUrls({});
+      if (options?.allowClear) {
+        setSocialAlbumUrls({});
+      }
       return;
     }
     const next = await resolveSocialAlbumUrlMap(normalizedPaths, 60 * 60);
-    setSocialAlbumUrls(next);
+    if (!Object.keys(next).length) return;
+    setSocialAlbumUrls((prev) => ({ ...prev, ...next }));
+    setSocialAlbumLoadErrors((prev) => {
+      const hasAny = Object.keys(prev).length > 0;
+      if (!hasAny) return prev;
+      const updated = { ...prev };
+      let changed = false;
+      for (const path of Object.keys(next)) {
+        if (updated[path]) {
+          delete updated[path];
+          changed = true;
+        }
+      }
+      return changed ? updated : prev;
+    });
+    Object.keys(next).forEach((path) => {
+      releaseSocialAlbumFallbackPreview(path);
+    });
   };
 
   const handleSocialAlbumUpload = async (file: File) => {
@@ -1060,6 +1101,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
 
     const uploadPromise = (async () => {
+      let keepPreviewForResolvedImage = false;
       const tick = window.setInterval(() => {
         setPendingSocialUploads((prev) =>
           prev.map((item) =>
@@ -1086,11 +1128,17 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         setPendingSocialUploads((prev) =>
           prev.map((item) => (item.id === uploadId ? { ...item, status: "success", progress: 100 } : item)),
         );
-        let nextAlbum: string[] = [];
-        setFormData((prev) => {
-          nextAlbum = canonicalizeSocialAlbumEntries([...prev.social_album, filePath]).slice(0, 5);
-          return { ...prev, social_album: nextAlbum };
+        const nextAlbum = canonicalizeSocialAlbumEntries([...socialAlbumRef.current, filePath]).slice(0, 5);
+        socialAlbumRef.current = nextAlbum;
+        setFormData((prev) => ({ ...prev, social_album: nextAlbum }));
+        setSocialAlbumLoadErrors((prev) => {
+          if (!prev[filePath]) return prev;
+          const next = { ...prev };
+          delete next[filePath];
+          return next;
         });
+        setSocialAlbumFallbackPreviews((prev) => ({ ...prev, [filePath]: previewUrl }));
+        keepPreviewForResolvedImage = true;
         await refreshSocialAlbumUrls(nextAlbum);
         markAlbumUploadSuccess(filePath);
         return filePath;
@@ -1104,7 +1152,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       } finally {
         window.clearInterval(tick);
         window.setTimeout(() => {
-          URL.revokeObjectURL(previewUrl);
+          if (!keepPreviewForResolvedImage) {
+            URL.revokeObjectURL(previewUrl);
+          }
           setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
           pendingSocialUploadRefs.current.delete(uploadId);
         }, 1000);
@@ -1260,8 +1310,22 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
   const handleRemoveSocialAlbum = async (path: string) => {
     const next = canonicalizeSocialAlbumEntries(formData.social_album.filter((p) => p !== path));
+    socialAlbumRef.current = next;
     setFormData((prev) => ({ ...prev, social_album: next }));
-    await refreshSocialAlbumUrls(next);
+    setSocialAlbumUrls((prev) => {
+      if (!prev[path]) return prev;
+      const updated = { ...prev };
+      delete updated[path];
+      return updated;
+    });
+    setSocialAlbumLoadErrors((prev) => {
+      if (!prev[path]) return prev;
+      const updated = { ...prev };
+      delete updated[path];
+      return updated;
+    });
+    releaseSocialAlbumFallbackPreview(path);
+    await refreshSocialAlbumUrls(next, { allowClear: next.length === 0 });
   };
 
   const requestPhoneOtp = async () => {
@@ -2347,28 +2411,40 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <div className="grid grid-cols-3 gap-3">
                 {formData.social_album.map((path) => (
                   <div key={path} className="relative rounded-xl overflow-hidden border border-border bg-muted">
-                    {isRenderableImageSrc(socialAlbumUrls[path]) ? (
+                    {isRenderableImageSrc(socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]) && !socialAlbumLoadErrors[path] ? (
                       <img
-                        src={socialAlbumUrls[path]}
+                        src={socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]}
                         alt={t("Social Album")}
                         className="w-full h-24 object-cover"
                         loading="lazy"
                         onError={() => {
+                          setSocialAlbumLoadErrors((prev) => ({ ...prev, [path]: true }));
                           setSocialAlbumUrls((prev) => {
                             if (!prev[path]) return prev;
                             const next = { ...prev };
                             delete next[path];
                             return next;
                           });
-                          setFormData((prev) => ({
-                            ...prev,
-                            social_album: canonicalizeSocialAlbumEntries(prev.social_album.filter((item) => item !== path)),
-                          }));
                         }}
                       />
                     ) : (
-                      <div className="w-full h-24 bg-[rgba(66,73,101,0.08)] flex items-center justify-center text-[11px] text-[rgba(74,73,101,0.55)]">
-                        Unavailable
+                      <div className="w-full h-24 bg-[rgba(66,73,101,0.08)] flex flex-col items-center justify-center gap-1 text-[11px] text-[rgba(74,73,101,0.55)]">
+                        <span>Unavailable</span>
+                        <button
+                          type="button"
+                          className="text-[10px] underline underline-offset-2 text-[var(--brandBlue,#2145CF)]"
+                          onClick={() => {
+                            setSocialAlbumLoadErrors((prev) => {
+                              if (!prev[path]) return prev;
+                              const next = { ...prev };
+                              delete next[path];
+                              return next;
+                            });
+                            void refreshSocialAlbumUrls(socialAlbumRef.current);
+                          }}
+                        >
+                          Retry
+                        </button>
                       </div>
                     )}
                     {recentlyUploadedAlbumPaths[path] && (
