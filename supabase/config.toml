@@ -76,3 +76,8 @@ verify_jwt = false
 # Internal gate: requires valid user JWT + JWT sub must match body user_id.
 [functions.send-signup-verify-email]
 verify_jwt = false
+
+# delete-account: called from authenticated app flow.
+# Internal gate: explicit Bearer token extraction + admin.auth.getUser(token).
+[functions.delete-account]
+verify_jwt = false

@@ -154,7 +154,7 @@ const SignupEmailConfirmation = () => {
             onClick={handleOpenMail}
           >
             <Mail size={16} className="mr-2" />
-            Open Mail app
+            Try opening Mail app
           </NeuButton>
           <NeuButton
             variant="ghost"

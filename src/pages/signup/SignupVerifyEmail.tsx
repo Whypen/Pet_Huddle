@@ -441,7 +441,7 @@ const SignupVerifyEmail = () => {
               onClick={handleOpenMail}
             >
               <Mail size={16} className="mr-2" />
-              Open Mail app
+              Try opening Mail app
             </NeuButton>
           ) : null}
           <p className="text-[13px] text-[rgba(74,73,101,0.50)] mt-2">
