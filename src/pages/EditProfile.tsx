@@ -2447,7 +2447,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         </button>
                       </div>
                     )}
-                    {recentlyUploadedAlbumPaths[path] && (
+                    {recentlyUploadedAlbumPaths[path] &&
+                      isRenderableImageSrc(socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]) &&
+                      !socialAlbumLoadErrors[path] && (
                       <div className="absolute inset-0 bg-emerald-600/35 flex items-center justify-center text-white">
                         <Check className="w-4 h-4" />
                       </div>

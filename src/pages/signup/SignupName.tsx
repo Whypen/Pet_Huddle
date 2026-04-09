@@ -73,8 +73,9 @@ const SignupName = () => {
         p_social_id: social,
       });
       if (duplicateError) {
-        setAvailabilityState("available");
-        setSocialError("");
+        setAvailabilityState("failed");
+        setSocialError("Could not verify Social ID right now. Please retry.");
+        return;
       }
       if (isTaken) {
         setAvailabilityState("taken");
@@ -131,14 +132,10 @@ const SignupName = () => {
       }
       goTo("/signup/verify");
     } catch {
-      setAvailabilityState("available");
-      setSocialError("");
-      update({ display_name: name, social_id: social });
-      if (!user) {
-        toast.error("Could not check availability. Please try again.");
-        return;
-      }
-      goTo("/signup/verify");
+      setAvailabilityState("failed");
+      setSocialError("Could not verify Social ID right now. Please retry.");
+      toast.error("Could not verify Social ID right now. Please retry.");
+      return;
     } finally {
       setSubmitting(false);
     }
@@ -164,8 +161,8 @@ const SignupName = () => {
         });
         if (cancelled) return;
         if (error) {
-          setAvailabilityState("available");
-          setSocialError("");
+          setAvailabilityState("failed");
+          setSocialError("Could not verify Social ID right now. Please retry.");
           return;
         }
         if (isTaken) {
@@ -177,8 +174,8 @@ const SignupName = () => {
         setSocialError("");
       } catch {
         if (cancelled) return;
-        setAvailabilityState("available");
-        setSocialError("");
+        setAvailabilityState("failed");
+        setSocialError("Could not verify Social ID right now. Please retry.");
       }
     }, 350);
     return () => {
