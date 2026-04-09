@@ -103,6 +103,13 @@ const maskPhoneForOtpNotice = (phone: string): string => {
   return `+${country} •••• ${last4}`;
 };
 
+const isRenderableImageSrc = (value: string): boolean => {
+  const src = String(value || "").trim();
+  if (!src) return false;
+  if (src.startsWith("blob:") || src.startsWith("data:")) return true;
+  return /^https?:\/\//i.test(src);
+};
+
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[1];
@@ -1906,7 +1913,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           {/* Photo Upload */}
           <div className="flex justify-center">
             <label className="relative cursor-pointer group">
-              <div className="w-28 h-28 rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
+              <div className="relative w-28 h-28 rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
                 {photoPreview ? (
                   <img
                     src={photoPreview}
@@ -1920,13 +1927,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <Camera className="w-8 h-8 text-muted-foreground" />
                 )}
                 {photoUploadState.status === "uploading" && (
-                  <div className="absolute inset-0 bg-black/35 flex flex-col items-center justify-center text-white text-xs font-semibold">
+                  <div className="absolute inset-0 rounded-full bg-black/35 flex flex-col items-center justify-center text-white text-xs font-semibold">
                     <span>{Math.round(photoUploadState.progress)}%</span>
                     <span className="text-[10px] font-medium mt-1">Uploading</span>
                   </div>
                 )}
                 {photoUploadState.status === "success" && (
-                  <div className="absolute inset-0 bg-emerald-600/35 flex items-center justify-center text-white">
+                  <div className="absolute inset-0 rounded-full bg-emerald-600/35 flex items-center justify-center text-white">
                     <Check className="w-5 h-5" />
                   </div>
                 )}
@@ -2050,7 +2057,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">
                   Email
                 </label>
-                <div className="form-field-rest relative flex items-center justify-between px-4">
+                <div className="form-field-rest relative flex items-center justify-between px-4 bg-[rgba(66,73,101,0.08)]">
                   <div className="flex items-center gap-2 min-w-0">
                     <Mail className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
                     <span className="text-[15px] text-[var(--text-primary,#424965)] truncate">
@@ -2340,12 +2347,30 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <div className="grid grid-cols-3 gap-3">
                 {formData.social_album.map((path) => (
                   <div key={path} className="relative rounded-xl overflow-hidden border border-border bg-muted">
-                    <img
-                      src={socialAlbumUrls[path] || path}
-                      alt={t("Social Album")}
-                      className="w-full h-24 object-cover"
-                      loading="lazy"
-                    />
+                    {isRenderableImageSrc(socialAlbumUrls[path]) ? (
+                      <img
+                        src={socialAlbumUrls[path]}
+                        alt={t("Social Album")}
+                        className="w-full h-24 object-cover"
+                        loading="lazy"
+                        onError={() => {
+                          setSocialAlbumUrls((prev) => {
+                            if (!prev[path]) return prev;
+                            const next = { ...prev };
+                            delete next[path];
+                            return next;
+                          });
+                          setFormData((prev) => ({
+                            ...prev,
+                            social_album: canonicalizeSocialAlbumEntries(prev.social_album.filter((item) => item !== path)),
+                          }));
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-24 bg-[rgba(66,73,101,0.08)] flex items-center justify-center text-[11px] text-[rgba(74,73,101,0.55)]">
+                        Unavailable
+                      </div>
+                    )}
                     {recentlyUploadedAlbumPaths[path] && (
                       <div className="absolute inset-0 bg-emerald-600/35 flex items-center justify-center text-white">
                         <Check className="w-4 h-4" />
