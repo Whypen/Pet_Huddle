@@ -44,7 +44,39 @@ const resetServiceWorkerCachesOnce = async () => {
 void resetServiceWorkerCachesOnce();
 
 const CHUNK_RELOAD_ATTEMPTS_KEY = "huddle:chunk-reload-attempts";
-const CHUNK_RELOAD_MAX_ATTEMPTS = 3;
+const CHUNK_RELOAD_MAX_ATTEMPTS = 6;
+const CHUNK_RELOAD_RESET_AFTER_MS = 30_000;
+const CHUNK_RECOVERY_GUARD_KEY = "huddle:chunk-recovering";
+type ChunkReloadState = {
+  attempts: number;
+  lastAttemptAt: number;
+  fingerprint: string;
+};
+const readChunkReloadState = (): ChunkReloadState => {
+  try {
+    const raw = sessionStorage.getItem(CHUNK_RELOAD_ATTEMPTS_KEY);
+    if (!raw) return { attempts: 0, lastAttemptAt: 0, fingerprint: "" };
+    const parsed = JSON.parse(raw) as Partial<ChunkReloadState>;
+    return {
+      attempts: Number.isFinite(parsed.attempts) ? Number(parsed.attempts) : 0,
+      lastAttemptAt: Number.isFinite(parsed.lastAttemptAt) ? Number(parsed.lastAttemptAt) : 0,
+      fingerprint: typeof parsed.fingerprint === "string" ? parsed.fingerprint : "",
+    };
+  } catch {
+    return { attempts: 0, lastAttemptAt: 0, fingerprint: "" };
+  }
+};
+const writeChunkReloadState = (state: ChunkReloadState) => {
+  try {
+    sessionStorage.setItem(CHUNK_RELOAD_ATTEMPTS_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage write failures
+  }
+};
+const getBundleFingerprint = () => {
+  const script = document.querySelector('script[type="module"][src*="/assets/index-"]') as HTMLScriptElement | null;
+  return script?.src || `${window.location.origin}/unknown-bundle`;
+};
 const shouldReloadForChunkFailure = (input: unknown): boolean => {
   const text = String(input ?? "");
   return (
@@ -54,14 +86,25 @@ const shouldReloadForChunkFailure = (input: unknown): boolean => {
   );
 };
 const reloadForChunkFailure = async () => {
-  try {
-    const raw = sessionStorage.getItem(CHUNK_RELOAD_ATTEMPTS_KEY);
-    const attempts = Number(raw || "0");
-    if (Number.isFinite(attempts) && attempts >= CHUNK_RELOAD_MAX_ATTEMPTS) return;
-    sessionStorage.setItem(CHUNK_RELOAD_ATTEMPTS_KEY, String((Number.isFinite(attempts) ? attempts : 0) + 1));
-  } catch {
-    // Ignore storage failures and continue with recovery reload.
-  }
+  if (sessionStorage.getItem(CHUNK_RECOVERY_GUARD_KEY) === "1") return;
+  sessionStorage.setItem(CHUNK_RECOVERY_GUARD_KEY, "1");
+
+  const now = Date.now();
+  const fingerprint = getBundleFingerprint();
+  const previous = readChunkReloadState();
+  const staleWindow = now - previous.lastAttemptAt > CHUNK_RELOAD_RESET_AFTER_MS;
+  const sameFingerprint = previous.fingerprint === fingerprint;
+  const previousAttempts = staleWindow || !sameFingerprint ? 0 : previous.attempts;
+  const nextAttempts = previousAttempts + 1;
+  writeChunkReloadState({
+    attempts: nextAttempts,
+    lastAttemptAt: now,
+    fingerprint,
+  });
+
+  // Never silently fail recovery. If repeated attempts exceed threshold,
+  // force a root-level hard navigation with a cache-busting marker.
+  const hardReset = nextAttempts > CHUNK_RELOAD_MAX_ATTEMPTS;
 
   try {
     if ("serviceWorker" in navigator) {
@@ -76,8 +119,11 @@ const reloadForChunkFailure = async () => {
     // Best effort cleanup.
   }
 
-  const current = new URL(window.location.href);
+  const current = hardReset
+    ? new URL("/", window.location.origin)
+    : new URL(window.location.href);
   current.searchParams.set("__chunk_recover", String(Date.now()));
+  current.searchParams.set("__bundle", String(Date.now()));
   window.location.replace(current.toString());
 };
 window.addEventListener("error", (event) => {
@@ -102,6 +148,16 @@ window.addEventListener("unhandledrejection", (event) => {
     void reloadForChunkFailure();
   }
 });
+
+// If the app stays up without chunk failures for a short period, clear retry state.
+window.setTimeout(() => {
+  try {
+    sessionStorage.removeItem(CHUNK_RELOAD_ATTEMPTS_KEY);
+    sessionStorage.removeItem(CHUNK_RECOVERY_GUARD_KEY);
+  } catch {
+    // ignore
+  }
+}, 10_000);
 
 // Service worker caching can cause stale bundles and broken network handshakes during dev.
 // Only register it for production builds.
