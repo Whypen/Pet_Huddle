@@ -20,6 +20,7 @@ type Props = {
 
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
+  const [avatarErrorsById, setAvatarErrorsById] = useState<Record<string, boolean>>({});
 
   const friendsById = useMemo(() => {
     const next: Record<string, FriendOverlayPin> = {};
@@ -61,6 +62,26 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
       map.off("render", sync);
     };
   }, [map, friends]);
+
+  useEffect(() => {
+    setAvatarErrorsById((prev) => {
+      const next: Record<string, boolean> = {};
+      let changed = false;
+      friends.forEach((friend) => {
+        if (prev[friend.id]) next[friend.id] = true;
+      });
+      if (Object.keys(prev).length !== Object.keys(next).length) changed = true;
+      if (!changed) {
+        for (const id of Object.keys(next)) {
+          if (!prev[id]) {
+            changed = true;
+            break;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [friends]);
 
   if (!map || friends.length === 0) return null;
 
@@ -108,17 +129,31 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
               className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
               style={{ border: `1.5px solid ${ringColor}` }}
             >
-              {friend.avatarUrl ? (
+              {(() => {
+                const normalizedAvatarUrl = String(friend.avatarUrl || "").trim();
+                const canRenderAvatar =
+                  !avatarErrorsById[friend.id] &&
+                  normalizedAvatarUrl.length > 0 &&
+                  (/^https?:\/\//i.test(normalizedAvatarUrl) ||
+                    normalizedAvatarUrl.startsWith("blob:") ||
+                    normalizedAvatarUrl.startsWith("data:"));
+                const normalizedName = String(friend.name || "").trim();
+                const initial = (normalizedName.charAt(0) || "F").toUpperCase();
+                return canRenderAvatar ? (
                 <img
-                  src={friend.avatarUrl}
+                  src={normalizedAvatarUrl}
                   alt={friend.name}
                   className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
+                  onError={() =>
+                    setAvatarErrorsById((prev) => ({ ...prev, [friend.id]: true }))
+                  }
                 />
               ) : (
                 <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
-                  {friend.name.charAt(0).toUpperCase()}
+                  {initial}
                 </span>
-              )}
+              );
+              })()}
             </span>
           </button>
         );

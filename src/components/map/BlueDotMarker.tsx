@@ -15,6 +15,7 @@ interface BlueDotMarkerProps {
 
 const BlueDotMarker = ({ map, coords, displayName, avatarUrl, isVerified = false, isInvisible = false }: BlueDotMarkerProps) => {
   const [screenPoint, setScreenPoint] = useState<{ x: number; y: number } | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
     if (!map || !coords) {
@@ -47,9 +48,21 @@ const BlueDotMarker = ({ map, coords, displayName, avatarUrl, isVerified = false
     };
   }, [coords, map]);
 
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarUrl]);
+
   if (!screenPoint) return null;
 
-  const initial = (displayName || "M").charAt(0).toUpperCase();
+  const normalizedName = String(displayName || "").trim();
+  const initial = (normalizedName.charAt(0) || "M").toUpperCase();
+  const normalizedAvatarUrl = String(avatarUrl || "").trim();
+  const hasRenderableAvatar =
+    !avatarFailed &&
+    normalizedAvatarUrl.length > 0 &&
+    (/^https?:\/\//i.test(normalizedAvatarUrl) ||
+      normalizedAvatarUrl.startsWith("blob:") ||
+      normalizedAvatarUrl.startsWith("data:"));
 
   return (
     <div
@@ -76,11 +89,12 @@ const BlueDotMarker = ({ map, coords, displayName, avatarUrl, isVerified = false
           <div
             className="h-full w-full rounded-full bg-white flex items-center justify-center overflow-hidden"
           >
-            {avatarUrl ? (
+            {hasRenderableAvatar ? (
               <img
-                src={avatarUrl}
+                src={normalizedAvatarUrl}
                 alt={displayName || "Me"}
                 className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
+                onError={() => setAvatarFailed(true)}
               />
             ) : (
               <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
