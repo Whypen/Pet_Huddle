@@ -1080,9 +1080,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             resolve(null);
             return;
           }
-          setPendingSocialUploads((prev) =>
-            prev.map((item) => (item.id === uploadId ? { ...item, status: "success", progress: 100 } : item)),
-          );
           setFormData((prev) => ({
             ...prev,
             social_album: canonicalizeSocialAlbumEntries([...prev.social_album, encoded]).slice(0, 5),
@@ -1095,7 +1092,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           URL.revokeObjectURL(previewUrl);
           setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
           pendingSocialUploadRefs.current.delete(uploadId);
-        }, 1000);
+        }, 0);
       });
       pendingSocialUploadRefs.current.set(uploadId, localReadPromise);
       return;
@@ -1127,9 +1124,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         const filePath = `${user.id}/${crypto.randomUUID()}.${ext}`;
         const { error: uploadError } = await supabase.storage.from("social_album").upload(filePath, compressed, { upsert: false });
         if (uploadError) throw uploadError;
-        setPendingSocialUploads((prev) =>
-          prev.map((item) => (item.id === uploadId ? { ...item, status: "success", progress: 100 } : item)),
-        );
         const nextAlbum = canonicalizeSocialAlbumEntries([...socialAlbumRef.current, filePath]).slice(0, 5);
         socialAlbumRef.current = nextAlbum;
         setFormData((prev) => ({ ...prev, social_album: nextAlbum }));
@@ -1142,6 +1136,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         setSocialAlbumFallbackPreviews((prev) => ({ ...prev, [filePath]: previewUrl }));
         keepPreviewForResolvedImage = true;
         removePendingDelayMs = 0;
+        setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
+        pendingSocialUploadRefs.current.delete(uploadId);
         const refreshed = await refreshSocialAlbumUrls(nextAlbum);
         if (refreshed[filePath]) {
           markAlbumUploadSuccess(filePath);
