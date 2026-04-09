@@ -1016,16 +1016,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const refreshSocialAlbumUrls = async (
     paths: string[],
     options?: { allowClear?: boolean },
-  ) => {
+  ): Promise<Record<string, string>> => {
     const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
     if (!normalizedPaths.length) {
       if (options?.allowClear) {
         setSocialAlbumUrls({});
       }
-      return;
+      return {};
     }
     const next = await resolveSocialAlbumUrlMap(normalizedPaths, 60 * 60);
-    if (!Object.keys(next).length) return;
+    if (!Object.keys(next).length) return {};
     setSocialAlbumUrls((prev) => ({ ...prev, ...next }));
     setSocialAlbumLoadErrors((prev) => {
       const hasAny = Object.keys(prev).length > 0;
@@ -1043,6 +1043,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     Object.keys(next).forEach((path) => {
       releaseSocialAlbumFallbackPreview(path);
     });
+    return next;
   };
 
   const handleSocialAlbumUpload = async (file: File) => {
@@ -1102,6 +1103,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     const uploadPromise = (async () => {
       let keepPreviewForResolvedImage = false;
+      let removePendingDelayMs = 1000;
       const tick = window.setInterval(() => {
         setPendingSocialUploads((prev) =>
           prev.map((item) =>
@@ -1139,8 +1141,15 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         });
         setSocialAlbumFallbackPreviews((prev) => ({ ...prev, [filePath]: previewUrl }));
         keepPreviewForResolvedImage = true;
-        await refreshSocialAlbumUrls(nextAlbum);
-        markAlbumUploadSuccess(filePath);
+        removePendingDelayMs = 0;
+        const refreshed = await refreshSocialAlbumUrls(nextAlbum);
+        if (refreshed[filePath]) {
+          markAlbumUploadSuccess(filePath);
+        } else {
+          window.setTimeout(() => {
+            void refreshSocialAlbumUrls(socialAlbumRef.current);
+          }, 500);
+        }
         return filePath;
       } catch (error) {
         const message = describeSupabaseWriteError(error);
@@ -1157,7 +1166,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           }
           setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
           pendingSocialUploadRefs.current.delete(uploadId);
-        }, 1000);
+        }, removePendingDelayMs);
       }
     })();
     pendingSocialUploadRefs.current.set(uploadId, uploadPromise);
@@ -2409,22 +2418,41 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <label className="text-sm font-medium">Moments with furry friends in up to 5 photos</label>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                {formData.social_album.map((path) => (
+                {formData.social_album.map((path) => {
+                  const resolvedSrc = socialAlbumUrls[path] || "";
+                  const fallbackSrc = socialAlbumFallbackPreviews[path] || "";
+                  const canUseResolvedSrc = isRenderableImageSrc(resolvedSrc) && !socialAlbumLoadErrors[path];
+                  const canUseFallbackSrc = isRenderableImageSrc(fallbackSrc);
+                  const displaySrc = canUseResolvedSrc ? resolvedSrc : canUseFallbackSrc ? fallbackSrc : "";
+                  return (
                   <div key={path} className="relative rounded-xl overflow-hidden border border-border bg-muted">
-                    {isRenderableImageSrc(socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]) && !socialAlbumLoadErrors[path] ? (
+                    {displaySrc ? (
                       <img
-                        src={socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]}
+                        src={displaySrc}
                         alt={t("Social Album")}
                         className="w-full h-24 object-cover"
                         loading="lazy"
                         onError={() => {
-                          setSocialAlbumLoadErrors((prev) => ({ ...prev, [path]: true }));
+                          const hasFallback = isRenderableImageSrc(socialAlbumFallbackPreviews[path] || "");
                           setSocialAlbumUrls((prev) => {
                             if (!prev[path]) return prev;
                             const next = { ...prev };
                             delete next[path];
                             return next;
                           });
+                          if (!hasFallback) {
+                            setSocialAlbumLoadErrors((prev) => ({ ...prev, [path]: true }));
+                            return;
+                          }
+                          setSocialAlbumLoadErrors((prev) => {
+                            if (!prev[path]) return prev;
+                            const next = { ...prev };
+                            delete next[path];
+                            return next;
+                          });
+                          window.setTimeout(() => {
+                            void refreshSocialAlbumUrls(socialAlbumRef.current);
+                          }, 500);
                         }}
                       />
                     ) : (
@@ -2448,7 +2476,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       </div>
                     )}
                     {recentlyUploadedAlbumPaths[path] &&
-                      isRenderableImageSrc(socialAlbumUrls[path] || socialAlbumFallbackPreviews[path]) &&
+                      isRenderableImageSrc(socialAlbumUrls[path] || "") &&
                       !socialAlbumLoadErrors[path] && (
                       <div className="absolute inset-0 bg-emerald-600/35 flex items-center justify-center text-white">
                         <Check className="w-4 h-4" />
@@ -2462,7 +2490,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       <X className="w-3 h-3" />
                     </button>
                   </div>
-                ))}
+                )})}
                 {pendingSocialUploads.map((item) => (
                   <div key={item.id} className="relative rounded-xl overflow-hidden border border-border bg-muted">
                     <img
@@ -2477,8 +2505,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                           <span>{Math.round(item.progress)}%</span>
                           <span className="text-[10px] font-medium mt-1">Uploading</span>
                         </>
-                      ) : item.status === "success" ? (
-                        <Check className="w-4 h-4" />
                       ) : (
                         <span className="text-[10px]">Upload failed</span>
                       )}
