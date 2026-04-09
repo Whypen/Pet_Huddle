@@ -220,6 +220,7 @@ const MapPage = () => {
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
   const [pinning, setPinning] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [lastKnownOwnCoords, setLastKnownOwnCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewPin, setBroadcastPreviewPin] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewAddress, setBroadcastPreviewAddress] = useState<string | null>(null);
   const [draftBroadcastType, setDraftBroadcastType] = useState<"Stray" | "Lost" | "Caution" | "Others">("Stray");
@@ -234,6 +235,51 @@ const MapPage = () => {
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
   const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
   const hideFromMap = Boolean(profile?.hide_from_map);
+  const ownMarkerCacheKey = useMemo(() => (user?.id ? `huddle:last-own-coords:${user.id}` : null), [user?.id]);
+
+  useEffect(() => {
+    if (!ownMarkerCacheKey) {
+      setLastKnownOwnCoords(null);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(ownMarkerCacheKey);
+      if (!raw) {
+        setLastKnownOwnCoords(null);
+        return;
+      }
+      const parsed = JSON.parse(raw) as { lat?: unknown; lng?: unknown };
+      const lat = typeof parsed?.lat === "number" ? parsed.lat : null;
+      const lng = typeof parsed?.lng === "number" ? parsed.lng : null;
+      if (lat === null || lng === null) {
+        setLastKnownOwnCoords(null);
+        return;
+      }
+      setLastKnownOwnCoords({ lat, lng });
+    } catch {
+      setLastKnownOwnCoords(null);
+    }
+  }, [ownMarkerCacheKey]);
+
+  const persistOwnMarkerCoords = useCallback((coords: { lat: number; lng: number }) => {
+    setLastKnownOwnCoords(coords);
+    if (!ownMarkerCacheKey) return;
+    try {
+      localStorage.setItem(ownMarkerCacheKey, JSON.stringify(coords));
+    } catch {
+      // best-effort cache only
+    }
+  }, [ownMarkerCacheKey]);
+
+  const clearOwnMarkerCoordsCache = useCallback(() => {
+    setLastKnownOwnCoords(null);
+    if (!ownMarkerCacheKey) return;
+    try {
+      localStorage.removeItem(ownMarkerCacheKey);
+    } catch {
+      // best-effort cache only
+    }
+  }, [ownMarkerCacheKey]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -299,19 +345,21 @@ const MapPage = () => {
         .maybeSingle();
       if (error || !data) return;
       if (typeof data.lat === "number" && typeof data.lng === "number") {
-        setUserLocation({ lat: data.lat, lng: data.lng });
+        const next = { lat: data.lat, lng: data.lng };
+        setUserLocation(next);
+        persistOwnMarkerCoords(next);
         setVisibleEnabled(true);
         setIsInvisible(hideFromMap);
         if (typeof data.created_at === "string") setPinPersistedAt(data.created_at);
       }
     })();
-  }, [hideFromMap, user]);
+  }, [hideFromMap, persistOwnMarkerCoords, user]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
   const viewRadiusMeters = 50000;
 
-  const isPinned = useMemo(() => Boolean(userLocation), [userLocation]);
+  const isPinned = useMemo(() => Boolean(userLocation || lastKnownOwnCoords), [lastKnownOwnCoords, userLocation]);
 
   // ==========================================================================
   // Effects
@@ -508,6 +556,7 @@ const MapPage = () => {
     const pinnedAt = typeof persistedPin.created_at === "string" ? persistedPin.created_at : new Date().toISOString();
     setPinPersistedAt(pinnedAt);
     if (import.meta.env.DEV) console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
+    persistOwnMarkerCoords({ lat, lng });
 
     flyToWithDebug("pin.apply", { center: [lng, lat], zoom: 15.5 });
 
@@ -516,7 +565,7 @@ const MapPage = () => {
     setPinning(false);
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [flyToWithDebug, lookupBroadcastAddress, pinAddressSnapshot, user?.id]);
+  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, user?.id]);
 
   const fallbackToLastKnownLocation = useCallback(async () => {
     const fallback =
@@ -630,6 +679,7 @@ const MapPage = () => {
     setPinPersistedAt(null);
     setIsInvisible(false);
     setUserLocation(null);
+    clearOwnMarkerCoordsCache();
     setFriendPins([]);
     setSelectedAlert(null);
     setSelectedVet(null);
@@ -1060,6 +1110,7 @@ const MapPage = () => {
   const fetchCurrentPinState = useCallback(async () => {
     if (!user?.id) {
       setUserLocation(null);
+      clearOwnMarkerCoordsCache();
       setVisibleEnabled(false);
       setPinPersistedAt(null);
       setPinAddressSnapshot(null);
@@ -1084,6 +1135,11 @@ const MapPage = () => {
         setIsInvisible(hideFromMap);
         return userLocation;
       }
+      if (lastKnownOwnCoords) {
+        setVisibleEnabled(true);
+        setIsInvisible(hideFromMap);
+        return lastKnownOwnCoords;
+      }
       setUserLocation(null);
       setVisibleEnabled(false);
       setPinPersistedAt(null);
@@ -1093,11 +1149,12 @@ const MapPage = () => {
     }
     const next = { lat: data.lat, lng: data.lng };
     setUserLocation(next);
+    persistOwnMarkerCoords(next);
     setVisibleEnabled(true);
     setIsInvisible(hideFromMap);
     setPinPersistedAt(typeof data.created_at === "string" ? data.created_at : null);
     return next;
-  }, [hideFromMap, user?.id, userLocation]);
+  }, [clearOwnMarkerCoordsCache, hideFromMap, lastKnownOwnCoords, persistOwnMarkerCoords, user?.id, userLocation]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1236,6 +1293,15 @@ const MapPage = () => {
     });
     return pins;
   }, [friendPins, showFriends, user?.id]);
+
+  const ownMarkerCoords = useMemo<{ lat: number; lng: number } | null>(() => {
+    if (userLocation) return userLocation;
+    if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
+      return { lat: profile.last_lat, lng: profile.last_lng };
+    }
+    if (lastKnownOwnCoords) return lastKnownOwnCoords;
+    return null;
+  }, [lastKnownOwnCoords, profile?.last_lat, profile?.last_lng, userLocation]);
 
   const filteredPins = useMemo(
     () =>
@@ -1455,10 +1521,10 @@ const MapPage = () => {
           />
         )}
 
-        {map.current && !isPickingBroadcastLocation && userLocation && (
+        {map.current && !isPickingBroadcastLocation && ownMarkerCoords && (
           <BlueDotMarker
             map={map.current}
-            coords={userLocation}
+            coords={ownMarkerCoords}
             displayName={profile?.display_name || user?.email || "Me"}
             avatarUrl={profile?.avatar_url || null}
             isVerified={profile?.is_verified === true}

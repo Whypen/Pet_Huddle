@@ -117,7 +117,7 @@ interface Pet {
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, refreshProfile } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -158,6 +158,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const normalizedTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
+  const logoutItem = useMemo(
+    () => ({
+      label: "Log Out",
+      iconClassName: "text-[#E84545]",
+    }),
+    []
+  );
 
   useEffect(() => {
     if (!menuOpen || !profile?.id) return;
@@ -192,9 +199,41 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   useEffect(() => {
     const state = location.state as { openSettingsDrawer?: boolean } | null;
     if (!state?.openSettingsDrawer) return;
+    void refreshProfile();
     setMenuOpen(true);
     navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
-  }, [location.pathname, location.search, location.state, navigate]);
+  }, [location.pathname, location.search, location.state, navigate, refreshProfile]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let inFlight = false;
+    let lastRunAt = 0;
+    const maybeRefresh = async () => {
+      const now = Date.now();
+      if (inFlight) return;
+      if (now - lastRunAt < 1200) return;
+      inFlight = true;
+      lastRunAt = now;
+      try {
+        await refreshProfile();
+      } finally {
+        inFlight = false;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void maybeRefresh();
+    };
+    const onFocus = () => {
+      void maybeRefresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshProfile, user?.id]);
 
   const fetchPets = useCallback(async () => {
     if (!user) return;
@@ -737,11 +776,11 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 />
               </InsetPanel>
 
-              {/* 5. Sign out */}
+              {/* 5. Log out */}
               <InsetPanel>
                 <InsetRow
-                  label="Sign Out"
-                  icon={<LogOut size={16} strokeWidth={1.75} />}
+                  label={logoutItem.label}
+                  icon={<LogOut size={16} strokeWidth={1.75} className={logoutItem.iconClassName} />}
                   variant="danger"
                   onClick={() => {
                     setMenuOpen(false);

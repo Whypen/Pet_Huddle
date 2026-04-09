@@ -943,7 +943,8 @@ export function VerifyIdentity({
 
   useEffect(() => {
     const locState = location.state as { backTo?: string; returnTo?: string; from?: string } | null;
-    if (locState?.backTo || locState?.returnTo || locState?.from) {
+    const hasExplicitNavState = Boolean(locState?.backTo || locState?.returnTo || locState?.from);
+    if (hasExplicitNavState) {
       navStateRef.current = {
         backTo: locState.backTo || locState.from,
         returnTo: locState.returnTo,
@@ -958,7 +959,7 @@ export function VerifyIdentity({
       try {
         sessionStorage.setItem(VERIFY_IDENTITY_NAV_KEY, JSON.stringify(navStateRef.current));
       } catch { /* best-effort */ }
-    } else {
+    } else if (flowState !== "idle") {
       // Restore after Stripe redirect (location.state wiped on full page reload)
       try {
         const saved = sessionStorage.getItem(VERIFY_IDENTITY_NAV_KEY);
@@ -970,6 +971,15 @@ export function VerifyIdentity({
         allowVerifiedReturnRef.current = isSignupVerifyFlow;
         setIsSignupVerifyEntry(isSignupVerifyFlow);
       } catch { /* best-effort */ }
+    } else {
+      navStateRef.current = {};
+      allowVerifiedReturnRef.current = false;
+      setIsSignupVerifyEntry(false);
+      try {
+        sessionStorage.removeItem(VERIFY_IDENTITY_NAV_KEY);
+      } catch {
+        // best-effort
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowState]);
@@ -1229,8 +1239,31 @@ export function VerifyIdentity({
   const refreshVerificationSnapshot = useCallback(async () => {
     const snapshot = await fetchVerifyIdentitySnapshot();
     applySnapshot(snapshot);
+    await refreshProfile();
     return snapshot;
-  }, [applySnapshot]);
+  }, [applySnapshot, refreshProfile]);
+
+  const syncProfileVerificationAfterStep = useCallback(async () => {
+    if (!user?.id) return;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await refreshProfile();
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("is_verified")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!error && data?.is_verified === true) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+    }
+  }, [refreshProfile, user?.id]);
+
+  const refreshVerificationRuntime = useCallback(async () => {
+    const snapshot = await refreshVerificationSnapshot();
+    if (user?.id) {
+      await resolvePhoneVerificationState(user.id);
+    }
+    return snapshot;
+  }, [refreshVerificationSnapshot, resolvePhoneVerificationState, user?.id]);
 
   const pullCardStatus = useCallback(async (options?: { force?: boolean }) => {
     const now = Date.now();
@@ -1250,11 +1283,14 @@ export function VerifyIdentity({
         lastSetupError: status.cardLastError,
         source: "pull_card_status",
       });
+      if (status.verificationStatus === "verified" || status.cardStatus === "passed") {
+        await refreshProfile();
+      }
       return status;
     } finally {
       cardStatusInFlightRef.current = false;
     }
-  }, [syncCardUiFromResolvedStatus]);
+  }, [refreshProfile, syncCardUiFromResolvedStatus]);
 
   useEffect(() => {
     if (humanVerificationStateOverride) {
@@ -1307,7 +1343,7 @@ export function VerifyIdentity({
           await resolvePhoneVerificationState(liveSession.user.id);
         }
         await trackDeviceFingerprint("verify_identity_entry");
-        const snapshot = await fetchVerifyIdentitySnapshot();
+        const snapshot = await refreshVerificationRuntime();
         if (!isMounted) return;
         applySnapshot(snapshot);
       } catch (error) {
@@ -1322,7 +1358,36 @@ export function VerifyIdentity({
       isMounted = false;
       resetCardFormRuntime();
     };
-  }, [authLoading, resetCardFormRuntime, resolvePhoneVerificationState]);
+  }, [authLoading, refreshVerificationRuntime, resetCardFormRuntime, resolvePhoneVerificationState, applySnapshot]);
+
+  useEffect(() => {
+    if (authLoading || !user?.id) return;
+    let inFlight = false;
+    const syncNow = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        await refreshVerificationRuntime();
+      } catch {
+        // no-op
+      } finally {
+        inFlight = false;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void syncNow();
+    };
+    const onFocus = () => {
+      void syncNow();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [authLoading, refreshVerificationRuntime, user?.id]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -1439,6 +1504,7 @@ export function VerifyIdentity({
         }
       }
       if (completed.humanStatus === "passed") {
+        await syncProfileVerificationAfterStep();
         toast.success("Human verification complete.");
       } else {
         setHumanErrorMessage(describeHumanFailure(result.resultPayload, workingChallenge?.instruction || null));
@@ -1584,6 +1650,7 @@ export function VerifyIdentity({
         console.debug("[VerifyIdentity.phone] snapshot refresh skipped", error);
       }
     }
+    await syncProfileVerificationAfterStep();
     if (user?.id) {
       try {
         await resolvePhoneVerificationState(user.id);
@@ -1912,6 +1979,7 @@ export function VerifyIdentity({
       try {
         const status = await pullCardStatus({ force: true });
         if (status?.cardStatus === "passed") {
+          await syncProfileVerificationAfterStep();
           toast.success("Card verification complete.");
           logCardState("confirm_card_setup_passed");
         } else if (status?.cardStatus === "failed") {
@@ -1951,6 +2019,7 @@ export function VerifyIdentity({
       const status = await pullCardStatus({ force: true });
       if (!status) return;
       if (status.cardStatus === "passed") {
+        await syncProfileVerificationAfterStep();
         toast.success("Card verification complete.");
         return;
       }
@@ -1973,7 +2042,7 @@ export function VerifyIdentity({
 
     const pollPending = async () => {
       try {
-        const snapshot = await fetchVerifyIdentitySnapshot();
+        const snapshot = await refreshVerificationSnapshot();
         if (cancelled) return;
         applySnapshot(snapshot);
         if (snapshot.cardStatus === "pending") {
@@ -2003,7 +2072,7 @@ export function VerifyIdentity({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [authLoading, user, humanVerificationState, cardVerificationState, pullCardStatus]);
+  }, [authLoading, user, humanVerificationState, cardVerificationState, pullCardStatus, refreshVerificationSnapshot, applySnapshot]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
