@@ -103,6 +103,11 @@ const maskPhoneForOtpNotice = (phone: string): string => {
   return `+${country} •••• ${last4}`;
 };
 
+const normalizePhoneForCompare = (phone: string): string =>
+  String(phone || "")
+    .trim()
+    .replace(/[^\d+]/g, "");
+
 const isRenderableImageSrc = (value: string): boolean => {
   const src = String(value || "").trim();
   if (!src) return false;
@@ -379,6 +384,81 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const suffix = normalized.length > 1 ? "fields" : "field";
     return `Almost there – fill in the ${normalized.join(", ")} ${suffix} to complete your profile!`;
   };
+
+  const scrollToProfileField = useCallback((fieldId: string) => {
+    if (typeof window === "undefined") return;
+    const target = document.getElementById(`profile-field-${fieldId}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      const focusTarget = target.querySelector<HTMLElement>("input, textarea, button, [role='combobox']");
+      focusTarget?.focus({ preventScroll: true });
+    }, 180);
+  }, []);
+
+  const focusFirstMissingRequiredField = useCallback((missingFields: string[]) => {
+    const keyByLabel: Record<string, string> = {
+      "Display/User Name": "display-name",
+      "Phone": "phone",
+      "Date of Birth": "dob",
+      "Gender": "gender",
+      "Location": "location",
+      "Social ID": "social-id",
+      "Experience with": "pet-experience",
+      "Social role": "social-role",
+      "Years of Experience": "experience-years",
+    };
+    const first = missingFields.find((field) => keyByLabel[field]);
+    if (!first) return;
+    scrollToProfileField(keyByLabel[first]);
+  }, [scrollToProfileField]);
+
+  type VisibilityField =
+    | "show_gender"
+    | "show_orientation"
+    | "show_age"
+    | "show_height"
+    | "show_weight"
+    | "show_academic"
+    | "show_affiliation"
+    | "show_occupation"
+    | "show_bio"
+    | "show_relationship_status"
+    | "show_languages"
+    | "show_location";
+
+  const handleVisibilityToggle = useCallback((field: VisibilityField, checked: boolean) => {
+    if (!checked) {
+      setFormData((prev) => ({ ...prev, [field]: false }));
+      return;
+    }
+    const requirements: Record<VisibilityField, { ready: boolean; message: string; scrollKey?: string; errorKey?: keyof typeof fieldErrors }> = {
+      show_gender: { ready: Boolean(formData.gender_genre.trim()), message: "Complete Gender first.", scrollKey: "gender", errorKey: "gender" },
+      show_orientation: { ready: Boolean(formData.orientation.trim()), message: "Complete Sexual Orientation first." },
+      show_age: { ready: Boolean(formData.dob), message: "Complete Date of Birth first.", scrollKey: "dob", errorKey: "dob" },
+      show_height: { ready: Boolean(formData.height.trim()), message: "Complete Height first.", scrollKey: "height", errorKey: "height" },
+      show_weight: { ready: Boolean(formData.weight.trim()), message: "Complete Weight first.", errorKey: "weight" },
+      show_academic: { ready: Boolean(formData.degree.trim() || formData.school.trim() || formData.major.trim()), message: "Complete Education & Career first." },
+      show_affiliation: { ready: Boolean(formData.affiliation.trim()), message: "Complete Affiliation first." },
+      show_occupation: { ready: Boolean(formData.occupation.trim()), message: "Complete Occupation first." },
+      show_bio: { ready: Boolean(formData.bio.trim()), message: "Complete Bio first.", scrollKey: "bio" },
+      show_relationship_status: { ready: Boolean(formData.relationship_status.trim()), message: "Complete Relationship Status first." },
+      show_languages: { ready: formData.languages.length > 0, message: "Select at least one language first." },
+      show_location: { ready: Boolean(formData.location_country.trim() && formData.location_district.trim()), message: "Complete Location first.", scrollKey: "location", errorKey: "location" },
+    };
+    const requirement = requirements[field];
+    if (!requirement.ready) {
+      if (requirement.errorKey) {
+        setFieldErrors((prev) => ({ ...prev, [requirement.errorKey]: REQUIRED_CONNECT_ERROR }));
+      }
+      if (requirement.scrollKey) {
+        scrollToProfileField(requirement.scrollKey);
+      }
+      toast.error(requirement.message);
+      return;
+    }
+    setFormData((prev) => ({ ...prev, [field]: true }));
+  }, [formData, scrollToProfileField, fieldErrors]);
 
   const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
     const response = await fetch(dataUrl);
@@ -1264,55 +1344,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
   };
 
-  useEffect(() => {
-    setFormData((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      const nextShowGender = Boolean(prev.gender_genre.trim());
-      const nextShowOrientation = Boolean(prev.orientation.trim());
-      const nextShowAge = Boolean(prev.dob);
-      const nextShowHeight = Boolean(prev.height);
-      const nextShowWeight = Boolean(prev.weight);
-      const nextShowAcademic = Boolean(prev.degree.trim() || prev.school.trim() || prev.major.trim());
-      const nextShowAffiliation = Boolean(prev.affiliation.trim());
-      const nextShowOccupation = Boolean(prev.occupation.trim());
-      const nextShowBio = Boolean(prev.bio.trim());
-      const nextShowRelationship = Boolean(prev.relationship_status.trim());
-      const nextShowLanguages = prev.languages.length > 0;
-      const nextShowLocation = Boolean(prev.location_country.trim() || prev.location_district.trim());
-
-      if (prev.show_gender !== nextShowGender) { next.show_gender = nextShowGender; changed = true; }
-      if (prev.show_orientation !== nextShowOrientation) { next.show_orientation = nextShowOrientation; changed = true; }
-      if (prev.show_age !== nextShowAge) { next.show_age = nextShowAge; changed = true; }
-      if (prev.show_height !== nextShowHeight) { next.show_height = nextShowHeight; changed = true; }
-      if (prev.show_weight !== nextShowWeight) { next.show_weight = nextShowWeight; changed = true; }
-      if (prev.show_academic !== nextShowAcademic) { next.show_academic = nextShowAcademic; changed = true; }
-      if (prev.show_affiliation !== nextShowAffiliation) { next.show_affiliation = nextShowAffiliation; changed = true; }
-      if (prev.show_occupation !== nextShowOccupation) { next.show_occupation = nextShowOccupation; changed = true; }
-      if (prev.show_bio !== nextShowBio) { next.show_bio = nextShowBio; changed = true; }
-      if (prev.show_relationship_status !== nextShowRelationship) { next.show_relationship_status = nextShowRelationship; changed = true; }
-      if (prev.show_languages !== nextShowLanguages) { next.show_languages = nextShowLanguages; changed = true; }
-      if (prev.show_location !== nextShowLocation) { next.show_location = nextShowLocation; changed = true; }
-      return changed ? next : prev;
-    });
-  }, [
-    formData.gender_genre,
-    formData.orientation,
-    formData.dob,
-    formData.height,
-    formData.weight,
-    formData.degree,
-    formData.school,
-    formData.major,
-    formData.affiliation,
-    formData.occupation,
-    formData.bio,
-    formData.relationship_status,
-    formData.languages,
-    formData.location_country,
-    formData.location_district,
-  ]);
-
   const handleRemoveSocialAlbum = async (path: string) => {
     const next = canonicalizeSocialAlbumEntries(formData.social_album.filter((p) => p !== path));
     socialAlbumRef.current = next;
@@ -1518,6 +1549,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const missingFields = getMissingRequiredFieldLabels();
     if (missingFields.length > 0) {
       validateRequiredFields();
+      focusFirstMissingRequiredField(missingFields);
       toast.error(formatMissingFieldsToast(missingFields));
       return;
     }
@@ -1562,7 +1594,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
       return;
     }
-    if (phoneEditMode || (formData.phone.trim() !== phoneOriginalValue.trim() && !phoneOtpVerified)) {
+    const currentPhoneNormalized = normalizePhoneForCompare(formData.phone);
+    const originalPhoneNormalized = normalizePhoneForCompare(phoneOriginalValue);
+    const phoneChanged = currentPhoneNormalized !== originalPhoneNormalized;
+    if (phoneChanged && !phoneOtpVerified) {
       setFieldErrors((prev) => ({ ...prev, phone: t("Please verify phone with OTP before saving") }));
       return;
     }
@@ -2031,7 +2066,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
 
             {/* Display Name */}
-            <div>
+            <div id="profile-field-display-name">
               <label className="text-sm font-medium mb-2 block">{t("Display/User Name")}</label>
               {!displayNameEditMode ? (
                 <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)]">
@@ -2072,7 +2107,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Social ID */}
-            <div>
+            <div id="profile-field-social-id">
               <label className="text-sm font-medium mb-2 block">{t("Social ID")}</label>
               {!socialIdEditMode ? (
                 <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)]">
@@ -2142,7 +2177,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             )}
 
             {/* Phone */}
-            <div>
+            <div id="profile-field-phone">
               <label className="text-sm font-medium mb-2 block">{t("Phone")}</label>
               {!phoneEditMode ? (
                 <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)]">
@@ -2296,7 +2331,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           </div>
 
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,170px)] gap-3 items-start">
-              <div>
+              <div id="profile-field-dob">
                 <div className="flex items-center justify-between mb-2 h-6">
                   <label className="text-sm font-medium">{t("Date of Birth")}</label>
                   <span className="inline-block w-[52px]" aria-hidden />
@@ -2357,7 +2392,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                     <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                     <NeuToggle
                       checked={formData.show_height}
-                      onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_height: checked }))}
+                      onCheckedChange={(checked) => handleVisibilityToggle("show_height", checked)}
                     />
                   </div>
                 </div>
@@ -2387,14 +2422,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Bio */}
-            <div>
+            <div id="profile-field-height">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Bio")}</label>
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_bio}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_bio: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_bio", checked)}
                   />
                 </div>
               </div>
@@ -2534,14 +2569,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Demographics")}</h3>
 
             {/* Gender */}
-            <div>
+            <div id="profile-field-bio">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Gender")}</label>
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_gender}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_gender: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_gender", checked)}
                   />
                 </div>
               </div>
@@ -2558,14 +2593,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Sexual Orientation */}
-            <div>
+            <div id="profile-field-gender">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Sexual Orientation")}</label>
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_orientation}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_orientation: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_orientation", checked)}
                   />
                 </div>
               </div>
@@ -2586,13 +2621,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                 <NeuToggle
                   checked={formData.show_academic}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_academic: checked }))}
+                  onCheckedChange={(checked) => handleVisibilityToggle("show_academic", checked)}
                 />
               </div>
             </div>
 
             {/* Degree */}
-            <div>
+            <div id="profile-field-location">
               <label className="text-sm font-medium mb-2 block">{t("Highest Degree")}</label>
               <NeuDropdown
                 placeholder="Select"
@@ -2633,14 +2668,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             {fieldErrors.major && <ErrorLabel message={fieldErrors.major} />}
 
             {/* Occupation */}
-            <div>
+            <div id="profile-field-pet-experience">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Occupation")}</label>
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_occupation}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_occupation: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_occupation", checked)}
                   />
                 </div>
               </div>
@@ -2668,7 +2703,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                 <NeuToggle
                   checked={formData.show_affiliation}
-                  onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_affiliation: checked }))}
+                  onCheckedChange={(checked) => handleVisibilityToggle("show_affiliation", checked)}
                 />
               </div>
             </div>
@@ -2694,7 +2729,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_relationship_status}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_relationship_status: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_relationship_status", checked)}
                   />
                 </div>
               </div>
@@ -2729,7 +2764,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_languages}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_languages: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_languages", checked)}
                   />
                 </div>
               </div>
@@ -2784,7 +2819,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
                     checked={formData.show_location}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, show_location: checked }))}
+                    onCheckedChange={(checked) => handleVisibilityToggle("show_location", checked)}
                   />
                 </div>
               </div>
@@ -2960,7 +2995,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
             {/* Years of Experience */}
             {formData.pet_experience.length > 0 && !formData.pet_experience.includes("None") && (
-              <div>
+              <div id="profile-field-experience-years">
                 <label className="text-sm font-medium mb-2 block">{t("Years of Experience")}</label>
                 <div className="form-field-rest relative flex items-center w-28">
                   <input
@@ -3022,7 +3057,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           </div>
 
           {/* Social Availability */}
-          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
+          <div id="profile-field-social-role" className="p-4 rounded-xl bg-muted/50 space-y-3">
             <span className="text-sm font-semibold">What should others know you as?</span>
             <div className="flex flex-wrap gap-2">
               {availabilityOptions.map((status) => (
