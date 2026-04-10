@@ -1163,8 +1163,14 @@ export function VerifyIdentity({
       Boolean(cardSetupIntentId)
       && Boolean(params.setupIntentId)
       && cardSetupIntentId !== params.setupIntentId;
+    // Protect locally-established failure: a "failed" local state means the user
+    // saw a mount error or submission error. Backend polling still returns "pending"
+    // (no submit was completed), so without this guard the poll at line 1179 resets
+    // cardVerificationState → "idle"/"pending", collapsing the failed-retry UI path.
+    // Only a backend "passed" result (uiState === "passed") can clear a local failure.
+    const hasLocalFailedState = cardVerificationState === "failed";
 
-    if (uiState !== "passed" && (hasActiveCardAttempt || differentSetupIntent)) {
+    if (uiState !== "passed" && (hasActiveCardAttempt || differentSetupIntent || hasLocalFailedState)) {
       logCardState("resolved_status_ignored_active_attempt", {
         source: params.source,
         resolvedState: uiState,

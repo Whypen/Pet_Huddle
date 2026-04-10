@@ -100,6 +100,15 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
   });
   const shouldKeepDraftForSession = useCallback((sessionEmail?: string | null, sessionUserId?: string | null) => {
     if (flowState !== "idle") return true;
+    // sessionStorage is written synchronously by setFlowState — use it as an
+    // authoritative fallback for the race where React state hasn't committed yet
+    // when onAuthStateChange fires during authSignup → applySession → setSession.
+    try {
+      const raw = sessionStorage.getItem(SIGNUP_FLOW_STATE_KEY);
+      if (raw === "signup" || raw === "verify_identity") return true;
+    } catch {
+      // best-effort only
+    }
     const draftOwner = normalizeStorageOwner(data.email || resolveRememberedOwner());
     const emailOwner = normalizeStorageOwner(sessionEmail || "");
     const idOwner = normalizeStorageOwner(sessionUserId || "");

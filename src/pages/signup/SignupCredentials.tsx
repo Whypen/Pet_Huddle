@@ -411,18 +411,40 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
+      const normalizedEmail = values.email.trim().toLowerCase();
+      // Pre-check: if this email already has a valid verified presignup token,
+      // skip /signup/verify-email entirely and go straight to /signup/name.
+      let signupProof = "";
+      try {
+        const storedToken = sessionStorage.getItem("huddle_presignup_token") || "";
+        const storedEmail = sessionStorage.getItem("huddle_presignup_email") || "";
+        if (storedToken && storedEmail === normalizedEmail) {
+          const { data: statusResp } = await supabase.functions.invoke("get-pre-signup-verify-status", {
+            body: { email: normalizedEmail, token: storedToken },
+          });
+          if (statusResp?.verified && statusResp?.signup_proof) {
+            signupProof = String(statusResp.signup_proof);
+          }
+        }
+      } catch {
+        // best-effort — fall through to normal verify-email flow
+      }
       update({
         email: values.email.trim(),
         password: values.password ?? "",
         phone: values.phone.trim(),
         email_opt_in: emailOptIn,
-        signup_proof: "",
+        signup_proof: signupProof,
       });
-      sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
       setFlowState("signup");
+      if (signupProof) {
+        goTo("/signup/name");
+        return;
+      }
+      sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
       goTo("/signup/verify-email", {
         from_credentials: true,
-        email: values.email.trim().toLowerCase(),
+        email: normalizedEmail,
       });
     } catch (err) {
       console.error("Signup failed:", err);
