@@ -57,6 +57,10 @@ const SignupCredentials = () => {
   const incomingEmail = String(incomingState?.email || "").trim().toLowerCase();
   const { user, profile, signIn } = useAuth();
   const [isExiting, setIsExiting] = useState(false);
+  // Pre-verified state: set as soon as the email field resolves to an already-verified
+  // presignup token on the backend. Checked on submit to skip /signup/verify-email.
+  const [preVerifiedProof, setPreVerifiedProof] = useState<string | null>(null);
+  const preVerifyCheckRef = useRef(0);
 
   // Strict OAuth onboarding detection — ALL four conditions must hold:
   // 1. Already authenticated (session exists via OAuth provider)
@@ -163,6 +167,36 @@ const SignupCredentials = () => {
     setDismissedDuplicateKey(null);
     setSignupBlockedMessage(null);
   }, [email, phone]);
+
+  // Early pre-verification check: as soon as the email field is structurally valid,
+  // ask the backend whether it already has a verified presignup token for this address.
+  // This fires on email change (debounced 600ms) so the result is ready by the time
+  // the user hits Continue — no token in sessionStorage required.
+  useEffect(() => {
+    if (isOAuthOnboarding) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!emailSchema.safeParse(normalizedEmail).success) {
+      setPreVerifiedProof(null);
+      return;
+    }
+    const checkId = ++preVerifyCheckRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const { data: resp } = await supabase.functions.invoke("get-pre-signup-verify-status", {
+          body: { email: normalizedEmail },
+        });
+        if (checkId !== preVerifyCheckRef.current) return;
+        if (resp?.verified && resp?.signup_proof) {
+          setPreVerifiedProof(String(resp.signup_proof));
+        } else {
+          setPreVerifiedProof(null);
+        }
+      } catch {
+        if (checkId === preVerifyCheckRef.current) setPreVerifiedProof(null);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [email, isOAuthOnboarding]);
 
   // Sync email from OAuth provider metadata after first render (in case auth
   // context wasn't ready when defaultValues was computed).
@@ -412,23 +446,9 @@ const SignupCredentials = () => {
         return;
       }
       const normalizedEmail = values.email.trim().toLowerCase();
-      // Pre-check: if this email already has a valid verified presignup token,
-      // skip /signup/verify-email entirely and go straight to /signup/name.
-      let signupProof = "";
-      try {
-        const storedToken = sessionStorage.getItem("huddle_presignup_token") || "";
-        const storedEmail = sessionStorage.getItem("huddle_presignup_email") || "";
-        if (storedToken && storedEmail === normalizedEmail) {
-          const { data: statusResp } = await supabase.functions.invoke("get-pre-signup-verify-status", {
-            body: { email: normalizedEmail, token: storedToken },
-          });
-          if (statusResp?.verified && statusResp?.signup_proof) {
-            signupProof = String(statusResp.signup_proof);
-          }
-        }
-      } catch {
-        // best-effort — fall through to normal verify-email flow
-      }
+      // preVerifiedProof is populated by the debounced email-change effect above.
+      // No sessionStorage token required — backend resolved it from the email alone.
+      const signupProof = preVerifiedProof || "";
       update({
         email: values.email.trim(),
         password: values.password ?? "",
