@@ -90,6 +90,12 @@ const SignupName = () => {
           toast.error("Email verification is required. Please resend your verification link.");
           return;
         }
+        // Assert signup flow state synchronously before creating the session.
+        // SignupContext.onAuthStateChange fires inside setSession() — having
+        // "signup" in sessionStorage before that call is the only race-free guarantee
+        // that shouldKeepDraftForSession returns true and the draft is not reset.
+        setFlowState("signup");
+
         // New user — create account now that we have display name + social ID
         const { error: signUpError } = await authSignup({
           email: data.email.trim(),
@@ -107,18 +113,30 @@ const SignupName = () => {
           toast.error(resolveSignupError(signUpError));
           return;
         }
-        // Fire account verify email + optional marketing DOI email (both fire-and-forget)
+
+        // Re-assert flow state: onAuthStateChange may have reset it to "idle"
+        // during the setSession() call inside authSignup. Writing it again here
+        // restores sessionStorage so PublicRoute’s next render allows the route.
+        setFlowState("signup");
+
+        // Verify the session was actually established before navigating.
+        // auth-signup returns no session when Supabase requires email confirmation.
         const { data: sessionData } = await supabase.auth.getSession();
         const newUserId = sessionData.session?.user?.id;
-        if (newUserId) {
+        if (!newUserId) {
+          toast.error("Account created — please sign in to continue.");
+          navigate("/auth");
+          return;
+        }
+
+        // Fire account verify email + optional marketing DOI email (both fire-and-forget)
+        void supabase.functions
+          .invoke("send-signup-verify-email", { body: { user_id: newUserId } })
+          .catch((err) => console.warn("[signup-name] verify email failed silently", err));
+        if (data.email_opt_in) {
           void supabase.functions
-            .invoke("send-signup-verify-email", { body: { user_id: newUserId } })
-            .catch((err) => console.warn("[signup-name] verify email failed silently", err));
-          if (data.email_opt_in) {
-            void supabase.functions
-              .invoke("send-marketing-doi-email", { body: { user_id: newUserId } })
-              .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
-          }
+            .invoke("send-marketing-doi-email", { body: { user_id: newUserId } })
+            .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
         }
         if (data.email_opt_in) {
           toast.message("We’ll send you a separate email to confirm your subscription.");
