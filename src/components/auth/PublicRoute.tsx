@@ -7,7 +7,7 @@ import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { hasSignupDraft } from "@/lib/signupOnboarding";
 
 export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, session, profile, loading, mfaPending } = useAuth();
+  const { user, session, profile, loading, hydrating, mfaPending } = useAuth();
   const { flowState } = useSignup();
   const location = useLocation();
   const isSignupPath = location.pathname.startsWith("/signup/");
@@ -53,6 +53,18 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (loading) {
+    return (
+      <div className="min-h-svh flex items-center justify-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // While AuthContext is mid-hydration (user set, profile fetch in flight),
+  // hold signup paths in place rather than redirecting. The hydration window
+  // is brief (<500 ms) but long enough to cause a PublicRoute bounce when
+  // a deleted-account re-signup fires SIGNED_IN before the profile resolves.
+  if (hydrating && isSignupPath) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />

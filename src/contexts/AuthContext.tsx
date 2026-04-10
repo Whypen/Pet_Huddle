@@ -98,6 +98,8 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  /** True while a new session is being hydrated (user→profile async gap). */
+  hydrating: boolean;
   mfaPending: boolean;
   signUp: (
     email: string,
@@ -137,6 +139,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hydrating, setHydrating] = useState(false);
   const [mfaPending, setMfaPending] = useState(false);
 
   const profileColumns = [
@@ -394,6 +397,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!candidateSession) {
       resetAuthBoundary(runId);
       setLoading(false);
+      setHydrating(false);
       return;
     }
 
@@ -401,6 +405,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // ever set to `false` — re-raising it on subsequent auth state changes
     // (e.g. after signInWithPassword) causes PublicRoute to unmount the Auth
     // component, destroying modal state like emailModalOpen.
+    // Instead, set `hydrating` to signal that user→profile is in flight.
+    setHydrating(true);
     const { data, error } = await supabase.auth.getUser(candidateSession.access_token);
     if (!isHydrationRunCurrent(runId)) return;
     if (error || !data.user) {
@@ -413,6 +419,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!isHydrationRunCurrent(runId)) return;
       resetAuthBoundary(runId);
       setLoading(false);
+      setHydrating(false);
       return;
     }
 
@@ -428,6 +435,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setProfile(null);
       previousUserIdRef.current = data.user.id;
       setLoading(false);
+      setHydrating(false);
       return;
     }
     setMfaPending(false);
@@ -444,6 +452,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!isHydrationRunCurrent(runId)) return;
     void touchProfileActivity();
     setLoading(false);
+    setHydrating(false);
   }, [
     beginHydrationRun,
     clearTransientUserStorage,
@@ -655,6 +664,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         session,
         profile,
         loading,
+        hydrating,
         mfaPending,
         signUp,
         signIn,

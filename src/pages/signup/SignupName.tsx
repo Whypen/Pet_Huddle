@@ -120,9 +120,15 @@ const SignupName = () => {
         setFlowState("signup");
 
         // Verify the session was actually established before navigating.
-        // auth-signup returns no session when Supabase requires email confirmation.
-        const { data: sessionData } = await supabase.auth.getSession();
-        const newUserId = sessionData.session?.user?.id;
+        // auth-signup may return session:null for deleted-account re-registration
+        // (delete+recreate race in Supabase). Retry up to 3 s to absorb it.
+        let newUserId: string | undefined;
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          newUserId = sessionData.session?.user?.id;
+          if (newUserId) break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
         if (!newUserId) {
           toast.error("Account created — please sign in to continue.");
           navigate("/auth");
