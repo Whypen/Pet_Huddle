@@ -178,6 +178,12 @@ const SignupVerifyEmail = () => {
     setTimeout(() => navigate(incomingFromSetProfile ? "/set-profile" : "/signup/name"), 180);
   }, [incomingFromSetProfile, navigate, setFlowState]);
 
+  // Auto-redirect as soon as verification is confirmed — no manual tap required.
+  useEffect(() => {
+    if (!verified) return;
+    proceedAfterVerification();
+  }, [verified, proceedAfterVerification]);
+
   const lookupStatus = useCallback(async (emailOverride?: string): Promise<StatusOutcome> => {
     const canonicalEmail = String(emailOverride || draftEmail || incomingEmail || "").trim().toLowerCase();
     if (!canonicalEmail || statusInFlight.current) return "error";

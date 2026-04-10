@@ -104,7 +104,6 @@ const SignupName = () => {
           signup_proof: signupProof,
         });
         if (signUpError) {
-          setFlowState("idle");
           toast.error(resolveSignupError(signUpError));
           return;
         }
@@ -189,7 +188,7 @@ const SignupName = () => {
     Boolean(displayName.trim()) &&
     Boolean(normalizedSocialId) &&
     SOCIAL_ID_REGEX.test(normalizedSocialId) &&
-    availabilityState === "available" &&
+    (user ? availabilityState !== "checking" : availabilityState === "available") &&
     (user ? true : Boolean(String(data.signup_proof || "").trim()));
 
   return (

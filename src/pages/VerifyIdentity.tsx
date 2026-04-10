@@ -1329,6 +1329,20 @@ export function VerifyIdentity({
     logCardState,
   ]);
 
+  // Stable refs so the bootstrap effect doesn't re-run when these callbacks are recreated.
+  // applySnapshot / refreshVerificationRuntime / resolvePhoneVerificationState are all
+  // useCallback-memoised on card-related state (cardVerificationState, cardFormVisible, etc.).
+  // Without these refs, every card state change triggers the bootstrap cleanup which calls
+  // resetCardFormRuntime() and destroys Stripe elements mid-flow.
+  const applySnapshotRef = useRef(applySnapshot);
+  useEffect(() => { applySnapshotRef.current = applySnapshot; }, [applySnapshot]);
+
+  const refreshVerificationRuntimeRef = useRef(refreshVerificationRuntime);
+  useEffect(() => { refreshVerificationRuntimeRef.current = refreshVerificationRuntime; }, [refreshVerificationRuntime]);
+
+  const resolvePhoneVerificationStateRef = useRef(resolvePhoneVerificationState);
+  useEffect(() => { resolvePhoneVerificationStateRef.current = resolvePhoneVerificationState; }, [resolvePhoneVerificationState]);
+
   useEffect(() => {
     let isMounted = true;
     if (authLoading) return;
@@ -1340,12 +1354,12 @@ export function VerifyIdentity({
         } = await supabase.auth.getSession();
         if (!liveSession?.access_token) return;
         if (isMounted && liveSession.user?.id) {
-          await resolvePhoneVerificationState(liveSession.user.id);
+          await resolvePhoneVerificationStateRef.current(liveSession.user.id);
         }
         await trackDeviceFingerprint("verify_identity_entry");
-        const snapshot = await refreshVerificationRuntime();
+        const snapshot = await refreshVerificationRuntimeRef.current();
         if (!isMounted) return;
-        applySnapshot(snapshot);
+        applySnapshotRef.current(snapshot);
       } catch (error) {
         if (import.meta.env.DEV) {
           console.debug("[VerifyIdentity] bootstrap waiting", error);
@@ -1356,9 +1370,14 @@ export function VerifyIdentity({
     void bootstrap();
     return () => {
       isMounted = false;
-      resetCardFormRuntime();
     };
-  }, [authLoading, refreshVerificationRuntime, resetCardFormRuntime, resolvePhoneVerificationState, applySnapshot]);
+  }, [authLoading]);
+
+  // Unmount-only: destroy Stripe elements when navigating away from the page.
+  // Kept separate so authLoading changes don't fire the cleanup mid-card-setup.
+  useEffect(() => {
+    return () => resetCardFormRuntime();
+  }, [resetCardFormRuntime]);
 
   useEffect(() => {
     if (authLoading || !user?.id) return;
