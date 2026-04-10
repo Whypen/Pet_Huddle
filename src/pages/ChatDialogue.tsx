@@ -10,11 +10,11 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Textarea } from "@/components/ui/textarea";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
+import { ReportModal } from "@/components/moderation/ReportModal";
 
 type ChatMessage = {
   id: string;
@@ -50,17 +50,6 @@ type CounterpartProfile = {
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
-
-const REPORT_REASONS = [
-  "Spam or fake account",
-  "Harassment or bullying",
-  "Inappropriate or offensive content",
-  "Unsafe or harmful behavior (online or in-person)",
-  "Hate, discrimination, or threats",
-  "Scams, money requests, or promotions",
-  "Impersonation or stolen photos",
-  "Other",
-] as const;
 
 const formatMessageTime = (iso: string) => {
   const dt = new Date(iso);
@@ -114,12 +103,7 @@ const ChatDialogue = () => {
   const [confirmUnmatchOpen, setConfirmUnmatchOpen] = useState(false);
   const [confirmBlockOpen, setConfirmBlockOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportReasons, setReportReasons] = useState<Set<string>>(new Set());
-  const [reportOther, setReportOther] = useState("");
-  const [reportDetails, setReportDetails] = useState("");
-  const [reportUploads, setReportUploads] = useState<File[]>([]);
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
-  const [reportSubmitting, setReportSubmitting] = useState(false);
   const [uploadingComposer, setUploadingComposer] = useState(false);
   const [isGroup, setIsGroup] = useState(false);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
@@ -138,23 +122,7 @@ const ChatDialogue = () => {
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const reportImageInputRef = useRef<HTMLInputElement | null>(null);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
-
-  const reportUploadPreviews = useMemo(
-    () =>
-      reportUploads.map((file, idx) => ({
-        key: `${file.name}-${file.size}-${idx}`,
-        url: URL.createObjectURL(file),
-      })),
-    [reportUploads]
-  );
-
-  useEffect(() => {
-    return () => {
-      reportUploadPreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
-    };
-  }, [reportUploadPreviews]);
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
@@ -763,58 +731,6 @@ const ChatDialogue = () => {
     }
   }, [roomId, profile?.id]);
 
-  const handleReportSubmit = useCallback(async () => {
-    if (!profile?.id || !counterpart?.id) return;
-    const selectedReasons = Array.from(reportReasons);
-    if (selectedReasons.length === 0) {
-      toast.error("Select at least one reason.");
-      return;
-    }
-    setReportSubmitting(true);
-    try {
-      const attachments = await uploadFilesToNotices(reportUploads, "reports");
-      const attachmentUrls = attachments.map((item) => item.url);
-      const payload = {
-        target_user_id: counterpart.id,
-        room_id: roomId,
-        reasons: selectedReasons,
-        other: selectedReasons.includes("Other") ? reportOther.trim() : "",
-        details: reportDetails.trim(),
-        attachments: attachmentUrls,
-      };
-      // Score + enforce via DB function
-      await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: unknown }>)(
-        "process_user_report",
-        {
-          p_target_id:       counterpart.id,
-          p_categories:      selectedReasons,
-          p_details:         reportDetails.trim() || null,
-          p_attachment_urls: attachmentUrls,
-        }
-      );
-      // Send email via edge function (best-effort)
-      void supabase.functions.invoke("support-request", {
-        body: {
-          userId:  profile.id,
-          subject: `Report: ${counterpart.displayName || counterpart.id}`,
-          message: JSON.stringify(payload),
-          email:   (profile as unknown as { email?: string }).email || null,
-          source:  isGroup ? "Group Chat" : "Chat",
-        },
-      });
-      toast.success("Report sent");
-      setReportOpen(false);
-      setReportReasons(new Set());
-      setReportOther("");
-      setReportDetails("");
-      setReportUploads([]);
-    } catch {
-      toast.error("Unable to submit report right now.");
-    } finally {
-      setReportSubmitting(false);
-    }
-  }, [counterpart, isGroup, profile, reportDetails, reportOther, reportReasons, reportUploads, roomId, uploadFilesToNotices]);
-
   if (loading) {
     return (
       <div className="h-full min-h-0 flex items-center justify-center">
@@ -1209,99 +1125,13 @@ const ChatDialogue = () => {
         </DialogContent>
       </Dialog>
 
-      <Sheet open={reportOpen} onOpenChange={setReportOpen}>
-        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
-          <SheetHeader className="pb-3 shrink-0">
-            <SheetTitle className="text-left">Report</SheetTitle>
-            <p className="text-sm text-muted-foreground text-left">Tell us what happened so we can protect the community.</p>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto space-y-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
-            <div className="space-y-2">
-              {REPORT_REASONS.map((reason) => (
-                <label key={reason} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={reportReasons.has(reason)}
-                    onChange={(event) => {
-                      setReportReasons((prev) => {
-                        const next = new Set(prev);
-                        if (event.target.checked) next.add(reason);
-                        else next.delete(reason);
-                        return next;
-                      });
-                    }}
-                  />
-                  <span>{reason}</span>
-                </label>
-              ))}
-            </div>
-            {reportReasons.has("Other") && (
-              <div className="form-field-rest relative flex items-center">
-                <input
-                  value={reportOther}
-                  onChange={(event) => setReportOther(event.target.value)}
-                  placeholder="Other reason"
-                  className="field-input-core"
-                />
-              </div>
-            )}
-            <div className="form-field-rest relative h-auto min-h-[96px] py-3">
-              <Textarea
-                value={reportDetails}
-                onChange={(event) => setReportDetails(event.target.value)}
-                placeholder="Add details (optional)"
-                className="field-input-core min-h-[72px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
-              />
-            </div>
-            <div>
-              <button
-                type="button"
-                className="neu-icon h-10 w-10"
-                onClick={() => reportImageInputRef.current?.click()}
-                aria-label="Upload image"
-              >
-                <ImagePlus className="h-4 w-4" />
-              </button>
-              <input
-                ref={reportImageInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(event) => {
-                  const files = Array.from(event.target.files || []);
-                  setReportUploads((prev) => [...prev, ...files].slice(0, 5));
-                  event.currentTarget.value = "";
-                }}
-              />
-              {reportUploads.length > 0 && (
-                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {reportUploadPreviews.map((preview, idx) => (
-                    <div
-                      key={preview.key}
-                      className="h-[96px] w-[96px] overflow-hidden rounded-xl bg-muted/30"
-                    >
-                      <img
-                        src={preview.url}
-                        alt={`Upload ${idx + 1}`}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleReportSubmit()}
-              disabled={reportSubmitting}
-              className="h-11 w-full rounded-full bg-brandBlue text-sm font-semibold text-white disabled:opacity-45"
-            >
-              {reportSubmitting ? "Sending..." : "Send report"}
-            </button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <ReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetUserId={counterpart?.id ?? null}
+        targetName={counterpart?.displayName ?? "User"}
+        source={isGroup ? "Group Chat" : "Chat"}
+      />
 
       {/* ── Group Info Sheet (WhatsApp-style) ── */}
       <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>

@@ -78,17 +78,17 @@ const lazyWithChunkRecovery = <T extends ComponentType<unknown>>(
     }
   });
 
-const Discover = lazy(() => import("./pages/Discover"));
-const Chats = lazy(() => import("./pages/Chats"));
-const ChatDialogue = lazy(() => import("./pages/ChatDialogue"));
-const ServiceChat = lazy(() => import("./pages/ServiceChat"));
+const Discover = lazyWithChunkRecovery("discover", () => import("./pages/Discover"));
+const Chats = lazyWithChunkRecovery("chats", () => import("./pages/Chats"));
+const ChatDialogue = lazyWithChunkRecovery("chat-dialogue", () => import("./pages/ChatDialogue"));
+const ServiceChat = lazyWithChunkRecovery("service-chat", () => import("./pages/ServiceChat"));
 const AIVet = lazy(() => import("./pages/AIVet"));
 const MapPage = lazyWithChunkRecovery("map", () => import("./pages/Map"));
 const PetDetails = lazy(() => import("./pages/PetDetails"));
-const Settings = lazy(() => import("./pages/Settings"));
-const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
+const Settings = lazyWithChunkRecovery("settings", () => import("./pages/Settings"));
+const SecuritySettings = lazyWithChunkRecovery("security-settings", () => import("./pages/SecuritySettings"));
 const Premium = lazyWithChunkRecovery("premium", () => import("./pages/Premium"));
-const Notifications = lazy(() => import("./pages/Notifications"));
+const Notifications = lazyWithChunkRecovery("notifications", () => import("./pages/Notifications"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminKYCReview = lazy(() => import("./pages/admin/AdminKYCReview"));
 const Marketplace = lazy(() => import("./pages/Marketplace"));
