@@ -2385,7 +2385,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   </p>
                 )}
               </div>
-              <div>
+              <div id="profile-field-height">
                 <div className="flex items-center justify-between mb-2 h-6">
                   <label className="text-sm font-medium">Height</label>
                   <div className="flex items-center gap-2">
@@ -2422,7 +2422,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Bio */}
-            <div id="profile-field-height">
+            <div id="profile-field-bio">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Bio")}</label>
                 <div className="flex items-center gap-2">
@@ -2569,7 +2569,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Demographics")}</h3>
 
             {/* Gender */}
-            <div id="profile-field-bio">
+            <div id="profile-field-gender">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Gender")}</label>
                 <div className="flex items-center gap-2">
@@ -2593,7 +2593,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Sexual Orientation */}
-            <div id="profile-field-gender">
+            <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Sexual Orientation")}</label>
                 <div className="flex items-center gap-2">
@@ -2627,7 +2627,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Degree */}
-            <div id="profile-field-location">
+            <div>
               <label className="text-sm font-medium mb-2 block">{t("Highest Degree")}</label>
               <NeuDropdown
                 placeholder="Select"
@@ -2668,7 +2668,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             {fieldErrors.major && <ErrorLabel message={fieldErrors.major} />}
 
             {/* Occupation */}
-            <div id="profile-field-pet-experience">
+            <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Occupation")}</label>
                 <div className="flex items-center gap-2">
@@ -2812,7 +2812,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Location */}
-            <div>
+            <div id="profile-field-location">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-medium">{t("Location")}</label>
                 <div className="flex items-center gap-2">
@@ -2926,7 +2926,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Pet Experience")}</h3>
 
             {/* Pet Experience Types */}
-            <div>
+            <div id="profile-field-pet-experience">
               <label className="text-sm font-medium mb-2 block">{t("Experience with")}</label>
               <div className="space-y-2">
                 <Popover>
