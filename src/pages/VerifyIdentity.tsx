@@ -927,6 +927,10 @@ export function VerifyIdentity({
   const cardStatusInFlightRef = useRef(false);
   const lastCardStatusFetchAtRef = useRef(0);
   const cardReadyWatchdogRef = useRef<number | null>(null);
+  // Tracks whether an automatic mount-retry has already been scheduled for the
+  // current user-initiated "Add Card" attempt. Reset on every manual click so
+  // each user action gets exactly one auto-retry on loaderror.
+  const cardMountAutoRetriedRef = useRef(false);
 
   // ── Nav state (survives Stripe full-page redirect) ──────────────────────────
   const VERIFY_IDENTITY_NAV_KEY = "huddle_vi_nav";
@@ -1708,13 +1712,16 @@ export function VerifyIdentity({
     }
   };
 
-  const onAddCard = async () => {
+  const onAddCard = async (isAutoRetry = false) => {
     if (onAddCardOverride) {
       onAddCardOverride();
       return;
     }
     if (cardSetupInFlightRef.current) return;
     if (!(await ensureAuthForVerification())) return;
+    // Reset the auto-retry sentinel on every manual click so each new user
+    // attempt gets exactly one automatic retry on loaderror.
+    if (!isAutoRetry) cardMountAutoRetriedRef.current = false;
     cardSetupInFlightRef.current = true;
     try {
       setActiveCard("card");
@@ -1830,10 +1837,19 @@ export function VerifyIdentity({
       };
 
       const onLoadError = (field: "number" | "expiry" | "cvc") => {
+        logCardState("card_field_loaderror", { field, autoRetried: cardMountAutoRetriedRef.current });
+        // First loaderror is almost always a cold-connection failure
+        // (ERR_CONNECTION_CLOSED on m.stripe.com / m.stripe.network). The browser
+        // has warm DNS + TCP by the time we retry 1 s later. Allow exactly one
+        // automatic retry per user-initiated click before surfacing the error.
+        if (!cardMountAutoRetriedRef.current) {
+          cardMountAutoRetriedRef.current = true;
+          window.setTimeout(() => void onAddCard(true), 1000);
+          return;
+        }
         setCardVerificationState("failed");
         setCardReadyReason(null);
         setCardErrorMessage("Card form failed to mount. Please retry.");
-        logCardState("card_field_loaderror", { field });
       };
 
       cardNumberElement.on("ready", () => onReady("number"));
