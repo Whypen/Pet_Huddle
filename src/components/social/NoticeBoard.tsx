@@ -38,6 +38,7 @@ import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
+import { ReportModal } from "@/components/moderation/ReportModal";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
@@ -496,6 +497,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [mentionSeeds, setMentionSeeds] = useState<MentionSeed[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePayload, setSharePayload] = useState<ShareModel | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportTargetUserId, setReportTargetUserId] = useState<string | null>(null);
+  const [reportTargetName, setReportTargetName] = useState<string>("");
   const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, LinkPreview>>({});
   const [expandedContentIds, setExpandedContentIds] = useState<Set<string>>(new Set());
   const [expandableContentById, setExpandableContentById] = useState<Record<string, boolean>>({});
@@ -2357,20 +2361,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     });
   };
 
+  const openReportModal = useCallback((targetUserId: string | null, targetName: string | null) => {
+    if (!targetUserId || !user?.id) return;
+    void (async () => {
+      const blocked = await areUsersBlocked(user.id, targetUserId);
+      if (blocked) {
+        toast.error("You cannot report this user from here.");
+        return;
+      }
+      setReportTargetUserId(targetUserId);
+      setReportTargetName(targetName?.trim() || "User");
+      setReportOpen(true);
+    })();
+  }, [user?.id]);
+
   const handleReport = (noticeId: string) => {
     const target = notices.find((item) => item.id === noticeId);
-    if (target?.user_id && user?.id) {
-      void (async () => {
-        const blocked = await areUsersBlocked(user.id, target.user_id);
-        if (blocked) {
-          toast.error("You cannot report this user from here.");
-          return;
-        }
-        toast.success(t("Thread reported - our team will review it"));
-      })();
-      return;
-    }
-    toast.success(t("Thread reported - our team will review it"));
+    openReportModal(target?.user_id ?? null, target?.author?.display_name ?? null);
   };
 
   const handleHide = (noticeId: string) => {
@@ -3392,10 +3399,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                       </button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
-                                      <DropdownMenuItem onClick={() => toast.success(t("Reply reported - our team will review it"))}>
-                                        <Flag className="w-4 h-4 mr-2" />
-                                        {t("Report")}
-                                      </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openReportModal(c.user_id, c.author?.display_name ?? null)}>
+                                      <Flag className="w-4 h-4 mr-2" />
+                                      {t("Report")}
+                                    </DropdownMenuItem>
                                       <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
                                         <EyeOff className="w-4 h-4 mr-2" />
                                         {t("Hide")}
@@ -3640,6 +3647,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           onShareAction={() => void recordShareClick(sharePayload.contentId)}
         />
       )}
+      <ReportModal
+        open={reportOpen}
+        onClose={() => {
+          setReportOpen(false);
+          setReportTargetUserId(null);
+          setReportTargetName("");
+        }}
+        targetUserId={reportTargetUserId}
+        targetName={reportTargetName}
+        source="Social"
+      />
 
     <AlertDialog open={!!confirmBlockId} onOpenChange={(v) => !v && setConfirmBlockId(null)}>
       <AlertDialogContent>
