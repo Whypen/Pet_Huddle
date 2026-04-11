@@ -1204,6 +1204,18 @@ export function VerifyIdentity({
     }
 
     if (uiState === "failed") {
+      // On initial snapshot / background poll, a stale backend "failed" status from a
+      // previous session should not immediately blast an error at the user.  Only surface
+      // the error message when the failure came from an action the user just performed
+      // (sources: "pull_card_status" after submit, "confirm_card_setup_failed_after_poll").
+      // For passive sources ("snapshot") reset silently to "idle" so the user sees a fresh
+      // "Add card" state instead of a confusing instant error.
+      const isPassiveSource = params.source === "snapshot";
+      if (isPassiveSource) {
+        setCardVerificationState("idle");
+        logCardState("resolved_status_failed_reset_idle", { source: params.source });
+        return;
+      }
       resetCardFormRuntime({ preserveOutcome: true });
       if (!cardErrorMessage) {
         setCardErrorMessage(GENERIC_CARD_ERROR_MESSAGE);
