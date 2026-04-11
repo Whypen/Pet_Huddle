@@ -320,8 +320,8 @@ const MapPage = () => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   // Styled confirmation modals
-  const [showPinConfirm, setShowPinConfirm] = useState(false);
   const [showUnpinConfirm, setShowUnpinConfirm] = useState(false);
+  const [showGpsModal, setShowGpsModal] = useState(false);
   // Invisible mode — Eye toggle
   const [isInvisible, setIsInvisible] = useState(false);
   useEffect(() => {
@@ -488,15 +488,37 @@ const MapPage = () => {
   }, [flyToWithDebug, userLocation]);
 
   // ==========================================================================
-  // Pin / Unpin Location
+  // GPS Required Modal — settings deep-link (pure web PWA, no Capacitor)
   // ==========================================================================
-  const handlePinMyLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error(t("Geolocation is not supported on this device"));
+  const openDeviceLocationSettings = () => {
+    // iOS Safari: 'app-settings:' opens this app's iOS Settings page.
+    // Android Chrome: no reliable web deep-link to device location settings;
+    // we try anyway and fall back to the helper toast if it does nothing.
+    const isIos = /ipad|iphone|ipod/i.test(navigator.userAgent);
+    const isAndroid = /android/i.test(navigator.userAgent);
+
+    if (isIos) {
+      try {
+        window.location.href = "app-settings:";
+      } catch {
+        toast.info("Please open Settings and enable Location Services for Huddle.");
+      }
       return;
     }
-    setShowPinConfirm(true);
+
+    if (isAndroid) {
+      // Android does not expose a reliable web-to-settings URI; show helper.
+      toast.info("Please open Settings and enable Location Services for Huddle.");
+      return;
+    }
+
+    // Desktop / unknown — nothing meaningful to open; show helper.
+    toast.info("Please open Settings and enable Location Services for Huddle.");
   };
+
+  // ==========================================================================
+  // Pin / Unpin Location
+  // ==========================================================================
 
   // ============================================================
   // GPS pin workflow (spec): live GPS only, no production mock fallback
@@ -567,62 +589,36 @@ const MapPage = () => {
     toast.success(`Location pinned (${source})`);
   }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, user?.id]);
 
-  const fallbackToLastKnownLocation = useCallback(async () => {
-    const fallback =
-      userLocation ||
-      ((typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number")
-        ? { lat: profile.last_lat, lng: profile.last_lng }
-        : null);
-    if (!fallback) return false;
-    toast.info("Using last known location.");
-    await applyPinLocation(fallback.lat, fallback.lng, "last-known");
-    return true;
-  }, [applyPinLocation, profile?.last_lat, profile?.last_lng, userLocation]);
-
-  const requestPinFromLiveGps = useCallback((silent = false) => {
+  const requestPinFromLiveGps = useCallback(() => {
+    // No secure context — GPS cannot work at all.
     if (!window.isSecureContext) {
-      void fallbackToLastKnownLocation().then((usedFallback) => {
-        if (!usedFallback) {
-          toast.error("Location requires secure context (https/localhost).");
-        }
-      });
+      setShowGpsModal(true);
       return;
     }
+    // Browser does not support Geolocation API.
     if (!navigator.geolocation) {
-      void fallbackToLastKnownLocation().then((usedFallback) => {
-        if (!usedFallback) {
-          toast.error("Geolocation is not supported on this device/browser.");
-        }
-      });
+      setShowGpsModal(true);
       return;
     }
+
     const runGetCurrentPosition = () => {
       setPinning(true);
       if (import.meta.env.DEV) console.debug("[PIN] GPS Request Sent — enableHighAccuracy=true, timeout=7000ms");
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           if (import.meta.env.DEV) console.debug(`[PIN] GPS Success: lat=${pos.coords.latitude}, lng=${pos.coords.longitude}, accuracy=${pos.coords.accuracy}m`);
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          await applyPinLocation(lat, lng, "GPS");
+          await applyPinLocation(pos.coords.latitude, pos.coords.longitude, "GPS");
         },
         (err) => {
           if (import.meta.env.DEV) console.debug(`[PIN] GPS Error: code=${err.code}, message=${err.message}`);
           setPinning(false);
-          void fallbackToLastKnownLocation().then((usedFallback) => {
-            if (usedFallback) return;
-            if (err.code === err.PERMISSION_DENIED) {
-              if (!silent) toast.error("Location permission denied.");
-              return;
-            }
-            toast.error("Unable to get live GPS location right now.");
-          });
+          // PERMISSION_DENIED (1) — user blocked location for this app.
+          // POSITION_UNAVAILABLE (2) — device location services off.
+          // TIMEOUT (3) — no GPS fix within timeout; treat as unavailable.
+          // All cases: show GPS required modal. No silent fallback, no stale pin.
+          setShowGpsModal(true);
         },
-        {
-          enableHighAccuracy: true,
-          timeout: 7000,
-          maximumAge: 0,
-        }
+        { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 }
       );
     };
 
@@ -631,26 +627,22 @@ const MapPage = () => {
         .query({ name: "geolocation" as PermissionName })
         .then((status) => {
           if (status.state === "denied") {
-            void fallbackToLastKnownLocation().then((usedFallback) => {
-              if (!usedFallback && !silent) toast.error("Location permission denied.");
-            });
+            // Permission already denied — show modal immediately, skip API call.
+            setShowGpsModal(true);
             return;
           }
+          // "granted" or "prompt" — attempt live GPS; modal fires on any error.
           runGetCurrentPosition();
         })
         .catch(() => {
+          // Permissions API not available (some iOS WebViews) — attempt anyway.
           runGetCurrentPosition();
         });
       return;
     }
 
     runGetCurrentPosition();
-  }, [applyPinLocation, fallbackToLastKnownLocation]);
-
-  const confirmPinLocation = () => {
-    setShowPinConfirm(false);
-    requestPinFromLiveGps();
-  };
+  }, [applyPinLocation]);
 
   const handleUnpinMyLocation = () => {
     if (!user) {
@@ -695,7 +687,7 @@ const MapPage = () => {
     if (isPinned || visibleEnabled) {
       handleUnpinMyLocation();
     } else {
-      setVisibleEnabled(true);
+      // Do NOT set visibleEnabled here — GPS must succeed first.
       requestPinFromLiveGps();
     }
   };
@@ -1660,31 +1652,43 @@ const MapPage = () => {
       />
 
       {/* ================================================================ */}
-      {/* Pin confirmation modal                                            */}
+      {/* GPS Required modal                                               */}
+      {/* Shown when location is off, denied, or unavailable.             */}
       {/* ================================================================ */}
-      {showPinConfirm && (
+      {showGpsModal && (
         <div
           className="fixed inset-0 z-[3000] bg-black/50 flex items-center justify-center px-6 transition-opacity duration-150"
-          onClick={() => setShowPinConfirm(false)}
+          onClick={() => setShowGpsModal(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated"
+            className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-elevated relative"
           >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-brandBlue/10 flex items-center justify-center">
+            {/* Close — top right X */}
+            <button
+              onClick={() => setShowGpsModal(false)}
+              className="absolute top-4 right-4 w-7 h-7 flex items-center justify-center rounded-full bg-muted/60 hover:bg-muted transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4 pr-8">
+              <div className="w-10 h-10 rounded-full bg-brandBlue/10 flex items-center justify-center shrink-0">
                 <MapPin className="w-5 h-5 text-brandBlue" />
               </div>
-              <h3 className="text-lg font-bold text-brandText">Pin My Location</h3>
+              <h3 className="text-lg font-bold text-brandText">Turn on GPS to place your pin</h3>
             </div>
+
             <p className="text-sm text-muted-foreground mb-6">
-              Available on map for 2 hours and stay in system for 12 hours to receive broadcast alert.
+              Your pin uses live location to stay accurate on the map.
             </p>
+
             <div className="flex gap-3">
               <NeuControl
                 variant="secondary"
                 size="md"
-                onClick={() => setShowPinConfirm(false)}
+                onClick={() => setShowGpsModal(false)}
                 className="flex-1"
               >
                 Cancel
@@ -1692,10 +1696,13 @@ const MapPage = () => {
               <NeuControl
                 variant="primary"
                 size="md"
-                onClick={confirmPinLocation}
+                onClick={() => {
+                  setShowGpsModal(false);
+                  openDeviceLocationSettings();
+                }}
                 className="flex-1"
               >
-                Continue
+                Open Settings
               </NeuControl>
             </div>
           </div>

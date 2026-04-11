@@ -66,7 +66,12 @@ async function tokenBelongsToCurrentProject(token: string): Promise<boolean> {
     const res = await supabase.auth.getUser(token);
     return Boolean(res.data.user) && !res.error;
   } catch {
-    return false;
+    // Network exception — cannot verify project membership.
+    // Return true so the caller proceeds; the edge function will reject with
+    // 401/403 if the token is truly invalid, which triggers the retry path.
+    // Previously returning false here caused a false auth_required on any
+    // transient network hiccup → "Your session expired" for a valid session.
+    return true;
   }
 }
 

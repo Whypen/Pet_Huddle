@@ -1041,7 +1041,13 @@ export function VerifyIdentity({
   }, [navigate, setFlowState]);
 
   const ensureAuthForVerification = async (): Promise<boolean> => {
-    if (authLoading) return false;
+    if (authLoading) {
+      // Auth context is still resolving — show feedback so the user knows to retry
+      // instead of silently doing nothing (which appeared as "no response").
+      setCardErrorMessage("Loading your session — please try again in a moment.");
+      setHumanErrorMessage("Loading your session — please try again in a moment.");
+      return false;
+    }
     const {
       data: { session: liveSession },
     } = await supabase.auth.getSession();

@@ -43,8 +43,11 @@ serve(async (req: Request) => {
       return withCors(req, json({ error: "method_not_allowed" }, 405));
     }
 
+    // Prefer x-huddle-access-token (user JWT sent by invokeAuthedFunction).
+    // Authorization header carries the gateway anon key, not the user token.
+    const huddleToken = req.headers.get("x-huddle-access-token") || "";
     const authHeader = req.headers.get("Authorization") || "";
-    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const accessToken = huddleToken || authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) return withCors(req, json({ error: "missing_token" }, 401));
 
     const authUser = await supabase.auth.getUser(accessToken);
