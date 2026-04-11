@@ -1481,15 +1481,6 @@ const CarerProfile: React.FC = () => {
                 );
               })()}
 
-              <WalletOnboardingModal
-                open={showWalletModal}
-                onOpenChange={setShowWalletModal}
-                onExit={() => {
-                  // Sync wallet status immediately after onboarding exits.
-                  // Belt-and-suspenders alongside the Stripe webhook + Realtime.
-                  void invokeAuthedFunction("refresh-stripe-account-status", { body: {} }).catch(() => {});
-                }}
-              />
             </>
           )}
 
@@ -1796,7 +1787,8 @@ const CarerProfile: React.FC = () => {
                               )}
                             </div>
                           );
-                        })}
+          })}
+
                     </div>
                   </section>
                 )}
@@ -1965,6 +1957,16 @@ const CarerProfile: React.FC = () => {
 
         </div>
       </div>
+
+      <WalletOnboardingModal
+        open={showWalletModal}
+        onOpenChange={setShowWalletModal}
+        onExit={() => {
+          // Keep wallet onboarding alive even if the page mode flips while the
+          // modal is open. Status is synced after Stripe exits.
+          void invokeAuthedFunction("refresh-stripe-account-status", { body: {} }).catch(() => {});
+        }}
+      />
 
       {/* ── Proof Dialog ──────────────────────────────────────────────────────── */}
       {proofTarget && (
