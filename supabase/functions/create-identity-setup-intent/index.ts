@@ -90,11 +90,74 @@ type StripeSetupIntent = {
 
 type StripePaymentMethod = {
   type?: string | null;
+  billing_details?: {
+    name?: string | null;
+  } | null;
   card?: {
     brand?: string | null;
     last4?: string | null;
+    fingerprint?: string | null;
   } | null;
 };
+
+const BLOCKED_IDENTITY_MESSAGE =
+  "We’re unable to complete verification for this account. If you think this is a mistake, contact us via Help & Support.";
+
+const trimToNull = (value: string | null | undefined) => {
+  const trimmed = String(value || "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+async function updateIdentityVerificationState(params: {
+  userId: string;
+  setupIntentId: string;
+  cardStatus: "not_started" | "pending" | "passed" | "failed";
+  cardVerified: boolean;
+  cardVerifiedAt: string | null;
+  cardBrand: string | null;
+  cardLast4: string | null;
+  cardFingerprint: string | null;
+  legalName: string | null;
+  verificationStatus: "unverified" | "pending" | "verified";
+  verificationRejectionCode: string | null;
+}) {
+  const nowIso = new Date().toISOString();
+  const { error: identityUpdateError } = await supabase
+    .from("identity_card_verifications")
+    .upsert({
+      user_id: params.userId,
+      stripe_setup_intent_id: params.setupIntentId,
+      card_verification_status: params.cardStatus,
+      card_verified: params.cardVerified,
+      card_verified_at: params.cardStatus === "passed" ? params.cardVerifiedAt : null,
+      card_brand: params.cardBrand,
+      card_last4: params.cardLast4,
+      card_fingerprint: params.cardFingerprint,
+      updated_at: nowIso,
+    }, { onConflict: "user_id" });
+  if (identityUpdateError) throw identityUpdateError;
+
+  const profileUpdatePayload: Record<string, unknown> = {
+    stripe_setup_intent_id: params.setupIntentId,
+    card_verification_status: params.cardStatus,
+    card_verified: params.cardVerified,
+    card_verified_at: params.cardStatus === "passed" ? params.cardVerifiedAt : null,
+    card_brand: params.cardBrand,
+    card_last4: params.cardLast4,
+    verification_status: params.verificationStatus,
+    is_verified: params.verificationStatus === "verified",
+    verification_rejection_code: params.verificationRejectionCode,
+  };
+  if (params.legalName !== null) {
+    profileUpdatePayload.legal_name = params.legalName;
+  }
+
+  const { error: updateError } = await supabase
+    .from("profiles")
+    .update(profileUpdatePayload)
+    .eq("id", params.userId);
+  if (updateError) throw updateError;
+}
 
 async function stripeRequest<T>(
   secretKey: string,
@@ -197,6 +260,10 @@ async function reconcileCardStatusFromStripe(params: {
   let cardVerifiedAt: string | null = null;
   let cardBrand: string | null = null;
   let cardLast4: string | null = null;
+  let cardFingerprint: string | null = null;
+  let legalName: string | null = null;
+  let verificationRejectionCode: string | null = null;
+  let blockedIdentity = false;
 
   if (stripeStatus === "succeeded") {
     cardStatus = "passed";
@@ -226,54 +293,69 @@ async function reconcileCardStatusFromStripe(params: {
         params.stripe.secretKey,
         `payment_methods/${encodeURIComponent(paymentMethodId)}`,
       );
+      legalName = trimToNull(paymentMethod?.billing_details?.name);
       if (paymentMethod?.type === "card" && paymentMethod.card) {
         cardBrand = paymentMethod.card.brand || null;
         cardLast4 = paymentMethod.card.last4 || null;
+        cardFingerprint = trimToNull(paymentMethod.card.fingerprint);
       }
     } catch {
       // best-effort enrichment only
     }
   }
 
-  const updatePayload: Record<string, unknown> = {
-    stripe_setup_intent_id: setupIntent.id,
-    card_verification_status: cardStatus,
-    card_verified: cardVerified,
-    card_brand: cardBrand,
-    card_last4: cardLast4,
-  };
-  if (cardStatus === "passed") {
-    updatePayload.card_verified_at = cardVerifiedAt;
-  } else if (cardStatus === "failed" || cardStatus === "not_started") {
-    updatePayload.card_verified_at = null;
+  let verificationStatus: "unverified" | "pending" | "verified" = "unverified";
+  if (cardStatus === "passed" && legalName && cardLast4 && cardFingerprint) {
+    const { data: blockedData, error: blockedError } = await supabase.rpc("check_blocked_identity_verification", {
+      p_legal_name: legalName,
+      p_card_last4: cardLast4,
+      p_card_fingerprint: cardFingerprint,
+    });
+    if (blockedError) throw blockedError;
+    blockedIdentity = Boolean((blockedData as { blocked?: boolean } | null)?.blocked);
+    if (blockedIdentity) {
+      cardStatus = "failed";
+      cardVerified = false;
+      cardVerifiedAt = null;
+      verificationStatus = "unverified";
+      verificationRejectionCode = "blocked_identity";
+    }
   }
 
-  const { error: identityUpdateError } = await supabase
-    .from("identity_card_verifications")
-    .upsert({
-      user_id: params.userId,
-      stripe_setup_intent_id: setupIntent.id,
-      card_verification_status: cardStatus,
-      card_verified: cardVerified,
-      card_verified_at: cardStatus === "passed" ? cardVerifiedAt : null,
-      card_brand: cardBrand,
-      card_last4: cardLast4,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id" });
-  if (identityUpdateError) throw identityUpdateError;
+  if (!blockedIdentity) {
+    await updateIdentityVerificationState({
+      userId: params.userId,
+      setupIntentId: setupIntent.id,
+      cardStatus,
+      cardVerified,
+      cardVerifiedAt,
+      cardBrand,
+      cardLast4,
+      cardFingerprint,
+      legalName,
+      verificationStatus: "pending",
+      verificationRejectionCode: null,
+    });
 
-  // UPDATE only — upsert would INSERT with missing NOT NULL columns if no profile row exists.
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update(updatePayload)
-    .eq("id", params.userId);
-  if (updateError) throw updateError;
-
-  const { data: statusData, error: statusError } = await supabase
-    .rpc("refresh_identity_verification_status", { p_user_id: params.userId });
-  // Gracefully handle profile_not_found — card data is in identity_card_verifications.
-  if (statusError && !String(statusError.message || "").includes("profile_not_found")) throw statusError;
-  const verificationStatus = String(statusData || "unverified");
+    const { data: statusData, error: statusError } = await supabase
+      .rpc("refresh_identity_verification_status", { p_user_id: params.userId });
+    if (statusError && !String(statusError.message || "").includes("profile_not_found")) throw statusError;
+    verificationStatus = String(statusData || "unverified") as "unverified" | "pending" | "verified";
+  } else {
+    await updateIdentityVerificationState({
+      userId: params.userId,
+      setupIntentId: setupIntent.id,
+      cardStatus,
+      cardVerified,
+      cardVerifiedAt,
+      cardBrand,
+      cardLast4,
+      cardFingerprint,
+      legalName,
+      verificationStatus,
+      verificationRejectionCode,
+    });
+  }
 
   return {
     cardStatus,
@@ -281,8 +363,18 @@ async function reconcileCardStatusFromStripe(params: {
     cardVerifiedAt,
     cardBrand,
     cardLast4,
+    cardFingerprint,
+    legalName,
     setupIntentId: setupIntent.id,
     verificationStatus,
+    verificationRejectionCode,
+    blockedIdentity: blockedIdentity ? {
+      blocked: true,
+      message: BLOCKED_IDENTITY_MESSAGE,
+    } : {
+      blocked: false,
+      message: null,
+    },
     stripeStatus,
     lastSetupError: setupIntent.last_setup_error ?? null,
   };
@@ -297,8 +389,11 @@ serve(async (req: Request) => {
       return withCors(req, json({ error: "method_not_allowed" }, 405));
     }
 
+    // Prefer x-huddle-access-token (user JWT sent by invokeAuthedFunction).
+    // Authorization header carries the gateway anon key, not the user token.
+    const huddleToken = req.headers.get("x-huddle-access-token") || "";
     const authHeader = req.headers.get("Authorization") || "";
-    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const accessToken = huddleToken || authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!accessToken) return withCors(req, json({ error: "missing_token" }, 401));
 
     const authUser = await supabase.auth.getUser(accessToken);
@@ -320,12 +415,12 @@ serve(async (req: Request) => {
       const [{ data: profile, error: profileError }, { data: identityRow, error: identityError }] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id,card_verification_status,card_verified,card_verified_at,card_brand,card_last4,stripe_setup_intent_id,verification_status")
+          .select("id,card_verification_status,card_verified,card_verified_at,card_brand,card_last4,stripe_setup_intent_id,verification_status,legal_name,verification_rejection_code")
           .eq("id", userId)
           .maybeSingle(),
         supabase
           .from("identity_card_verifications")
-          .select("stripe_customer_id,stripe_setup_intent_id,card_verification_status,card_verified,card_verified_at,card_brand,card_last4")
+          .select("stripe_customer_id,stripe_setup_intent_id,card_verification_status,card_verified,card_verified_at,card_brand,card_last4,card_fingerprint")
           .eq("user_id", userId)
           .maybeSingle(),
       ]);
@@ -337,10 +432,16 @@ serve(async (req: Request) => {
       let resolvedCardVerified = Boolean(profile?.card_verified ?? identityRow?.card_verified);
       let resolvedCardBrand = profile?.card_brand ?? identityRow?.card_brand ?? null;
       let resolvedCardLast4 = profile?.card_last4 ?? identityRow?.card_last4 ?? null;
+      let resolvedLegalName = profile?.legal_name ?? null;
+      let resolvedCardFingerprintPresent = Boolean(identityRow?.card_fingerprint);
       let resolvedCardVerifiedAt = profile?.card_verified_at ?? identityRow?.card_verified_at ?? null;
       let resolvedVerificationStatus = profile?.verification_status ?? ((resolvedCardStatus === "pending" || resolvedCardStatus === "passed") ? "pending" : "unverified");
+      let resolvedVerificationRejectionCode = trimToNull(profile?.verification_rejection_code) ?? null;
       let resolvedSetupIntentId = profile?.stripe_setup_intent_id ?? identityRow?.stripe_setup_intent_id ?? null;
       let resolvedLastSetupError: { message?: string | null; code?: string | null } | null = null;
+      let resolvedBlockedIdentity = resolvedVerificationRejectionCode === "blocked_identity"
+        ? { blocked: true, message: BLOCKED_IDENTITY_MESSAGE }
+        : { blocked: false, message: null };
 
       if (resolvedSetupIntentId && (resolvedCardStatus === "pending" || resolvedCardStatus === "failed" || !resolvedCardVerified)) {
         try {
@@ -353,9 +454,13 @@ serve(async (req: Request) => {
           resolvedCardVerified = reconciled.cardVerified;
           resolvedCardBrand = reconciled.cardBrand;
           resolvedCardLast4 = reconciled.cardLast4;
+          resolvedLegalName = reconciled.legalName;
+          resolvedCardFingerprintPresent = Boolean(reconciled.cardFingerprint);
           resolvedCardVerifiedAt = reconciled.cardVerifiedAt;
           resolvedVerificationStatus = reconciled.verificationStatus;
+          resolvedVerificationRejectionCode = reconciled.verificationRejectionCode;
           resolvedSetupIntentId = reconciled.setupIntentId;
+          resolvedBlockedIdentity = reconciled.blockedIdentity;
           resolvedLastSetupError = reconciled.lastSetupError ? {
             message: reconciled.lastSetupError.message ?? null,
             code: reconciled.lastSetupError.code ?? null,
@@ -372,8 +477,12 @@ serve(async (req: Request) => {
         cardVerifiedAt: resolvedCardVerifiedAt,
         cardBrand: resolvedCardBrand,
         cardLast4: resolvedCardLast4,
+        legalName: resolvedLegalName,
+        cardFingerprintPresent: resolvedCardFingerprintPresent,
         setupIntentId: resolvedSetupIntentId,
         verificationStatus: resolvedVerificationStatus,
+        verificationRejectionCode: resolvedVerificationRejectionCode,
+        blockedIdentity: resolvedBlockedIdentity,
         lastSetupError: resolvedLastSetupError,
         publishableKey: stripePublishableKey,
         stripeMode,

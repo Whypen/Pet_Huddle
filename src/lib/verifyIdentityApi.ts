@@ -5,6 +5,12 @@ import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 export type BackendVerificationStatus = "unverified" | "pending" | "verified";
 export type HumanStatus = "not_started" | "pending" | "passed" | "failed";
 export type CardStatus = "not_started" | "pending" | "passed" | "failed";
+export type VerificationRejectionCode = "blocked_identity" | null;
+
+export type BlockedIdentityState = {
+  blocked: boolean;
+  message: string | null;
+};
 
 export type VerifyIdentitySnapshot = {
   verificationStatus: BackendVerificationStatus;
@@ -13,6 +19,10 @@ export type VerifyIdentitySnapshot = {
   cardVerified: boolean;
   cardBrand: string | null;
   cardLast4: string | null;
+  legalName: string | null;
+  cardFingerprintPresent: boolean;
+  verificationRejectionCode: VerificationRejectionCode;
+  blockedIdentity: BlockedIdentityState;
   cardLastError: { message?: string | null; code?: string | null } | null;
   setupIntentId: string | null;
   publishableKey: string | null;
@@ -146,6 +156,11 @@ const asCard = (value: unknown): CardStatus => {
   return v === "pending" || v === "passed" || v === "failed" || v === "not_started" ? v : "not_started";
 };
 
+const asVerificationRejectionCode = (value: unknown): VerificationRejectionCode => {
+  const v = String(value || "").toLowerCase();
+  return v === "blocked_identity" ? "blocked_identity" : null;
+};
+
 export async function fetchVerifyIdentitySnapshot(): Promise<VerifyIdentitySnapshot> {
   const {
     data: { session },
@@ -167,7 +182,7 @@ export async function fetchVerifyIdentitySnapshot(): Promise<VerifyIdentitySnaps
   if (cardError) {
     const { data: fallbackProfile, error: fallbackProfileError } = await supabase
       .from("profiles")
-      .select("verification_status, card_verification_status, card_verified, card_brand, card_last4, stripe_setup_intent_id")
+      .select("verification_status, card_verification_status, card_verified, card_brand, card_last4, stripe_setup_intent_id, legal_name, verification_rejection_code")
       .eq("id", session.user.id)
       .maybeSingle();
     if (!fallbackProfileError && fallbackProfile) {
@@ -177,6 +192,15 @@ export async function fetchVerifyIdentitySnapshot(): Promise<VerifyIdentitySnaps
         cardVerified: Boolean(fallbackProfile.card_verified),
         cardBrand: fallbackProfile.card_brand ?? null,
         cardLast4: fallbackProfile.card_last4 ?? null,
+        legalName: fallbackProfile.legal_name ?? null,
+        verificationRejectionCode: fallbackProfile.verification_rejection_code ?? null,
+        blockedIdentity: {
+          blocked: fallbackProfile.verification_rejection_code === "blocked_identity",
+          message: fallbackProfile.verification_rejection_code === "blocked_identity"
+            ? "We’re unable to complete verification for this account. If you think this is a mistake, contact us via Help & Support."
+            : null,
+        },
+        cardFingerprintPresent: false,
         setupIntentId: fallbackProfile.stripe_setup_intent_id ?? null,
         publishableKey: null,
       };
@@ -195,6 +219,13 @@ export async function fetchVerifyIdentitySnapshot(): Promise<VerifyIdentitySnaps
     cardVerified: Boolean(cardData.cardVerified),
     cardBrand: (cardData.cardBrand ?? null) as string | null,
     cardLast4: (cardData.cardLast4 ?? null) as string | null,
+    legalName: (cardData.legalName ?? null) as string | null,
+    cardFingerprintPresent: Boolean(cardData.cardFingerprintPresent),
+    verificationRejectionCode: asVerificationRejectionCode(cardData.verificationRejectionCode),
+    blockedIdentity: {
+      blocked: Boolean(cardData?.blockedIdentity?.blocked),
+      message: typeof cardData?.blockedIdentity?.message === "string" ? cardData.blockedIdentity.message : null,
+    },
     cardLastError: (cardData.lastSetupError ?? null) as { message?: string | null; code?: string | null } | null,
     setupIntentId: (cardData.setupIntentId ?? null) as string | null,
     publishableKey: typeof cardData.publishableKey === "string" ? cardData.publishableKey : null,
@@ -266,7 +297,18 @@ export async function createCardSetupIntent(attemptId?: string): Promise<{
   };
 }
 
-export async function fetchCardStatus(): Promise<{ cardStatus: CardStatus; verificationStatus: BackendVerificationStatus; cardBrand: string | null; cardLast4: string | null; setupIntentId: string | null; cardLastError: { message?: string | null; code?: string | null } | null }> {
+export async function fetchCardStatus(): Promise<{
+  cardStatus: CardStatus;
+  verificationStatus: BackendVerificationStatus;
+  cardBrand: string | null;
+  cardLast4: string | null;
+  legalName: string | null;
+  cardFingerprintPresent: boolean;
+  verificationRejectionCode: VerificationRejectionCode;
+  blockedIdentity: BlockedIdentityState;
+  setupIntentId: string | null;
+  cardLastError: { message?: string | null; code?: string | null } | null;
+}> {
   const stripeMode = resolveLocalStripeMode();
   const { data, error } = await invokeWithTransient503Retry("create-identity-setup-intent", { action: "status", stripeMode });
   if (error) throw mapError(error.message);
@@ -275,6 +317,13 @@ export async function fetchCardStatus(): Promise<{ cardStatus: CardStatus; verif
     verificationStatus: asStatus(data?.verificationStatus),
     cardBrand: (data?.cardBrand ?? null) as string | null,
     cardLast4: (data?.cardLast4 ?? null) as string | null,
+    legalName: (data?.legalName ?? null) as string | null,
+    cardFingerprintPresent: Boolean(data?.cardFingerprintPresent),
+    verificationRejectionCode: asVerificationRejectionCode(data?.verificationRejectionCode),
+    blockedIdentity: {
+      blocked: Boolean(data?.blockedIdentity?.blocked),
+      message: typeof data?.blockedIdentity?.message === "string" ? data.blockedIdentity.message : null,
+    },
     setupIntentId: (data?.setupIntentId ?? null) as string | null,
     cardLastError: (data?.lastSetupError ?? null) as { message?: string | null; code?: string | null } | null,
   };

@@ -969,6 +969,7 @@ export type Database = {
       identity_card_verifications: {
         Row: {
           card_brand: string | null
+          card_fingerprint: string | null
           card_last4: string | null
           card_verification_status: string
           card_verified: boolean
@@ -981,6 +982,7 @@ export type Database = {
         }
         Insert: {
           card_brand?: string | null
+          card_fingerprint?: string | null
           card_last4?: string | null
           card_verification_status?: string
           card_verified?: boolean
@@ -993,6 +995,7 @@ export type Database = {
         }
         Update: {
           card_brand?: string | null
+          card_fingerprint?: string | null
           card_last4?: string | null
           card_verification_status?: string
           card_verified?: boolean
@@ -1002,6 +1005,42 @@ export type Database = {
           stripe_setup_intent_id?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      blocked_identity_verifications: {
+        Row: {
+          active: boolean
+          card_fingerprint_hash: string
+          card_last4: string
+          created_at: string
+          id: string
+          legal_name_hash: string
+          metadata: Json
+          source_user_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          card_fingerprint_hash: string
+          card_last4: string
+          created_at?: string
+          id?: string
+          legal_name_hash: string
+          metadata?: Json
+          source_user_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          card_fingerprint_hash?: string
+          card_last4?: string
+          created_at?: string
+          id?: string
+          legal_name_hash?: string
+          metadata?: Json
+          source_user_id?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -2740,6 +2779,7 @@ export type Database = {
           user_role: string | null
           verification_comment: string | null
           verification_document_url: string | null
+          verification_rejection_code: string | null
           verification_status:
             | Database["public"]["Enums"]["verification_status_enum"]
             | null
@@ -2871,6 +2911,7 @@ export type Database = {
           user_role?: string | null
           verification_comment?: string | null
           verification_document_url?: string | null
+          verification_rejection_code?: string | null
           verification_status?:
             | Database["public"]["Enums"]["verification_status_enum"]
             | null
@@ -3002,6 +3043,7 @@ export type Database = {
           user_role?: string | null
           verification_comment?: string | null
           verification_document_url?: string | null
+          verification_rejection_code?: string | null
           verification_status?:
             | Database["public"]["Enums"]["verification_status_enum"]
             | null

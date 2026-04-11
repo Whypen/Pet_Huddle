@@ -744,7 +744,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
     const signupSocialId = allowSignupSeed ? signupData.social_id : "";
     const signupPhone = allowSignupSeed ? signupData.phone : "";
+    const signupLegalName = allowSignupSeed ? signupData.legal_name : "";
     const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name");
+    const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name");
     const phone = profile?.phone || signupPhone || cachedValue("phone");
     const dob = profile?.dob || signupDob || cachedValue("dob");
     const bio = profile?.bio || cachedValue("bio");
@@ -788,6 +790,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     setFormData({
       display_name: displayName,
+      legal_name: legalName,
       phone,
       dob,
       bio,
@@ -2121,6 +2124,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 </div>
               )}
               {fieldErrors.displayName && <ErrorLabel message={fieldErrors.displayName} />}
+            </div>
+
+            <div id="profile-field-legal-name">
+              <label className="mb-2 block text-sm font-medium text-muted-foreground">Legal Name</label>
+              <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)] text-muted-foreground">
+                <span className="truncate">
+                  {profile?.is_verified ? (formData.legal_name || "—") : "Available after verification"}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Private. This stays hidden from public profile surfaces.
+              </p>
             </div>
 
             {/* Social ID */}

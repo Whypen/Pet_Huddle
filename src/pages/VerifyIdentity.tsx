@@ -30,6 +30,7 @@ import {
   fetchVerifyIdentitySnapshot,
   startHumanChallenge,
   type BackendVerificationStatus,
+  type BlockedIdentityState,
 } from "@/lib/verifyIdentityApi";
 import { supabase } from "@/integrations/supabase/client";
 import { useSignup } from "@/contexts/SignupContext";
@@ -39,6 +40,7 @@ import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/Turn
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
+import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
 
 type HumanVerificationState =
   | "idle" | "ready" | "capturing" | "pending" | "passed" | "failed";
@@ -68,6 +70,7 @@ interface VerifyIdentityProps {
   cardNumberContainerId?: string;
   cardExpiryContainerId?: string;
   cardCvcContainerId?: string;
+  legalName?: string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
   humanErrorMessage?: string | null;
@@ -578,11 +581,16 @@ interface CardVerificationCardProps {
   cardNumberContainerId?: string;
   cardExpiryContainerId?: string;
   cardCvcContainerId?: string;
+  legalName?: string;
+  onLegalNameChange?: (value: string) => void;
   postalCode?: string;
   onPostalCodeChange?: (value: string) => void;
+  verifiedLegalName?: string | null;
   cardBrand?: string | null;
   cardLast4?: string | null;
   errorMessage?: string | null;
+  blockedIdentity?: BlockedIdentityState;
+  onOpenSupport?: () => void;
   onCheckPendingStatus?: () => void;
 }
 
@@ -601,11 +609,16 @@ function CardVerificationCard({
   cardNumberContainerId = "verify-card-number-element",
   cardExpiryContainerId = "verify-card-expiry-element",
   cardCvcContainerId = "verify-card-cvc-element",
+  legalName = "",
+  onLegalNameChange,
   postalCode = "",
   onPostalCodeChange,
+  verifiedLegalName,
   cardBrand,
   cardLast4,
   errorMessage,
+  blockedIdentity = { blocked: false, message: null },
+  onOpenSupport,
   onCheckPendingStatus,
 }: CardVerificationCardProps) {
   const isPassed = state === "passed";
@@ -648,11 +661,17 @@ function CardVerificationCard({
           <div className="flex items-center gap-3 px-4 py-3.5">
             <CreditCard size={16} strokeWidth={1.75} className="text-[var(--color-success,#22C55E)] shrink-0" />
             <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-[var(--text-primary,#424965)]">
+                Legal Name: {verifiedLegalName || "Submitted with card"}
+              </p>
               <p className="font-mono tracking-[0.08em] text-[15px] text-[var(--text-primary,#424965)]">
                 &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; {cardLast4 || "••••"}
               </p>
               <p className="text-[12px] text-[var(--text-tertiary)]">
                 {cardBrand ? `${cardBrand.toUpperCase()} verified` : "Verified card"}
+              </p>
+              <p className="text-[12px] text-[var(--text-tertiary)]">
+                Legal name is the billing name submitted with this card.
               </p>
             </div>
             <span className="text-[11px] font-semibold text-[var(--color-success,#22C55E)] bg-[rgba(34,197,94,0.08)] px-2 py-0.5 rounded-full shrink-0">
@@ -683,6 +702,19 @@ function CardVerificationCard({
             {showMountedForm && (
               <>
                 <div className="w-full rounded-[14px] bg-white/70 border border-white/70 px-3 py-3 space-y-3">
+                  <div className="space-y-1.5">
+                    <p className="text-[13px] text-[var(--text-secondary)]">Legal name</p>
+                    <input
+                      value={legalName}
+                      onChange={(event) => onLegalNameChange?.(event.target.value)}
+                      placeholder="Name on card"
+                      className="w-full h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white px-3 text-[15px] text-[var(--text-primary,#424965)] outline-none focus:border-brandBlue"
+                      autoComplete="cc-name"
+                    />
+                    <p className="text-[12px] text-[var(--text-tertiary)]">
+                      Enter the card billing name exactly as submitted with this card.
+                    </p>
+                  </div>
                   <div className="space-y-1.5">
                     <p className="text-[13px] text-[var(--text-secondary)]">Card number</p>
                     <div className="min-h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white px-3 py-2">
@@ -762,12 +794,21 @@ function CardVerificationCard({
             {state === "failed" && (
               <>
                 <div className="glass-card rounded-[16px] border border-[rgba(232,69,69,0.2)] px-4 py-4 w-full">
-                <p className="text-[14px] text-[var(--color-error,#E84545)] leading-snug">
+                  <p className="text-[14px] text-[var(--color-error,#E84545)] leading-snug">
                     {errorMessage || GENERIC_CARD_ERROR_MESSAGE}
-                </p>
-              </div>
-              <NeuControl size="lg" fullWidth onClick={onRetryCard}>
-                Try a Different Card
+                  </p>
+                  {blockedIdentity.blocked && onOpenSupport ? (
+                    <button
+                      type="button"
+                      onClick={onOpenSupport}
+                      className="mt-3 text-[13px] font-semibold text-brandBlue underline underline-offset-2"
+                    >
+                      Help &amp; Support
+                    </button>
+                  ) : null}
+                </div>
+                <NeuControl size="lg" fullWidth onClick={onRetryCard}>
+                  Try a Different Card
                 </NeuControl>
               </>
             )}
@@ -895,6 +936,10 @@ export function VerifyIdentity({
   const [humanChallenge, setHumanChallenge] = useState<HumanChallenge | null>(null);
   const [humanErrorMessage, setHumanErrorMessage] = useState<string | null>(null);
   const [cardErrorMessage, setCardErrorMessage] = useState<string | null>(null);
+  const [cardLegalNameInput, setCardLegalNameInput] = useState("");
+  const [verifiedLegalName, setVerifiedLegalName] = useState<string | null>(null);
+  const [blockedIdentity, setBlockedIdentity] = useState<BlockedIdentityState>({ blocked: false, message: null });
+  const [supportOpen, setSupportOpen] = useState(false);
   const [cardBrand, setCardBrand] = useState<string | null>(null);
   const [cardLast4, setCardLast4] = useState<string | null>(null);
   const [cardClientSecret, setCardClientSecret] = useState<string | null>(null);
@@ -941,6 +986,7 @@ export function VerifyIdentity({
     && cardNumberComplete
     && cardExpiryComplete
     && cardCvcComplete
+    && Boolean(cardLegalNameInput.trim())
     && !cardSubmitting
     && Boolean(cardClientSecret)
     && Boolean(cardSetupIntentId);
@@ -1160,13 +1206,17 @@ export function VerifyIdentity({
   const syncCardUiFromResolvedStatus = useCallback((params: {
     cardStatus: string;
     cardVerified: boolean;
+    legalName?: string | null;
     cardBrand: string | null;
     cardLast4: string | null;
+    cardFingerprintPresent?: boolean;
+    blockedIdentity?: BlockedIdentityState;
     setupIntentId?: string | null;
     lastSetupError?: { message?: string | null; code?: string | null } | null;
     source: string;
   }) => {
     const uiState = toCardUiState(params.cardStatus, params.cardVerified);
+    const isBlockedIdentity = Boolean(params.blockedIdentity?.blocked);
     const hasActiveCardAttempt =
       cardFormVisible && (cardVerificationState === "collecting" || cardVerificationState === "submitting");
     const differentSetupIntent =
@@ -1180,7 +1230,7 @@ export function VerifyIdentity({
     // Only a backend "passed" result (uiState === "passed") can clear a local failure.
     const hasLocalFailedState = cardVerificationState === "failed";
 
-    if (uiState !== "passed" && (hasActiveCardAttempt || differentSetupIntent || hasLocalFailedState)) {
+    if (uiState !== "passed" && !isBlockedIdentity && (hasActiveCardAttempt || differentSetupIntent || hasLocalFailedState)) {
       logCardState("resolved_status_ignored_active_attempt", {
         source: params.source,
         resolvedState: uiState,
@@ -1193,12 +1243,15 @@ export function VerifyIdentity({
     }
 
     setCardVerificationState(uiState);
+    setVerifiedLegalName(params.legalName || null);
+    setBlockedIdentity(params.blockedIdentity ?? { blocked: false, message: null });
     setCardBrand(params.cardBrand || null);
     setCardLast4(params.cardLast4 || null);
 
     if (uiState === "passed") {
       resetCardFormRuntime();
       setCardErrorMessage(null);
+      setCardLegalNameInput(params.legalName || "");
       logCardState("resolved_status_passed", { source: params.source });
       return;
     }
@@ -1211,6 +1264,12 @@ export function VerifyIdentity({
       // For passive sources ("snapshot") reset silently to "idle" so the user sees a fresh
       // "Add card" state instead of a confusing instant error.
       const isPassiveSource = params.source === "snapshot";
+      if (isBlockedIdentity) {
+        resetCardFormRuntime({ preserveOutcome: true });
+        setCardErrorMessage(params.blockedIdentity?.message || GENERIC_CARD_ERROR_MESSAGE);
+        logCardState("resolved_status_blocked_identity", { source: params.source });
+        return;
+      }
       if (isPassiveSource) {
         setCardVerificationState("idle");
         logCardState("resolved_status_failed_reset_idle", { source: params.source });
@@ -1232,8 +1291,11 @@ export function VerifyIdentity({
     humanStatus: string;
     cardStatus: string;
     cardVerified: boolean;
+    legalName?: string | null;
     cardBrand: string | null;
     cardLast4: string | null;
+    cardFingerprintPresent?: boolean;
+    blockedIdentity?: BlockedIdentityState;
     setupIntentId?: string | null;
     cardLastError?: { message?: string | null; code?: string | null } | null;
     humanAttemptId?: string | null;
@@ -1256,8 +1318,11 @@ export function VerifyIdentity({
     syncCardUiFromResolvedStatus({
       cardStatus: snapshot.cardStatus,
       cardVerified: snapshot.cardVerified,
+      legalName: snapshot.legalName || null,
       cardBrand: snapshot.cardBrand || null,
       cardLast4: snapshot.cardLast4 || null,
+      cardFingerprintPresent: snapshot.cardFingerprintPresent,
+      blockedIdentity: snapshot.blockedIdentity,
       setupIntentId: snapshot.setupIntentId || null,
       lastSetupError: snapshot.cardLastError || null,
       source: "snapshot",
@@ -1305,8 +1370,11 @@ export function VerifyIdentity({
       syncCardUiFromResolvedStatus({
         cardStatus: status.cardStatus,
         cardVerified: status.cardStatus === "passed",
+        legalName: status.legalName,
         cardBrand: status.cardBrand,
         cardLast4: status.cardLast4,
+        cardFingerprintPresent: status.cardFingerprintPresent,
+        blockedIdentity: status.blockedIdentity,
         setupIntentId: status.setupIntentId,
         lastSetupError: status.cardLastError,
         source: "pull_card_status",
@@ -1599,6 +1667,12 @@ export function VerifyIdentity({
   }, [profile?.phone, signupData.phone, user?.phone]);
 
   useEffect(() => {
+    const resolvedLegalName = String(profile?.legal_name || signupData.legal_name || "").trim();
+    setVerifiedLegalName((prev) => prev ?? (resolvedLegalName || null));
+    setCardLegalNameInput((prev) => (prev.trim() ? prev : resolvedLegalName));
+  }, [profile?.legal_name, signupData.legal_name]);
+
+  useEffect(() => {
     if (!showTurnstileDiag) return;
     setActiveCard("phone");
   }, [showTurnstileDiag]);
@@ -1745,6 +1819,7 @@ export function VerifyIdentity({
       setActiveCard("card");
       resetCardFormRuntime();
       setCardErrorMessage(null);
+      setBlockedIdentity({ blocked: false, message: null });
       setCardVerificationState("collecting");
       const attemptId = crypto.randomUUID();
 
@@ -1963,6 +2038,14 @@ export function VerifyIdentity({
       });
       return;
     }
+    const trimmedLegalName = cardLegalNameInput.trim();
+    if (!trimmedLegalName) {
+      setCardErrorMessage("Legal name is required.");
+      logCardState("submit_blocked_missing_legal_name", {
+        setupIntentId: cardSetupIntentId,
+      });
+      return;
+    }
 
     try {
       setCardErrorMessage(null);
@@ -1978,6 +2061,7 @@ export function VerifyIdentity({
           setupIntentId: cardSetupIntentId,
           clientSecretPrefix: cardClientSecret.slice(0, 12),
           hasCardNumberElement: true,
+          legalName: trimmedLegalName,
           postalCode: cardPostalCode || null,
           cardNumberComplete,
           cardExpiryComplete,
@@ -1988,6 +2072,7 @@ export function VerifyIdentity({
         payment_method: {
           card: cardNumberElement,
           billing_details: {
+            name: trimmedLegalName,
             address: {
               postal_code: cardPostalCode || undefined,
             },
@@ -2038,11 +2123,14 @@ export function VerifyIdentity({
       try {
         const status = await pullCardStatus({ force: true });
         if (status?.cardStatus === "passed") {
+          setVerifiedLegalName(status.legalName || trimmedLegalName);
           await syncProfileVerificationAfterStep();
           toast.success("Card verification complete.");
           logCardState("confirm_card_setup_passed");
         } else if (status?.cardStatus === "failed") {
-          setCardErrorMessage(GENERIC_CARD_ERROR_MESSAGE);
+          setCardErrorMessage(status.blockedIdentity.blocked
+            ? (status.blockedIdentity.message || GENERIC_CARD_ERROR_MESSAGE)
+            : GENERIC_CARD_ERROR_MESSAGE);
           logCardState("confirm_card_setup_failed_after_poll");
         } else {
           setCardErrorMessage("Verification is still processing. Please check status in a moment.");
@@ -2078,12 +2166,15 @@ export function VerifyIdentity({
       const status = await pullCardStatus({ force: true });
       if (!status) return;
       if (status.cardStatus === "passed") {
+        setVerifiedLegalName(status.legalName || verifiedLegalName);
         await syncProfileVerificationAfterStep();
         toast.success("Card verification complete.");
         return;
       }
       if (status.cardStatus === "failed") {
-        setCardErrorMessage(GENERIC_CARD_ERROR_MESSAGE);
+        setCardErrorMessage(status.blockedIdentity.blocked
+          ? (status.blockedIdentity.message || GENERIC_CARD_ERROR_MESSAGE)
+          : GENERIC_CARD_ERROR_MESSAGE);
         return;
       }
       setCardErrorMessage("Verification is still processing. Please check status in a moment.");
@@ -2176,6 +2267,21 @@ export function VerifyIdentity({
             metadata needed for safety and fraud prevention.
           </p>
 
+          {blockedIdentity.blocked ? (
+            <div className="rounded-[18px] border border-[rgba(232,69,69,0.16)] bg-[rgba(232,69,69,0.06)] px-4 py-4 shadow-[0_12px_34px_rgba(66,73,101,0.08)]">
+              <p className="text-[14px] leading-[1.5] text-[var(--text-primary,#424965)]">
+                {blockedIdentity.message}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSupportOpen(true)}
+                className="mt-3 text-[13px] font-semibold text-brandBlue underline underline-offset-2"
+              >
+                Help &amp; Support
+              </button>
+            </div>
+          ) : null}
+
           <PhoneVerificationCard
             state={phoneVerificationState}
             isOpen={activeCard === "phone"}
@@ -2231,11 +2337,16 @@ export function VerifyIdentity({
             cardNumberContainerId={cardNumberContainerIdOverride ?? cardNumberContainerId}
             cardExpiryContainerId={cardExpiryContainerIdOverride ?? cardExpiryContainerId}
             cardCvcContainerId={cardCvcContainerIdOverride ?? cardCvcContainerId}
+            legalName={cardLegalNameInput}
+            onLegalNameChange={setCardLegalNameInput}
             postalCode={cardPostalCode}
             onPostalCodeChange={setCardPostalCode}
+            verifiedLegalName={verifiedLegalName}
             cardBrand={cardBrandOverride ?? cardBrand}
             cardLast4={cardLast4Override ?? cardLast4}
             errorMessage={cardErrorMessageOverride || cardErrorMessage}
+            blockedIdentity={blockedIdentity}
+            onOpenSupport={() => setSupportOpen(true)}
             onCheckPendingStatus={onCheckCardPendingStatus}
           />
 
@@ -2246,6 +2357,12 @@ export function VerifyIdentity({
           ) : null}
         </div>
       </div>
+      <HelpSupportDialog
+        open={supportOpen}
+        onOpenChange={setSupportOpen}
+        initialSubject="Identity verification support"
+        initialMessage={blockedIdentity.blocked ? "I need help with identity verification." : ""}
+      />
     </div>
   );
 }
