@@ -472,6 +472,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [replyComposerFocused, setReplyComposerFocused] = useState(false);
   const [replyMediaFiles, setReplyMediaFiles] = useState<ComposerMedia[]>([]);
   const [replyError, setReplyError] = useState("");
+  const [replySubmittingByThread, setReplySubmittingByThread] = useState<Set<string>>(new Set());
   const [newsAlertTypeByThread, setNewsAlertTypeByThread] = useState<Record<string, "Stray" | "Lost" | "Others">>({});
   const [createErrors, setCreateErrors] = useState<{ title?: string; content?: string }>({});
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1863,6 +1864,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       toast.info("Thread not available.");
       return;
     }
+    if (replySubmittingByThread.has(thread.id)) return;
     if (!replyContent.trim()) {
       setReplyError(t("Reply cannot be empty"));
       return;
@@ -1879,99 +1881,108 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
     }
 
-    let uploadedUrls: string[] = [];
+    setReplySubmittingByThread((prev) => new Set([...prev, thread.id]));
     try {
-      uploadedUrls = await uploadComposerMedia(replyMediaFiles, "reply");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to upload media";
-      toast.error(message);
-      return;
-    }
+      let uploadedUrls: string[] = [];
+      try {
+        uploadedUrls = await uploadComposerMedia(replyMediaFiles, "reply");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to upload media";
+        toast.error(message);
+        return;
+      }
 
-    const replyText = replyContent.trim();
-    const { data: createdReply, error } = await supabase
-      .from("thread_comments" as "profiles")
-      .insert({
-        thread_id: thread.id,
-        user_id: user.id,
-        content: replyText,
-        images: uploadedUrls,
-      } as Record<string, unknown>)
-      .select("id")
-      .single();
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
+      const replyText = replyContent.trim();
+      const { data: createdReply, error } = await supabase
+        .from("thread_comments" as "profiles")
+        .insert({
+          thread_id: thread.id,
+          user_id: user.id,
+          content: replyText,
+          images: uploadedUrls,
+        } as Record<string, unknown>)
+        .select("id")
+        .single();
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
 
-    try {
-      const finalMentions = await resolveMentionsFromText(replyText, replyMentions);
-      if (createdReply?.id && finalMentions.length > 0) {
-        await persistReplyMentions(String(createdReply.id), finalMentions);
-        await createMentionNotifications(
-          thread.id,
-          Array.from(new Set(finalMentions.map((entry) => entry.mentionedUserId)))
+      try {
+        const finalMentions = await resolveMentionsFromText(replyText, replyMentions);
+        if (createdReply?.id && finalMentions.length > 0) {
+          await persistReplyMentions(String(createdReply.id), finalMentions);
+          await createMentionNotifications(
+            thread.id,
+            Array.from(new Set(finalMentions.map((entry) => entry.mentionedUserId)))
+          );
+        }
+      } catch (mentionError) {
+        console.error("[social.reply_mentions.failed]", {
+          threadId: thread.id,
+          replyId: createdReply?.id,
+          error: mentionError,
+        });
+        toast.error("Reply posted, but mention syncing failed.");
+      }
+
+      if (thread.user_id && thread.user_id !== user.id) {
+        await upsertNotificationWindow({
+          ownerUserId: thread.user_id,
+          subjectId: thread.id,
+          subjectType: "thread",
+          kind: "comment",
+          category: "social",
+          href: `/social?focus=${thread.id}`,
+          actorId: user.id,
+          actorName: profile?.display_name || "Someone",
+        });
+      }
+
+      if (createdReply?.id) {
+        const optimisticReply: ThreadComment = {
+          id: String(createdReply.id),
+          thread_id: thread.id,
+          content: replyText,
+          images: uploadedUrls,
+          created_at: new Date().toISOString(),
+          user_id: user.id,
+          author: {
+            display_name: profile?.display_name || "You",
+            social_id: profile?.social_id || null,
+            avatar_url: profile?.avatar_url || null,
+          },
+        };
+
+        setCommentsByThread((prev) => ({
+          ...prev,
+          [thread.id]: [...(prev[thread.id] || []), optimisticReply],
+        }));
+        setNotices((prev) =>
+          prev.map((notice) =>
+            notice.id === thread.id
+              ? { ...notice, comment_count: Math.max(0, Number(notice.comment_count ?? 0) + 1) }
+              : notice
+          )
         );
       }
-    } catch (mentionError) {
-      console.error("[social.reply_mentions.failed]", {
-        threadId: thread.id,
-        replyId: createdReply?.id,
-        error: mentionError,
-      });
-      toast.error("Reply posted, but mention syncing failed.");
-    }
 
-    if (thread.user_id && thread.user_id !== user.id) {
-      await upsertNotificationWindow({
-        ownerUserId: thread.user_id,
-        subjectId: thread.id,
-        subjectType: "thread",
-        kind: "comment",
-        category: "social",
-        href: `/social?focus=${thread.id}`,
-        actorId: user.id,
-        actorName: profile?.display_name || "Someone",
+      setReplyContent("");
+      setReplyMentions([]);
+      setReplyMentionQuery(null);
+      setReplyMentionSuggestions([]);
+      setReplyComposerFocused(false);
+      setReplyFor(null);
+      revokeComposerMedia(replyMediaFiles);
+      setReplyMediaFiles([]);
+      setReplyError("");
+    } finally {
+      setReplySubmittingByThread((prev) => {
+        const next = new Set(prev);
+        next.delete(thread.id);
+        return next;
       });
     }
-
-    if (createdReply?.id) {
-      const optimisticReply: ThreadComment = {
-        id: String(createdReply.id),
-        thread_id: thread.id,
-        content: replyText,
-        images: uploadedUrls,
-        created_at: new Date().toISOString(),
-        user_id: user.id,
-        author: {
-          display_name: profile?.display_name || "You",
-          social_id: profile?.social_id || null,
-          avatar_url: profile?.avatar_url || null,
-        },
-      };
-
-      setCommentsByThread((prev) => ({
-        ...prev,
-        [thread.id]: [...(prev[thread.id] || []), optimisticReply],
-      }));
-      setNotices((prev) =>
-        prev.map((notice) =>
-          notice.id === thread.id
-            ? { ...notice, comment_count: Math.max(0, Number(notice.comment_count ?? 0) + 1) }
-            : notice
-        )
-      );
-    }
-
-    setReplyContent("");
-    setReplyMentions([]);
-    setReplyMentionQuery(null);
-    setReplyMentionSuggestions([]);
-    setReplyComposerFocused(false);
-    setReplyFor(null);
-    revokeComposerMedia(replyMediaFiles);
-    setReplyMediaFiles([]);
-    setReplyError("");
   };
 
   const buildFallbackMentionEntries = useCallback((value: string) => {
@@ -2388,6 +2399,68 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const handleHideComment = (commentId: string) => {
     setHiddenComments((prev) => new Set([...prev, commentId]));
     toast.success(t("Reply hidden"));
+  };
+
+  const handleEditComment = async (threadId: string, comment: ThreadComment) => {
+    if (!user?.id || comment.user_id !== user.id) return;
+    const nextContent = window.prompt(t("Edit reply"), comment.content || "");
+    if (nextContent === null) return;
+    const trimmed = nextContent.trim();
+    if (!trimmed) {
+      toast.error(t("Reply cannot be empty"));
+      return;
+    }
+    if (countWords(trimmed) > MAX_COMPOSER_WORDS) {
+      toast.error(t("Reply is too long"));
+      return;
+    }
+
+    const { error } = await supabase
+      .from("thread_comments" as "profiles")
+      .update({ content: trimmed } as Record<string, unknown>)
+      .eq("id", comment.id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error(error.message || t("Unable to edit reply"));
+      return;
+    }
+
+    setCommentsByThread((prev) => ({
+      ...prev,
+      [threadId]: (prev[threadId] || []).map((entry) =>
+        entry.id === comment.id ? { ...entry, content: trimmed } : entry
+      ),
+    }));
+    toast.success(t("Reply updated"));
+  };
+
+  const handleDeleteComment = async (threadId: string, comment: ThreadComment) => {
+    if (!user?.id || comment.user_id !== user.id) return;
+    const confirmed = window.confirm(t("Delete this reply permanently?"));
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("thread_comments" as "profiles")
+      .delete()
+      .eq("id", comment.id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error(error.message || t("Unable to delete reply"));
+      return;
+    }
+
+    setCommentsByThread((prev) => ({
+      ...prev,
+      [threadId]: (prev[threadId] || []).filter((entry) => entry.id !== comment.id),
+    }));
+    setNotices((prev) =>
+      prev.map((notice) =>
+        notice.id === threadId
+          ? { ...notice, comment_count: Math.max(0, Number(notice.comment_count ?? 0) - 1) }
+          : notice
+      )
+    );
+    toast.success(t("Reply deleted"));
   };
 
   const handleBlockUser = async (authorId: string) => {
@@ -3314,11 +3387,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                   <NeuButton
                                     size="sm"
                                     onClick={() => handleReply(notice)}
-                                    disabled={!replyContent.trim() || remainingReplyWords < 0}
+                                    disabled={!replyContent.trim() || remainingReplyWords < 0 || replySubmittingByThread.has(notice.id)}
                                     className="ml-auto h-8 w-8 min-w-0 rounded-full p-0"
                                     aria-label="Send reply"
                                   >
-                                    <ArrowUp className="h-4 w-4" />
+                                    {replySubmittingByThread.has(notice.id) ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <ArrowUp className="h-4 w-4" />
+                                    )}
                                   </NeuButton>
                                 </div>
                                 {replyError && (
@@ -3399,21 +3476,41 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                       </button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => openReportModal(c.user_id, c.author?.display_name ?? null)}>
-                                      <Flag className="w-4 h-4 mr-2" />
-                                      {t("Report")}
-                                    </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
-                                        <EyeOff className="w-4 h-4 mr-2" />
-                                        {t("Hide")}
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(c.author?.display_name ?? "this user"); }}
-                                        className="text-destructive"
-                                      >
-                                        <Ban className="w-4 h-4 mr-2" />
-                                        {t("Block User")}
-                                      </DropdownMenuItem>
+                                      {c.user_id === user?.id ? (
+                                        <>
+                                          <DropdownMenuItem onClick={() => void handleEditComment(notice.id, c)}>
+                                            <Pencil className="w-4 h-4 mr-2" />
+                                            {t("Edit")}
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={() => void handleDeleteComment(notice.id, c)}
+                                            className="text-destructive"
+                                          >
+                                            <Trash2 className="w-4 h-4 mr-2" />
+                                            {t("Delete")}
+                                          </DropdownMenuItem>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <DropdownMenuItem onClick={() => openReportModal(c.user_id, c.author?.display_name ?? null)}>
+                                            <Flag className="w-4 h-4 mr-2" />
+                                            {t("Report")}
+                                          </DropdownMenuItem>
+                                          {notice.user_id === user?.id && (
+                                            <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
+                                              <EyeOff className="w-4 h-4 mr-2" />
+                                              {t("Hide")}
+                                            </DropdownMenuItem>
+                                          )}
+                                          <DropdownMenuItem
+                                            onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(c.author?.display_name ?? "this user"); }}
+                                            className="text-destructive"
+                                          >
+                                            <Ban className="w-4 h-4 mr-2" />
+                                            {t("Block User")}
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 </div>
