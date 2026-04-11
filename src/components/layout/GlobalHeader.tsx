@@ -93,9 +93,79 @@ function notifIcon(type: string) {
 }
 
 const allowedHref = (href: string) =>
-  /^\/(chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
+  /^\/(social|chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
     href
   );
+
+const firstString = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed;
+  }
+  return null;
+};
+
+const normalizeNotificationHref = (
+  href: string | null,
+  type: string,
+  meta: Record<string, unknown>
+) => {
+  const normalizedType = type.toLowerCase();
+  const socialTarget = firstString(
+    meta.thread_id,
+    meta.threadId,
+    meta.post_id,
+    meta.postId,
+    meta.subject_id,
+    meta.subjectId,
+    meta.content_id,
+    meta.contentId
+  );
+  const alertTarget = firstString(
+    meta.alert_id,
+    meta.alertId,
+    meta.subject_id,
+    meta.subjectId,
+    meta.content_id,
+    meta.contentId
+  );
+
+  let nextHref = href;
+  if (!nextHref && socialTarget && ["social", "like", "comment", "reply", "mention", "thread"].includes(normalizedType)) {
+    nextHref = `/social?focus=${encodeURIComponent(socialTarget)}`;
+  }
+  if (!nextHref && alertTarget && ["alert", "alert_like", "broadcast", "mesh_alert"].includes(normalizedType)) {
+    nextHref = `/map?alert=${encodeURIComponent(alertTarget)}`;
+  }
+  if (!nextHref) return null;
+
+  if (nextHref.startsWith("/threads")) {
+    const [, rawQuery = ""] = nextHref.split("?");
+    const params = new URLSearchParams(rawQuery);
+    const focus = params.get("focus") || params.get("thread") || socialTarget;
+    return focus ? `/social?focus=${encodeURIComponent(focus)}` : "/social";
+  }
+
+  if (nextHref.startsWith("/map")) {
+    const [, rawQuery = ""] = nextHref.split("?");
+    const params = new URLSearchParams(rawQuery);
+    if (!params.get("alert") && alertTarget) {
+      params.set("alert", alertTarget);
+    }
+    const q = params.toString();
+    return q ? `/map?${q}` : "/map";
+  }
+
+  return nextHref;
+};
+
+const normalizedTypeToPage = (rawType: string) => {
+  const normalizedType = rawType.toLowerCase();
+  if (["alert", "alert_like", "broadcast", "mesh_alert"].includes(normalizedType)) return "map";
+  if (["social", "like", "comment", "reply", "mention", "thread"].includes(normalizedType)) return "social";
+  return null;
+};
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -411,11 +481,27 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       type === "wave" ||
       body.toLowerCase().includes("open discover to find out");
     const resolvedHref = shouldForceDiscover ? "/chats?tab=discover" : href;
-    if (resolvedHref && allowedHref(resolvedHref)) {
+    const normalizedHref = shouldForceDiscover
+      ? resolvedHref
+      : normalizeNotificationHref(resolvedHref, type, meta);
+
+    if (normalizedHref && allowedHref(normalizedHref)) {
       setNotifOpen(false);
-      navigate(resolvedHref);
+      navigate(normalizedHref);
     } else {
-      console.warn("Invalid notification href", { id: r.id, href: resolvedHref });
+      if (normalizedTypeToPage(type) === "map") {
+        setNotifOpen(false);
+        navigate("/map");
+        toast.info("That alert is no longer available.");
+        return;
+      }
+      if (normalizedTypeToPage(type) === "social") {
+        setNotifOpen(false);
+        navigate("/social");
+        toast.info("That post is no longer available.");
+        return;
+      }
+      console.warn("Invalid notification href", { id: r.id, href: normalizedHref, rawHref: resolvedHref });
     }
   };
 

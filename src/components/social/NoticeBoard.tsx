@@ -491,6 +491,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastAutoFocusedThreadRef = useRef<string | null>(null);
+  const focusFallbackShownRef = useRef<string | null>(null);
   const focusThreadId = params.threadId || searchParams.get("focus") || searchParams.get("thread");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -1408,6 +1409,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             author_non_social: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).non_social : false,
           });
           nextRows = [normalizedFocused, ...nextRows.filter((item) => item.id !== normalizedFocused.id)];
+        } else if (focusFallbackShownRef.current !== focusThreadId) {
+          focusFallbackShownRef.current = focusThreadId;
+          toast.info("That post is no longer available.");
+          setFocusedThreadId(null);
         }
       }
 
@@ -1503,6 +1508,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   useEffect(() => {
     setFocusedThreadId(focusThreadId || null);
+    lastAutoFocusedThreadRef.current = null;
     if (focusThreadId) {
       setTopicFilters([]);
     }
@@ -1514,10 +1520,28 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const node = threadRefs.current[focusedThreadId];
     if (!node) return;
     lastAutoFocusedThreadRef.current = focusedThreadId;
+    const scroller = scrollContainerRef?.current;
+    if (scroller) {
+      const targetTop =
+        node.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop -
+        8;
+      scroller.scrollTo({
+        top: Math.max(0, targetTop),
+        behavior: "smooth",
+      });
+    } else {
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    const timer = window.setTimeout(() => {
+      setFocusedThreadId((current) => (current === focusedThreadId ? null : current));
+    }, 1800);
     if (import.meta.env.DEV) {
       console.info(`[SOCIAL_FOCUS_OK] thread=${focusedThreadId}`);
     }
-  }, [focusedThreadId, notices]);
+    return () => window.clearTimeout(timer);
+  }, [focusedThreadId, notices, scrollContainerRef]);
 
   useEffect(() => {
     if (composeSignal > 0) {

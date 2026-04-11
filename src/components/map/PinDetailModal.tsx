@@ -190,7 +190,7 @@ interface PinDetailModalProps {
         p_subject_type: "alert",
         p_kind: "alert_like",
         p_category: "map",
-        p_href: "/map",
+        p_href: `/map?alert=${encodeURIComponent(alert.id)}`,
         p_actor_id: user.id,
         p_actor_name: profile?.display_name || "Someone",
       }
@@ -644,12 +644,21 @@ interface PinDetailModalProps {
                   type="button"
                   onClick={() => {
                     if (socialThreadId) {
-                      navigate(`/threads?focus=${encodeURIComponent(socialThreadId)}`);
+                      navigate(`/social?focus=${encodeURIComponent(socialThreadId)}`);
                       return;
                     }
                     if (alert.social_url?.startsWith("/")) {
+                      const [, rawQuery = ""] = alert.social_url.split("?");
+                      const params = new URLSearchParams(rawQuery);
+                      const focus = params.get("focus") || params.get("thread");
+                      if (alert.social_url.startsWith("/threads")) {
+                        navigate(focus ? `/social?focus=${encodeURIComponent(focus)}` : "/social");
+                        return;
+                      }
                       navigate(alert.social_url);
+                      return;
                     }
+                    toast.info("That post is no longer available.");
                   }}
                   className="mr-auto text-sm font-medium text-[#2145CF] underline underline-offset-2"
                 >

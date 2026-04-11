@@ -1165,7 +1165,11 @@ const MapPage = () => {
       setAlertFocusId(null);
       return;
     }
-    if (alertFocusRetriesRef.current >= 1) return;
+    if (alertFocusRetriesRef.current >= 1) {
+      toast.info("That alert is no longer available.");
+      setAlertFocusId(null);
+      return;
+    }
     alertFocusRetriesRef.current += 1;
     const timer = window.setTimeout(() => {
       void fetchAlerts();
