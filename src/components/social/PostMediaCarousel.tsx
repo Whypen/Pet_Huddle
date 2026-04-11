@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Hand, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -12,6 +12,7 @@ type PostMediaCarouselProps = {
   items: MediaItem[];
   className?: string;
   mode?: "peek" | "full";
+  isSensitive?: boolean;
 };
 
 const MIN_ASPECT = 3 / 4;
@@ -20,7 +21,7 @@ const MAX_ASPECT = 4 / 3;
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
 
-export const PostMediaCarousel = ({ items, className, mode = "peek" }: PostMediaCarouselProps) => {
+export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
   const dragStartXRef = useRef<number | null>(null);
@@ -29,6 +30,13 @@ export const PostMediaCarousel = ({ items, className, mode = "peek" }: PostMedia
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const [aspectMap, setAspectMap] = useState<Record<string, number>>({});
+  const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
+
+  useEffect(() => {
+    if (!isSensitive) {
+      setSensitiveRevealed(false);
+    }
+  }, [isSensitive]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -126,9 +134,20 @@ export const PostMediaCarousel = ({ items, className, mode = "peek" }: PostMedia
                   onPointerCancel={handlePointerEnd}
                   onClick={() => {
                     if (dragMovedRef.current) return;
+                    if (isSensitive) {
+                      setSensitiveRevealed((prev) => !prev);
+                      return;
+                    }
                     setFullscreenIndex(index);
                   }}
                   onKeyDown={(event) => {
+                    if (isSensitive) {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSensitiveRevealed((prev) => !prev);
+                      }
+                      return;
+                    }
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       setFullscreenIndex(index);
@@ -138,7 +157,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek" }: PostMedia
                   {isVideo ? (
                     <video
                       src={item.src}
-                      className="h-full w-full object-cover object-center"
+                      className="h-full w-full object-cover object-center transition-[filter] duration-300 ease-out"
+                      style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
                       muted
                       playsInline
                       preload="metadata"
@@ -148,11 +168,24 @@ export const PostMediaCarousel = ({ items, className, mode = "peek" }: PostMedia
                     <img
                       src={item.src}
                       alt={item.alt || ""}
-                      className="h-full w-full object-cover object-center"
+                      className="h-full w-full object-cover object-center transition-[filter] duration-300 ease-out"
+                      style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
                       loading="lazy"
                       onLoad={(event) => updateAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
                     />
                   )}
+                  {isSensitive ? (
+                    <span
+                      className={cn(
+                        "pointer-events-none absolute inset-0 flex items-center justify-center bg-black/22 transition-opacity duration-300",
+                        sensitiveRevealed ? "opacity-0" : "opacity-100",
+                      )}
+                    >
+                      <span className="rounded-full border border-white/70 bg-black/25 p-2 text-white">
+                        <Hand className="h-5 w-5" strokeWidth={1.8} />
+                      </span>
+                    </span>
+                  ) : null}
                 </div>
               );
             })}

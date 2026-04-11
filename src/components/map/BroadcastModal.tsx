@@ -16,7 +16,7 @@ import { humanError } from "@/lib/humanError";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { toast } from "sonner";
 import { MediaThumb } from "@/components/media/MediaThumb";
-import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
+import { detectSensitiveImage } from "@/lib/sensitiveContent";
 
 type BroadcastMedia = {
   file: File;
@@ -77,6 +77,8 @@ const BroadcastModal = ({
   const [description, setDescription] = useState("");
   const [mediaFiles, setMediaFiles] = useState<BroadcastMedia[]>([]);
   const [postOnThreads, setPostOnThreads] = useState(false);
+  const [isSensitive, setIsSensitive] = useState(false);
+  const [sensitiveSuggested, setSensitiveSuggested] = useState(false);
   const [creating, setCreating] = useState(false);
   const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
   const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
@@ -125,6 +127,12 @@ const BroadcastModal = ({
       mediaFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     };
   }, [mediaFiles]);
+
+  useEffect(() => {
+    if (mediaFiles.length > 0) return;
+    setIsSensitive(false);
+    setSensitiveSuggested(false);
+  }, [mediaFiles.length]);
 
   const showUpsellOncePerDrag = () => {
     if (upsellOnceRef.current) return;
@@ -184,6 +192,18 @@ const BroadcastModal = ({
     }));
 
     setMediaFiles((prev) => [...prev, ...prepared]);
+    const firstImage = acceptedFiles[0];
+    if (firstImage) {
+      void detectSensitiveImage(firstImage)
+        .then((result) => {
+          if (!result.isSensitive) return;
+          setIsSensitive(true);
+          setSensitiveSuggested(true);
+        })
+        .catch(() => {
+          // Soft suggestion only.
+        });
+    }
     event.target.value = "";
   };
 
@@ -195,6 +215,8 @@ const BroadcastModal = ({
       return [];
     });
     setPostOnThreads(false);
+    setIsSensitive(false);
+    setSensitiveSuggested(false);
     setRangeKm(baseRangeKm);
     setDurationHours(baseDurationHours);
   };
@@ -258,6 +280,7 @@ const BroadcastModal = ({
         expires_at: expiresAt,
         post_on_social: postOnThreads,
         post_on_threads: postOnThreads,
+        is_sensitive: isSensitive,
       };
 
       const rpcResult = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
@@ -272,6 +295,20 @@ const BroadcastModal = ({
         throw { message: "Broadcast create RPC did not return alert_id" };
       }
       const threadId: string | null = rpcData.thread_id ?? null;
+      if (isSensitive) {
+        await supabase
+          .from("map_alerts" as "profiles")
+          .update({ is_sensitive: true } as Record<string, unknown>)
+          .eq("id", createdAlertId)
+          .eq("creator_id", user.id);
+        if (threadId) {
+          await supabase
+            .from("threads" as "profiles")
+            .update({ is_sensitive: true } as Record<string, unknown>)
+            .eq("id", threadId)
+            .eq("user_id", user.id);
+        }
+      }
 
       onSuccess({
         alertId: createdAlertId,
@@ -296,6 +333,7 @@ const BroadcastModal = ({
           range_meters: rangeMeters,
           range_km: rangeKm,
           duration_hours: durationHours,
+          is_sensitive: isSensitive,
           creator: {
             display_name: profile?.display_name || null,
             avatar_url: profile?.avatar_url || null,
@@ -467,6 +505,25 @@ const BroadcastModal = ({
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : null}
+            {mediaFiles.length > 0 ? (
+              <div className="mb-3">
+                <label className="flex items-start gap-2 text-xs text-[rgba(74,73,101,0.78)]">
+                  <input
+                    type="checkbox"
+                    checked={isSensitive}
+                    onChange={(event) => {
+                      setIsSensitive(event.target.checked);
+                      if (!event.target.checked) setSensitiveSuggested(false);
+                    }}
+                    className="mt-[2px] h-4 w-4 rounded border-border"
+                  />
+                  <span>This photo contains injury, blood, sensitive or disturbing content</span>
+                </label>
+                {sensitiveSuggested ? (
+                  <p className="mt-1 text-xs text-[#B46900]">Detected possible sensitive content</p>
+                ) : null}
               </div>
             ) : null}
 

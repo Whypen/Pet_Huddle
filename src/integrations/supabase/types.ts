@@ -1192,6 +1192,7 @@ export type Database = {
           duration_hours: number | null
           expires_at: string | null
           id: string
+          is_sensitive: boolean
           is_active: boolean | null
           latitude: number
           location_district: string | null
@@ -1221,6 +1222,7 @@ export type Database = {
           duration_hours?: number | null
           expires_at?: string | null
           id?: string
+          is_sensitive?: boolean
           is_active?: boolean | null
           latitude: number
           location_district?: string | null
@@ -1250,6 +1252,7 @@ export type Database = {
           duration_hours?: number | null
           expires_at?: string | null
           id?: string
+          is_sensitive?: boolean
           is_active?: boolean | null
           latitude?: number
           location_district?: string | null
@@ -3842,6 +3845,7 @@ export type Database = {
           hashtags: string[] | null
           id: string
           images: string[] | null
+          is_sensitive: boolean
           is_map_alert: boolean
           is_public: boolean
           likes: number | null
@@ -3858,6 +3862,7 @@ export type Database = {
           hashtags?: string[] | null
           id?: string
           images?: string[] | null
+          is_sensitive?: boolean
           is_map_alert?: boolean
           is_public?: boolean
           likes?: number | null
@@ -3874,6 +3879,7 @@ export type Database = {
           hashtags?: string[] | null
           id?: string
           images?: string[] | null
+          is_sensitive?: boolean
           is_map_alert?: boolean
           is_public?: boolean
           likes?: number | null
@@ -5379,6 +5385,7 @@ export type Database = {
           hashtags: string[]
           id: string
           images: string[]
+          is_sensitive: boolean
           like_count: number
           score: number
           support_count: number
@@ -5400,6 +5407,7 @@ export type Database = {
           duration_hours: number
           expires_at: string
           id: string
+          is_sensitive: boolean
           latitude: number
           location_district: string
           location_street: string

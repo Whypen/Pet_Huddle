@@ -41,6 +41,7 @@ import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
+import { detectSensitiveImage } from "@/lib/sensitiveContent";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 
 
@@ -72,6 +73,7 @@ interface Thread {
   score?: number | null;
   map_id?: string | null;
   alert_type?: string | null;
+  is_sensitive?: boolean | null;
   author: {
     display_name: string | null;
     social_id?: string | null;
@@ -458,6 +460,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [createComposerFocused, setCreateComposerFocused] = useState(false);
   const [category, setCategory] = useState("Social");
   const [createMediaFiles, setCreateMediaFiles] = useState<ComposerMedia[]>([]);
+  const [createIsSensitive, setCreateIsSensitive] = useState(false);
+  const [createSensitiveSuggested, setCreateSensitiveSuggested] = useState(false);
   const [hiddenNotices, setHiddenNotices] = useState<Set<string>>(new Set());
   const [hiddenComments, setHiddenComments] = useState<Set<string>>(new Set());
   const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
@@ -1091,6 +1095,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     score: typeof row.score === "number" ? row.score : Number(row.score ?? 0),
     map_id: typeof row.map_id === "string" ? row.map_id : null,
     alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
+    is_sensitive: row.is_sensitive === true,
     created_at: String(row.created_at || new Date().toISOString()),
     user_id: String(row.user_id),
     author: {
@@ -1166,6 +1171,25 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           ? { ...notice, share_count: shareMap.get(notice.id) ?? 0 }
           : notice
       );
+    }
+
+    const { data: sensitiveRows } = await supabase
+      .from("threads" as "profiles")
+      .select("id,is_sensitive")
+      .in("id", ids);
+    if (sensitiveRows && sensitiveRows.length > 0) {
+      const sensitiveMap = new Map<string, boolean>(
+        (sensitiveRows as Array<{ id: string; is_sensitive?: boolean | null }>).map((row) => [
+          row.id,
+          row.is_sensitive === true,
+        ])
+      );
+      hydratedRows = hydratedRows.map((notice) => ({
+        ...notice,
+        is_sensitive: sensitiveMap.get(notice.id) === true,
+      }));
+    } else {
+      hydratedRows = hydratedRows.map((notice) => ({ ...notice, is_sensitive: notice.is_sensitive === true }));
     }
 
     const userIds = Array.from(new Set(hydratedRows.map((row) => row.user_id).filter(Boolean)));
@@ -1651,6 +1675,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const prepared = await prepareComposerMedia(event.target.files, createMediaFiles.length);
     if (prepared.length > 0) {
       setCreateMediaFiles((prev) => [...prev, ...prepared]);
+      const firstImage = prepared.find((item) => item.kind === "image");
+      if (firstImage) {
+        void detectSensitiveImage(firstImage.file)
+          .then((result) => {
+            if (!result.isSensitive) return;
+            setCreateIsSensitive(true);
+            setCreateSensitiveSuggested(true);
+          })
+          .catch(() => {
+            // Soft suggestion only.
+          });
+      }
     }
     event.target.value = "";
   };
@@ -1662,6 +1698,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
     event.target.value = "";
   };
+
+  useEffect(() => {
+    if (createMediaFiles.length > 0) return;
+    setCreateIsSensitive(false);
+    setCreateSensitiveSuggested(false);
+  }, [createMediaFiles.length]);
 
   const uploadComposerMedia = useCallback(async (items: ComposerMedia[], scope: "thread" | "reply") => {
     if (!user?.id || items.length === 0) return [] as string[];
@@ -1813,6 +1855,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setCreateMentionQuery(null);
     setCreateMentionSuggestions([]);
     setCreateComposerFocused(false);
+    setCreateIsSensitive(false);
+    setCreateSensitiveSuggested(false);
     setEditingNoticeId(null);
     setIsCreateOpen(false);
   };
@@ -1827,6 +1871,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setCreateMentions([]);
     setCreateMentionQuery(null);
     setCreateMentionSuggestions([]);
+    setCreateIsSensitive(notice.is_sensitive === true);
+    setCreateSensitiveSuggested(false);
     revokeComposerMedia(createMediaFiles);
     setCreateMediaFiles([]);
     setIsCreateOpen(true);
@@ -2167,6 +2213,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             content: content.trim(),
             tags: [category],
             images: mergedImages,
+            is_sensitive: createIsSensitive,
           } as Record<string, unknown>)
           .eq("id", editingNoticeId)
           .eq("user_id", user.id)
@@ -2185,6 +2232,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     tags: (updatedThread.tags as string[] | null) ?? null,
                     hashtags: (updatedThread.hashtags as string[] | null) ?? null,
                     images: (updatedThread.images as string[] | null) ?? item.images ?? null,
+                    is_sensitive: createIsSensitive,
                   }
                 : item
             )
@@ -2224,6 +2272,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             hashtags: [],
             images: uploadedUrls,
             likes: 0,
+            is_sensitive: createIsSensitive,
           } as Record<string, unknown>)
           .select("id, title, content, tags, hashtags, images, likes, created_at, user_id")
           .single();
@@ -2241,6 +2290,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             likes: Number(createdThread.likes ?? 0),
             created_at: String(createdThread.created_at),
             user_id: String(createdThread.user_id),
+            is_sensitive: createIsSensitive,
             author: {
               display_name: profile?.display_name || "You",
               avatar_url: profile?.avatar_url || null,
@@ -2270,6 +2320,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setCategory("Social");
       revokeComposerMedia(createMediaFiles);
       setCreateMediaFiles([]);
+      setCreateIsSensitive(false);
+      setCreateSensitiveSuggested(false);
       setEditingNoticeId(null);
       setIsCreateOpen(false);
       setCreateErrors({});
@@ -3156,6 +3208,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         {notice.images && notice.images.length > 0 && (
                           <PostMediaCarousel
                             className="mt-2"
+                            isSensitive={notice.is_sensitive === true}
                             items={notice.images.map((src, index) => ({
                               src,
                               alt: `${notice.title || "Post"} ${index + 1}`,
@@ -3703,6 +3756,25 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                   ))}
                 </div>
               )}
+              {createMediaFiles.length > 0 ? (
+                <div className="mb-4">
+                  <label className="flex items-start gap-2 text-xs text-[rgba(74,73,101,0.78)]">
+                    <input
+                      type="checkbox"
+                      checked={createIsSensitive}
+                      onChange={(event) => {
+                        setCreateIsSensitive(event.target.checked);
+                        if (!event.target.checked) setCreateSensitiveSuggested(false);
+                      }}
+                      className="mt-[2px] h-4 w-4 rounded border-border"
+                    />
+                    <span>This photo contains injury, blood, sensitive or disturbing content</span>
+                  </label>
+                  {createSensitiveSuggested ? (
+                    <p className="mt-1 text-xs text-[#B46900]">Detected possible sensitive content</p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {/* Actions */}
               <div className="mt-3 flex items-center gap-3 pb-2">
