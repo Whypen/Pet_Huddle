@@ -25,6 +25,23 @@ const cleanEnv = (v: string | undefined | null): string => {
   return r;
 };
 
+const isJwt = (value: string): boolean => value.split(".").length === 3;
+
+const decodePayload = (value: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(atob(value.split(".")[1]));
+  } catch {
+    return null;
+  }
+};
+
+const isUserToken = (value: string): boolean => {
+  if (!isJwt(value)) return false;
+  const payload = decodePayload(value);
+  const role = String(payload?.role || "").trim().toLowerCase();
+  return Boolean(payload?.sub) && role !== "anon" && role !== "service_role";
+};
+
 const resolveStripeSecret = (): string => {
   const live = cleanEnv(Deno.env.get("STRIPE_LIVE_SECRET_KEY"));
   const def = cleanEnv(Deno.env.get("STRIPE_SECRET_KEY") || Deno.env.get("STRIPE_API_KEY"));
@@ -33,6 +50,10 @@ const resolveStripeSecret = (): string => {
   if (live && def.startsWith("sk_test_")) return live;
   return def || live || "";
 };
+
+const resolveSupabaseServiceKey = (): string =>
+  cleanEnv(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY"))
+  || cleanEnv(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
 
 const COUNTRY_MAP: Record<string, string> = {
   "hong kong": "HK", "hong kong sar": "HK", "hong kong sar china": "HK",
@@ -76,18 +97,29 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
     // ── Auth ──────────────────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
     const huddleToken = req.headers.get("x-huddle-access-token") ?? "";
+    const bodyToken = String(body.access_token || "").trim();
     const token =
-      [authHeader.replace(/^Bearer\s+/i, "").trim(), huddleToken.replace(/^Bearer\s+/i, "").trim()]
-        .find((t) => t.split(".").length === 3) || "";
+      [
+        bodyToken,
+        huddleToken.replace(/^Bearer\s+/i, "").trim(),
+        authHeader.replace(/^Bearer\s+/i, "").trim(),
+      ].find(isUserToken)
+      || [
+        bodyToken,
+        huddleToken.replace(/^Bearer\s+/i, "").trim(),
+        authHeader.replace(/^Bearer\s+/i, "").trim(),
+      ].find(isJwt)
+      || "";
     if (!token)
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") as string,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string,
+      resolveSupabaseServiceKey(),
     );
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user)

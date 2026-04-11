@@ -22,6 +22,27 @@ const cleanEnv = (v: string | undefined | null): string => {
   return r;
 };
 
+const resolveSupabaseServiceKey = (): string =>
+  cleanEnv(Deno.env.get("HUDDLE_SUPABASE_SERVICE_KEY"))
+  || cleanEnv(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
+
+const isJwt = (value: string): boolean => value.split(".").length === 3;
+
+const decodePayload = (value: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(atob(value.split(".")[1]));
+  } catch {
+    return null;
+  }
+};
+
+const isUserToken = (value: string): boolean => {
+  if (!isJwt(value)) return false;
+  const payload = decodePayload(value);
+  const role = String(payload?.role || "").trim().toLowerCase();
+  return Boolean(payload?.sub) && role !== "anon" && role !== "service_role";
+};
+
 // Resolve test or live Stripe key pair, matching the pattern used by
 // create-identity-setup-intent for consistency.
 const resolveKeyPair = (req: Request): { secretKey: string; publishableKey: string } => {
@@ -51,18 +72,29 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
     // ── Auth ──────────────────────────────────────────────────────────────────
     const authHeader = req.headers.get("Authorization") ?? "";
     const huddleToken = req.headers.get("x-huddle-access-token") ?? "";
+    const bodyToken = String(body.access_token || "").trim();
     const token =
-      [authHeader.replace(/^Bearer\s+/i, "").trim(), huddleToken.replace(/^Bearer\s+/i, "").trim()]
-        .find((t) => t.split(".").length === 3) || "";
+      [
+        bodyToken,
+        huddleToken.replace(/^Bearer\s+/i, "").trim(),
+        authHeader.replace(/^Bearer\s+/i, "").trim(),
+      ].find(isUserToken)
+      || [
+        bodyToken,
+        huddleToken.replace(/^Bearer\s+/i, "").trim(),
+        authHeader.replace(/^Bearer\s+/i, "").trim(),
+      ].find(isJwt)
+      || "";
     if (!token)
       return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL") as string,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") as string,
+      resolveSupabaseServiceKey(),
     );
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user)
@@ -85,7 +117,8 @@ serve(async (req) => {
     const careProfile = careProfileResult.data as Record<string, unknown> | null;
     const hp = huddleProfileResult.data as Record<string, unknown> | null;
 
-    const accountId = String(careProfile?.stripe_account_id || "").trim();
+    const requestedAccountId = String(body.stripe_account_id || "").trim();
+    const accountId = requestedAccountId || String(careProfile?.stripe_account_id || "").trim();
 
     if (!accountId) {
       return Response.json(

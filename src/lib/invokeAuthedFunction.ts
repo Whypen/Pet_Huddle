@@ -8,6 +8,12 @@ type InvokeArgs = {
 
 const authErrorPattern = /(401|unauthori[sz]ed|invalid[_\s-]?jwt|missing[_\s-]?token)/i;
 const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+// Supabase Functions on this project still accept the legacy anon JWT reliably at
+// the gateway layer, while user ES256 access tokens are passed through a
+// dedicated header and verified inside each function with auth.getUser().
+const legacyFunctionGatewayKey =
+  (import.meta.env.VITE_SUPABASE_LEGACY_ANON_KEY || "").trim()
+  || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNTQ2NDMsImV4cCI6MjA4NDkzMDY0M30.ehK3oSGq6AFdtuSovXTi02aMB_ht4suO16HJ8RecIvg";
 
 type AccessTokenResolution =
   | { token: string; hasSession: true }
@@ -151,17 +157,22 @@ export async function invokeAuthedFunction<T = unknown>(
   }
 
   const fnUrl = `${(import.meta.env.VITE_SUPABASE_URL as string).replace(/\/$/, "")}/functions/v1/${functionName}`;
+  const authorizationGatewayKey = legacyFunctionGatewayKey || anonKey;
   const invokeWithRawFetch = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
     try {
+      const requestBody =
+        args.body && typeof args.body === "object" && !Array.isArray(args.body)
+          ? { ...(args.body as Record<string, unknown>), access_token: token }
+          : { access_token: token, payload: args.body ?? null };
       const res = await fetch(fnUrl, {
         method: "POST",
         headers: {
           ...baseHeaders,
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${authorizationGatewayKey}`,
           "x-huddle-access-token": token,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(args.body ?? null),
+        body: JSON.stringify(requestBody),
       });
       const payload = await res.json().catch(() => null) as unknown;
       if (!res.ok) {
@@ -178,32 +189,8 @@ export async function invokeAuthedFunction<T = unknown>(
       return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
     }
   };
-  const invokeWithToken = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
-    try {
-      const sdk = await supabase.functions.invoke(functionName, {
-        body: args.body ?? null,
-        headers: {
-          ...baseHeaders,
-          Authorization: `Bearer ${token}`,
-          "x-huddle-access-token": token,
-        },
-      });
-      if (!sdk.error) {
-        return { data: sdk.data ?? null, error: null };
-      }
-      const message = String(sdk.error.message || "");
-      const shouldFallbackToRaw =
-        message.includes("Failed to fetch")
-        || message.includes("NetworkError")
-        || message.includes("Load failed");
-      if (shouldFallbackToRaw) {
-        return await invokeWithRawFetch(token);
-      }
-      return { data: sdk.data ?? null, error: sdk.error };
-    } catch {
-      return await invokeWithRawFetch(token);
-    }
-  };
+  const invokeWithToken = async (token: string): Promise<{ data: unknown; error: Error | null }> =>
+    invokeWithRawFetch(token);
 
   const first = await invokeWithToken(firstToken);
   if (import.meta.env.DEV) {
@@ -211,6 +198,7 @@ export async function invokeAuthedFunction<T = unknown>(
       functionName,
       hasAuthorizationHeader: true,
       authorizationPrefix: "Bearer",
+      authorizationKeyPrefix: authorizationGatewayKey.slice(0, 12),
       hasApiKeyHeader: Boolean(baseHeaders.apikey),
       apikeyPrefix: String(baseHeaders.apikey).slice(0, 16),
       firstError: first.error?.message || null,
@@ -248,6 +236,7 @@ export async function invokeAuthedFunction<T = unknown>(
       functionName,
       hasAuthorizationHeader: true,
       authorizationPrefix: "Bearer",
+      authorizationKeyPrefix: authorizationGatewayKey.slice(0, 12),
       hasApiKeyHeader: Boolean(baseHeaders.apikey),
       apikeyPrefix: String(baseHeaders.apikey).slice(0, 16),
       tokenChanged: retryToken !== firstToken,

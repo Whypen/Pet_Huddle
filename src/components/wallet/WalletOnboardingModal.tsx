@@ -42,7 +42,10 @@ export function WalletOnboardingModal({
     const sessionResponse = await invokeAuthedFunction<{
       client_secret?: string;
       publishable_key?: string;
-    }>("create-account-session", { body: {}, forceRefresh: true });
+    }>("create-account-session", {
+      body: { stripe_account_id: accountBootstrap.data?.stripe_account_id || "" },
+      forceRefresh: true,
+    });
 
     if (sessionResponse.error) {
       throw sessionResponse.error;

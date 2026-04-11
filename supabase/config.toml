@@ -34,6 +34,15 @@ verify_jwt = false
 [functions.create-stripe-connect-link]
 verify_jwt = false
 
+[functions.create-or-get-stripe-account]
+verify_jwt = false
+
+[functions.create-account-session]
+verify_jwt = false
+
+[functions.refresh-stripe-account-status]
+verify_jwt = false
+
 [functions.cancel-subscription]
 verify_jwt = false
 
