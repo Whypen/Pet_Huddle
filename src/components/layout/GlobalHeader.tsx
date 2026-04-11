@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { normalizeMembershipTier } from "@/lib/membership";
 import { plusTabRoute } from "@/lib/routes";
 import { getRemainingStarsFromSnapshot } from "@/lib/starQuota";
+import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { InsetPanel, InsetDivider, InsetRow } from "@/components/ui/InsetPanel";
 import { EmptyStateCard } from "@/components/ui/EmptyStateCard";
@@ -158,6 +159,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const normalizedTier = normalizeMembershipTier(profile?.effective_tier ?? profile?.tier);
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
+  const onboardingComplete = isRegisteredUserProfile(profile ?? null);
   const logoutItem = useMemo(
     () => ({
       label: "Log Out",
@@ -681,18 +683,14 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     icon={<Star size={16} strokeWidth={1.75} />}
                     variant="nav"
                     onClick={() => {
-                      if (onUpgradeClick && !isPlusOrAbove) {
-                        setTimeout(onUpgradeClick, 200);
-                      } else {
-                        sessionStorage.setItem("premium:returnTo", premiumReturnTo);
-                        sessionStorage.setItem("premium:reopenDrawer", "1");
-                        navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"), {
-                          state: {
-                            returnTo: premiumReturnTo,
-                            reopenDrawerOnClose: true,
-                          },
-                        });
-                      }
+                      sessionStorage.setItem("premium:returnTo", premiumReturnTo);
+                      sessionStorage.setItem("premium:reopenDrawer", "1");
+                      navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"), {
+                        state: {
+                          returnTo: premiumReturnTo,
+                          reopenDrawerOnClose: true,
+                        },
+                      });
                     }}
                   />
                 </SheetClose>
@@ -751,7 +749,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     label="Account Settings"
                     icon={<UserIcon size={16} strokeWidth={1.75} />}
                     variant="nav"
-                    onClick={() => navigate("/settings", { state: { from: location.pathname } })}
+                    onClick={() => {
+                      if (!user || !onboardingComplete) {
+                        toast.warning("Complete profile to access Account Settings.");
+                        return;
+                      }
+                      navigate("/settings", { state: { from: location.pathname } });
+                    }}
                   />
                 </SheetClose>
               </InsetPanel>

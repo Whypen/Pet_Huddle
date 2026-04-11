@@ -192,6 +192,21 @@ const Auth = () => {
       return;
     }
 
+    const { data: currentUserData } = await supabase.auth.getUser();
+    const currentUserId = String(currentUserData.user?.id || "").trim();
+    if (currentUserId) {
+      const { data: profileRow, error: profileLookupError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", currentUserId)
+        .maybeSingle();
+      if (profileLookupError || !profileRow) {
+        await supabase.auth.signOut({ scope: "local" });
+        setAuthError("This account is unavailable. Please sign up again.");
+        return;
+      }
+    }
+
     navigate("/");
   };
 

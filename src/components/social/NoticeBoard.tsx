@@ -3162,6 +3162,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             }))}
                           />
                         )}
+                        {notice.map_id ? (
+                          <button
+                            type="button"
+                            className="mt-2 text-xs font-semibold text-brandBlue underline underline-offset-2"
+                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
+                          >
+                            Check out pin on Map
+                          </button>
+                        ) : null}
                         <div className="mt-3 flex items-center">
                           <div className="flex min-w-0 items-center gap-2">
                             <p className="text-xs text-[rgba(74,73,101,0.45)]">
