@@ -72,7 +72,10 @@ const SignupVerify = () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
       toast.error("Session not ready. Please sign in and continue.");
-      navigate("/auth");
+      navigate("/signup/credentials", {
+        replace: true,
+        state: { email: data.email || "" },
+      });
       return;
     }
 

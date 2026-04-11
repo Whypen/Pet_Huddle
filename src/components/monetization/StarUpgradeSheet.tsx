@@ -33,6 +33,8 @@ type StarUpgradeSheetProps = {
 type FeatureItem = {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; style?: React.CSSProperties; "aria-hidden"?: boolean }>;
   label: string;
+  sublabel?: string;
+  sublabelNote?: string;
 };
 
 // ─── Theme + static data ──────────────────────────────────────────────────────
@@ -48,15 +50,22 @@ const CARD_FLOAT_STYLE: React.CSSProperties = {
 };
 
 const PLUS_HIGHLIGHTS: FeatureItem[] = [
-  { icon: Star,  label: "4 Stars / month" },
-  { icon: Users, label: "×2 Discovery" },
-  { icon: Radio, label: "Broadcasts · 25km · 24h" },
+  { icon: Users, label: "Open Discovery", sublabel: "Double the chances. Better matches." },
+  { icon: TrendingUp, label: "Profile Boost", sublabel: "Get seen earlier in Discover and Services." },
+  { icon: Star, label: "4 Stars / month", sublabel: "Reach out without waiting." },
+  { icon: Radio, label: "Broadcasts · 25km · 24h", sublabel: "Reach more nearby members for longer." },
+  { icon: Globe, label: "Advanced Filters", sublabel: "Sharper search. Better fit." },
+  { icon: Users, label: "Family Sharing", sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
 
 const GOLD_HIGHLIGHTS: FeatureItem[] = [
-  { icon: Star,        label: "10 Stars / month" },
-  { icon: TrendingUp,  label: "3× Visibility priority" },
-  { icon: Globe,       label: "Wide Open Discovery" },
+  { icon: Globe, label: "Max Discovery", sublabel: "Keep discovering without the usual limits." },
+  { icon: TrendingUp, label: "Top Profile Boost", sublabel: "Priority placement in Discover and Services." },
+  { icon: Star, label: "10 Stars / month", sublabel: "Your fastest way to connect." },
+  { icon: Radio, label: "Broadcasts · 50km · 48h", sublabel: "Your widest reach, for even longer." },
+  { icon: Globe, label: "All Filters", sublabel: "Every filter unlocked. Less noise, better matches." },
+  { icon: Users, label: "Video Uploads", sublabel: "Gold exclusive." },
+  { icon: Users, label: "Family Sharing", sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -221,11 +230,21 @@ export function StarUpgradeSheet({
                   {/* Feature highlights */}
                   <div className="mt-3">
                     {highlights.map((h) => (
-                      <div key={h.label} className="flex items-center gap-3 py-2.5">
+                      <div key={h.label} className="flex items-start gap-3 py-2.5">
                         <h.icon size={18} strokeWidth={1.75} style={{ color: theme.textOnBg, opacity: 0.90 }} aria-hidden />
-                        <p className="text-[13px] font-[600] leading-tight" style={{ color: theme.textOnBg }}>
-                          {h.label}
-                        </p>
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-[600] leading-tight" style={{ color: theme.textOnBg }}>
+                            {h.label}
+                          </p>
+                          {h.sublabel ? (
+                            <p className="mt-0.5 text-[11px] leading-snug opacity-80" style={{ color: theme.textOnBg }}>
+                              {h.sublabel}
+                              {h.sublabelNote ? (
+                                <span className="block">{h.sublabelNote}</span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>

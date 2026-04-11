@@ -160,6 +160,22 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
   const onboardingComplete = isRegisteredUserProfile(profile ?? null);
+  const requireCompletedProfile = useCallback(
+    (actionLabel: string) => {
+      if (!user) {
+        toast.warning("Please sign in to continue.");
+        navigate("/auth", { replace: true });
+        return false;
+      }
+      if (!onboardingComplete) {
+        toast.warning(`Complete profile to access ${actionLabel}.`);
+        navigate("/set-profile", { replace: true });
+        return false;
+      }
+      return true;
+    },
+    [navigate, onboardingComplete, user],
+  );
   const logoutItem = useMemo(
     () => ({
       label: "Log Out",
@@ -659,6 +675,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   tierValue={String(profile?.effective_tier || profile?.tier || "free")}
                   starsLabel={String(Math.max(0, Number(starsRemaining || 0)))}
                   onStarsClick={() => {
+                    if (!requireCompletedProfile("Manage Membership")) return;
                     setMenuOpen(false);
                     sessionStorage.setItem("premium:returnTo", premiumReturnTo);
                     sessionStorage.setItem("premium:reopenDrawer", "1");
@@ -683,6 +700,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     icon={<Star size={16} strokeWidth={1.75} />}
                     variant="nav"
                     onClick={() => {
+                      if (!requireCompletedProfile("Manage Membership")) return;
                       sessionStorage.setItem("premium:returnTo", premiumReturnTo);
                       sessionStorage.setItem("premium:reopenDrawer", "1");
                       navigate(isPlusOrAbove ? plusTabRoute("Gold") : plusTabRoute("Plus"), {
@@ -701,6 +719,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                   variant="nav"
                   value={familyUsedCount > 0 ? `${familyUsedCount} member${familyUsedCount > 1 ? "s" : ""}` : undefined}
                   onClick={() => {
+                    if (!requireCompletedProfile("Family Account")) return;
                     setReopenMenuOnFamilyClose(true);
                     setMenuOpen(false);
                     setTimeout(() => setFamilySheetOpen(true), 150);
@@ -733,6 +752,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                         variant="nav"
                         value={isVerified ? undefined : "Verify first"}
                         onClick={() => {
+                          if (!requireCompletedProfile("Pet Carer Profile")) return;
                           if (isVerified) {
                             navigate("/carerprofile", { state: { from: location.pathname } });
                           } else {
@@ -750,10 +770,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                     icon={<UserIcon size={16} strokeWidth={1.75} />}
                     variant="nav"
                     onClick={() => {
-                      if (!user || !onboardingComplete) {
-                        toast.warning("Complete profile to access Account Settings.");
-                        return;
-                      }
+                      if (!requireCompletedProfile("Account Settings")) return;
                       navigate("/settings", { state: { from: location.pathname } });
                     }}
                   />

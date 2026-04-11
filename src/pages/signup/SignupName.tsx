@@ -130,8 +130,11 @@ const SignupName = () => {
           await new Promise((r) => setTimeout(r, 500));
         }
         if (!newUserId) {
-          toast.error("Account created — please sign in to continue.");
-          navigate("/auth");
+          toast.error("Session not ready yet. Please continue from credentials.");
+          navigate("/signup/credentials", {
+            replace: true,
+            state: { email: data.email?.trim() || "" },
+          });
           return;
         }
 
