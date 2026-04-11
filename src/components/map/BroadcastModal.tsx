@@ -54,6 +54,7 @@ interface BroadcastModalProps {
       creator: { display_name: string | null; avatar_url: string | null } | null;
       expires_at?: string | null;
       range_meters?: number | null;
+      is_sensitive?: boolean;
     };
   }) => void;
   onError: () => void;
@@ -295,20 +296,6 @@ const BroadcastModal = ({
         throw { message: "Broadcast create RPC did not return alert_id" };
       }
       const threadId: string | null = rpcData.thread_id ?? null;
-      if (isSensitive) {
-        await supabase
-          .from("map_alerts" as "profiles")
-          .update({ is_sensitive: true } as Record<string, unknown>)
-          .eq("id", createdAlertId)
-          .eq("creator_id", user.id);
-        if (threadId) {
-          await supabase
-            .from("threads" as "profiles")
-            .update({ is_sensitive: true } as Record<string, unknown>)
-            .eq("id", threadId)
-            .eq("user_id", user.id);
-        }
-      }
 
       onSuccess({
         alertId: createdAlertId,

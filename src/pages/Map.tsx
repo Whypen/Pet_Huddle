@@ -79,6 +79,7 @@ interface MapAlert {
   social_url?: string | null;
   location_street?: string | null;
   location_district?: string | null;
+  is_sensitive?: boolean;
   marker_state?: "active" | "expired_dot";
   is_demo?: boolean;
   creator: {
@@ -140,6 +141,7 @@ type VisibleMapAlertRow = {
   social_post_id: string | null;
   social_status: string | null;
   social_url: string | null;
+  is_sensitive: boolean | null;
   media_urls: string[] | null;
   location_street: string | null;
   location_district: string | null;
@@ -995,6 +997,7 @@ const MapPage = () => {
         social_post_id: row.social_post_id,
         social_status: row.social_status,
         social_url: row.social_url,
+        is_sensitive: row.is_sensitive === true,
         duration_hours: row.duration_hours,
         range_km: row.range_km,
         location_street: row.location_street,

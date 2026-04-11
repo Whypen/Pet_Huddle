@@ -3506,6 +3506,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                 </div>
                                 {c.images && c.images.length > 0 && (
                                   <PostMediaCarousel
+                                    isSensitive={notice.is_sensitive === true}
                                     items={c.images.map((src, index) => ({
                                       src,
                                       alt: `${c.content.slice(0, 40) || "Reply"} ${index + 1}`,

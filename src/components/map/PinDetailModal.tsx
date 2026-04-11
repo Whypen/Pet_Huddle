@@ -104,6 +104,7 @@ interface MapAlert {
   social_post_id?: string | null;
   social_status?: string | null;
   social_url?: string | null;
+  is_sensitive?: boolean;
   location_street?: string | null;
   location_district?: string | null;
   creator: {
@@ -603,6 +604,7 @@ interface PinDetailModalProps {
               {(alert.media_urls?.length || alert.photo_url) ? (
                 <div className="mb-4 w-full">
                   <PostMediaCarousel
+                    isSensitive={alert.is_sensitive === true}
                     items={(alert.media_urls?.length ? alert.media_urls : alert.photo_url ? [alert.photo_url] : []).map((src, index) => ({
                       src,
                       alt: `${alert.title || "Alert photo"} ${index + 1}`,
