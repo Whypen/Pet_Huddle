@@ -944,11 +944,12 @@ const ChatDialogue = () => {
                     <div
                       className={cn(
                         "w-fit max-w-[90%] rounded-xl border px-3 py-2 text-sm",
+                        mine && "ml-auto",
                         isStarFirstUserMessage
                           ? "border-[rgba(220,170,52,0.52)] bg-[rgba(245,200,92,0.26)] text-[#6F5716]"
                           : mine
-                          ? "ml-auto border-[rgba(255,255,255,0.36)] bg-brandBlue text-white"
-                          : "border-[rgba(163,168,190,0.35)] bg-muted text-brandText"
+                            ? "border-[rgba(255,255,255,0.36)] bg-brandBlue text-white"
+                            : "border-[rgba(163,168,190,0.35)] bg-muted text-brandText"
                       )}
                     >
                       {attachments.length > 0 && (

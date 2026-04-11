@@ -52,16 +52,26 @@ const Service = () => {
     const resolveAnchor = async () => {
       if (!profile?.id) return;
       if (typeof navigator !== "undefined" && navigator.geolocation) {
-        const device = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
-            () => resolve(null),
-            { enableHighAccuracy: false, timeout: 2500, maximumAge: 300000 },
-          );
-        });
-        if (!canceled && device) {
-          setProximityAnchor(device);
-          return;
+        try {
+          const permissionState =
+            navigator.permissions?.query
+              ? (await navigator.permissions.query({ name: "geolocation" as PermissionName })).state
+              : "prompt";
+          if (permissionState === "granted") {
+            const device = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+                () => resolve(null),
+                { enableHighAccuracy: false, timeout: 2500, maximumAge: 300000 },
+              );
+            });
+            if (!canceled && device) {
+              setProximityAnchor(device);
+              return;
+            }
+          }
+        } catch {
+          // fallback below
         }
       }
 

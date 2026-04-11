@@ -922,35 +922,52 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     };
 
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          try {
-            const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${pos.coords.longitude},${pos.coords.latitude}.json?language=en&access_token=${MAPBOX_ACCESS_TOKEN}`;
-            const res = await fetch(url);
-            const payload = await res.json();
-            const placeName = String(payload?.features?.[0]?.place_name || "");
-            const parts = placeName.split(",").map((part: string) => part.trim()).filter(Boolean);
-            const countryName = parts.at(-1) || "";
-            if (countryName) {
-              const code = countryOptions.find((country) => country.label.toLowerCase() === countryName.toLowerCase())?.code || "";
-              if (code) setSelectedCountry(code);
-              setFormData((prev) => ({
-                ...prev,
-                location_country: countryName,
-                location_name: `${prev.location_district || ""}${countryName ? `, ${countryName}` : ""}`.trim(),
-              }));
+      const runGeoLookup = () => {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${pos.coords.longitude},${pos.coords.latitude}.json?language=en&access_token=${MAPBOX_ACCESS_TOKEN}`;
+              const res = await fetch(url);
+              const payload = await res.json();
+              const placeName = String(payload?.features?.[0]?.place_name || "");
+              const parts = placeName.split(",").map((part: string) => part.trim()).filter(Boolean);
+              const countryName = parts.at(-1) || "";
+              if (countryName) {
+                const code = countryOptions.find((country) => country.label.toLowerCase() === countryName.toLowerCase())?.code || "";
+                if (code) setSelectedCountry(code);
+                setFormData((prev) => ({
+                  ...prev,
+                  location_country: countryName,
+                  location_name: `${prev.location_district || ""}${countryName ? `, ${countryName}` : ""}`.trim(),
+                }));
+                return;
+              }
+              fallbackFromPhone();
+            } catch {
+              fallbackFromPhone();
+            }
+          },
+          () => {
+            fallbackFromPhone();
+          },
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
+        );
+      };
+
+      if (navigator.permissions?.query) {
+        navigator.permissions
+          .query({ name: "geolocation" as PermissionName })
+          .then((status) => {
+            if (status.state === "granted") {
+              runGeoLookup();
               return;
             }
             fallbackFromPhone();
-          } catch {
-            fallbackFromPhone();
-          }
-        },
-        () => {
-          fallbackFromPhone();
-        },
-        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 },
-      );
+          })
+          .catch(() => fallbackFromPhone());
+      } else {
+        fallbackFromPhone();
+      }
       return;
     }
 

@@ -813,20 +813,26 @@ const Chats = () => {
 
     if (typeof navigator !== "undefined" && navigator.geolocation) {
       try {
-        const deviceAnchor = await new Promise<DiscoveryAnchor>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            (position) =>
-              resolve({
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-                source: "device",
-              }),
-            (error) => reject(error),
-            { enableHighAccuracy: true, timeout: 6000, maximumAge: 60_000 }
-          );
-        });
-        if (Number.isFinite(deviceAnchor.lat) && Number.isFinite(deviceAnchor.lng)) {
-          return deviceAnchor;
+        const permissionState =
+          navigator.permissions?.query
+            ? (await navigator.permissions.query({ name: "geolocation" as PermissionName })).state
+            : "prompt";
+        if (permissionState === "granted") {
+          const deviceAnchor = await new Promise<DiscoveryAnchor>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              (position) =>
+                resolve({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude,
+                  source: "device",
+                }),
+              (error) => reject(error),
+              { enableHighAccuracy: true, timeout: 6000, maximumAge: 60_000 }
+            );
+          });
+          if (Number.isFinite(deviceAnchor.lat) && Number.isFinite(deviceAnchor.lng)) {
+            return deviceAnchor;
+          }
         }
       } catch {
         // fall through to pinned/profile fallback
