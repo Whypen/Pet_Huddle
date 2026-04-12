@@ -1109,21 +1109,37 @@ export function VerifyIdentity({
   };
 
   const resolvePhoneVerificationState = useCallback(async (currentUserId: string) => {
+    const normalizePhoneForCompare = (value: string) => String(value || "").trim().replace(/[^\d+]/g, "");
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
-    const authConfirmed = Boolean(authUser?.phone_confirmed_at);
+    const metadata = (authUser?.user_metadata as Record<string, unknown> | null) ?? null;
+    const currentPhoneNormalized = normalizePhoneForCompare(phoneValue || profile?.phone || "");
+    const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
+    const metadataPhoneNormalized = normalizePhoneForCompare(String(metadata?.phone_e164 || ""));
+    const authConfirmed = Boolean(authUser?.phone_confirmed_at) && authPhoneNormalized === currentPhoneNormalized;
     const metadataVerified = Boolean(
-      (authUser?.user_metadata as Record<string, unknown> | null)?.phone_verified_local === true,
+      metadata?.phone_verified_local === true &&
+      (!metadataPhoneNormalized || metadataPhoneNormalized === currentPhoneNormalized),
     );
     const { data: approvedRequests, error: approvedRequestsError } = await supabase
       .from("verification_requests")
-      .select("id")
+      .select("submitted_data")
       .eq("user_id", currentUserId)
       .eq("request_type", "phone")
       .eq("status", "approved")
-      .limit(1);
-    const hasApprovedRequest = !approvedRequestsError && Array.isArray(approvedRequests) && approvedRequests.length > 0;
+      .limit(20);
+    const hasApprovedRequest =
+      !approvedRequestsError &&
+      Array.isArray(approvedRequests) &&
+      approvedRequests.some((request) => {
+        const submittedData = (request as { submitted_data?: unknown }).submitted_data;
+        const requestPhone =
+          submittedData && typeof submittedData === "object"
+            ? (submittedData as Record<string, unknown>).phone
+            : "";
+        return normalizePhoneForCompare(String(requestPhone || "")) === currentPhoneNormalized;
+      });
     const verified = authConfirmed || metadataVerified || hasApprovedRequest;
     setPhoneVerificationState((prev) => {
       if (verified) return "verified";
@@ -1131,7 +1147,7 @@ export function VerifyIdentity({
       return "idle";
     });
     return verified;
-  }, []);
+  }, [phoneValue, profile?.phone]);
 
   const toggleCard = (card: "phone" | "human" | "card") => setActiveCard((prev) => (prev === card ? null : card));
 

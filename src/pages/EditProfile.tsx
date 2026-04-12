@@ -222,6 +222,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   // Clear the countdown timer on unmount to avoid state updates on dead components
   useEffect(() => () => { if (otpCountdownRef.current) clearInterval(otpCountdownRef.current); }, []);
   const [phoneOtpVerified, setPhoneOtpVerified] = useState(false);
+  const [savedPhoneVerified, setSavedPhoneVerified] = useState(false);
   const phoneOtpTurnstile = useTurnstile("send_pre_signup_verify");
   const [phoneOriginalValue, setPhoneOriginalValue] = useState("");
   // Duplicate-phone detection for the edit-phone flow.
@@ -624,6 +625,61 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     return !Object.values(nextErrors).some(Boolean);
   };
 
+  const resolvePhoneVerifiedForValue = useCallback(async (phoneValue: string, userId?: string | null) => {
+    const normalizedPhone = normalizePhoneForCompare(phoneValue);
+    if (!normalizedPhone || !userId) return false;
+
+    let authConfirmedForCurrentPhone = false;
+    let metadataVerifiedForCurrentPhone = false;
+    try {
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      const metadata = (authUser?.user_metadata as Record<string, unknown> | null) ?? null;
+      const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
+      const metadataPhoneNormalized = normalizePhoneForCompare(String(metadata?.phone_e164 || ""));
+      authConfirmedForCurrentPhone =
+        Boolean(authUser?.phone_confirmed_at) &&
+        authPhoneNormalized === normalizedPhone;
+      metadataVerifiedForCurrentPhone =
+        metadata?.phone_verified_local === true &&
+        (!metadataPhoneNormalized || metadataPhoneNormalized === normalizedPhone);
+    } catch {
+      authConfirmedForCurrentPhone = false;
+      metadataVerifiedForCurrentPhone = false;
+    }
+
+    let approvedRequestForCurrentPhone = false;
+    try {
+      const { data: approvedRows, error } = await supabase
+        .from("verification_requests")
+        .select("submitted_data")
+        .eq("user_id", userId)
+        .eq("request_type", "phone")
+        .eq("status", "approved")
+        .limit(20);
+
+      if (!error && Array.isArray(approvedRows)) {
+        approvedRequestForCurrentPhone = approvedRows.some((row) => {
+          const submittedData = (row as { submitted_data?: unknown }).submitted_data;
+          const candidate =
+            submittedData && typeof submittedData === "object"
+              ? (submittedData as Record<string, unknown>).phone
+              : "";
+          return normalizePhoneForCompare(String(candidate || "")) === normalizedPhone;
+        });
+      }
+    } catch {
+      approvedRequestForCurrentPhone = false;
+    }
+
+    return (
+      authConfirmedForCurrentPhone ||
+      metadataVerifiedForCurrentPhone ||
+      approvedRequestForCurrentPhone
+    );
+  }, []);
+
   useEffect(() => {
     setFieldErrors((prev) => {
       const next = { ...prev };
@@ -849,7 +905,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       refreshSocialAlbumUrls(canonicalizeSocialAlbumEntries(cachedSocialAlbum));
     }
     setPhoneOriginalValue(phone);
-    setPhoneOtpVerified(Boolean(phone));
+    void resolvePhoneVerifiedForValue(phone, user?.id || profile?.id || null).then((isVerified) => {
+      setSavedPhoneVerified(isVerified);
+      setPhoneOtpVerified(isVerified);
+    });
     setLocationQuery(locationName);
     setResolvedLocationCountry(extractCountryFromPlaceLabel(locationName) || locationCountry || "");
     setPrefillHydrated(true);
@@ -862,6 +921,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.email,
     signupData.phone,
     signupData.social_id,
+    resolvePhoneVerifiedForValue,
     user?.id,
   ]);
 
@@ -1449,13 +1509,23 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       toast.error(result.error || "We couldn’t verify the code right now. Please try again.");
       return;
     }
+    try {
+      await supabase.auth.updateUser({
+        data: {
+          phone_verified_local: true,
+          phone_e164: formData.phone.trim(),
+        },
+      });
+    } catch {
+      // Keep UI flow resilient if metadata write is blocked.
+    }
     setPhoneOtpVerified(true);
+    setSavedPhoneVerified(true);
     setPhoneOtpRequested(false);
     setPhoneOtpCode("");
     setPhoneSentMaskedHint(null);
     setPhoneOtpMessage(null);
     setPhoneEditMode(false);
-    setPhoneOriginalValue(formData.phone.trim());
     if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
     setOtpCountdown(0);
     toast.success(t("Phone verified"));
@@ -1617,9 +1687,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const currentPhoneNormalized = normalizePhoneForCompare(formData.phone);
     const originalPhoneNormalized = normalizePhoneForCompare(phoneOriginalValue);
     const phoneChanged = currentPhoneNormalized !== originalPhoneNormalized;
-    if (phoneChanged && !phoneOtpVerified) {
-      setFieldErrors((prev) => ({ ...prev, phone: t("Please verify phone with OTP before saving") }));
-      return;
+    const verifiedPhoneChangedWithoutOtp = phoneChanged && savedPhoneVerified && !phoneOtpVerified;
+    if (verifiedPhoneChangedWithoutOtp) {
+      const keepSaving = window.confirm(
+        "Changing your number without verifying it will remove your verified status.",
+      );
+      if (!keepSaving) return;
     }
     if (!formData.social_id.trim()) {
       setFieldErrors((prev) => ({ ...prev, social_id: REQUIRED_CONNECT_ERROR }));
@@ -1811,6 +1884,32 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
       if (error) throw error;
 
+      if (phoneChanged) {
+        if (verifiedPhoneChangedWithoutOtp) {
+          try {
+            await supabase.auth.updateUser({
+              data: {
+                phone_verified_local: false,
+                phone_e164: formData.phone.trim(),
+              },
+            });
+          } catch {
+            // Continue and rely on DB refresh path below.
+          }
+        }
+
+        const { error: refreshIdentityStatusError } = await supabase.rpc(
+          "refresh_identity_verification_status",
+          { p_user_id: activeUser.id },
+        );
+        if (refreshIdentityStatusError) {
+          console.warn("[EditProfile] refresh_identity_verification_status failed:", refreshIdentityStatusError.message);
+        }
+
+        setSavedPhoneVerified(phoneOtpVerified);
+        setPhoneOriginalValue(formData.phone.trim());
+      }
+
       if (onboardingMode) {
         await finalizePendingVerification(activeUser.id);
 
@@ -1972,6 +2071,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const mediaUploadInProgress =
     photoUploadState.status === "uploading" ||
     pendingSocialUploads.some((item) => item.status === "uploading");
+  const phoneChangedFromOriginal =
+    normalizePhoneForCompare(formData.phone) !== normalizePhoneForCompare(phoneOriginalValue);
+  const showPhoneChangeVerifiedWarning =
+    phoneEditMode && savedPhoneVerified && phoneChangedFromOriginal && !phoneOtpVerified;
 
   return (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
@@ -2221,16 +2324,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       setSocialIdEditMode(false);
                       setPhoneEditMode(true);
                       setPhoneOtpRequested(false);
-                      setPhoneOtpVerified(false);
+                      setPhoneOtpVerified(savedPhoneVerified);
                       setPhoneOtpCode("");
                       setPhoneOtpUnavailable(false);
-                      setPhoneOtpMessage("Changing your phone number will require a new code.");
+                      setPhoneOtpMessage(savedPhoneVerified ? null : "Changing your phone number will require a new code.");
                       setPhoneSentMaskedHint(null);
                     }}
                     className="p-1 text-muted-foreground"
                     aria-label="Edit phone"
                   >
-                    <Pencil className="w-4 h-4" />
+                    {savedPhoneVerified ? <Check className="w-4 h-4 text-brandBlue" /> : <Pencil className="w-4 h-4" />}
                   </button>
                 </div>
               ) : (
@@ -2243,8 +2346,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       onChange={(value) => {
                         const v = value || "";
                         setFormData((prev) => ({ ...prev, phone: v }));
-                        const unchanged = v.trim() === phoneOriginalValue.trim();
-                        setPhoneOtpVerified(unchanged);
+                        const unchanged = normalizePhoneForCompare(v) === normalizePhoneForCompare(phoneOriginalValue);
+                        setPhoneOtpVerified(unchanged ? savedPhoneVerified : false);
                         if (!unchanged) {
                           setPhoneOtpRequested(false);
                           setPhoneOtpCode("");
@@ -2254,10 +2357,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                           setPhoneOtpMessage(null);
                         }
                       }}
-                      className="w-full pr-28 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
+                      className="w-full [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
                       aria-invalid={Boolean(fieldErrors.phone)}
                     />
-                    {!phoneOtpVerified && (
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    {phoneChangedFromOriginal && (
                       <button
                         type="button"
                         onClick={requestPhoneOtp}
@@ -2270,7 +2375,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                           (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
                         }
                         className={cn(
-                          "absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
+                          "h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
                           (phoneOtpUnavailable ||
                             otpCountdown > 0 ||
                             !phoneOtpTurnstile.isTokenUsable ||
@@ -2284,14 +2389,26 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                         {otpCountdown > 0 ? `Resend in ${otpCountdown}s` : "Send OTP"}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setPhoneEditMode(false)}
+                      className="h-8 w-8 rounded-[8px] border border-[rgba(163,168,190,0.28)] bg-white text-[var(--text-secondary)] grid place-items-center"
+                      aria-label="Save phone edit"
+                    >
+                      <Save className="w-4 h-4" />
+                    </button>
                   </div>
-                  {/* Duplicate-phone inline error — shown before OTP entry */}
+                  {showPhoneChangeVerifiedWarning && (
+                    <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1">
+                      Changing your number without verifying it will remove your verified status.
+                    </p>
+                  )}
                   {phoneDuplicate && (
                     <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                       This phone number is already used by another account
                     </p>
                   )}
-                  {!phoneOtpUnavailable ? (
+                  {phoneChangedFromOriginal && !phoneOtpUnavailable ? (
                     <>
                       <TurnstileWidget
                         siteKeyMissing={phoneOtpTurnstile.siteKeyMissing}
@@ -2308,11 +2425,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       ) : null}
                       <TurnstileDebugPanel visible={showTurnstileDiag} diag={phoneOtpTurnstile.diag} />
                     </>
-                  ) : (
+                  ) : phoneChangedFromOriginal ? (
                     <div className="rounded-[10px] border border-[rgba(163,168,190,0.28)] bg-[rgba(163,168,190,0.12)] px-3 py-2">
                       <p className="text-[12px] font-semibold text-[var(--text-tertiary)]">Unavailable</p>
                     </div>
-                  )}
+                  ) : null}
                   {phoneOtpMessage ? (
                     <p className={cn(
                       "text-[12px] font-medium pl-1",
@@ -2328,7 +2445,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       Code sent to {phoneSentMaskedHint}
                     </p>
                   ) : null}
-                  {!phoneOtpVerified && phoneOtpRequested && (
+                  {phoneChangedFromOriginal && !phoneOtpVerified && phoneOtpRequested && (
                     <div className="space-y-1.5">
                       <p className="text-[13px] text-[var(--text-secondary)]">Verification code</p>
                       <div className="relative flex items-center">
