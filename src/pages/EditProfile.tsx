@@ -354,6 +354,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_languages: false,
     show_location: false,
   });
+  const hasVerifiedLegalName = Boolean(formData.legal_name?.trim()) && (
+    profile?.is_verified === true
+    || String(profile?.verification_status || "").toLowerCase() === "verified"
+    || String(profile?.card_verification_status || "").toLowerCase() === "passed"
+  );
 
   const showDiscoverAgeInfo = Boolean(formData.dob) && isAtLeast13FromDate(formData.dob) && !isAtLeast16FromDate(formData.dob);
 
@@ -2192,7 +2197,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <label className="mb-2 block text-sm font-medium text-muted-foreground">Legal Name</label>
               <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)] text-muted-foreground">
                 <span className="truncate">
-                  {profile?.is_verified ? (formData.legal_name || "—") : "Available after verification"}
+                  {hasVerifiedLegalName ? (formData.legal_name || "—") : "Available after verification"}
                 </span>
               </div>
             </div>

@@ -109,6 +109,13 @@ type HydratedRowsResult = {
   alertTypes: Record<string, "Stray" | "Lost" | "Others">;
 };
 
+const normalizeNewsAlertType = (rawType: string | null | undefined): "Stray" | "Lost" | "Others" => {
+  const normalized = String(rawType || "").toLowerCase();
+  if (normalized === "lost") return "Lost";
+  if (normalized === "stray") return "Stray";
+  return "Others";
+};
+
 const AuthorHandle = ({
   displayName,
   socialId,
@@ -1112,13 +1119,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     },
   }), []);
 
-  const normalizeAlertType = useCallback((rawType: string | null): "Stray" | "Lost" | "Others" => {
-    const normalizedType = String(rawType || "").toLowerCase();
-    if (normalizedType === "lost") return "Lost";
-    if (normalizedType === "stray") return "Stray";
-    return "Others";
-  }, []);
-
   const getDerivedAlertType = useCallback((notice: Thread): "Stray" | "Lost" | "Others" | null => {
     const stateType = newsAlertTypeByThread[notice.id];
     if (stateType) return stateType;
@@ -1314,9 +1314,32 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       ...(((comments || []) as ThreadComment[]).map((comment) => comment.content || "")),
     ]);
 
+    const alertTypeByMapId: Record<string, "Stray" | "Lost" | "Others"> = {};
+    const mapIds = Array.from(
+      new Set(
+        hydratedRows
+          .map((row) => row.map_id)
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      )
+    );
+    if (mapIds.length > 0 && broadcastAlertsReadableRef.current) {
+      const { data: broadcastRows, error: broadcastError } = await supabase
+        .from("broadcast_alerts")
+        .select("id,type")
+        .in("id", mapIds);
+      if (broadcastError) {
+        markBroadcastAlertsUnreadable(broadcastError as { code?: string; message?: string });
+      } else {
+        (((broadcastRows || []) as Array<{ id: string; type: string | null }>)).forEach((row) => {
+          alertTypeByMapId[row.id] = normalizeNewsAlertType(row.type);
+        });
+      }
+    }
+
     const nextAlertTypeMap: Record<string, "Stray" | "Lost" | "Others"> = {};
     for (const notice of hydratedRows) {
-      const derivedType = deriveAlertTypeFromNoticeData(notice);
+      const derivedType = deriveAlertTypeFromNoticeData(notice)
+        || (notice.map_id ? alertTypeByMapId[notice.map_id] : null);
       if (!derivedType) continue;
       nextAlertTypeMap[notice.id] = derivedType;
     }
@@ -1328,7 +1351,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       replyMentions: nextReplyMentions,
       alertTypes: nextAlertTypeMap,
     };
-  }, [markMentionTablesUnavailable, primeMentionDirectory]);
+  }, [markBroadcastAlertsUnreadable, markMentionTablesUnavailable, primeMentionDirectory]);
 
   const applyHydratedRows = useCallback((payload: HydratedRowsResult, options?: { reset?: boolean }) => {
     const reset = options?.reset === true;

@@ -26,6 +26,8 @@ export interface Profile {
   verification_status?: string | null;
   is_verified?: boolean | null;
   verification_comment?: string | null;
+  card_verification_status?: string | null;
+  card_verified?: boolean | null;
   is_admin?: boolean | null;
   avatar_url: string | null;
   bio: string | null;
@@ -213,6 +215,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "verification_status",
     "is_verified",
     "verification_comment",
+    "card_verification_status",
+    "card_verified",
     "social_album",
     "prefs",
     "hide_from_map",

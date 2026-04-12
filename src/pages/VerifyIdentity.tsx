@@ -1047,22 +1047,6 @@ export function VerifyIdentity({
   }, [flowState, navigate, overallVerificationStatus, setFlowState]);
 
   useEffect(() => {
-    if (
-      phoneVerificationState === "verified"
-      && humanVerificationState === "passed"
-      && cardVerificationState === "passed"
-      && overallVerificationStatus !== "verified"
-    ) {
-      setOverallVerificationStatus("verified");
-    }
-  }, [
-    cardVerificationState,
-    humanVerificationState,
-    overallVerificationStatus,
-    phoneVerificationState,
-  ]);
-
-  useEffect(() => {
     if (overallVerificationStatus !== "verified") return;
     // is_verified / verification_status are set server-side by edge functions via service_role;
     // direct client update is blocked by trg_prevent_sensitive_profile_updates.
@@ -1343,17 +1327,35 @@ export function VerifyIdentity({
     return snapshot;
   }, [applySnapshot, refreshProfile]);
 
-  const syncProfileVerificationAfterStep = useCallback(async () => {
-    if (!user?.id) return;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+  const syncProfileVerificationAfterStep = useCallback(async (options?: {
+    expectVerified?: boolean;
+    expectCardPassed?: boolean;
+    expectedLegalName?: string | null;
+  }) => {
+    if (!user?.id) {
+      await refreshProfile();
+      return;
+    }
+    const expectedLegalName = String(options?.expectedLegalName || "").trim().toLowerCase();
+    for (let attempt = 0; attempt < 6; attempt += 1) {
       await refreshProfile();
       const { data, error } = await supabase
         .from("profiles")
-        .select("is_verified")
+        .select("is_verified,verification_status,legal_name,card_verification_status")
         .eq("id", user.id)
         .maybeSingle();
-      if (!error && data?.is_verified === true) return;
-      await new Promise((resolve) => window.setTimeout(resolve, 350));
+      if (!error && data) {
+        const isVerified = data.is_verified === true || String(data.verification_status || "").toLowerCase() === "verified";
+        const cardPassed = String(data.card_verification_status || "").toLowerCase() === "passed";
+        const legalNameMatches = expectedLegalName.length === 0
+          || String(data.legal_name || "").trim().toLowerCase() === expectedLegalName;
+        const verifiedReady = options?.expectVerified ? isVerified : true;
+        const cardReady = options?.expectCardPassed ? cardPassed : true;
+        if (verifiedReady && cardReady && legalNameMatches) return;
+      }
+      if (attempt < 5) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
     }
   }, [refreshProfile, user?.id]);
 
@@ -1675,7 +1677,7 @@ export function VerifyIdentity({
 
   useEffect(() => {
     const resolvedLegalName = String(profile?.legal_name || signupData.legal_name || "").trim();
-    setVerifiedLegalName((prev) => prev ?? (resolvedLegalName || null));
+    setVerifiedLegalName((prev) => (resolvedLegalName || prev || null));
     setCardLegalNameInput((prev) => (prev.trim() ? prev : resolvedLegalName));
   }, [profile?.legal_name, signupData.legal_name]);
 
@@ -2132,6 +2134,11 @@ export function VerifyIdentity({
         if (status?.cardStatus === "passed") {
           setVerifiedLegalName(status.legalName || trimmedLegalName);
           await refreshVerificationRuntime();
+          await syncProfileVerificationAfterStep({
+            expectedLegalName: status.legalName || trimmedLegalName,
+            expectCardPassed: true,
+            expectVerified: phoneVerificationState === "verified" && humanVerificationState === "passed",
+          });
           toast.success("Card verification complete.");
           logCardState("confirm_card_setup_passed");
         } else if (status?.cardStatus === "failed") {
@@ -2175,6 +2182,11 @@ export function VerifyIdentity({
       if (status.cardStatus === "passed") {
         setVerifiedLegalName(status.legalName || verifiedLegalName);
         await refreshVerificationRuntime();
+        await syncProfileVerificationAfterStep({
+          expectedLegalName: status.legalName || verifiedLegalName,
+          expectCardPassed: true,
+          expectVerified: phoneVerificationState === "verified" && humanVerificationState === "passed",
+        });
         toast.success("Card verification complete.");
         return;
       }
