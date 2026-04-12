@@ -419,6 +419,11 @@ const BroadcastModal = ({
                 <Switch checked={postOnThreads} onCheckedChange={setPostOnThreads} />
               </div>
             </div>
+            {!selectedLocation ? (
+              <p className="mb-3 text-xs font-medium text-red-500">
+                Tap the Pin icon to place your alert.
+              </p>
+            ) : null}
 
             <div className="mb-4 rounded-xl border border-border bg-white p-4">
               <div className="space-y-4">
