@@ -1088,15 +1088,9 @@ export function VerifyIdentity({
     const {
       data: { user: authUser },
     } = await supabase.auth.getUser();
-    const metadata = (authUser?.user_metadata as Record<string, unknown> | null) ?? null;
     const currentPhoneNormalized = normalizePhoneForCompare(phoneValue || profile?.phone || "");
     const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
-    const metadataPhoneNormalized = normalizePhoneForCompare(String(metadata?.phone_e164 || ""));
     const authConfirmed = Boolean(authUser?.phone_confirmed_at) && authPhoneNormalized === currentPhoneNormalized;
-    const metadataVerified = Boolean(
-      metadata?.phone_verified_local === true &&
-      (!metadataPhoneNormalized || metadataPhoneNormalized === currentPhoneNormalized),
-    );
     const { data: approvedRequests, error: approvedRequestsError } = await supabase
       .from("verification_requests")
       .select("submitted_data")
@@ -1115,7 +1109,10 @@ export function VerifyIdentity({
             : "";
         return normalizePhoneForCompare(String(requestPhone || "")) === currentPhoneNormalized;
       });
-    const verified = authConfirmed || metadataVerified || hasApprovedRequest;
+    // Phone "Complete" must match backend truth:
+    // 1) auth.users phone_confirmed_at + exact phone match, OR
+    // 2) approved verification_request for the exact current phone number.
+    const verified = authConfirmed || hasApprovedRequest;
     setPhoneVerificationState((prev) => {
       if (verified) return "verified";
       if (prev === "sent" || prev === "failed") return prev;
@@ -1738,18 +1735,6 @@ export function VerifyIdentity({
     setPhoneVerificationError(null);
     setPhoneOtpCode("");
     if (user?.id) {
-      try {
-        await supabase.auth.updateUser({
-          data: {
-            phone_verified_local: true,
-            phone_e164: normalizedPhone,
-          },
-        });
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.debug("[VerifyIdentity.phone] auth metadata update failed", error);
-        }
-      }
       try {
         await supabase.from("profiles").update({ phone: normalizedPhone }).eq("id", user.id);
       } catch (error) {
