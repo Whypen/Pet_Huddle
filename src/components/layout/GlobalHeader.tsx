@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Activity,
   AlertCircle,
   Bell,
   BookOpen,
@@ -9,15 +8,11 @@ import {
   FileText,
   Heart,
   HelpCircle,
-  Info,
   LogOut,
-  MessageSquare,
   Settings,
   Shield,
   ShieldAlert,
-  Star,
   User as UserIcon,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -74,23 +69,27 @@ function timeAgo(iso: string) {
 }
 
 function notifIcon(type: string) {
-  if (type === "alert" || type === "mesh_alert" || type === "broadcast" || type === "map")
-    return <AlertCircle size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "admin" || type === "system" || type === "announcement")
-    return <Info size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "star" || type === "like")
-    return <Star size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "heart" || type === "social")
-    return <Heart size={18} strokeWidth={1.75} aria-hidden />;
-  if (
-    type === "message" || type === "chat" || type === "comment" ||
-    type === "reply" || type === "mention" || type === "thread" || type === "conversation"
-  )
-    return <MessageSquare size={18} strokeWidth={1.75} aria-hidden />;
-  if (type === "friend" || type === "follow" || type === "connect")
-    return <UserPlus size={18} strokeWidth={1.75} aria-hidden />;
-  return <Activity size={18} strokeWidth={1.75} aria-hidden />;
+  if (type === "alert" || type === "mesh_alert" || type === "broadcast" || type === "map") {
+    return <AlertCircle size={20} strokeWidth={1.75} aria-hidden />;
+  }
+  return <Heart size={20} strokeWidth={1.75} aria-hidden />;
 }
+
+const stripLeadingSymbolPrefixes = (text: string) => {
+  const trimmed = text.trimStart();
+  const emojiPrefixMatch = trimmed.match(/^([\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\s]+)/u);
+
+  if (emojiPrefixMatch) {
+    const emojiPrefix = emojiPrefixMatch[1].trimEnd();
+    const rest = trimmed
+      .slice(emojiPrefixMatch[1].length)
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .trimStart();
+    return rest ? `${emojiPrefix} ${rest}` : emojiPrefix;
+  }
+
+  return trimmed.replace(/^[^\p{L}\p{N}]+/u, "").trimStart();
+};
 
 const allowedHref = (href: string) =>
   /^\/(social|chats|map|threads|chat-dialogue|verify-identity|pet-details|edit-pet-profile|settings|notifications)(\?|$)/.test(
@@ -522,7 +521,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   );
 
   const renderNotifRow = (r: NotificationRow) => {
-    const body = r.body ?? r.message ?? "";
+    const body = stripLeadingSymbolPrefixes(r.body ?? r.message ?? "");
     const type = String(r.type || "").toLowerCase();
     return (
       <div
@@ -546,7 +545,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         {!r.read && (
           <div className="absolute left-0 inset-y-0 w-[3px] bg-[var(--primary)] rounded-l-[16px] pointer-events-none" />
         )}
-        <div className="mr-3 mt-[1px] flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/65 text-[var(--text-secondary)]">
+        <div className="mr-3 mt-[2px] flex h-6 w-6 shrink-0 items-center justify-center text-[var(--text-secondary)]">
           {notifIcon(type)}
         </div>
         <div className="flex-1 min-w-0">

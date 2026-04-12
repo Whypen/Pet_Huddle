@@ -21,13 +21,6 @@ const MAX_ASPECT = 4 / 3;
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
 
-const FingerTapFilledIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 512 512" aria-hidden="true" className={className} fill="currentColor">
-    <path d="M128 32c0-17.7 14.3-32 32-32s32 14.3 32 32V96h32V64c0-17.7 14.3-32 32-32s32 14.3 32 32V96h32V80c0-17.7 14.3-32 32-32s32 14.3 32 32v128c0 97.2-78.8 176-176 176h-42.8c-38.9 0-75.5-18.2-98.8-49.2L12.1 289.6C4.3 280.2 0 268.3 0 256c0-28.7 23.3-52 52-52c14 0 27.4 5.6 37.3 15.5L128 258.3V32z" />
-    <path d="M238 18c-8.8 0-16-7.2-16-16s7.2-16 16-16h32c8.8 0 16 7.2 16 16s-7.2 16-16 16h-32zM328.7 45.3c-6.2-6.3-6.2-16.4 0-22.6l22.6-22.6c6.2-6.2 16.4-6.2 22.6 0s6.2 16.4 0 22.6l-22.6 22.6c-6.2 6.2-16.4 6.2-22.6 0zM158.7 45.3 136.1 22.7c-6.2-6.2-16.4-6.2-22.6 0s-6.2 16.4 0 22.6l22.6 22.6c6.2 6.2 16.4 6.2 22.6 0z" />
-  </svg>
-);
-
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -184,12 +177,10 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   {isSensitive ? (
                     <span
                       className={cn(
-                        "pointer-events-none absolute inset-0 flex items-center justify-center bg-black/22 transition-opacity duration-300",
+                        "pointer-events-none absolute inset-0 bg-black/22 transition-opacity duration-300",
                         sensitiveRevealed ? "opacity-0" : "opacity-100",
                       )}
-                    >
-                      <FingerTapFilledIcon className="h-16 w-16 text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)]" />
-                    </span>
+                    />
                   ) : null}
                 </div>
               );
