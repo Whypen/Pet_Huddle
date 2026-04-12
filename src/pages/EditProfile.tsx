@@ -2188,6 +2188,15 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Basic Info")}</h3>
 
+            <div id="profile-field-legal-name">
+              <label className="mb-2 block text-sm font-medium text-muted-foreground">Legal Name</label>
+              <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)] text-muted-foreground">
+                <span className="truncate">
+                  {profile?.is_verified ? (formData.legal_name || "—") : "Available after verification"}
+                </span>
+              </div>
+            </div>
+
             {/* Display Name */}
             <div id="profile-field-display-name">
               <label className="text-sm font-medium mb-2 block">{t("Display/User Name")}</label>
@@ -2227,18 +2236,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 </div>
               )}
               {fieldErrors.displayName && <ErrorLabel message={fieldErrors.displayName} />}
-            </div>
-
-            <div id="profile-field-legal-name">
-              <label className="mb-2 block text-sm font-medium text-muted-foreground">Legal Name</label>
-              <div className="form-field-rest relative flex items-center justify-between bg-[rgba(66,73,101,0.08)] text-muted-foreground">
-                <span className="truncate">
-                  {profile?.is_verified ? (formData.legal_name || "—") : "Available after verification"}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Private. This stays hidden from public profile surfaces.
-              </p>
             </div>
 
             {/* Social ID */}
