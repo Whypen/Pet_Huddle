@@ -317,6 +317,7 @@ const MapPage = () => {
 
   // Broadcast modal state
   const [isBroadcastOpen, setIsBroadcastOpen] = useState(false);
+  const [showBroadcastPinWarning, setShowBroadcastPinWarning] = useState(false);
 
   // Offline warning
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -1264,6 +1265,11 @@ const MapPage = () => {
   // Broadcast: start a NEW draft pin flow every time
   // ==========================================================================
   const openBroadcast = () => {
+    if (!isPinned) {
+      setShowBroadcastPinWarning(true);
+      return;
+    }
+    setShowBroadcastPinWarning(false);
     setBroadcastPreviewPin(null);
     setIsPickingBroadcastLocation(false);
     setIsBroadcastOpen(true);
@@ -1568,6 +1574,11 @@ const MapPage = () => {
 
         {!isBroadcastOpen && (
           <div className="absolute left-1/2 -translate-x-1/2 bottom-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+68px)] z-[1700] w-[calc(100%-32px)] max-w-[440px] pointer-events-none">
+            {showBroadcastPinWarning && !isPinned ? (
+              <p className="mb-2 text-center text-xs font-medium text-red-500 pointer-events-none">
+                Tap the Pin icon to place your alert.
+              </p>
+            ) : null}
             <button
               className="h-14 w-14 rounded-full border border-white/40 bg-white/30 shadow-md backdrop-blur-md flex items-center justify-center pointer-events-auto"
               aria-label={t("map.broadcast")}
@@ -1590,6 +1601,7 @@ const MapPage = () => {
           setPinningActive(false);
           setBroadcastPreviewPin(null);
           setBroadcastPreviewAddress(null);
+          setShowBroadcastPinWarning(false);
         }}
         selectedLocation={broadcastPreviewPin}
         selectedAddress={broadcastPreviewAddress}

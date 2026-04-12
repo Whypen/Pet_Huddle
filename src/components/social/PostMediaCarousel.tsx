@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Hand, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -20,6 +20,13 @@ const MAX_ASPECT = 4 / 3;
 
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
+
+const FingerTapFilledIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
+    <path d="M8.92 11.69V6.7c0-.73.6-1.32 1.33-1.32s1.32.59 1.32 1.32v2.5h.53V5.95c0-.73.59-1.32 1.32-1.32s1.32.59 1.32 1.32v3.25h.53V7.02c0-.73.6-1.32 1.33-1.32s1.32.59 1.32 1.32v4.01h.53v-1.6c0-.73.59-1.32 1.32-1.32s1.32.59 1.32 1.32v4.43c0 4.47-2.98 8.1-7.45 8.1h-.72c-2.61 0-4.71-1.04-6.02-3.05l-2.47-3.67a1.26 1.26 0 0 1 .35-1.78 1.26 1.26 0 0 1 1.75.3l1.84 2.52h.05z" />
+    <path d="M7.96 1.87a.93.93 0 0 1 0 1.31L6.8 4.33a.93.93 0 1 1-1.31-1.31l1.16-1.15a.93.93 0 0 1 1.31 0zM11.89.66a.93.93 0 0 1 .93.93v1.63a.93.93 0 0 1-1.86 0V1.59a.93.93 0 0 1 .93-.93zM16.54 1.87l1.16 1.15a.93.93 0 1 1-1.31 1.31l-1.16-1.15a.93.93 0 1 1 1.31-1.31z" />
+  </svg>
+);
 
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -123,7 +130,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   key={`${item.src}-${index}`}
                   role="button"
                   tabIndex={0}
-                  className="shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 touch-pan-x cursor-pointer"
+                  className="relative shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 touch-pan-x cursor-pointer"
                   style={{
                     width: slideWidth ? `${slideWidth}px` : undefined,
                     aspectRatio: `${aspect}`,
@@ -181,8 +188,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                         sensitiveRevealed ? "opacity-0" : "opacity-100",
                       )}
                     >
-                      <span className="rounded-full border border-white/70 bg-black/25 p-2 text-white">
-                        <Hand className="h-5 w-5" strokeWidth={1.8} />
+                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/38 text-white">
+                        <FingerTapFilledIcon className="h-6 w-6" />
                       </span>
                     </span>
                   ) : null}

@@ -1,5 +1,4 @@
 const NSFW_THRESHOLD = 0.7;
-const NSFW_MODEL_URL = "https://cdn.jsdelivr.net/npm/nsfwjs@2.4.2/dist/model/";
 const NSFW_CLASSES = new Set(["Porn", "Sexy", "Hentai"]);
 
 type NsfwPrediction = {
@@ -14,7 +13,7 @@ let modelPromise: Promise<{
 const getModel = async () => {
   if (!modelPromise) {
     modelPromise = import("nsfwjs")
-      .then((mod) => mod.load(NSFW_MODEL_URL))
+      .then((mod) => mod.load())
       .catch((error) => {
         modelPromise = null;
         throw error;
