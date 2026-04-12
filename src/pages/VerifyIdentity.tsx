@@ -614,7 +614,7 @@ function CardVerificationCard({
   postalCode = "",
   onPostalCodeChange,
   verifiedLegalName,
-  cardBrand,
+  cardBrand: _cardBrand,
   cardLast4,
   errorMessage,
   blockedIdentity = { blocked: false, message: null },
@@ -661,17 +661,11 @@ function CardVerificationCard({
           <div className="flex items-center gap-3 px-4 py-3.5">
             <CreditCard size={16} strokeWidth={1.75} className="text-[var(--color-success,#22C55E)] shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-medium text-[var(--text-primary,#424965)]">
-                Legal Name: {verifiedLegalName || "Submitted with card"}
+              <p className="text-[15px] font-medium text-[var(--text-primary,#424965)]">
+                {verifiedLegalName || "Submitted with card"}
               </p>
               <p className="font-mono tracking-[0.08em] text-[15px] text-[var(--text-primary,#424965)]">
                 &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; {cardLast4 || "••••"}
-              </p>
-              <p className="text-[12px] text-[var(--text-tertiary)]">
-                {cardBrand ? `${cardBrand.toUpperCase()} verified` : "Verified card"}
-              </p>
-              <p className="text-[12px] text-[var(--text-tertiary)]">
-                Legal name is the billing name submitted with this card.
               </p>
             </div>
             <span className="text-[11px] font-semibold text-[var(--color-success,#22C55E)] bg-[rgba(34,197,94,0.08)] px-2 py-0.5 rounded-full shrink-0">
@@ -711,9 +705,6 @@ function CardVerificationCard({
                       className="w-full h-[42px] rounded-[10px] border border-[rgba(163,168,190,0.3)] bg-white px-3 text-[15px] text-[var(--text-primary,#424965)] outline-none focus:border-brandBlue"
                       autoComplete="cc-name"
                     />
-                    <p className="text-[12px] text-[var(--text-tertiary)]">
-                      Enter the card billing name exactly as submitted with this card.
-                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <p className="text-[13px] text-[var(--text-secondary)]">Card number</p>
@@ -2140,7 +2131,7 @@ export function VerifyIdentity({
         const status = await pullCardStatus({ force: true });
         if (status?.cardStatus === "passed") {
           setVerifiedLegalName(status.legalName || trimmedLegalName);
-          await syncProfileVerificationAfterStep();
+          await refreshVerificationRuntime();
           toast.success("Card verification complete.");
           logCardState("confirm_card_setup_passed");
         } else if (status?.cardStatus === "failed") {
@@ -2183,7 +2174,7 @@ export function VerifyIdentity({
       if (!status) return;
       if (status.cardStatus === "passed") {
         setVerifiedLegalName(status.legalName || verifiedLegalName);
-        await syncProfileVerificationAfterStep();
+        await refreshVerificationRuntime();
         toast.success("Card verification complete.");
         return;
       }

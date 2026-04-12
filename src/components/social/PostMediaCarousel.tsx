@@ -23,8 +23,7 @@ const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPEC
 
 const FingerTapFilledIcon = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="currentColor">
-    <path d="M11.5 2.5a1 1 0 0 1 1 1v5.75h.7V6.5a1 1 0 1 1 2 0v2.75h.7V7.25a1 1 0 1 1 2 0V10h.7V9a1 1 0 1 1 2 0v4.25A7.75 7.75 0 0 1 13.55 21h-.7a6.62 6.62 0 0 1-5.44-2.82L5.5 15.4a1 1 0 1 1 1.64-1.15l1.36 1.94V7.75a1 1 0 1 1 2 0v3.5h1V3.5a1 1 0 0 1 1-1z" />
-    <path d="M7.28 4.66a.85.85 0 0 1 0-1.2l1-1a.85.85 0 1 1 1.2 1.2l-1 1a.85.85 0 0 1-1.2 0zm8.24-2.2a.85.85 0 0 1 1.2 0l1 1a.85.85 0 0 1-1.2 1.2l-1-1a.85.85 0 0 1 0-1.2zM12 0.9a.85.85 0 0 1 .85.85V3a.85.85 0 0 1-1.7 0V1.75A.85.85 0 0 1 12 .9z" />
+    <path d="M11.5 21c-1.95 0-3.7-.96-4.77-2.58l-1.8-2.73a1.5 1.5 0 0 1 .21-1.93 1.45 1.45 0 0 1 2.04-.02l1.06 1.06V8.25a1.75 1.75 0 0 1 3.5 0V11h.5V4.75a1.75 1.75 0 1 1 3.5 0V11h.5V6.25a1.75 1.75 0 1 1 3.5 0V11h.5V7.25a1.75 1.75 0 1 1 3.5 0v5.2A8.55 8.55 0 0 1 15.19 21h-3.69z" />
   </svg>
 );
 
@@ -188,9 +187,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                         sensitiveRevealed ? "opacity-0" : "opacity-100",
                       )}
                     >
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/38 text-white">
-                        <FingerTapFilledIcon className="h-6 w-6" />
-                      </span>
+                      <FingerTapFilledIcon className="h-12 w-12 text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]" />
                     </span>
                   ) : null}
                 </div>

@@ -420,7 +420,7 @@ const BroadcastModal = ({
               </div>
             </div>
             {!selectedLocation ? (
-              <p className="mb-3 text-xs font-medium text-red-500">
+              <p className="mb-3 text-xs font-medium text-[var(--text-tertiary)]">
                 Tap the Pin icon to place your alert.
               </p>
             ) : null}

@@ -2572,7 +2572,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const type = notice ? getDerivedAlertType(notice) : newsAlertTypeByThread[threadId];
     if (type === "Lost") return "bg-red-500 text-white border border-red-500";
     if (type === "Stray") return "bg-yellow-400 text-black border border-yellow-400";
-    return "bg-primary text-white border border-primary";
+    return "bg-[#A1A4A9] text-white border border-[#A1A4A9]";
   };
 
   const getPrimaryTag = (notice: Thread) => {
@@ -3239,15 +3239,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             }))}
                           />
                         )}
-                        {notice.map_id ? (
-                          <button
-                            type="button"
-                            className="mt-2 text-xs font-semibold text-brandBlue underline underline-offset-2"
-                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
-                          >
-                            Check out pin on Map
-                          </button>
-                        ) : null}
                         <div className="mt-3 flex items-center">
                           <div className="flex min-w-0 items-center gap-2">
                             <p className="text-xs text-[rgba(74,73,101,0.45)]">
@@ -3257,6 +3248,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               <span className={cn("px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0", getTagStyle(primaryTag, notice.id))}>
                                 {t(primaryTag)}
                               </span>
+                            ) : null}
+                            {notice.map_id ? (
+                              <button
+                                type="button"
+                                className="text-[11px] font-semibold text-brandBlue underline underline-offset-2 whitespace-nowrap"
+                                onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
+                              >
+                                See on Map
+                              </button>
                             ) : null}
                           </div>
                           <div className="ml-auto flex items-center justify-end gap-0.5 min-w-[136px]">

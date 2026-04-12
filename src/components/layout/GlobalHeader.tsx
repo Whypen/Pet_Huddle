@@ -45,7 +45,7 @@ import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
 type NotificationRow = {
   id: string;
   message: string;
-  type: "alert" | "admin" | string;
+  type: "alert" | "admin" | "map" | "social" | string;
   read: boolean;
   created_at: string;
   href?: string | null;
@@ -74,7 +74,7 @@ function timeAgo(iso: string) {
 }
 
 function notifIcon(type: string) {
-  if (type === "alert" || type === "mesh_alert" || type === "broadcast")
+  if (type === "alert" || type === "mesh_alert" || type === "broadcast" || type === "map")
     return <AlertCircle size={18} strokeWidth={1.75} aria-hidden />;
   if (type === "admin" || type === "system" || type === "announcement")
     return <Info size={18} strokeWidth={1.75} aria-hidden />;
@@ -135,7 +135,7 @@ const normalizeNotificationHref = (
   if (!nextHref && socialTarget && ["social", "like", "comment", "reply", "mention", "thread"].includes(normalizedType)) {
     nextHref = `/social?focus=${encodeURIComponent(socialTarget)}`;
   }
-  if (!nextHref && alertTarget && ["alert", "alert_like", "broadcast", "mesh_alert"].includes(normalizedType)) {
+  if (!nextHref && alertTarget && ["alert", "alert_like", "broadcast", "mesh_alert", "map"].includes(normalizedType)) {
     nextHref = `/map?alert=${encodeURIComponent(alertTarget)}`;
   }
   if (!nextHref) return null;
@@ -162,7 +162,7 @@ const normalizeNotificationHref = (
 
 const normalizedTypeToPage = (rawType: string) => {
   const normalizedType = rawType.toLowerCase();
-  if (["alert", "alert_like", "broadcast", "mesh_alert"].includes(normalizedType)) return "map";
+  if (["alert", "alert_like", "broadcast", "mesh_alert", "map"].includes(normalizedType)) return "map";
   if (["social", "like", "comment", "reply", "mention", "thread"].includes(normalizedType)) return "social";
   return null;
 };
@@ -523,6 +523,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
   const renderNotifRow = (r: NotificationRow) => {
     const body = r.body ?? r.message ?? "";
+    const type = String(r.type || "").toLowerCase();
     return (
       <div
         key={r.id}
@@ -545,6 +546,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         {!r.read && (
           <div className="absolute left-0 inset-y-0 w-[3px] bg-[var(--primary)] rounded-l-[16px] pointer-events-none" />
         )}
+        <div className="mr-3 mt-[1px] flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/65 text-[var(--text-secondary)]">
+          {notifIcon(type)}
+        </div>
         <div className="flex-1 min-w-0">
           <p
             className={cn(
