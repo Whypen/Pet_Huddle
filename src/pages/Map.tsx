@@ -195,6 +195,8 @@ function dedupeById(items: MapAlert[]): MapAlert[] {
   return Object.values(dedup);
 }
 
+const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // ==========================================================================
 // POI Cache: Read vets + pet shops from poi_locations table (NO live Overpass)
 // Harvested monthly via Edge Function + pg_cron
@@ -1040,6 +1042,7 @@ const MapPage = () => {
   const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
     const trimmedAlertId = String(alertId || "").trim();
     if (!trimmedAlertId) return null;
+    if (!UUID_V4ISH.test(trimmedAlertId)) return null;
     try {
       const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
         "get_broadcast_alert_by_id",

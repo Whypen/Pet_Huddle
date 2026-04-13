@@ -73,6 +73,8 @@ interface Thread {
   score?: number | null;
   map_id?: string | null;
   alert_type?: string | null;
+  alert_district?: string | null;
+  has_alert_link?: boolean;
   is_sensitive?: boolean | null;
   author: {
     display_name: string | null;
@@ -234,6 +236,14 @@ const parseAlertTypeFromTitle = (title: string) => {
   if (normalized === "stray") return "Stray" as const;
   if (normalized === "others") return "Others" as const;
   return null;
+};
+
+const deriveDistrictLabel = (value: string | null | undefined) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2) return parts[1];
+  return parts[0] || "";
 };
 
 const deriveAlertTypeFromNoticeData = (notice: Pick<Thread, "alert_type" | "tags" | "title">) => {
@@ -1136,6 +1146,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     score: typeof row.score === "number" ? row.score : Number(row.score ?? 0),
     map_id: typeof row.map_id === "string" ? row.map_id : null,
     alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
+    alert_district: typeof row.alert_district === "string" ? row.alert_district : null,
+    has_alert_link: Boolean(row.has_alert_link),
     is_sensitive: row.is_sensitive === true,
     created_at: String(row.created_at || new Date().toISOString()),
     user_id: String(row.user_id),
@@ -1213,11 +1225,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     );
     if (!alertRowsError && Array.isArray(alertRows) && alertRows.length > 0) {
       const alertMap = new Map(
-        (alertRows as Array<{ thread_id?: string; map_id?: string | null; alert_type?: string | null }>).map((row) => [
+        (alertRows as Array<{ thread_id?: string; map_id?: string | null; alert_type?: string | null; location_district?: string | null }>).map((row) => [
           String(row.thread_id || ""),
           {
             map_id: typeof row.map_id === "string" ? row.map_id : null,
             alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
+            location_district: typeof row.location_district === "string" ? row.location_district : null,
+            has_alert_link:
+              (typeof row.map_id === "string" && row.map_id.trim().length > 0)
+              || (typeof row.alert_type === "string" && row.alert_type.trim().length > 0)
+              || (typeof row.location_district === "string" && row.location_district.trim().length > 0),
           },
         ])
       );
@@ -1228,6 +1245,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           ...notice,
           map_id: linked.map_id ?? notice.map_id ?? null,
           alert_type: linked.alert_type ?? notice.alert_type ?? null,
+          alert_district: linked.location_district ?? notice.alert_district ?? null,
+          has_alert_link: linked.has_alert_link || notice.has_alert_link === true,
         };
       });
     }
@@ -3267,14 +3286,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         </div>
                         </div>
                         <p className="text-sm font-semibold break-words">{notice.title}</p>
-                        {notice.map_id ? (
+                        {(notice.has_alert_link || notice.map_id) ? (
                           <button
                             type="button"
                             className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brandBlue whitespace-nowrap"
-                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}&thread=${encodeURIComponent(notice.id)}`)}
+                            onClick={() => {
+                              const params = new URLSearchParams();
+                              if (notice.map_id) params.set("alert", notice.map_id);
+                              params.set("thread", notice.id);
+                              navigate(`/map?${params.toString()}`);
+                            }}
                           >
                             <span aria-hidden>📍</span>
-                            <span>Map</span>
+                            <span>{deriveDistrictLabel(notice.alert_district) || "Map"}</span>
                           </button>
                         ) : null}
                         <div

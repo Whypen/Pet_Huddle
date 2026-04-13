@@ -375,12 +375,29 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
         () => { void refreshUnread(); }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          void refreshUnread();
+        }
+      });
+
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshUnread();
+    }, 25000);
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshUnread();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     void refreshUnread();
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollId);
+      document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
   }, [user]);
@@ -439,12 +456,22 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
         () => void load()
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          void load();
+        }
+      });
+
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void load();
+    }, 25000);
 
     void load();
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, [notifOpen, user]);
