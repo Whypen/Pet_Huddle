@@ -197,7 +197,7 @@ export async function fetchVerifyIdentitySnapshot(): Promise<VerifyIdentitySnaps
         blockedIdentity: {
           blocked: fallbackProfile.verification_rejection_code === "blocked_identity",
           message: fallbackProfile.verification_rejection_code === "blocked_identity"
-            ? "We’re unable to complete verification for this account. If you think this is a mistake, contact us via Help & Support."
+            ? "Card is already used by another account."
             : null,
         },
         cardFingerprintPresent: false,

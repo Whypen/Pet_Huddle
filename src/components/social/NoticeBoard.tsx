@@ -201,6 +201,13 @@ type ComposerMedia = {
   previewUrl: string;
 };
 
+type UploadLifecycleStatus = "idle" | "uploading" | "success" | "error";
+type ComposerUploadState = {
+  scope: "thread" | "reply" | null;
+  status: UploadLifecycleStatus;
+  progress: number;
+};
+
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
 const MENTION_LIVE_SUGGESTIONS_ENABLED = true;
@@ -484,6 +491,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [replyMediaFiles, setReplyMediaFiles] = useState<ComposerMedia[]>([]);
   const [replyError, setReplyError] = useState("");
   const [replySubmittingByThread, setReplySubmittingByThread] = useState<Set<string>>(new Set());
+  const [composerUploadState, setComposerUploadState] = useState<ComposerUploadState>({
+    scope: null,
+    status: "idle",
+    progress: 0,
+  });
   const [newsAlertTypeByThread, setNewsAlertTypeByThread] = useState<Record<string, "Stray" | "Lost" | "Others">>({});
   const [createErrors, setCreateErrors] = useState<{ title?: string; content?: string }>({});
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -523,6 +535,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
   const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
+  const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
   const replyWordsUsed = useMemo(() => countWords(replyContent), [replyContent]);
@@ -540,6 +553,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   useEffect(() => {
     mentionDirectoryRef.current = mentionDirectory;
   }, [mentionDirectory]);
+
+  const clearComposerUploadTicker = useCallback(() => {
+    if (composerUploadTickerRef.current) {
+      window.clearInterval(composerUploadTickerRef.current);
+      composerUploadTickerRef.current = null;
+    }
+  }, []);
+
+  const startComposerUploadTicker = useCallback((scope: "thread" | "reply") => {
+    clearComposerUploadTicker();
+    setComposerUploadState({ scope, status: "uploading", progress: 8 });
+    composerUploadTickerRef.current = window.setInterval(() => {
+      setComposerUploadState((prev) => {
+        if (prev.scope !== scope || prev.status !== "uploading") return prev;
+        return { ...prev, progress: Math.min(prev.progress + 6, 92) };
+      });
+    }, 180);
+  }, [clearComposerUploadTicker]);
+
+  useEffect(() => () => clearComposerUploadTicker(), [clearComposerUploadTicker]);
 
   const openProfile = useCallback((userId: string, fallbackName: string) => {
     if (!userId) return;
@@ -1174,6 +1207,31 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       );
     }
 
+    const { data: alertRows } = await supabase
+      .from("threads" as "profiles")
+      .select("id,map_id,alert_type")
+      .in("id", ids);
+    if (alertRows && alertRows.length > 0) {
+      const alertMap = new Map(
+        (alertRows as Array<{ id: string; map_id?: string | null; alert_type?: string | null }>).map((row) => [
+          row.id,
+          {
+            map_id: typeof row.map_id === "string" ? row.map_id : null,
+            alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
+          },
+        ])
+      );
+      hydratedRows = hydratedRows.map((notice) => {
+        const linked = alertMap.get(notice.id);
+        if (!linked) return notice;
+        return {
+          ...notice,
+          map_id: linked.map_id ?? notice.map_id ?? null,
+          alert_type: linked.alert_type ?? notice.alert_type ?? null,
+        };
+      });
+    }
+
     const { data: sensitiveRows } = await supabase
       .from("threads" as "profiles")
       .select("id,is_sensitive")
@@ -1386,6 +1444,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             tags,
             hashtags,
             images,
+            map_id,
+            alert_type,
             likes,
             created_at,
             user_id,
@@ -1755,18 +1815,35 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const uploadComposerMedia = useCallback(async (items: ComposerMedia[], scope: "thread" | "reply") => {
     if (!user?.id || items.length === 0) return [] as string[];
 
+    startComposerUploadTicker(scope);
     const uploadedUrls: string[] = [];
-    for (const [index, item] of items.entries()) {
-      const fileExt = item.file.name.split(".").pop() || (item.kind === "video" ? "mp4" : "jpg");
-      const fileName = `${user.id}/${scope}/${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, item.file);
-      if (uploadError) throw uploadError;
-      const { data: publicData } = supabase.storage.from("notices").getPublicUrl(fileName);
-      uploadedUrls.push(publicData.publicUrl);
+    try {
+      for (const [index, item] of items.entries()) {
+        const fileExt = item.file.name.split(".").pop() || (item.kind === "video" ? "mp4" : "jpg");
+        const fileName = `${user.id}/${scope}/${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, item.file);
+        if (uploadError) throw uploadError;
+        const { data: publicData } = supabase.storage.from("notices").getPublicUrl(fileName);
+        uploadedUrls.push(publicData.publicUrl);
+        const ratio = (index + 1) / items.length;
+        setComposerUploadState({ scope, status: "uploading", progress: Math.max(8, Math.min(96, Math.round(8 + ratio * 88))) });
+      }
+      clearComposerUploadTicker();
+      setComposerUploadState({ scope, status: "success", progress: 100 });
+      window.setTimeout(() => {
+        setComposerUploadState((prev) => (prev.scope === scope ? { scope: null, status: "idle", progress: 0 } : prev));
+      }, 1200);
+    } catch (error) {
+      clearComposerUploadTicker();
+      setComposerUploadState({ scope, status: "error", progress: 0 });
+      window.setTimeout(() => {
+        setComposerUploadState((prev) => (prev.scope === scope ? { scope: null, status: "idle", progress: 0 } : prev));
+      }, 2000);
+      throw error;
     }
 
     return uploadedUrls;
-  }, [user?.id]);
+  }, [clearComposerUploadTicker, startComposerUploadTicker, user?.id]);
 
   const enqueueSocialNotification = useCallback(
     async (args: {
@@ -2264,7 +2341,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           } as Record<string, unknown>)
           .eq("id", editingNoticeId)
           .eq("user_id", user.id)
-          .select("id, title, content, tags, hashtags, images, likes, created_at, user_id")
+          .select("id, title, content, tags, hashtags, images, map_id, alert_type, likes, created_at, user_id")
           .single();
         if (error) throw error;
 
@@ -2279,6 +2356,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     tags: (updatedThread.tags as string[] | null) ?? null,
                     hashtags: (updatedThread.hashtags as string[] | null) ?? null,
                     images: (updatedThread.images as string[] | null) ?? item.images ?? null,
+                    map_id: (updatedThread.map_id as string | null) ?? item.map_id ?? null,
+                    alert_type: (updatedThread.alert_type as string | null) ?? item.alert_type ?? null,
                     is_sensitive: createIsSensitive,
                   }
                 : item
@@ -2321,7 +2400,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             likes: 0,
             is_sensitive: createIsSensitive,
           } as Record<string, unknown>)
-          .select("id, title, content, tags, hashtags, images, likes, created_at, user_id")
+          .select("id, title, content, tags, hashtags, images, map_id, alert_type, likes, created_at, user_id")
           .single();
 
         if (error) throw error;
@@ -2334,6 +2413,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             tags: (createdThread.tags as string[] | null) ?? null,
             hashtags: (createdThread.hashtags as string[] | null) ?? null,
             images: (createdThread.images as string[] | null) ?? null,
+            map_id: (createdThread.map_id as string | null) ?? null,
+            alert_type: (createdThread.alert_type as string | null) ?? null,
             likes: Number(createdThread.likes ?? 0),
             created_at: String(createdThread.created_at),
             user_id: String(createdThread.user_id),
@@ -3463,8 +3544,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         <MediaThumb
                                           src={item.previewUrl}
                                           alt={`Reply media ${index + 1}`}
-                                          className="h-28 w-full aspect-video"
+                                          className={cn(
+                                            "h-28 w-full aspect-video",
+                                            composerUploadState.scope === "reply" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]"
+                                          )}
                                         />
+                                        {composerUploadState.scope === "reply" && composerUploadState.status === "uploading" ? (
+                                          <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
+                                            Uploading {Math.round(composerUploadState.progress)}%
+                                          </div>
+                                        ) : null}
                                         <button
                                           type="button"
                                           onClick={() => removeReplyMediaAt(index)}
@@ -3791,8 +3880,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       <MediaThumb
                         src={item.previewUrl}
                         alt="Thread preview"
-                        className="h-full w-full rounded-[24px]"
+                        className={cn(
+                          "h-full w-full rounded-[24px]",
+                          composerUploadState.scope === "thread" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]"
+                        )}
                       />
+                      {composerUploadState.scope === "thread" && composerUploadState.status === "uploading" ? (
+                        <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
+                          Uploading {Math.round(composerUploadState.progress)}%
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => removeCreateMediaAt(index)}

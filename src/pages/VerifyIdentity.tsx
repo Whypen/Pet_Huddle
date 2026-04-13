@@ -1679,6 +1679,48 @@ export function VerifyIdentity({
   }, [profile?.legal_name, signupData.legal_name]);
 
   useEffect(() => {
+    if (!profile) return;
+    const profileOverall = String(profile.verification_status || "").toLowerCase();
+    if (profileOverall === "verified" || profileOverall === "pending" || profileOverall === "unverified") {
+      setOverallVerificationStatus(profileOverall as OverallVerificationStatus);
+    }
+
+    const profileHuman = String(profile.human_verification_status || "").toLowerCase();
+    if (profileHuman === "passed") {
+      setHumanVerificationState("passed");
+      setHumanErrorMessage(null);
+    } else if (profileHuman === "pending") {
+      setHumanVerificationState((prev) => (prev === "passed" ? prev : "pending"));
+    }
+
+    const profileCard = String(profile.card_verification_status || "").toLowerCase();
+    if (profileCard === "passed" || profileCard === "pending" || profileCard === "failed" || profileCard === "not_started") {
+      syncCardUiFromResolvedStatus({
+        cardStatus: profileCard,
+        cardVerified: profile.card_verified === true,
+        legalName: profile.legal_name || null,
+        cardBrand: profile.card_brand || null,
+        cardLast4: profile.card_last4 || null,
+        blockedIdentity: profile.verification_rejection_code === "blocked_identity"
+          ? { blocked: true, message: "Card is already used by another account." }
+          : { blocked: false, message: null },
+        source: "profile_state",
+      });
+    }
+  }, [
+    profile,
+    profile?.card_brand,
+    profile?.card_last4,
+    profile?.card_verified,
+    profile?.card_verification_status,
+    profile?.human_verification_status,
+    profile?.legal_name,
+    profile?.verification_rejection_code,
+    profile?.verification_status,
+    syncCardUiFromResolvedStatus,
+  ]);
+
+  useEffect(() => {
     if (!showTurnstileDiag) return;
     setActiveCard("phone");
   }, [showTurnstileDiag]);

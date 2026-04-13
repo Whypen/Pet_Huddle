@@ -55,6 +55,11 @@ function isAttemptExpired(challengePayload: unknown, now = new Date()): boolean 
   return now.getTime() > expiresAt;
 }
 
+const trimToNull = (value: string | null | undefined) => {
+  const trimmed = String(value || "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 const asNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -132,18 +137,43 @@ async function resolveVerificationStatus(userId: string): Promise<string> {
   return "unverified";
 }
 
+async function ensureProfileRow(params: { userId: string; userEmail?: string | null; phone?: string | null }) {
+  const { data: existing, error: existingError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", params.userId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) return;
+
+  const displayName = trimToNull(params.userEmail?.split("@")[0]) || "User";
+  const legalName = "Pending Verification";
+  const { error: insertError } = await supabase
+    .from("profiles")
+    .insert({
+      id: params.userId,
+      display_name: displayName,
+      legal_name: legalName,
+      phone: trimToNull(params.phone),
+      updated_at: new Date().toISOString(),
+    });
+  if (insertError && insertError.code !== "23505") throw insertError;
+}
+
 async function tryUpdateProfileHumanStatus(userId: string, nextStatus: Status, nowIso: string | null) {
   // Use UPDATE (not upsert) — no-op when no profile row exists.
   // The attempt status is already recorded in human_verification_attempts.
   // Upsert would fail with NOT NULL violations on required profile columns.
-  const { error: updateError } = await supabase
+  const { data: updatedRows, error: updateError } = await supabase
     .from("profiles")
     .update({
       human_verification_status: nextStatus,
       human_verified_at: nextStatus === "passed" ? nowIso : null,
     })
+    .select("id")
     .eq("id", userId);
   if (updateError) throw updateError;
+  if (!updatedRows || updatedRows.length === 0) throw new Error("profile_not_found");
 }
 
 Deno.serve(async (req: Request) => {
@@ -165,6 +195,11 @@ Deno.serve(async (req: Request) => {
     const authUser = await supabase.auth.getUser(accessToken);
     const userId = authUser.data?.user?.id;
     if (!userId) return withCors(req, json({ error: "unauthorized" }, 401));
+    await ensureProfileRow({
+      userId,
+      userEmail: authUser.data?.user?.email || null,
+      phone: authUser.data?.user?.phone || null,
+    });
 
     const payload = (await req.json().catch(() => ({}))) as Payload;
     const action: Action = payload.action || "get";

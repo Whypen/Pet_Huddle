@@ -26,8 +26,13 @@ export interface Profile {
   verification_status?: string | null;
   is_verified?: boolean | null;
   verification_comment?: string | null;
+  human_verification_status?: string | null;
+  human_verified_at?: string | null;
   card_verification_status?: string | null;
   card_verified?: boolean | null;
+  card_brand?: string | null;
+  card_last4?: string | null;
+  verification_rejection_code?: string | null;
   is_admin?: boolean | null;
   avatar_url: string | null;
   bio: string | null;
@@ -215,8 +220,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     "verification_status",
     "is_verified",
     "verification_comment",
+    "human_verification_status",
+    "human_verified_at",
     "card_verification_status",
     "card_verified",
+    "card_brand",
+    "card_last4",
+    "verification_rejection_code",
     "social_album",
     "prefs",
     "hide_from_map",
@@ -470,6 +480,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!user) return;
     void touchProfileActivity();
   }, [touchProfileActivity, user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`profile-live-sync:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${user.id}`,
+        },
+        () => {
+          const runId = beginHydrationRun();
+          void fetchProfile(user.id, runId);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [beginHydrationRun, fetchProfile, user?.id]);
 
   useEffect(() => {
     let mounted = true;

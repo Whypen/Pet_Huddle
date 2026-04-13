@@ -24,6 +24,7 @@ type BroadcastMedia = {
 };
 
 const MAX_BROADCAST_MEDIA = 10;
+type UploadLifecycleStatus = "idle" | "uploading" | "success" | "error";
 
 interface BroadcastModalProps {
   isOpen: boolean;
@@ -81,6 +82,8 @@ const BroadcastModal = ({
   const [isSensitive, setIsSensitive] = useState(false);
   const [sensitiveSuggested, setSensitiveSuggested] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<UploadLifecycleStatus>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
   const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
@@ -94,6 +97,7 @@ const BroadcastModal = ({
   const [showUpsell, setShowUpsell] = useState(false);
   const upsellOnceRef = useRef(false);
   const upsellResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const RANGE_STEPS = [1, 5, 10, 25, 50, 100, 150];
   const DURATION_STEPS = [1, 3, 6, 12, 24, 48, 72];
 
@@ -117,6 +121,22 @@ const BroadcastModal = ({
     })();
   }, [isOpen, user]);
 
+  const clearUploadTicker = () => {
+    if (uploadTickerRef.current) {
+      window.clearInterval(uploadTickerRef.current);
+      uploadTickerRef.current = null;
+    }
+  };
+
+  const startUploadTicker = () => {
+    clearUploadTicker();
+    setUploadStatus("uploading");
+    setUploadProgress(8);
+    uploadTickerRef.current = window.setInterval(() => {
+      setUploadProgress((prev) => Math.min(prev + 6, 92));
+    }, 180);
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     setRangeKm((current) => Math.min(current, capRangeKm));
@@ -126,6 +146,7 @@ const BroadcastModal = ({
   useEffect(() => {
     return () => {
       mediaFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      clearUploadTicker();
     };
   }, [mediaFiles]);
 
@@ -220,6 +241,9 @@ const BroadcastModal = ({
     setSensitiveSuggested(false);
     setRangeKm(baseRangeKm);
     setDurationHours(baseDurationHours);
+    clearUploadTicker();
+    setUploadStatus("idle");
+    setUploadProgress(0);
   };
 
   const handleSubmit = async () => {
@@ -253,15 +277,33 @@ const BroadcastModal = ({
       }
 
       if (mediaFiles.length > 0) {
-        const uploaded = await Promise.all(
-          mediaFiles.map(async (item, index) => {
+        startUploadTicker();
+        const uploaded: string[] = [];
+        try {
+          for (const [index, item] of mediaFiles.entries()) {
             const fileExt = item.file.name.split(".").pop() || "jpg";
             const fileName = `${user.id}/${Date.now()}-${index}.${fileExt}`;
             const upload = await supabase.storage.from("alerts").upload(fileName, item.file);
             if (upload.error) throw upload.error;
-            return supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
-          })
-        );
+            const publicUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
+            if (publicUrl) uploaded.push(publicUrl);
+            const ratio = (index + 1) / mediaFiles.length;
+            setUploadProgress(Math.max(8, Math.min(96, Math.round(8 + ratio * 88))));
+          }
+          clearUploadTicker();
+          setUploadStatus("success");
+          setUploadProgress(100);
+          window.setTimeout(() => {
+            setUploadStatus((prev) => (prev === "success" ? "idle" : prev));
+            setUploadProgress((prev) => (prev === 100 ? 0 : prev));
+          }, 1200);
+        } catch (uploadError) {
+          clearUploadTicker();
+          setUploadStatus("error");
+          setUploadProgress(0);
+          window.setTimeout(() => setUploadStatus("idle"), 2000);
+          throw uploadError;
+        }
         photoUrls = uploaded.filter(Boolean);
         photoUrl = photoUrls[0] || null;
       }
@@ -487,7 +529,16 @@ const BroadcastModal = ({
                 <div className="flex flex-wrap items-start gap-3">
                   {mediaFiles.map((item, index) => (
                     <div key={`${item.previewUrl}-${index}`} className="relative h-[150px] w-[150px] shrink-0 overflow-hidden rounded-[24px]">
-                      <MediaThumb src={item.previewUrl} alt={`Broadcast preview ${index + 1}`} className="h-full w-full rounded-[24px]" />
+                      <MediaThumb
+                        src={item.previewUrl}
+                        alt={`Broadcast preview ${index + 1}`}
+                        className={`h-full w-full rounded-[24px] ${uploadStatus === "uploading" ? "opacity-70 blur-[1.5px]" : ""}`}
+                      />
+                      {uploadStatus === "uploading" ? (
+                        <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
+                          Uploading {Math.round(uploadProgress)}%
+                        </div>
+                      ) : null}
                       <button
                         onClick={() => removeMediaAt(index)}
                         className="absolute top-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
@@ -536,7 +587,11 @@ const BroadcastModal = ({
                 className="flex-1 h-12 rounded-xl font-semibold disabled:bg-muted disabled:text-muted-foreground"
                 style={creating || !selectedLocation ? undefined : { backgroundColor: pinStyle.color, color: "#fff" }}
               >
-                {creating ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                {creating ? (
+                  uploadStatus === "uploading"
+                    ? <span className="text-sm font-semibold">Uploading {Math.round(uploadProgress)}%</span>
+                    : <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
                   <span className="flex items-center gap-2">
                     <AlertTriangle className="w-5 h-5" />
                     Broadcast {normalizedType} Alert

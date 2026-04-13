@@ -36,6 +36,7 @@ type SendOtpReasonCode =
   | "provider_config_error"
   | "sms_region_blocked"
   | "rate_limited"
+  | "already_verified"
   | "user_not_found"
   | "provider_send_failed";
 
@@ -115,6 +116,9 @@ const mapSendOtpFailure = (
   }
   if (statusCode === 403 && (raw.includes("turnstile") || raw.includes("human_verification"))) {
     return { message: "Please complete the verification first.", unavailable: false };
+  }
+  if (reasonCode === "already_verified") {
+    return { message: "This number is already verified for your account.", unavailable: false };
   }
   if (reasonCode === "sms_region_blocked") {
     return { message: "Phone verification is temporarily unavailable.", unavailable: true };

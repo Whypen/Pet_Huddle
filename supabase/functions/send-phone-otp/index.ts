@@ -45,6 +45,7 @@ type OtpSendReasonCode =
   | "provider_config_error"
   | "sms_region_blocked"
   | "rate_limited"
+  | "already_verified"
   | "user_not_found"
   | "provider_send_failed";
 
@@ -118,6 +119,10 @@ function classifyOtpSendError(raw: string): OtpSendReasonCode {
     return "user_not_found";
   }
   return "provider_send_failed";
+}
+
+function normalizePhoneForCompare(value: string | null | undefined): string {
+  return String(value || "").trim().replace(/[^\d+]/g, "");
 }
 
 // ── Logger helper ─────────────────────────────────────────────────────────────
@@ -304,6 +309,19 @@ Deno.serve(async (req: Request) => {
       });
     }
     userId = user.id;
+
+    const targetPhone = normalizePhoneForCompare(rawPhone);
+    const currentPhone = normalizePhoneForCompare(user.phone || "");
+    const alreadyConfirmed = Boolean(user.phone_confirmed_at);
+    if (alreadyConfirmed && targetPhone.length > 0 && targetPhone === currentPhone) {
+      return new Response(
+        JSON.stringify({
+          error: "already_verified",
+          reason_code: "already_verified",
+        }),
+        { status: 409, headers: CORS },
+      );
+    }
   }
 
   // ── Rate limit gate (DB-enforced) ─────────────────────────────────────────
@@ -383,9 +401,20 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({ phone: rawPhone }),
     });
+    const authBody = await authResp.json().catch(() => ({})) as Record<string, unknown>;
     if (!authResp.ok) {
-      const authBody = await authResp.json().catch(() => ({})) as Record<string, string>;
       sendError = authBody.msg || authBody.message || authBody.error_description || `auth_update_failed_${authResp.status}`;
+    } else {
+      const userObj = (authBody.user && typeof authBody.user === "object")
+        ? (authBody.user as Record<string, unknown>)
+        : null;
+      const targetPhone = normalizePhoneForCompare(rawPhone);
+      const phoneChange = normalizePhoneForCompare(String(userObj?.phone_change || ""));
+      const phoneChangeSentAt = String(userObj?.phone_change_sent_at || "").trim();
+      // Treat as success only when the auth response proves a fresh phone-change OTP dispatch state.
+      if (!userObj || !phoneChange || phoneChange !== targetPhone || !phoneChangeSentAt) {
+        sendError = "provider_send_failed";
+      }
     }
   } else {
     // Unauthenticated path (phone-login users whose phone is in auth.users.phone)

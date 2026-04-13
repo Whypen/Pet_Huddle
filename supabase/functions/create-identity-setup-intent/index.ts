@@ -101,12 +101,35 @@ type StripePaymentMethod = {
 };
 
 const BLOCKED_IDENTITY_MESSAGE =
-  "We’re unable to complete verification for this account. If you think this is a mistake, contact us via Help & Support.";
+  "Card is already used by another account.";
 
 const trimToNull = (value: string | null | undefined) => {
   const trimmed = String(value || "").trim();
   return trimmed.length > 0 ? trimmed : null;
 };
+
+async function ensureProfileRow(params: { userId: string; userEmail?: string | null; phone?: string | null }) {
+  const { data: existing, error: existingError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", params.userId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) return;
+
+  const displayName = trimToNull(params.userEmail?.split("@")[0]) || "User";
+  const legalName = "Pending Verification";
+  const { error: insertError } = await supabase
+    .from("profiles")
+    .insert({
+      id: params.userId,
+      display_name: displayName,
+      legal_name: legalName,
+      phone: trimToNull(params.phone),
+      updated_at: new Date().toISOString(),
+    });
+  if (insertError && insertError.code !== "23505") throw insertError;
+}
 
 async function updateIdentityVerificationState(params: {
   userId: string;
@@ -152,11 +175,15 @@ async function updateIdentityVerificationState(params: {
     profileUpdatePayload.legal_name = params.legalName;
   }
 
-  const { error: updateError } = await supabase
+  const { data: updatedProfileRow, error: updateError } = await supabase
     .from("profiles")
     .update(profileUpdatePayload)
+    .select("id")
     .eq("id", params.userId);
   if (updateError) throw updateError;
+  if (!updatedProfileRow || updatedProfileRow.length === 0) {
+    throw new Error("profile_not_found");
+  }
 }
 
 async function stripeRequest<T>(
@@ -400,6 +427,11 @@ serve(async (req: Request) => {
     const userId = authUser.data?.user?.id;
     const userEmail = authUser.data?.user?.email || undefined;
     if (!userId) return withCors(req, json({ error: "unauthorized" }, 401));
+    await ensureProfileRow({
+      userId,
+      userEmail: userEmail || null,
+      phone: authUser.data?.user?.phone || null,
+    });
 
     const payload = (await req.json().catch(() => ({}))) as Payload;
     const preferredStripeMode =

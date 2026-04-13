@@ -175,12 +175,19 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     />
                   )}
                   {isSensitive ? (
-                    <span
-                      className={cn(
-                        "pointer-events-none absolute inset-0 bg-black/22 transition-opacity duration-300",
-                        sensitiveRevealed ? "opacity-0" : "opacity-100",
-                      )}
-                    />
+                    <>
+                      <span
+                        className={cn(
+                          "pointer-events-none absolute inset-0 bg-black/22 transition-opacity duration-300",
+                          sensitiveRevealed ? "opacity-0" : "opacity-100",
+                        )}
+                      />
+                      {!sensitiveRevealed ? (
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[40px] leading-none text-white">
+                          ☝️
+                        </span>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               );

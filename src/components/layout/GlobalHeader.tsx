@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertCircle,
   Bell,
   BookOpen,
   ChevronLeft,
@@ -67,13 +66,6 @@ function timeAgo(iso: string) {
   if (months < 12) return `${months}mo ago`;
   const years = Math.floor(days / 365);
   return `${years}y ago`;
-}
-
-function notifIcon(type: string) {
-  if (type === "alert" || type === "mesh_alert" || type === "broadcast" || type === "map") {
-    return <AlertCircle size={20} strokeWidth={1.75} aria-hidden />;
-  }
-  return <Heart size={20} strokeWidth={1.75} aria-hidden />;
 }
 
 const stripLeadingSymbolPrefixes = (text: string) => {
@@ -523,7 +515,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
   const renderNotifRow = (r: NotificationRow) => {
     const body = stripLeadingSymbolPrefixes(r.body ?? r.message ?? "");
-    const type = String(r.type || "").toLowerCase();
     return (
       <div
         key={r.id}
@@ -546,9 +537,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         {!r.read && (
           <div className="absolute left-0 inset-y-0 w-[3px] bg-[var(--primary)] rounded-l-[16px] pointer-events-none" />
         )}
-        <div className="mr-3 mt-[2px] flex h-6 w-6 shrink-0 items-center justify-center text-[var(--text-secondary)]">
-          {notifIcon(type)}
-        </div>
         <div className="flex-1 min-w-0">
           <p
             className={cn(
