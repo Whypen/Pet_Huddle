@@ -12,6 +12,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  Star,
   User as UserIcon,
   Users,
   X,
