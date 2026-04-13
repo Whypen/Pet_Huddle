@@ -3267,6 +3267,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         </div>
                         </div>
                         <p className="text-sm font-semibold break-words">{notice.title}</p>
+                        {notice.map_id ? (
+                          <button
+                            type="button"
+                            className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brandBlue whitespace-nowrap"
+                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
+                          >
+                            <Pin className="h-3.5 w-3.5" />
+                            <span>Map</span>
+                          </button>
+                        ) : null}
                         <div
                           ref={(el) => {
                             contentRefs.current[notice.id] = el;
@@ -3352,15 +3362,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               <span className={cn("px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0", getTagStyle(primaryTag, notice.id))}>
                                 {t(primaryTag)}
                               </span>
-                            ) : null}
-                            {notice.map_id ? (
-                              <button
-                                type="button"
-                                className="text-[11px] font-semibold text-brandBlue underline underline-offset-2 whitespace-nowrap"
-                                onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
-                              >
-                                See on Map
-                              </button>
                             ) : null}
                           </div>
                           <div className="ml-auto flex items-center justify-end gap-0.5 min-w-[136px]">
