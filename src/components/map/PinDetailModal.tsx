@@ -46,6 +46,7 @@ import { ShareSheet } from "@/components/social/ShareSheet";
 import { areUsersBlocked } from "@/lib/blocking";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
+import { ReportModal } from "@/components/moderation/ReportModal";
 
 const DEMO_SEEDED = String(import.meta.env.VITE_ENABLE_DEMO_DATA ?? "false") === "true";
 
@@ -134,6 +135,7 @@ interface PinDetailModalProps {
   const [liked, setLiked] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [editMedia, setEditMedia] = useState<EditableBroadcastMedia[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [sharePayload, setSharePayload] = useState<ShareModel | null>(null);
@@ -250,10 +252,13 @@ interface PinDetailModalProps {
     }
   };
 
-  // Spec: Report Abuse — abuse_count > 10 → auto-hide
-  const handleReport = async () => {
+  const handleReportModalOpen = async () => {
     if (!user || !alert) {
       toast.error("Please login to report alerts");
+      return;
+    }
+    if (!alert.creator_id) {
+      toast.error("Unable to submit report right now.");
       return;
     }
     if (alert.creator_id) {
@@ -264,6 +269,12 @@ interface PinDetailModalProps {
       }
     }
     setShowMenu(false);
+    setReportOpen(true);
+  };
+
+  // Keep alert abuse interaction in sync after shared report modal submission.
+  const handleReportSubmitSuccess = useCallback(async () => {
+    if (!user || !alert) return;
     try {
       const { error } = await (supabase.from("broadcast_alert_interactions" as "profiles") as unknown as {
         upsert: (v: object, o: object) => Promise<{ error: unknown }>;
@@ -273,12 +284,11 @@ interface PinDetailModalProps {
       );
       if (error) throw error;
 
-      toast.success("Alert reported");
       onRefresh();
     } catch {
-      toast.error("Failed to report alert");
+      toast.error("Report sent, but alert abuse signal failed to sync.");
     }
-  };
+  }, [alert, onRefresh, user]);
 
   const handleBlockUser = async () => {
     if (!alert?.creator_id) return;
@@ -716,7 +726,9 @@ interface PinDetailModalProps {
                         className="absolute right-0 bottom-12 bg-card border border-border rounded-xl shadow-elevated py-1 w-44 z-50"
                       >
                         <button
-                          onClick={handleReport}
+                          onClick={() => {
+                            void handleReportModalOpen();
+                          }}
                           className="w-full flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
                         >
                           <Flag className="w-4 h-4 text-muted-foreground" />
@@ -870,6 +882,15 @@ interface PinDetailModalProps {
         </motion.div>
       )}
     </AnimatePresence>
+
+    <ReportModal
+      open={reportOpen}
+      onClose={() => setReportOpen(false)}
+      targetUserId={alert?.creator_id ?? null}
+      targetName={alert?.creator?.display_name || "User"}
+      source="Map"
+      onSubmitSuccess={handleReportSubmitSuccess}
+    />
 
     {sharePayload && (
       <ShareSheet

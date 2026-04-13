@@ -16,14 +16,15 @@ import { Textarea } from "@/components/ui/textarea";
 export type ReportSource = "Chat" | "Group Chat" | "Social" | "Map";
 
 const REPORT_CATEGORIES = [
-  "Spam or fake account",
-  "Harassment or bullying",
-  "Inappropriate or offensive content",
-  "Unsafe or harmful behavior (online or in-person)",
-  "Hate, discrimination, or threats",
-  "Scams, money requests, or promotions",
-  "Impersonation or stolen photos",
-  "Other",
+  "Unsafe behavior or Safety Incident or Threat",
+  "Animal Welfare or Cruelty",
+  "Privacy Violation",
+  "Suspicious Behavior or Potential Scam",
+  "False Information or \"Crying Wolf\" (Fake alerts)",
+  "Inappropriate or Explicit Content",
+  "Harassment or Hate Speech or Offensive Content",
+  "Commercial Spam",
+  "Others",
 ] as const;
 
 type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -34,6 +35,7 @@ interface ReportModalProps {
   targetUserId: string | null;
   targetName?: string;
   source: ReportSource;
+  onSubmitSuccess?: () => Promise<void> | void;
 }
 
 async function uploadReportImages(files: File[]): Promise<string[]> {
@@ -56,6 +58,7 @@ export function ReportModal({
   targetUserId,
   targetName,
   source,
+  onSubmitSuccess,
 }: ReportModalProps) {
   const { profile } = useAuth();
   const [reasons, setReasons] = useState<Set<ReportCategory>>(new Set());
@@ -78,7 +81,14 @@ export function ReportModal({
   }, [onClose, reset]);
 
   const handleSubmit = useCallback(async () => {
-    if (!profile?.id || !targetUserId) return;
+    if (!profile?.id) {
+      toast.error("Please login to report.");
+      return;
+    }
+    if (!targetUserId) {
+      toast.error("Unable to submit report right now.");
+      return;
+    }
     const selectedCategories = Array.from(reasons);
     if (selectedCategories.length === 0) {
       toast.error("Select at least one reason.");
@@ -109,7 +119,7 @@ export function ReportModal({
           message: JSON.stringify({
             target_user_id: targetUserId,
             categories: selectedCategories,
-            other: reasons.has("Other") ? otherText.trim() : "",
+            other: reasons.has("Others") ? otherText.trim() : "",
             details: details.trim(),
             attachments: attachmentUrls,
           }),
@@ -118,6 +128,7 @@ export function ReportModal({
         },
       });
 
+      await onSubmitSuccess?.();
       toast.success("Report sent");
       handleClose();
     } catch {
@@ -134,6 +145,7 @@ export function ReportModal({
     source,
     targetName,
     targetUserId,
+    onSubmitSuccess,
     uploads,
   ]);
 
@@ -166,7 +178,7 @@ export function ReportModal({
               </label>
             ))}
           </div>
-          {reasons.has("Other") && (
+          {reasons.has("Others") && (
             <div className="form-field-rest relative flex items-center">
               <input
                 value={otherText}
