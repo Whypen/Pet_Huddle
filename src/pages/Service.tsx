@@ -125,10 +125,6 @@ const Service = () => {
       toast.error("Sign in required.");
       return;
     }
-    if (profile?.is_verified !== true) {
-      toast.error("Identity verification is required before requesting service.");
-      return;
-    }
     try {
       const { data, error } = await (supabase.rpc as (
         fn: string,
@@ -164,10 +160,6 @@ const Service = () => {
         toast.error("Your profile setup is incomplete. Please complete profile setup first.");
         return;
       }
-      if (reason.includes("requester_not_verified")) {
-        toast.error("Identity verification is required before requesting service.");
-        return;
-      }
       if (reason.includes("not_authenticated")) {
         toast.error("Please sign in again.");
         return;
@@ -186,7 +178,7 @@ const Service = () => {
       }
       toast.error("Unable to start service chat right now.");
     }
-  }, [navigate, profile?.id, profile?.is_verified]);
+  }, [navigate, profile?.id]);
 
   const triggerPullRefresh = useCallback(async () => {
     if (pullRefreshing) return;
@@ -377,7 +369,7 @@ const Service = () => {
       <PublicCarerProfileModal
         isOpen={Boolean(activeProviderId)}
         providerUserId={activeProviderId}
-        canRequestService={profile?.is_verified === true}
+        canRequestService={true}
         onClose={() => setActiveProviderId(null)}
         onRequestService={handleRequestService}
       />
