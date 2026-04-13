@@ -21,6 +21,31 @@ const MAX_ASPECT = 4 / 3;
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
 
+const SensitiveTapIcon = () => (
+  <svg
+    width="72"
+    height="72"
+    viewBox="0 0 64 64"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path
+      d="M29 16V35M37 26V35M45 29V41.5C45 48.4 39.4 54 32.5 54H31.8C27.7 54 23.8 52.1 21.4 48.9L14 39.2C12.4 37.1 12.8 34 14.9 32.4C17 30.9 20.1 31.2 21.7 33.3L26 38.8V22.5C26 20.6 27.6 19 29.5 19C31.4 19 33 20.6 33 22.5V35"
+      stroke="white"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M31.5 8.5V4.5M40.6 11.1L43.5 8.2M22.4 11.1L19.5 8.2M45.3 20.3H49.3M13.7 20.3H9.7"
+      stroke="white"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -183,8 +208,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                         )}
                       />
                       {!sensitiveRevealed ? (
-                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[40px] leading-none text-white">
-                          ☝️
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                          <SensitiveTapIcon />
                         </span>
                       ) : null}
                     </>
