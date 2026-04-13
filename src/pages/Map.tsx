@@ -1215,7 +1215,7 @@ const MapPage = () => {
       setAlertFocusThreadId(null);
       return;
     }
-    if (alertFocusRetriesRef.current >= 1) {
+    if (alertFocusRetriesRef.current >= 5) {
       void (async () => {
         const byId = alertFocusId ? await fetchAlertByIdForDeepLink(alertFocusId) : null;
         const resolved = byId ?? (alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null);
@@ -1236,8 +1236,21 @@ const MapPage = () => {
     }
     alertFocusRetriesRef.current += 1;
     const timer = window.setTimeout(() => {
-      void fetchAlerts();
-    }, 500);
+      void (async () => {
+        const byId = alertFocusId ? await fetchAlertByIdForDeepLink(alertFocusId) : null;
+        const resolved = byId ?? (alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null);
+        if (resolved) {
+          setDbAlerts((prev) => dedupeById([resolved, ...prev]));
+          setShowAlerts(true);
+          focusMapTarget("deeplink.alert.retry", resolved.latitude, resolved.longitude);
+          setSelectedAlert(resolved);
+          setAlertFocusId(null);
+          setAlertFocusThreadId(null);
+          return;
+        }
+        await fetchAlerts();
+      })();
+    }, 800);
     return () => window.clearTimeout(timer);
   }, [alertFocusId, alertFocusThreadId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlertByThreadForDeepLink, fetchAlerts, focusMapTarget]);
 
@@ -1262,9 +1275,7 @@ const MapPage = () => {
     const updated = dbAlerts.find((row) => row.id === selectedAlert.id) || null;
     if (updated) {
       if (updated !== selectedAlert) setSelectedAlert(updated);
-      return;
     }
-    setSelectedAlert(null);
   }, [dbAlerts, selectedAlert]);
 
   const refreshMapData = useCallback(async () => {
