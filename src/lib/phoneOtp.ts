@@ -217,14 +217,16 @@ export async function requestPhoneOtp(
 
   const deviceId = await getVisitorId(); // null if FingerprintJS fails — acceptable
   const { data: { session } } = await supabase.auth.getSession();
-  const hasSession = Boolean(session?.access_token);
+  const sessionToken = String(session?.access_token || "").trim();
+  const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
+  const hasSession = Boolean(sessionToken && userProbe.data.user && !userProbe.error);
 
   type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
   let data: SendResponse | null = null;
   let errorMsg: string | null = null;
   let statusCode: number | null = null;
   let errorDetails: SendOtpErrorDetails | null = null;
-  const accessToken = String(session?.access_token || "").trim();
+  const accessToken = hasSession ? sessionToken : "";
 
   if (hasSession) {
     // Authenticated path — send session token explicitly in x-huddle-access-token
@@ -303,7 +305,9 @@ export async function verifyPhoneOtp(
   let errorDetails: VerifyOtpErrorDetails | null = null;
 
   const { data: { session } } = await supabase.auth.getSession();
-  const accessToken = String(session?.access_token || "").trim();
+  const sessionToken = String(session?.access_token || "").trim();
+  const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
+  const accessToken = sessionToken && userProbe.data.user && !userProbe.error ? sessionToken : "";
 
   if (otpType === "phone_change") {
     // Authenticated path — JWT required by edge function for phone_change

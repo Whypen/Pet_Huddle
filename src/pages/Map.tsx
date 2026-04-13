@@ -248,6 +248,7 @@ const MapPage = () => {
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<MapAlert | null>(null);
   const [alertFocusId, setAlertFocusId] = useState<string | null>(null);
+  const [alertFocusThreadId, setAlertFocusThreadId] = useState<string | null>(null);
   const alertFocusRetriesRef = useRef(0);
   const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
   const [publicProfileOpen, setPublicProfileOpen] = useState(false);
@@ -460,7 +461,9 @@ const MapPage = () => {
       setPinningActive(true);
     }
     const alertIdFromUrl = params.get("alert");
+    const alertThreadFromUrl = params.get("thread");
     setAlertFocusId(alertIdFromUrl && alertIdFromUrl.trim() ? alertIdFromUrl.trim() : null);
+    setAlertFocusThreadId(alertThreadFromUrl && alertThreadFromUrl.trim() ? alertThreadFromUrl.trim() : null);
     alertFocusRetriesRef.current = 0;
   }, [location.search]);
 
@@ -1052,6 +1055,25 @@ const MapPage = () => {
     }
   }, []);
 
+  const fetchAlertByThreadForDeepLink = useCallback(async (threadId: string): Promise<MapAlert | null> => {
+    const trimmedThreadId = String(threadId || "").trim();
+    if (!trimmedThreadId) return null;
+    try {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+        "get_social_feed_alert_context",
+        { p_thread_ids: [trimmedThreadId] },
+      );
+      if (error) throw error;
+      const row = Array.isArray(data) ? (data[0] as { map_id?: string | null } | undefined) : undefined;
+      const alertId = String(row?.map_id || "").trim();
+      if (!alertId) return null;
+      return await fetchAlertByIdForDeepLink(alertId);
+    } catch (error) {
+      if (import.meta.env.DEV) console.error("[DEEPLINK_THREAD_ALERT_FETCH_ERROR]", error);
+      return null;
+    }
+  }, [fetchAlertByIdForDeepLink]);
+
   // Fetch vet clinics on mount
   useEffect(() => { fetchVetClinics(); }, [fetchVetClinics]);
 
@@ -1178,28 +1200,34 @@ const MapPage = () => {
   }, [flyToWithDebug]);
 
   useEffect(() => {
-    if (!alertFocusId) return;
+    if (!alertFocusId && !alertFocusThreadId) return;
+    const focusKey = alertFocusId || alertFocusThreadId || "";
+    if (!focusKey) return;
     const target = dbAlerts.find((item) => item.id === alertFocusId);
     if (target) {
       setShowAlerts(true);
       focusMapTarget("deeplink.alert", target.latitude, target.longitude);
       setSelectedAlert(target);
       setAlertFocusId(null);
+      setAlertFocusThreadId(null);
       return;
     }
     if (alertFocusRetriesRef.current >= 1) {
       void (async () => {
-        const byId = await fetchAlertByIdForDeepLink(alertFocusId);
-        if (byId) {
-          setDbAlerts((prev) => dedupeById([byId, ...prev]));
+        const byId = alertFocusId ? await fetchAlertByIdForDeepLink(alertFocusId) : null;
+        const resolved = byId ?? (alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null);
+        if (resolved) {
+          setDbAlerts((prev) => dedupeById([resolved, ...prev]));
           setShowAlerts(true);
-          focusMapTarget("deeplink.alert.by_id", byId.latitude, byId.longitude);
-          setSelectedAlert(byId);
+          focusMapTarget("deeplink.alert.resolved", resolved.latitude, resolved.longitude);
+          setSelectedAlert(resolved);
           setAlertFocusId(null);
+          setAlertFocusThreadId(null);
           return;
         }
         toast.info("That alert is no longer available.");
         setAlertFocusId(null);
+        setAlertFocusThreadId(null);
       })();
       return;
     }
@@ -1208,7 +1236,7 @@ const MapPage = () => {
       void fetchAlerts();
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [alertFocusId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlerts, focusMapTarget]);
+  }, [alertFocusId, alertFocusThreadId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlertByThreadForDeepLink, fetchAlerts, focusMapTarget]);
 
   const openPublicProfileSheet = useCallback(
     async (userId: string, fallbackName: string) => {

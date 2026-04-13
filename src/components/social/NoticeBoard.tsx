@@ -3271,7 +3271,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           <button
                             type="button"
                             className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brandBlue whitespace-nowrap"
-                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
+                            onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}&thread=${encodeURIComponent(notice.id)}`)}
                           >
                             <span aria-hidden>📍</span>
                             <span>Map</span>
