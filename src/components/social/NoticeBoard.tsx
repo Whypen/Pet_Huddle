@@ -476,7 +476,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [hasMore, setHasMore] = useState(true);
   const lastCursorRef = useRef<{ created_at: string; id: string } | null>(null);
   const mentionTablesAvailableRef = useRef(true);
-  const broadcastAlertsReadableRef = useRef(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
@@ -601,16 +600,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (error.code === "PGRST205" || String(error.message || "").includes("404")) {
       mentionTablesAvailableRef.current = false;
       console.warn("[social.mentions.disabled]", error.message || error.code);
-      return true;
-    }
-    return false;
-  }, []);
-
-  const markBroadcastAlertsUnreadable = useCallback((error: { code?: string; message?: string } | null | undefined) => {
-    if (!error) return false;
-    if (error.code === "42501" || String(error.message || "").toLowerCase().includes("permission")) {
-      broadcastAlertsReadableRef.current = false;
-      console.warn("[social.broadcast_alerts.disabled]", error.message || error.code);
       return true;
     }
     return false;
@@ -1396,32 +1385,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       ...(((comments || []) as ThreadComment[]).map((comment) => comment.content || "")),
     ]);
 
-    const alertTypeByMapId: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
-    const mapIds = Array.from(
-      new Set(
-        hydratedRows
-          .map((row) => row.map_id)
-          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      )
-    );
-    if (mapIds.length > 0 && broadcastAlertsReadableRef.current) {
-      const { data: broadcastRows, error: broadcastError } = await supabase
-        .from("broadcast_alerts")
-          .select("id,type")
-        .in("id", mapIds);
-      if (broadcastError) {
-        markBroadcastAlertsUnreadable(broadcastError as { code?: string; message?: string });
-      } else {
-        (((broadcastRows || []) as Array<{ id: string; type: string | null }>)).forEach((row) => {
-          alertTypeByMapId[row.id] = normalizeNewsAlertType(row.type);
-        });
-      }
-    }
-
     const nextAlertTypeMap: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
     for (const notice of hydratedRows) {
-      const derivedType = deriveAlertTypeFromNoticeData(notice)
-        || (notice.map_id ? alertTypeByMapId[notice.map_id] : null);
+      const derivedType = deriveAlertTypeFromNoticeData(notice);
       if (!derivedType) continue;
       nextAlertTypeMap[notice.id] = derivedType;
     }
@@ -1433,7 +1399,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       replyMentions: nextReplyMentions,
       alertTypes: nextAlertTypeMap,
     };
-  }, [markBroadcastAlertsUnreadable, markMentionTablesUnavailable, primeMentionDirectory]);
+  }, [markMentionTablesUnavailable, primeMentionDirectory]);
 
   const applyHydratedRows = useCallback((payload: HydratedRowsResult, options?: { reset?: boolean }) => {
     const reset = options?.reset === true;
