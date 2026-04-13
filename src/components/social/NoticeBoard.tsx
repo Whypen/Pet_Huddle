@@ -3291,10 +3291,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         </div>
                         </div>
                         <p className="text-sm font-semibold break-words">{notice.title}</p>
-                        {(notice.has_alert_link || notice.map_id) ? (
+                        {(notice.has_alert_link || notice.map_id || Boolean(getDerivedAlertType(notice))) ? (
                           <button
                             type="button"
-                            className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brandBlue whitespace-nowrap"
+                            className="mt-1 inline-flex items-center gap-1 rounded-sm p-0 text-[13px] font-bold text-brandBlue underline underline-offset-2 whitespace-nowrap cursor-pointer"
                             onClick={() => {
                               const params = new URLSearchParams();
                               if (notice.map_id) params.set("alert", notice.map_id);

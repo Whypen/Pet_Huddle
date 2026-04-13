@@ -320,6 +320,7 @@ interface PinDetailModalProps {
     }
 
     setShowConfirmRemove(false);
+    onHide(alert.id);
     onRefresh();
     onClose();
     toast.success("Broadcast removed");
@@ -380,8 +381,7 @@ interface PinDetailModalProps {
   };
 
   const isCreator = user && alert?.creator_id === user.id;
-  const isAdmin = String(profile?.role || "").toLowerCase() === "admin";
-  const canRemove = Boolean(isCreator || isAdmin);
+  const canRemove = Boolean(isCreator);
   const isSocial = Boolean(alert?.post_on_social || alert?.social_post_id || alert?.thread_id);
   const socialThreadId = alert?.thread_id || (alert?.social_post_id ? String(alert.social_post_id) : null);
 
@@ -552,7 +552,7 @@ interface PinDetailModalProps {
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(isCreator || isAdmin) && (
+                  {canRemove && (
                     <>
                       {isCreator && (
                         <NeuButton
