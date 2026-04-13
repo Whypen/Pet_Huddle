@@ -108,13 +108,14 @@ type HydratedRowsResult = {
   commentsByThread: Record<string, ThreadComment[]>;
   threadMentions: Record<string, MentionEntry[]>;
   replyMentions: Record<string, MentionEntry[]>;
-  alertTypes: Record<string, "Stray" | "Lost" | "Others">;
+  alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others">;
 };
 
-const normalizeNewsAlertType = (rawType: string | null | undefined): "Stray" | "Lost" | "Others" => {
+const normalizeNewsAlertType = (rawType: string | null | undefined): "Stray" | "Lost" | "Caution" | "Others" => {
   const normalized = String(rawType || "").toLowerCase();
   if (normalized === "lost") return "Lost";
   if (normalized === "stray") return "Stray";
+  if (normalized === "caution") return "Caution";
   return "Others";
 };
 
@@ -231,9 +232,10 @@ const getErrorMessage = (error: unknown, fallback: string) => {
 };
 
 const parseAlertTypeFromTitle = (title: string) => {
-  const normalized = title.match(/^\s*(stray|lost|others)\s+alert\b/i)?.[1]?.toLowerCase();
+  const normalized = title.match(/^\s*(stray|lost|caution|others)\s+alert\b/i)?.[1]?.toLowerCase();
   if (normalized === "lost") return "Lost" as const;
   if (normalized === "stray") return "Stray" as const;
+  if (normalized === "caution") return "Caution" as const;
   if (normalized === "others") return "Others" as const;
   return null;
 };
@@ -251,12 +253,14 @@ const deriveAlertTypeFromNoticeData = (notice: Pick<Thread, "alert_type" | "tags
     const normalized = String(notice.alert_type).toLowerCase();
     if (normalized === "lost") return "Lost" as const;
     if (normalized === "stray") return "Stray" as const;
+    if (normalized === "caution") return "Caution" as const;
     return "Others" as const;
   }
 
   const tags = (notice.tags || []).map((tag) => String(tag).toLowerCase());
   if (tags.includes("lost")) return "Lost" as const;
   if (tags.includes("stray")) return "Stray" as const;
+  if (tags.includes("caution")) return "Caution" as const;
   if (tags.includes("others")) return "Others" as const;
 
   return parseAlertTypeFromTitle(notice.title);
@@ -506,7 +510,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     status: "idle",
     progress: 0,
   });
-  const [newsAlertTypeByThread, setNewsAlertTypeByThread] = useState<Record<string, "Stray" | "Lost" | "Others">>({});
+  const [newsAlertTypeByThread, setNewsAlertTypeByThread] = useState<Record<string, "Stray" | "Lost" | "Caution" | "Others">>({});
   const [createErrors, setCreateErrors] = useState<{ title?: string; content?: string }>({});
   const replyInputRef = useRef<HTMLTextAreaElement | null>(null);
   // SPRINT 3: Track liked notices for green (#22c55e) button state
@@ -1164,7 +1168,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     },
   }), []);
 
-  const getDerivedAlertType = useCallback((notice: Thread): "Stray" | "Lost" | "Others" | null => {
+  const getDerivedAlertType = useCallback((notice: Thread): "Stray" | "Lost" | "Caution" | "Others" | null => {
     const stateType = newsAlertTypeByThread[notice.id];
     if (stateType) return stateType;
     return deriveAlertTypeFromNoticeData(notice);
@@ -1391,7 +1395,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       ...(((comments || []) as ThreadComment[]).map((comment) => comment.content || "")),
     ]);
 
-    const alertTypeByMapId: Record<string, "Stray" | "Lost" | "Others"> = {};
+    const alertTypeByMapId: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
     const mapIds = Array.from(
       new Set(
         hydratedRows
@@ -1413,7 +1417,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
     }
 
-    const nextAlertTypeMap: Record<string, "Stray" | "Lost" | "Others"> = {};
+    const nextAlertTypeMap: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
     for (const notice of hydratedRows) {
       const derivedType = deriveAlertTypeFromNoticeData(notice)
         || (notice.map_id ? alertTypeByMapId[notice.map_id] : null);
@@ -2694,6 +2698,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const notice = notices.find((item) => item.id === threadId);
     const type = notice ? getDerivedAlertType(notice) : newsAlertTypeByThread[threadId];
     if (type === "Lost") return "bg-red-500 text-white border border-red-500";
+    if (type === "Caution") return "bg-[#2145CF] text-white border border-[#2145CF]";
     if (type === "Stray") return "bg-yellow-400 text-black border border-yellow-400";
     return "bg-[#A1A4A9] text-white border border-[#A1A4A9]";
   };

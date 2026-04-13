@@ -1217,8 +1217,9 @@ const MapPage = () => {
     }
     if (alertFocusRetriesRef.current >= 5) {
       void (async () => {
+        const byThread = alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null;
         const byId = alertFocusId ? await fetchAlertByIdForDeepLink(alertFocusId) : null;
-        const resolved = byId ?? (alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null);
+        const resolved = byThread ?? byId;
         if (resolved) {
           setDbAlerts((prev) => dedupeById([resolved, ...prev]));
           setShowAlerts(true);
@@ -1237,8 +1238,9 @@ const MapPage = () => {
     alertFocusRetriesRef.current += 1;
     const timer = window.setTimeout(() => {
       void (async () => {
+        const byThread = alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null;
         const byId = alertFocusId ? await fetchAlertByIdForDeepLink(alertFocusId) : null;
-        const resolved = byId ?? (alertFocusThreadId ? await fetchAlertByThreadForDeepLink(alertFocusThreadId) : null);
+        const resolved = byThread ?? byId;
         if (resolved) {
           setDbAlerts((prev) => dedupeById([resolved, ...prev]));
           setShowAlerts(true);
