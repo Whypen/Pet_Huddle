@@ -294,7 +294,7 @@ Deno.serve(async (req: Request) => {
   const bearerToken  = authHeader.replace(/^Bearer\s+/i, "").trim();
   const huddleToken  = huddleHeader.replace(/^Bearer\s+/i, "").trim();
   const accessToken  = [huddleToken, bearerToken].find(
-    (t) => t.split(".").length === 3,
+    (t) => t.split(".").length === 3 && t !== anonKey,
   ) ?? null;
 
   let userId: string | null = null;

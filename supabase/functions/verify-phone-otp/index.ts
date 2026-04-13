@@ -196,8 +196,8 @@ Deno.serve(async (req: Request) => {
   // ── JWT extraction (same pattern as send-phone-otp and connect-link) ──────
   const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   const huddleToken = (req.headers.get("x-huddle-access-token") ?? "").replace(/^Bearer\s+/i, "").trim();
-  const accessToken = [bearerToken, huddleToken].find(
-    (t) => t.split(".").length === 3,
+  const accessToken = [huddleToken, bearerToken].find(
+    (t) => t.split(".").length === 3 && t !== anonKey,
   ) ?? null;
 
   let userId: string | null = null;

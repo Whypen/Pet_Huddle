@@ -151,6 +151,42 @@ type VisibleMapAlertRow = {
   marker_state: "active" | "expired_dot" | "hidden" | null;
 };
 
+function mapVisibleAlertRowToMapAlert(row: VisibleMapAlertRow): MapAlert {
+  return {
+    id: row.id,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    alert_type: row.alert_type,
+    title: row.title || null,
+    description: row.description || null,
+    photo_url: row.photo_url || null,
+    media_urls: Array.isArray(row.media_urls) ? row.media_urls.filter(Boolean) : row.photo_url ? [row.photo_url] : [],
+    support_count: row.support_count ?? 0,
+    report_count: row.report_count ?? 0,
+    created_at: row.created_at,
+    creator_id: row.creator_id || null,
+    thread_id: row.thread_id || null,
+    posted_to_threads: Boolean(row.posted_to_threads),
+    post_on_social: Boolean(row.post_on_social),
+    social_post_id: row.social_post_id,
+    social_status: row.social_status,
+    social_url: row.social_url,
+    is_sensitive: row.is_sensitive === true,
+    duration_hours: row.duration_hours,
+    range_km: row.range_km,
+    location_street: row.location_street,
+    location_district: row.location_district,
+    creator: {
+      display_name: row.creator_display_name,
+      social_id: row.creator_social_id,
+      avatar_url: row.creator_avatar_url,
+    },
+    expires_at: row.expires_at,
+    range_meters: row.range_meters,
+    marker_state: row.marker_state === "expired_dot" ? "expired_dot" : "active",
+  };
+}
+
 function dedupeById(items: MapAlert[]): MapAlert[] {
   const dedup: Record<string, MapAlert> = {};
   items.forEach((item) => {
@@ -978,39 +1014,7 @@ const MapPage = () => {
         }
       );
       if (error) throw error;
-      const mapped = (Array.isArray(data) ? (data as VisibleMapAlertRow[]) : []).map((row) => ({
-        id: row.id,
-        latitude: row.latitude,
-        longitude: row.longitude,
-        alert_type: row.alert_type,
-        title: row.title || null,
-        description: row.description || null,
-        photo_url: row.photo_url || null,
-        media_urls: Array.isArray(row.media_urls) ? row.media_urls.filter(Boolean) : row.photo_url ? [row.photo_url] : [],
-        support_count: row.support_count ?? 0,
-        report_count: row.report_count ?? 0,
-        created_at: row.created_at,
-        creator_id: row.creator_id || null,
-        thread_id: row.thread_id || null,
-        posted_to_threads: Boolean(row.posted_to_threads),
-        post_on_social: Boolean(row.post_on_social),
-        social_post_id: row.social_post_id,
-        social_status: row.social_status,
-        social_url: row.social_url,
-        is_sensitive: row.is_sensitive === true,
-        duration_hours: row.duration_hours,
-        range_km: row.range_km,
-        location_street: row.location_street,
-        location_district: row.location_district,
-        creator: {
-          display_name: row.creator_display_name,
-          social_id: row.creator_social_id,
-          avatar_url: row.creator_avatar_url,
-        },
-        expires_at: row.expires_at,
-        range_meters: row.range_meters,
-        marker_state: row.marker_state === "expired_dot" ? "expired_dot" : "active",
-      }));
+      const mapped = (Array.isArray(data) ? (data as VisibleMapAlertRow[]) : []).map(mapVisibleAlertRowToMapAlert);
       const nowMs = Date.now();
       const graceMs = 7 * 24 * 60 * 60 * 1000;
       const rpcIds = new Set(mapped.map((item) => item.id));
@@ -1029,6 +1033,24 @@ const MapPage = () => {
       setLoading(false);
     }
   }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, userLocation?.lat, userLocation?.lng]);
+
+  const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
+    const trimmedAlertId = String(alertId || "").trim();
+    if (!trimmedAlertId) return null;
+    try {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+        "get_broadcast_alert_by_id",
+        { p_alert_id: trimmedAlertId },
+      );
+      if (error) throw error;
+      const row = Array.isArray(data) ? (data[0] as VisibleMapAlertRow | undefined) : undefined;
+      if (!row || !row.id) return null;
+      return mapVisibleAlertRowToMapAlert(row);
+    } catch (error) {
+      if (import.meta.env.DEV) console.error("[DEEPLINK_ALERT_FETCH_ERROR]", error);
+      return null;
+    }
+  }, []);
 
   // Fetch vet clinics on mount
   useEffect(() => { fetchVetClinics(); }, [fetchVetClinics]);
@@ -1166,8 +1188,19 @@ const MapPage = () => {
       return;
     }
     if (alertFocusRetriesRef.current >= 1) {
-      toast.info("That alert is no longer available.");
-      setAlertFocusId(null);
+      void (async () => {
+        const byId = await fetchAlertByIdForDeepLink(alertFocusId);
+        if (byId) {
+          setDbAlerts((prev) => dedupeById([byId, ...prev]));
+          setShowAlerts(true);
+          focusMapTarget("deeplink.alert.by_id", byId.latitude, byId.longitude);
+          setSelectedAlert(byId);
+          setAlertFocusId(null);
+          return;
+        }
+        toast.info("That alert is no longer available.");
+        setAlertFocusId(null);
+      })();
       return;
     }
     alertFocusRetriesRef.current += 1;
@@ -1175,7 +1208,7 @@ const MapPage = () => {
       void fetchAlerts();
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [alertFocusId, dbAlerts, fetchAlerts, focusMapTarget]);
+  }, [alertFocusId, dbAlerts, fetchAlertByIdForDeepLink, fetchAlerts, focusMapTarget]);
 
   const openPublicProfileSheet = useCallback(
     async (userId: string, fallbackName: string) => {

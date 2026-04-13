@@ -3273,7 +3273,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold text-brandBlue whitespace-nowrap"
                             onClick={() => navigate(`/map?alert=${encodeURIComponent(notice.map_id as string)}`)}
                           >
-                            <Pin className="h-3.5 w-3.5" />
+                            <span aria-hidden>📍</span>
                             <span>Map</span>
                           </button>
                         ) : null}
