@@ -1695,12 +1695,7 @@ const MapPage = () => {
               if (prev.some((p) => p.id === created.alert.id)) return prev;
               return [created.alert, ...prev];
             });
-            flyToWithDebug("broadcast.created", {
-              center: [created.alert.longitude, created.alert.latitude],
-              zoom: 15.5,
-            });
           }
-          await fetchAlerts();
           setBroadcastPreviewPin(null);
           setBroadcastPreviewAddress(null);
           setPinningActive(false);

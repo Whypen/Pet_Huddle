@@ -32,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 import imageCompression from "browser-image-compression";
-import { useSearchParams, useParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
@@ -465,6 +465,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const { t } = useLanguage();
   const { user, profile } = useAuth();
   const { showUpsellBanner } = useUpsellBanner();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const params = useParams();
   const [notices, setNotices] = useState<Thread[]>([]);
@@ -3291,20 +3292,27 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         </div>
                         </div>
                         <p className="text-sm font-semibold break-words">{notice.title}</p>
-                        {(notice.has_alert_link || notice.map_id || Boolean(getDerivedAlertType(notice))) ? (
-                          <button
-                            type="button"
-                            className="mt-1 inline-flex items-center gap-1 rounded-sm p-0 text-[13px] font-bold text-brandBlue underline underline-offset-2 whitespace-nowrap cursor-pointer"
-                            onClick={() => {
-                              const params = new URLSearchParams();
-                              if (notice.map_id) params.set("alert", notice.map_id);
-                              params.set("thread", notice.id);
-                              navigate(`/map?${params.toString()}`);
+                        {(notice.has_alert_link || Boolean(notice.map_id) || Boolean(notice.alert_type)) ? (
+                          <a
+                            href={`/map?${(() => {
+                              const query = new URLSearchParams();
+                              if (notice.map_id) query.set("alert", notice.map_id);
+                              query.set("thread", notice.id);
+                              return query.toString();
+                            })()}`}
+                            className="mt-1 inline-flex items-center gap-1 rounded-sm p-0 text-[13px] font-bold text-brandBlue whitespace-nowrap cursor-pointer no-underline hover:no-underline"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const query = new URLSearchParams();
+                              if (notice.map_id) query.set("alert", notice.map_id);
+                              query.set("thread", notice.id);
+                              navigate(`/map?${query.toString()}`);
                             }}
                           >
-                            <span aria-hidden>📍</span>
-                            <span>{deriveDistrictLabel(notice.alert_district) || "Map"}</span>
-                          </button>
+                            <span aria-hidden className="no-underline">📍</span>
+                            <span className="underline underline-offset-2">{deriveDistrictLabel(notice.alert_district) || "Map"}</span>
+                          </a>
                         ) : null}
                         <div
                           ref={(el) => {

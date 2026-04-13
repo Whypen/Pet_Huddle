@@ -19,8 +19,12 @@ import { MediaThumb } from "@/components/media/MediaThumb";
 import { detectSensitiveImage } from "@/lib/sensitiveContent";
 
 type BroadcastMedia = {
+  id: string;
   file: File;
   previewUrl: string;
+  uploadedUrl: string | null;
+  status: "queued" | "uploading" | "uploaded" | "error";
+  uploadError?: string | null;
 };
 
 const MAX_BROADCAST_MEDIA = 10;
@@ -97,7 +101,7 @@ const BroadcastModal = ({
   const [showUpsell, setShowUpsell] = useState(false);
   const upsellOnceRef = useRef(false);
   const upsellResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const uploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+  const mediaFilesRef = useRef<BroadcastMedia[]>([]);
   const RANGE_STEPS = [1, 5, 10, 25, 50, 100, 150];
   const DURATION_STEPS = [1, 3, 6, 12, 24, 48, 72];
 
@@ -121,22 +125,6 @@ const BroadcastModal = ({
     })();
   }, [isOpen, user]);
 
-  const clearUploadTicker = () => {
-    if (uploadTickerRef.current) {
-      window.clearInterval(uploadTickerRef.current);
-      uploadTickerRef.current = null;
-    }
-  };
-
-  const startUploadTicker = () => {
-    clearUploadTicker();
-    setUploadStatus("uploading");
-    setUploadProgress(8);
-    uploadTickerRef.current = window.setInterval(() => {
-      setUploadProgress((prev) => Math.min(prev + 6, 92));
-    }, 180);
-  };
-
   useEffect(() => {
     if (!isOpen) return;
     setRangeKm((current) => Math.min(current, capRangeKm));
@@ -144,10 +132,35 @@ const BroadcastModal = ({
   }, [capDurationHours, capRangeKm, isOpen]);
 
   useEffect(() => {
+    mediaFilesRef.current = mediaFiles;
+  }, [mediaFiles]);
+
+  useEffect(() => {
     return () => {
-      mediaFiles.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-      clearUploadTicker();
+      mediaFilesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     };
+  }, []);
+
+  useEffect(() => {
+    if (mediaFiles.length === 0) {
+      setUploadStatus("idle");
+      setUploadProgress(0);
+      return;
+    }
+    const total = mediaFiles.length;
+    const uploadedCount = mediaFiles.filter((item) => item.status === "uploaded").length;
+    const hasUploading = mediaFiles.some((item) => item.status === "uploading" || item.status === "queued");
+    const hasError = mediaFiles.some((item) => item.status === "error");
+    setUploadProgress(Math.round((uploadedCount / total) * 100));
+    if (hasUploading) {
+      setUploadStatus("uploading");
+      return;
+    }
+    if (hasError) {
+      setUploadStatus("error");
+      return;
+    }
+    setUploadStatus("success");
   }, [mediaFiles]);
 
   useEffect(() => {
@@ -209,11 +222,53 @@ const BroadcastModal = ({
     }
 
     const prepared = acceptedFiles.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       file,
       previewUrl: URL.createObjectURL(file),
+      uploadedUrl: null,
+      status: "queued" as const,
+      uploadError: null,
     }));
 
     setMediaFiles((prev) => [...prev, ...prepared]);
+    if (user?.id) {
+      void (async () => {
+        for (const item of prepared) {
+          setMediaFiles((prev) =>
+            prev.map((entry) => (
+              entry.id === item.id
+                ? { ...entry, status: "uploading", uploadError: null }
+                : entry
+            ))
+          );
+          try {
+            const fileExt = item.file.name.split(".").pop() || "jpg";
+            const fileName = `${user.id}/${Date.now()}-${item.id}.${fileExt}`;
+            const upload = await supabase.storage.from("alerts").upload(fileName, item.file);
+            if (upload.error) throw upload.error;
+            const publicUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl || null;
+            if (!publicUrl) throw new Error("Upload succeeded but public URL missing.");
+            setMediaFiles((prev) =>
+              prev.map((entry) => (
+                entry.id === item.id
+                  ? { ...entry, status: "uploaded", uploadedUrl: publicUrl, uploadError: null }
+                  : entry
+              ))
+            );
+          } catch (uploadError) {
+            const message = humanError(uploadError);
+            setMediaFiles((prev) =>
+              prev.map((entry) => (
+                entry.id === item.id
+                  ? { ...entry, status: "error", uploadedUrl: null, uploadError: message }
+                  : entry
+              ))
+            );
+            toast.error(`Image upload failed: ${message}`);
+          }
+        }
+      })();
+    }
     const firstImage = acceptedFiles[0];
     if (firstImage) {
       void detectSensitiveImage(firstImage)
@@ -241,7 +296,6 @@ const BroadcastModal = ({
     setSensitiveSuggested(false);
     setRangeKm(baseRangeKm);
     setDurationHours(baseDurationHours);
-    clearUploadTicker();
     setUploadStatus("idle");
     setUploadProgress(0);
   };
@@ -277,34 +331,24 @@ const BroadcastModal = ({
       }
 
       if (mediaFiles.length > 0) {
-        startUploadTicker();
-        const uploaded: string[] = [];
-        try {
-          for (const [index, item] of mediaFiles.entries()) {
-            const fileExt = item.file.name.split(".").pop() || "jpg";
-            const fileName = `${user.id}/${Date.now()}-${index}.${fileExt}`;
-            const upload = await supabase.storage.from("alerts").upload(fileName, item.file);
-            if (upload.error) throw upload.error;
-            const publicUrl = supabase.storage.from("alerts").getPublicUrl(fileName).data.publicUrl;
-            if (publicUrl) uploaded.push(publicUrl);
-            const ratio = (index + 1) / mediaFiles.length;
-            setUploadProgress(Math.max(8, Math.min(96, Math.round(8 + ratio * 88))));
-          }
-          clearUploadTicker();
-          setUploadStatus("success");
-          setUploadProgress(100);
-          window.setTimeout(() => {
-            setUploadStatus((prev) => (prev === "success" ? "idle" : prev));
-            setUploadProgress((prev) => (prev === 100 ? 0 : prev));
-          }, 1200);
-        } catch (uploadError) {
-          clearUploadTicker();
-          setUploadStatus("error");
-          setUploadProgress(0);
-          window.setTimeout(() => setUploadStatus("idle"), 2000);
-          throw uploadError;
+        const pendingUpload = mediaFiles.some((item) => item.status === "queued" || item.status === "uploading");
+        if (pendingUpload) {
+          toast.error("Please wait for image upload to finish.");
+          setCreating(false);
+          return;
         }
-        photoUrls = uploaded.filter(Boolean);
+        const failedUpload = mediaFiles.some((item) => item.status === "error");
+        if (failedUpload) {
+          toast.error("One or more images failed to upload. Remove them or retry.");
+          setCreating(false);
+          return;
+        }
+        photoUrls = mediaFiles.map((item) => item.uploadedUrl).filter((value): value is string => Boolean(value));
+        if (photoUrls.length !== mediaFiles.length) {
+          toast.error("Some uploaded images are missing. Please reselect them.");
+          setCreating(false);
+          return;
+        }
         photoUrl = photoUrls[0] || null;
       }
 
