@@ -47,6 +47,7 @@ const CHUNK_RELOAD_ATTEMPTS_KEY = "huddle:chunk-reload-attempts";
 const CHUNK_RELOAD_MAX_ATTEMPTS = 6;
 const CHUNK_RELOAD_RESET_AFTER_MS = 30_000;
 const CHUNK_RECOVERY_GUARD_KEY = "huddle:chunk-recovering";
+const ENTRY_SYNC_GUARD_KEY = "huddle:entry-sync-reload";
 type ChunkReloadState = {
   attempts: number;
   lastAttemptAt: number;
@@ -76,6 +77,16 @@ const writeChunkReloadState = (state: ChunkReloadState) => {
 const getBundleFingerprint = () => {
   const script = document.querySelector('script[type="module"][src*="/assets/index-"]') as HTMLScriptElement | null;
   return script?.src || `${window.location.origin}/unknown-bundle`;
+};
+
+const extractEntryBundleFromHtml = (html: string): string | null => {
+  const match = html.match(/assets\/index-[^"'\s>]+\.js/);
+  if (!match) return null;
+  try {
+    return new URL(match[0], window.location.origin).toString();
+  } catch {
+    return null;
+  }
 };
 const shouldReloadForChunkFailure = (input: unknown): boolean => {
   const text = String(input ?? "");
@@ -126,6 +137,31 @@ const reloadForChunkFailure = async () => {
   current.searchParams.set("__bundle", String(Date.now()));
   window.location.replace(current.toString());
 };
+
+const syncToLatestEntryBundleOnce = async () => {
+  if (!import.meta.env.PROD) return;
+  if (sessionStorage.getItem(ENTRY_SYNC_GUARD_KEY) === "1") return;
+  const currentBundle = getBundleFingerprint();
+  if (!currentBundle.includes("/assets/index-")) return;
+
+  try {
+    const res = await fetch(window.location.origin + "/", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) return;
+    const html = await res.text();
+    const latestBundle = extractEntryBundleFromHtml(html);
+    if (!latestBundle) return;
+    if (latestBundle === currentBundle) return;
+
+    sessionStorage.setItem(ENTRY_SYNC_GUARD_KEY, "1");
+    const url = new URL(window.location.href);
+    url.searchParams.set("__entry_sync", String(Date.now()));
+    window.location.replace(url.toString());
+  } catch {
+    // Best effort only.
+  }
+};
+
+void syncToLatestEntryBundleOnce();
 window.addEventListener("error", (event) => {
   const target = event.target as (EventTarget & { tagName?: string; src?: string }) | null;
   const scriptSrc = typeof target?.src === "string" ? target.src : "";
