@@ -91,6 +91,7 @@ const Premium = lazyWithChunkRecovery("premium", () => import("./pages/Premium")
 const Notifications = lazyWithChunkRecovery("notifications", () => import("./pages/Notifications"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminKYCReview = lazy(() => import("./pages/admin/AdminKYCReview"));
+const AdminSafety = lazy(() => import("./pages/admin/AdminSafety"));
 const Marketplace = lazy(() => import("./pages/Marketplace"));
 const Service = lazyWithChunkRecovery("service", () => import("./pages/Service"));
 const AdminDisputes = lazy(() => import("./screens/AdminDisputes"));
@@ -505,6 +506,16 @@ const App = () => (
                       <ProtectedRoute>
                         <AppShell>
                           <RouteSuspense><AdminKYCReview /></RouteSuspense>
+                        </AppShell>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/safety"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell fullBleed>
+                          <RouteSuspense><AdminSafety /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
