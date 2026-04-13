@@ -1536,6 +1536,24 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     toast.success(t("Phone verified"));
   };
 
+  const handlePhoneInlineSave = () => {
+    const normalizedPhone = formData.phone.trim();
+    if (!normalizedPhone) {
+      setFieldErrors((prev) => ({ ...prev, phone: "Enter a valid phone number." }));
+      return;
+    }
+    if (!isValidPhoneNumber(normalizedPhone)) {
+      setFieldErrors((prev) => ({ ...prev, phone: t("Phone number length is not valid for the selected country") }));
+      return;
+    }
+    if (phoneDuplicate) {
+      setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
+      return;
+    }
+    setFieldErrors((prev) => ({ ...prev, phone: "" }));
+    setPhoneEditMode(false);
+  };
+
   const handleCurrentLocation = () => {
     if (!navigator.geolocation) {
       toast.error(t("Location services are unavailable. Please type your location."));
@@ -2340,7 +2358,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className={cn("form-field-rest relative flex items-center bg-white", fieldErrors.phone && "form-field-error")}>
+                  <div className={cn("form-field-rest relative flex items-center bg-white pr-[132px]", fieldErrors.phone && "form-field-error")}>
                     <PhoneInput
                       international
                       defaultCountry={(inferCountryCodeFromPhone(formData.phone) || "HK") as never}
@@ -2362,43 +2380,43 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       className="w-full [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none [&_.PhoneInputInput]:text-[15px] [&_.PhoneInputInput]:text-[var(--text-primary,#424965)]"
                       aria-invalid={Boolean(fieldErrors.phone)}
                     />
-                  </div>
-                  <div className="flex items-center justify-end gap-2">
-                    {phoneChangedFromOriginal && (
-                      <button
-                        type="button"
-                        onClick={requestPhoneOtp}
-                        disabled={
-                          phoneOtpUnavailable ||
-                          otpCountdown > 0 ||
-                          !phoneOtpTurnstile.isTokenUsable ||
-                          phoneDuplicate ||
-                          phoneDuplicateChecking ||
-                          (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
-                        }
-                        className={cn(
-                          "h-8 px-3 rounded-[8px] text-[12px] font-semibold transition-colors shrink-0",
-                          (phoneOtpUnavailable ||
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      {phoneChangedFromOriginal && (
+                        <button
+                          type="button"
+                          onClick={requestPhoneOtp}
+                          disabled={
+                            phoneOtpUnavailable ||
                             otpCountdown > 0 ||
                             !phoneOtpTurnstile.isTokenUsable ||
                             phoneDuplicate ||
                             phoneDuplicateChecking ||
-                            (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone)))
-                            ? "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
-                            : "bg-brandBlue text-white active:opacity-80"
-                        )}
+                            (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone))
+                          }
+                          className={cn(
+                            "h-7 px-2 rounded-[8px] text-[11px] font-semibold transition-colors shrink-0",
+                            (phoneOtpUnavailable ||
+                              otpCountdown > 0 ||
+                              !phoneOtpTurnstile.isTokenUsable ||
+                              phoneDuplicate ||
+                              phoneDuplicateChecking ||
+                              (Boolean(formData.phone) && !isValidPhoneNumber(formData.phone)))
+                              ? "bg-[rgba(163,168,190,0.15)] text-[var(--text-tertiary)] cursor-default"
+                              : "bg-brandBlue text-white active:opacity-80"
+                          )}
+                        >
+                          {otpCountdown > 0 ? `Resend ${otpCountdown}s` : "Send OTP"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handlePhoneInlineSave}
+                        className="h-7 w-7 rounded-[8px] border border-[rgba(163,168,190,0.28)] bg-white text-[var(--text-secondary)] grid place-items-center"
+                        aria-label="Save phone edit"
                       >
-                        {otpCountdown > 0 ? `Resend in ${otpCountdown}s` : "Send OTP"}
+                        <Save className="w-4 h-4" />
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setPhoneEditMode(false)}
-                      className="h-8 w-8 rounded-[8px] border border-[rgba(163,168,190,0.28)] bg-white text-[var(--text-secondary)] grid place-items-center"
-                      aria-label="Save phone edit"
-                    >
-                      <Save className="w-4 h-4" />
-                    </button>
+                    </div>
                   </div>
                   {showPhoneChangeVerifiedWarning && (
                     <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1">
