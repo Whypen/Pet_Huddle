@@ -92,7 +92,7 @@ const Notifications = lazyWithChunkRecovery("notifications", () => import("./pag
 const Admin = lazy(() => import("./pages/Admin"));
 const AdminKYCReview = lazy(() => import("./pages/admin/AdminKYCReview"));
 const Marketplace = lazy(() => import("./pages/Marketplace"));
-const Service = lazy(() => import("./pages/Service"));
+const Service = lazyWithChunkRecovery("service", () => import("./pages/Service"));
 const AdminDisputes = lazy(() => import("./screens/AdminDisputes"));
 
 const queryClient = new QueryClient({
