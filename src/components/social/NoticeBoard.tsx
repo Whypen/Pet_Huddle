@@ -1207,14 +1207,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       );
     }
 
-    const { data: alertRows } = await supabase
-      .from("threads" as "profiles")
-      .select("id,map_id,alert_type")
-      .in("id", ids);
-    if (alertRows && alertRows.length > 0) {
+    const { data: alertRows, error: alertRowsError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
+      "get_social_feed_alert_context",
+      { p_thread_ids: ids },
+    );
+    if (!alertRowsError && Array.isArray(alertRows) && alertRows.length > 0) {
       const alertMap = new Map(
-        (alertRows as Array<{ id: string; map_id?: string | null; alert_type?: string | null }>).map((row) => [
-          row.id,
+        (alertRows as Array<{ thread_id?: string; map_id?: string | null; alert_type?: string | null }>).map((row) => [
+          String(row.thread_id || ""),
           {
             map_id: typeof row.map_id === "string" ? row.map_id : null,
             alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
@@ -1383,7 +1383,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (mapIds.length > 0 && broadcastAlertsReadableRef.current) {
       const { data: broadcastRows, error: broadcastError } = await supabase
         .from("broadcast_alerts")
-        .select("id,type")
+          .select("id,type")
         .in("id", mapIds);
       if (broadcastError) {
         markBroadcastAlertsUnreadable(broadcastError as { code?: string; message?: string });
@@ -2341,7 +2341,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           } as Record<string, unknown>)
           .eq("id", editingNoticeId)
           .eq("user_id", user.id)
-          .select("id, title, content, tags, hashtags, images, map_id, alert_type, likes, created_at, user_id")
+          .select("id, title, content, tags, hashtags, images, map_id, likes, created_at, user_id")
           .single();
         if (error) throw error;
 
@@ -2357,7 +2357,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     hashtags: (updatedThread.hashtags as string[] | null) ?? null,
                     images: (updatedThread.images as string[] | null) ?? item.images ?? null,
                     map_id: (updatedThread.map_id as string | null) ?? item.map_id ?? null,
-                    alert_type: (updatedThread.alert_type as string | null) ?? item.alert_type ?? null,
+                    alert_type: item.alert_type ?? null,
                     is_sensitive: createIsSensitive,
                   }
                 : item
@@ -2400,7 +2400,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             likes: 0,
             is_sensitive: createIsSensitive,
           } as Record<string, unknown>)
-          .select("id, title, content, tags, hashtags, images, map_id, alert_type, likes, created_at, user_id")
+          .select("id, title, content, tags, hashtags, images, map_id, likes, created_at, user_id")
           .single();
 
         if (error) throw error;
@@ -2414,7 +2414,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             hashtags: (createdThread.hashtags as string[] | null) ?? null,
             images: (createdThread.images as string[] | null) ?? null,
             map_id: (createdThread.map_id as string | null) ?? null,
-            alert_type: (createdThread.alert_type as string | null) ?? null,
+            alert_type: null,
             likes: Number(createdThread.likes ?? 0),
             created_at: String(createdThread.created_at),
             user_id: String(createdThread.user_id),
