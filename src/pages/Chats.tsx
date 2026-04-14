@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
-import { CreateGroupDialog } from "@/components/chat/CreateGroupDialog";
+import { CreateGroupSheet } from "@/components/chat/CreateGroupSheet";
+import { JoinWithCodeSheet } from "@/components/chat/JoinWithCodeSheet";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
@@ -598,6 +599,7 @@ const Chats = () => {
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [isJoinWithCodeOpen, setIsJoinWithCodeOpen] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
   const [mainTab, setMainTab] = useState<MainTab>(() => {
     const tab = searchParams.get("tab");
@@ -609,6 +611,18 @@ const Chats = () => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
   const [groupVisibleCount, setGroupVisibleCount] = useState(10);
+  const [groupSubTab, setGroupSubTab] = useState<"my" | "explore">("my");
+  const [exploreGroups, setExploreGroups] = useState<Array<{
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    location_label: string | null;
+    pet_focus: string[] | null;
+    join_method: string;
+    last_message_at: string | null;
+    created_at: string;
+  }>>([]);
+  const [exploreLoading, setExploreLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
@@ -3511,83 +3525,59 @@ const Chats = () => {
     setIsCreateGroupOpen(true);
   };
 
-  const handleGroupCreated = async (groupData: { name: string; members: unknown[]; avatarFile?: File | null }) => {
-    if (!profile?.id) {
-      toast.error("Sign in required.");
-      return;
-    }
-
-    try {
-      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      const memberIds = Array.from(
-        new Set(
-          groupData.members
-            .map((member) => (member as { id?: string })?.id)
-            .filter((id): id is string => Boolean(id) && uuidPattern.test(id) && id !== profile.id)
-        )
-      );
-      if (memberIds.length === 0) {
-        toast.error("Select at least one real member before creating a group.");
-        return;
-      }
-
-      const roomId = crypto.randomUUID();
-      let groupAvatarUrl: string | null = null;
-      if (groupData.avatarFile) {
-        const ext = groupData.avatarFile.name.split(".").pop() || "jpg";
-        const path = `groups/${roomId}/avatar.${ext}`;
-        const upload = await supabase.storage.from("avatars").upload(path, groupData.avatarFile, { upsert: true });
-        if (!upload.error) {
-          groupAvatarUrl = supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
-        }
-      }
-
-      const { error: chatError } = await supabase
-        .from("chats")
-        .insert({
-          id: roomId,
-          name: groupData.name,
-          type: "group",
-          created_by: profile.id,
-          avatar_url: groupAvatarUrl,
-        } as Record<string, unknown>);
-
-      if (chatError) {
-        toast.error("Failed to create group. Please retry.");
-        return;
-      }
-
-      const { error: membersError } = await supabase.from("chat_room_members").insert([{ chat_id: roomId, user_id: profile.id }] as Record<string, unknown>[]);
-      if (membersError) {
-        await supabase.from("chats").delete().eq("id", roomId);
-        toast.error("Failed to add members. Group was not created.");
-        return;
-      }
-
-      if (memberIds.length > 0) {
-        const inviteRows = memberIds.map((id) => ({
-          chat_id: roomId,
-          chat_name: groupData.name,
-          inviter_user_id: profile.id,
-          invitee_user_id: id,
-          status: "pending",
-        }));
-        const { error: inviteError } = await supabase
-          .from("group_chat_invites")
-          .upsert(inviteRows as Record<string, unknown>[], { onConflict: "chat_id,invitee_user_id" });
-        if (inviteError) {
-          throw inviteError;
-        }
-      }
-
-      await loadConversations();
-      markRoomSeen(roomId);
-      toast.success(`Group "${groupData.name}" created!`);
-      navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(groupData.name)}`);
-    } catch {
-      toast.error("Failed to create group. Please retry.");
-    }
+  const handleGroupCreated = (chatId: string) => {
+    void loadConversations();
+    navigate(`/chat-dialogue?room=${encodeURIComponent(chatId)}`);
   };
+
+  const fetchExploreGroups = useCallback(async () => {
+    setExploreLoading(true);
+    try {
+      const { data } = await supabase
+        .from("chats")
+        .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at")
+        .eq("type", "group")
+        .eq("visibility", "public")
+        .order("last_message_at", { ascending: false })
+        .limit(50);
+      if (!data) return;
+
+      // Client-side ranking: R_pet (0–3) × 3 + R_active (0–2)
+      const userSpecies: string[] = (
+        (Array.isArray(profile?.pets) ? profile.pets : []) as Array<{ species?: string }>
+      )
+        .map((p) => (p.species ?? "").toLowerCase())
+        .filter(Boolean);
+
+      const scored = data.map((g) => {
+        const focusLower = (g.pet_focus ?? []).map((f: string) => f.toLowerCase());
+        let petScore = 0;
+        if (focusLower.includes("all pets")) {
+          petScore = 1;
+        } else if (userSpecies.length > 0 && userSpecies.some((s) => focusLower.includes(s))) {
+          petScore = 3;
+        }
+        const msSince = g.last_message_at ? Date.now() - new Date(g.last_message_at).getTime() : Infinity;
+        const activeScore = msSince < 86_400_000 ? 2 : msSince < 604_800_000 ? 1 : 0;
+        return { ...g, _score: petScore * 3 + activeScore };
+      });
+
+      scored.sort((a, b) =>
+        b._score - a._score ||
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      setExploreGroups(scored);
+    } finally {
+      setExploreLoading(false);
+    }
+  }, [profile?.pets]);
+
+  useEffect(() => {
+    if (mainTab === "groups" && groupSubTab === "explore") {
+      void fetchExploreGroups();
+    }
+  }, [mainTab, groupSubTab, fetchExploreGroups]);
 
   const handleChatClick = (chat: ChatUser) => {
     // Mark as read
@@ -4528,18 +4518,27 @@ const Chats = () => {
                 <Search className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
               </button>
               {mainTab === "groups" && (
-                <button
-                  onClick={handleCreateGroup}
-                  className={cn(
-                    "h-12 w-12 rounded-full flex items-center justify-center transition-colors",
-                    isVerified
-                      ? "bg-accent text-accent-foreground hover:bg-accent/90"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  )}
-                  aria-label="Create Group"
-                >
-                  <Users className="w-5 h-5" strokeWidth={1.75} />
-                </button>
+                <>
+                  <button
+                    onClick={() => setIsJoinWithCodeOpen(true)}
+                    className="h-12 w-12 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+                    aria-label="Join with code"
+                  >
+                    <Hash className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    onClick={handleCreateGroup}
+                    className={cn(
+                      "h-12 w-12 rounded-full flex items-center justify-center transition-colors",
+                      isVerified
+                        ? "bg-accent text-accent-foreground hover:bg-accent/90"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    )}
+                    aria-label="Create Group"
+                  >
+                    <Users className="w-5 h-5" strokeWidth={1.75} />
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -4845,8 +4844,94 @@ const Chats = () => {
 
             {/* Groups View */}
             {mainTab === "groups" && (
-              <div className="px-5 pt-2">
-                <div className="space-y-2">
+              <div className="pt-2">
+                {/* Sub-tab toggle */}
+                <div className="flex px-5 gap-2 mb-3">
+                  <button
+                    onClick={() => setGroupSubTab("my")}
+                    className="neu-chip text-[13px] px-4 py-1.5 font-medium"
+                    data-active={groupSubTab === "my"}
+                  >
+                    My Groups
+                  </button>
+                  <button
+                    onClick={() => setGroupSubTab("explore")}
+                    className="neu-chip text-[13px] px-4 py-1.5 font-medium"
+                    data-active={groupSubTab === "explore"}
+                  >
+                    Explore
+                  </button>
+                </div>
+
+                {/* Explore tab */}
+                {groupSubTab === "explore" && (
+                  <div className="px-5 space-y-2">
+                    {exploreLoading ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" strokeWidth={1.75} />
+                      </div>
+                    ) : exploreGroups.length === 0 ? (
+                      <div className="flex flex-col items-center py-10 gap-3">
+                        <Users className="w-8 h-8 text-muted-foreground" strokeWidth={1.5} />
+                        <p className="text-center text-[15px] text-muted-foreground max-w-[26ch]">
+                          No public groups nearby yet. Be the first to create one!
+                        </p>
+                      </div>
+                    ) : (
+                      exploreGroups.map((group, index) => (
+                        <motion.div
+                          key={group.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.04, duration: 0.2 }}
+                          onClick={() => navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`)}
+                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl cursor-pointer hover:bg-accent/5 transition-colors"
+                        >
+                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
+                            {group.avatar_url ? (
+                              <img src={group.avatar_url} alt={group.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Users className="w-6 h-6 text-primary" strokeWidth={1.75} />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-[15px] truncate text-brandText">{group.name}</p>
+                            {group.location_label && (
+                              <p className="text-[12px] text-muted-foreground truncate mt-0.5">
+                                <MapPin className="inline w-3 h-3 mr-0.5" strokeWidth={1.75} />{group.location_label}
+                              </p>
+                            )}
+                            {group.pet_focus && group.pet_focus.length > 0 && (
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                {group.pet_focus.slice(0, 3).map((tag) => (
+                                  <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/60 text-accent-foreground font-medium">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              {group.last_message_at
+                                ? (() => {
+                                    const ms = Date.now() - new Date(group.last_message_at).getTime();
+                                    if (ms < 3_600_000) return `Active ${Math.floor(ms / 60_000)}m ago`;
+                                    if (ms < 86_400_000) return "Active today";
+                                    if (ms < 604_800_000) return "Active this week";
+                                    return "Not recently active";
+                                  })()
+                                : "No messages yet"}
+                            </p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" strokeWidth={1.75} />
+                        </motion.div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* My Groups tab */}
+                {groupSubTab === "my" && (
+                <div className="px-5 space-y-2">
                   {filteredGroups.length === 0 ? (
                     <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
                       <img
@@ -5001,16 +5086,17 @@ const Chats = () => {
                       </div>
                     ))
                   )}
+                  {filteredGroups.length > groupVisibleCount && (
+                    <div className="flex justify-center pt-2">
+                      <button
+                        className="text-sm text-primary hover:underline"
+                        onClick={() => setGroupVisibleCount((c) => c + 10)}
+                      >
+                        {t("Load more")}
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {filteredGroups.length > groupVisibleCount && (
-                  <div className="flex justify-center pt-2">
-                    <button
-                      className="text-sm text-primary hover:underline"
-                      onClick={() => setGroupVisibleCount((c) => c + 10)}
-                    >
-                      {t("Load more")}
-                    </button>
-                  </div>
                 )}
               </div>
             )}
@@ -5372,11 +5458,14 @@ const Chats = () => {
       </Dialog>
 
       <PremiumUpsell isOpen={isPremiumOpen} onClose={() => setIsPremiumOpen(false)} />
-      <CreateGroupDialog
+      <CreateGroupSheet
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
-        onCreateGroup={handleGroupCreated}
-        contacts={groupSelectableUsers}
+        onGroupCreated={handleGroupCreated}
+      />
+      <JoinWithCodeSheet
+        isOpen={isJoinWithCodeOpen}
+        onClose={() => setIsJoinWithCodeOpen(false)}
       />
       </div>
 
