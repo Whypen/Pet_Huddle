@@ -407,7 +407,7 @@ Deno.serve(async (req: Request) => {
     } else {
       const userObj = (authBody.user && typeof authBody.user === "object")
         ? (authBody.user as Record<string, unknown>)
-        : null;
+        : authBody;
       const targetPhone = normalizePhoneForCompare(rawPhone);
       const phoneChange = normalizePhoneForCompare(
         String(userObj?.new_phone || userObj?.phone_change || ""),
