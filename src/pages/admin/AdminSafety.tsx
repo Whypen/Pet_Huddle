@@ -66,9 +66,12 @@ type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes
   decision_at?: string | null;
   decision_version?: number | null;
   total_paid_amount?: number | null;
-  platform_fee_amount?: number | null;
+  service_rate_amount?: number | null;
+  customer_platform_fee_amount?: number | null;
+  provider_platform_fee_amount?: number | null;
   provider_receives_amount?: number | null;
   customer_refund_amount?: number | null;
+  huddle_retained_amount?: number | null;
   currency_code?: string | null;
 };
 type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
@@ -109,6 +112,10 @@ type ServiceChatPreviewData = {
     content: string | null;
     created_at: string | null;
   }>;
+};
+type MediaViewerItem = {
+  url: string;
+  label: string;
 };
 type SafetyUserRow = {
   user_id: string | null;
@@ -301,7 +308,7 @@ const badgeClasses =
 const demoBadgeClasses =
   "inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800";
 const DEMO_FIXTURE_MARKER = "[DEMO_FIXTURE_ADMIN_SAFETY_V1]";
-const sentinelBadgeClasses =
+const automationBadgeClasses =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800";
 
 const resolveIdentityLabel = (displayName: string | null | undefined, socialId: string | null | undefined, fallbackId: string | null | undefined) => {
@@ -337,6 +344,13 @@ const parseAmount = (value: unknown): number | null => {
 };
 
 const formatMoneyAmount = (value: number) => value.toFixed(2);
+
+const extractMoneyField = (payload: unknown, key: string): number | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const source = payload as Record<string, unknown>;
+  if (!source.money || typeof source.money !== "object") return null;
+  return parseAmount((source.money as Record<string, unknown>)[key]);
+};
 
 const formatDisputeStatusLabel = (status: string | null | undefined) => {
   const normalized = (status ?? "").toLowerCase();
@@ -379,13 +393,18 @@ const resolveStorageOrPublicUrl = (rawValue: string | null | undefined) => {
   if (!value) return "";
   if (/^https?:\/\//i.test(value)) return value;
   const normalized = value.replace(/^\/+/, "");
-  if (normalized.startsWith("notices/")) {
+  if (
+    normalized.startsWith("notices/") ||
+    normalized.startsWith("reports/") ||
+    normalized.startsWith("attachments/")
+  ) {
     return supabase.storage.from("notices").getPublicUrl(normalized).data.publicUrl;
   }
   if (normalized.startsWith("alerts/")) {
     return supabase.storage.from("alerts").getPublicUrl(normalized).data.publicUrl;
   }
-  return value;
+  if (normalized.startsWith("http")) return normalized;
+  return supabase.storage.from("notices").getPublicUrl(normalized).data.publicUrl;
 };
 
 const formatEventGroupLabel = (group: string) => {
@@ -467,7 +486,12 @@ const AdminSafety = () => {
   const [disputeActionError, setDisputeActionError] = useState<string | null>(null);
   const [disputeActionSuccess, setDisputeActionSuccess] = useState<string | null>(null);
   const [partialRefundInput, setPartialRefundInput] = useState("");
-  const [waivePlatformFee, setWaivePlatformFee] = useState(false);
+  const [waiveCustomerPlatformFee, setWaiveCustomerPlatformFee] = useState(false);
+  const [waiveProviderPlatformFee, setWaiveProviderPlatformFee] = useState(false);
+  const [mediaViewerOpen, setMediaViewerOpen] = useState(false);
+  const [mediaViewerTitle, setMediaViewerTitle] = useState("Media Viewer");
+  const [mediaViewerItems, setMediaViewerItems] = useState<MediaViewerItem[]>([]);
+  const [mediaViewerIndex, setMediaViewerIndex] = useState(0);
   const [reportsCaseFilter, setReportsCaseFilter] = useState<"open" | "resolved" | "dismissed" | "all">("open");
   const [selectedReporterForPenalty, setSelectedReporterForPenalty] = useState<string | null>(null);
   const [shadowFlags, setShadowFlags] = useState<Record<RestrictionFlagKey, boolean>>({
@@ -925,7 +949,8 @@ const AdminSafety = () => {
     setDisputeActionSuccess(null);
     setDisputeAdminNote("");
     setPartialRefundInput("");
-    setWaivePlatformFee(false);
+    setWaiveCustomerPlatformFee(false);
+    setWaiveProviderPlatformFee(false);
     setServiceChatPreview(null);
     setServiceChatPreviewOpen(false);
   }, [selectedDisputeId]);
@@ -954,46 +979,54 @@ const AdminSafety = () => {
   const reportDrawerIsDemo =
     (selectedReportTargetId ? demoReportTargetIds.has(selectedReportTargetId) : false) ||
     reportCasefile.some((row) => hasDemoMarker(row.details));
+  const disputePayload = disputeCasefile?.decision_payload ?? disputeHeader?.decision_payload ?? null;
   const disputeTotalPaidAmount = Math.max(
     parseAmount(disputeHeader?.total_paid_amount) ??
-    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
-      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
-        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).total_paid_amount
-        : null
-      : null) ??
+    extractMoneyField(disputePayload, "total_paid_amount") ??
     getDisputeTotalPaidValue(serviceChatTotals, disputeHeader ?? ({} as DisputesQueueRow)) ??
     0,
     0,
   );
-  const disputePlatformFeeAmount = Math.max(
-    parseAmount(disputeHeader?.platform_fee_amount) ??
-    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
-      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
-        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).platform_fee_amount
-        : null
-      : null) ??
+  const disputeCustomerPlatformFeeAmount = Math.max(
+    parseAmount(disputeHeader?.customer_platform_fee_amount) ??
+    extractMoneyField(disputePayload, "customer_platform_fee_amount") ??
+    extractMoneyField(disputePayload, "platform_fee_amount") ??
     0,
     0,
   );
-  const disputeServiceRateAmount = Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount, 0);
+  const disputeProviderPlatformFeeAmount = Math.max(
+    parseAmount(disputeHeader?.provider_platform_fee_amount) ??
+    extractMoneyField(disputePayload, "provider_platform_fee_amount") ??
+    extractMoneyField(disputePayload, "platform_fee_amount") ??
+    disputeCustomerPlatformFeeAmount,
+    0,
+  );
+  const disputeServiceRateAmount = Math.max(
+    parseAmount(disputeHeader?.service_rate_amount) ??
+    extractMoneyField(disputePayload, "service_rate_amount") ??
+    (disputeTotalPaidAmount - disputeCustomerPlatformFeeAmount),
+    0,
+  );
   const disputeExistingRefundAmount = Math.max(
     parseAmount(disputeHeader?.customer_refund_amount) ??
-    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
-      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
-        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).customer_refund_amount
-        : null
-      : null) ??
+    extractMoneyField(disputePayload, "customer_refund_amount") ??
     0,
+    0,
+  );
+  const disputeExistingProviderOnFullReleaseAmount = Math.max(
+    disputeServiceRateAmount - disputeProviderPlatformFeeAmount,
     0,
   );
   const disputeExistingProviderAmount = Math.max(
     parseAmount(disputeHeader?.provider_receives_amount) ??
-    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
-      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
-        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).provider_receives_amount
-        : null
-      : null) ??
-    Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount - disputeExistingRefundAmount, 0),
+    extractMoneyField(disputePayload, "provider_receives_amount") ??
+    disputeExistingProviderOnFullReleaseAmount,
+    0,
+  );
+  const disputeExistingHuddleRetainedAmount = Math.max(
+    parseAmount(disputeHeader?.huddle_retained_amount) ??
+    extractMoneyField(disputePayload, "huddle_retained_amount") ??
+    Math.max(disputeTotalPaidAmount - disputeExistingProviderAmount - disputeExistingRefundAmount, 0),
     0,
   );
   const disputeCurrencyCode =
@@ -1014,9 +1047,14 @@ const AdminSafety = () => {
       typeof (disputeHeader.decision_payload as Record<string, unknown>).source === "string"
         ? String((disputeHeader.decision_payload as Record<string, unknown>).source).toLowerCase()
         : "manual";
-    if (source === "sentinel") return "Sentinel";
+    if (source === "sentinel") return "Automation";
     return "Manual";
   })();
+  const reportLastActionLabel = reportHeader?.latest_action_source
+    ? reportHeader.latest_action_source === "sentinel"
+      ? "Last action: Automation"
+      : "Last action: Manual"
+    : "Last action: None";
 
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
@@ -1025,7 +1063,7 @@ const AdminSafety = () => {
     if (action.action === "hard_ban") return "Hard Ban";
     if (action.action === "mark_dismissed") return "Mark Dismissed";
     if (action.action === "mark_false_report") return "Mark False Report";
-    return action.pauseSentinel ? "Pause Sentinel" : "Resume Sentinel";
+    return action.pauseSentinel ? "Automation: Off" : "Automation: On";
   };
 
   const needsNote = (action: PendingReportAction) => {
@@ -1081,6 +1119,17 @@ const AdminSafety = () => {
     if (!userId) return;
     setProfilePreviewUserId(userId);
     setProfilePreviewName(fallbackName ?? "Profile");
+  };
+
+  const openMediaViewer = (items: Array<string | null | undefined>, title: string) => {
+    const normalized = items
+      .map((item, index) => ({ url: resolveStorageOrPublicUrl(item), label: `Item ${index + 1}` }))
+      .filter((item) => item.url.length > 0);
+    if (normalized.length === 0) return;
+    setMediaViewerTitle(title);
+    setMediaViewerItems(normalized);
+    setMediaViewerIndex(0);
+    setMediaViewerOpen(true);
   };
 
   const openReportActionConfirm = (action: PendingReportAction) => {
@@ -1153,10 +1202,10 @@ const AdminSafety = () => {
   const openDisputeActionConfirm = (action: DisputeDecisionAction) => {
     resetDisputeActionFeedback();
     setPendingDisputeAction({ action });
-    const defaultWaive = action === "full_refund";
-    setWaivePlatformFee(defaultWaive);
+    setWaiveCustomerPlatformFee(action === "full_refund");
+    setWaiveProviderPlatformFee(false);
     if (action === "partial_refund") {
-      const maxRefund = defaultWaive ? disputeTotalPaidAmount : disputeServiceRateAmount;
+      const maxRefund = disputeServiceRateAmount;
       const seedRefund = Math.min(disputeExistingRefundAmount, maxRefund);
       setPartialRefundInput(seedRefund > 0 ? seedRefund.toFixed(2) : "");
     } else {
@@ -1165,58 +1214,79 @@ const AdminSafety = () => {
   };
 
   const getPendingDisputeBreakdown = () => {
+    const totalPaid = disputeTotalPaidAmount;
+    const serviceRate = disputeServiceRateAmount;
+    const customerPlatformFee = disputeCustomerPlatformFeeAmount;
+    const providerPlatformFee = disputeProviderPlatformFeeAmount;
+
     if (!pendingDisputeAction) {
       return {
-        totalPaid: disputeTotalPaidAmount,
-        platformFee: disputePlatformFeeAmount,
-        serviceRate: disputeServiceRateAmount,
-        waivePlatformFee: false,
+        totalPaid,
+        serviceRate,
+        customerPlatformFee,
+        providerPlatformFee,
+        waiveCustomerPlatformFee: false,
+        waiveProviderPlatformFee: false,
+        providerReceivesOnFullRelease: Math.max(serviceRate - providerPlatformFee, 0),
         providerReceives: disputeExistingProviderAmount,
         customerRefunded: disputeExistingRefundAmount,
-        platformFeeRetained: disputePlatformFeeAmount,
+        huddleRetains: disputeExistingHuddleRetainedAmount,
       };
     }
 
-    const totalPaid = disputeTotalPaidAmount;
-    const platformFee = disputePlatformFeeAmount;
-    const serviceRate = disputeServiceRateAmount;
+    const providerFeeDeduction = waiveProviderPlatformFee ? 0 : providerPlatformFee;
+    const providerReceivesOnFullRelease = Math.max(serviceRate - providerFeeDeduction, 0);
     if (pendingDisputeAction.action === "release_full") {
+      const huddleRetains = Math.max(totalPaid - providerReceivesOnFullRelease, 0);
       return {
         totalPaid,
-        platformFee,
         serviceRate,
-        waivePlatformFee: false,
-        platformFeeRetained: platformFee,
-        providerReceives: serviceRate,
+        customerPlatformFee,
+        providerPlatformFee,
+        waiveCustomerPlatformFee,
+        waiveProviderPlatformFee,
+        providerReceivesOnFullRelease,
+        providerReceives: providerReceivesOnFullRelease,
         customerRefunded: 0,
+        huddleRetains,
       };
     }
+
     if (pendingDisputeAction.action === "full_refund") {
-      const platformFeeRetained = waivePlatformFee ? 0 : platformFee;
-      const customerRefunded = waivePlatformFee ? totalPaid : serviceRate;
+      const customerRefunded = serviceRate + (waiveCustomerPlatformFee ? customerPlatformFee : 0);
+      const providerReceives = 0;
+      const huddleRetains = Math.max(totalPaid - customerRefunded - providerReceives, 0);
       return {
         totalPaid,
-        platformFee,
         serviceRate,
-        waivePlatformFee,
-        platformFeeRetained,
-        providerReceives: 0,
+        customerPlatformFee,
+        providerPlatformFee,
+        waiveCustomerPlatformFee,
+        waiveProviderPlatformFee,
+        providerReceivesOnFullRelease,
+        providerReceives,
         customerRefunded,
+        huddleRetains,
       };
     }
 
     const parsedRefund = parseAmount(partialRefundInput) ?? 0;
-    const maxRefund = waivePlatformFee ? totalPaid : serviceRate;
+    const maxRefund = serviceRate + (waiveCustomerPlatformFee ? customerPlatformFee : 0);
     const clampedRefund = Math.max(Math.min(parsedRefund, maxRefund), 0);
-    const platformFeeRetained = waivePlatformFee ? 0 : platformFee;
+    const serviceRefundPortion = Math.max(Math.min(clampedRefund, serviceRate), 0);
+    const providerReceives = Math.max(serviceRate - serviceRefundPortion - providerFeeDeduction, 0);
+    const huddleRetains = Math.max(totalPaid - clampedRefund - providerReceives, 0);
     return {
       totalPaid,
-      platformFee,
       serviceRate,
-      waivePlatformFee,
-      platformFeeRetained,
-      providerReceives: Math.max(totalPaid - platformFeeRetained - clampedRefund, 0),
+      customerPlatformFee,
+      providerPlatformFee,
+      waiveCustomerPlatformFee,
+      waiveProviderPlatformFee,
+      providerReceivesOnFullRelease,
+      providerReceives,
       customerRefunded: clampedRefund,
+      huddleRetains,
     };
   };
 
@@ -1236,7 +1306,7 @@ const AdminSafety = () => {
         setDisputeActionError("Enter a valid partial refund amount.");
         return;
       }
-      const maxRefund = waivePlatformFee ? disputeTotalPaidAmount : disputeServiceRateAmount;
+      const maxRefund = disputeServiceRateAmount + (waiveCustomerPlatformFee ? disputeCustomerPlatformFeeAmount : 0);
       refundAmount = Math.max(Math.min(parsed, maxRefund), 0);
     }
 
@@ -1251,7 +1321,8 @@ const AdminSafety = () => {
         p_action: pendingDisputeAction.action,
         p_note: trimmedNote,
         p_customer_refund_amount: refundAmount,
-        p_waive_platform_fee: pendingDisputeAction.action === "release_full" ? false : waivePlatformFee,
+        p_waive_customer_platform_fee: pendingDisputeAction.action === "release_full" ? false : waiveCustomerPlatformFee,
+        p_waive_provider_platform_fee: waiveProviderPlatformFee,
       } as never,
     );
 
@@ -1756,8 +1827,8 @@ const AdminSafety = () => {
                       auditSorted.map((row) => (
                         <tr key={row.audit_id} className="border-b last:border-b-0 align-top hover:bg-muted/30">
                           <td className="px-3 py-2">
-                            <span className={row.action_source === "sentinel" ? sentinelBadgeClasses : badgeClasses}>
-                              {row.action_source === "sentinel" ? "Sentinel" : "Manual"}
+                            <span className={row.action_source === "sentinel" ? automationBadgeClasses : badgeClasses}>
+                              {row.action_source === "sentinel" ? "Automation" : "Manual"}
                             </span>
                           </td>
                           <td className="px-3 py-2">
@@ -1807,16 +1878,19 @@ const AdminSafety = () => {
                     <div>Total score: {reportHeader?.total_score ?? 0}</div>
                     <div>Latest: {formatDateTime(reportHeader?.latest_report_at ?? null)}</div>
                     <div>Case status: {formatCaseStatus(currentCaseStatus)}</div>
-                    <div>Latest source: {reportHeader?.latest_action_source === "sentinel" ? "Sentinel" : "Manual"}</div>
+                    <div>Automation: {currentAutomationPaused ? "Off" : "On"}</div>
+                    <div>{reportLastActionLabel}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <span className={badgeClasses}>Moderation: {currentReportState}</span>
-                    <span className={badgeClasses}>
-                      {currentAutomationPaused ? "Sentinel Paused" : "Sentinel Active"}
+                    <span className={badgeClasses}>Moderation: {formatModerationState(currentReportState)}</span>
+                    <span className={currentAutomationPaused ? badgeClasses : automationBadgeClasses}>
+                      {currentAutomationPaused ? "Automation: Off" : "Automation: On"}
                     </span>
-                    <span className={reportHeader?.latest_action_source === "sentinel" ? sentinelBadgeClasses : badgeClasses}>
-                      {reportHeader?.latest_action_source === "sentinel" ? "Sentinel" : "Manual"}
-                    </span>
+                    {reportHeader?.latest_action_source ? (
+                      <span className={reportHeader.latest_action_source === "sentinel" ? automationBadgeClasses : badgeClasses}>
+                        {reportHeader.latest_action_source === "sentinel" ? "Last action: Automation" : "Last action: Manual"}
+                      </span>
+                    ) : null}
                     {reportDrawerIsDemo ? (
                       <span className={demoBadgeClasses}>Demo Fixture</span>
                     ) : null}
@@ -1889,18 +1963,19 @@ const AdminSafety = () => {
                           ))}
                         </div>
                         <div className="whitespace-pre-wrap break-words">{row.details ?? "-"}</div>
-                        <div>Attachments: {(row.attachment_urls ?? []).length}</div>
-                        {(row.attachment_urls ?? []).length > 0 ? (
-                          <div className="space-y-1">
-                            {(row.attachment_urls ?? []).map((url, index) => (
-                              <div key={`${row.report_id}-att-${index}`} className="text-xs">
-                                <a href={resolveStorageOrPublicUrl(url)} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
-                                  Attachment {index + 1}
-                                </a>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+                        <div className="flex items-center gap-2">
+                          <span>Attachments: {(row.attachment_urls ?? []).length}</span>
+                          {(row.attachment_urls ?? []).length > 0 ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openMediaViewer(row.attachment_urls ?? [], "Report Attachments")}
+                            >
+                              View
+                            </Button>
+                          ) : null}
+                        </div>
                         {row.support_subject ? (
                           <div className="text-xs text-muted-foreground">
                             Linked Support Ticket: {row.support_subject}
@@ -1949,9 +2024,9 @@ const AdminSafety = () => {
                   </div>
 
                   <div className="rounded-md border p-3">
-                    <div className="mb-2 text-xs font-medium text-muted-foreground">Pause Sentinel</div>
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">Automation</div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm">{currentAutomationPaused ? "Paused" : "Active"}</span>
+                      <span className="text-sm">{currentAutomationPaused ? "Automation: Off" : "Automation: On"}</span>
                       <Switch
                         checked={currentAutomationPaused}
                         onCheckedChange={(checked) =>
@@ -1999,7 +2074,7 @@ const AdminSafety = () => {
                         })
                       }
                     >
-                      Pause Sentinel
+                      {currentAutomationPaused ? "Automation: On" : "Automation: Off"}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "mark_dismissed" })}>
                       Mark Dismissed
@@ -2102,23 +2177,19 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Dispute Detail</h3>
                         <div className="whitespace-pre-wrap break-words">{stripDemoFixtureMarker(disputeCasefile?.description)}</div>
                   <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
-                  <div>Evidence URLs: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</div>
-                  {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
-                    <div className="space-y-1">
-                      {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).map((url, index) => (
-                        <div key={`${selectedDisputeId}-evidence-${index}`} className="text-xs">
-                          <a
-                            href={resolveStorageOrPublicUrl(url)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline decoration-dotted underline-offset-2"
-                          >
-                            Evidence {index + 1}
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <span>Evidence: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</span>
+                    {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openMediaViewer(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [], "Dispute Evidence")}
+                      >
+                        View
+                      </Button>
+                    ) : null}
+                  </div>
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
@@ -2146,12 +2217,20 @@ const AdminSafety = () => {
                       <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeTotalPaidAmount)}</div>
                     </div>
                     <div>
-                      <div className="text-xs text-muted-foreground">Platform Fee</div>
-                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputePlatformFeeAmount)}</div>
-                    </div>
-                    <div>
                       <div className="text-xs text-muted-foreground">Service Rate</div>
                       <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeServiceRateAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Customer Platform Fee</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeCustomerPlatformFeeAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Provider Platform Fee</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeProviderPlatformFeeAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Provider Receives (Full Release)</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingProviderOnFullReleaseAmount)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Provider Receives</div>
@@ -2160,6 +2239,10 @@ const AdminSafety = () => {
                     <div>
                       <div className="text-xs text-muted-foreground">Customer Refunded</div>
                       <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingRefundAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Huddle Retains</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingHuddleRetainedAmount)}</div>
                     </div>
                   </div>
 
@@ -2244,7 +2327,7 @@ const AdminSafety = () => {
                         <div className="font-mono text-[10px] text-muted-foreground/80">{identity.fallback}</div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>Moderation state: {formatModerationState(userRow.moderation_state)}</div>
-                          <div>Sentinel: {userRow.automation_paused ? "Paused" : "Active"}</div>
+                          <div>Automation: {userRow.automation_paused ? "Off" : "On"}</div>
                           <div>Reports received: {userRow.reports_received ?? 0}</div>
                           <div>Reports filed: {userRow.reports_filed ?? 0}</div>
                           <div>False reports: {userRow.false_report_count ?? 0}</div>
@@ -2379,6 +2462,68 @@ const AdminSafety = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={mediaViewerOpen}
+        onOpenChange={(open) => {
+          setMediaViewerOpen(open);
+          if (!open) {
+            setMediaViewerItems([]);
+            setMediaViewerIndex(0);
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl max-h-[86vh] overflow-y-auto !z-[9500]">
+          <DialogHeader>
+            <DialogTitle>{mediaViewerTitle}</DialogTitle>
+            <DialogDescription>
+              {mediaViewerItems.length > 0 ? `Item ${mediaViewerIndex + 1} of ${mediaViewerItems.length}` : "No media items."}
+            </DialogDescription>
+          </DialogHeader>
+          {mediaViewerItems.length > 0 ? (
+            <div className="space-y-3">
+              <div className="rounded-md border bg-muted/20 p-2">
+                {/\.(png|jpg|jpeg|gif|webp|bmp|svg)(\?.*)?$/i.test(mediaViewerItems[mediaViewerIndex].url) ? (
+                  <img
+                    src={mediaViewerItems[mediaViewerIndex].url}
+                    alt={mediaViewerItems[mediaViewerIndex].label}
+                    className="mx-auto max-h-[60vh] w-auto rounded-md object-contain"
+                  />
+                ) : (
+                  <iframe
+                    src={mediaViewerItems[mediaViewerIndex].url}
+                    title={mediaViewerItems[mediaViewerIndex].label}
+                    className="h-[60vh] w-full rounded-md border bg-white"
+                  />
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={mediaViewerIndex <= 0}
+                  onClick={() => setMediaViewerIndex((prev) => Math.max(prev - 1, 0))}
+                >
+                  Prev
+                </Button>
+                <div className="text-xs text-muted-foreground">
+                  {mediaViewerItems[mediaViewerIndex].url}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={mediaViewerIndex >= mediaViewerItems.length - 1}
+                  onClick={() => setMediaViewerIndex((prev) => Math.min(prev + 1, mediaViewerItems.length - 1))}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No media to preview.</div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <PublicProfileSheet
         isOpen={Boolean(profilePreviewUserId)}
         onClose={() => {
@@ -2489,16 +2634,28 @@ const AdminSafety = () => {
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().totalPaid)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Platform Fee</div>
-                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().platformFee)}</div>
-                </div>
-                <div>
                   <div className="text-xs text-muted-foreground">Service Rate</div>
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().serviceRate)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">Waive Platform Fee</div>
-                  <div className="font-medium">{getPendingDisputeBreakdown().waivePlatformFee ? "Yes" : "No"}</div>
+                  <div className="text-xs text-muted-foreground">Customer Platform Fee</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().customerPlatformFee)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Provider Platform Fee</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().providerPlatformFee)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Waive Platform Fee from Customer</div>
+                  <div className="font-medium">{getPendingDisputeBreakdown().waiveCustomerPlatformFee ? "Yes" : "No"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Waive Platform Fee from Provider</div>
+                  <div className="font-medium">{getPendingDisputeBreakdown().waiveProviderPlatformFee ? "Yes" : "No"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Provider Receives on Full Release</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().providerReceivesOnFullRelease)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Provider Receives</div>
@@ -2508,23 +2665,35 @@ const AdminSafety = () => {
                   <div className="text-xs text-muted-foreground">Customer Refunded</div>
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().customerRefunded)}</div>
                 </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Huddle Retains</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().huddleRetains)}</div>
+                </div>
               </div>
 
-              {pendingDisputeAction.action === "partial_refund" || pendingDisputeAction.action === "full_refund" ? (
+              <div className="space-y-2 rounded-md border p-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    checked={waivePlatformFee}
-                    onChange={(event) => setWaivePlatformFee(event.target.checked)}
+                    checked={waiveCustomerPlatformFee}
+                    onChange={(event) => setWaiveCustomerPlatformFee(event.target.checked)}
                   />
-                  <span>Waive platform fee</span>
+                  <span>Waive platform fee from Customer</span>
                 </label>
-              ) : null}
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={waiveProviderPlatformFee}
+                    onChange={(event) => setWaiveProviderPlatformFee(event.target.checked)}
+                  />
+                  <span>Waive platform fee from Provider</span>
+                </label>
+              </div>
 
               {pendingDisputeAction.action === "partial_refund" ? (
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground" htmlFor="partial-refund-amount">
-                    Partial refund amount
+                    Partial refund amount (customer refunded)
                   </label>
                   <input
                     id="partial-refund-amount"
@@ -2534,7 +2703,7 @@ const AdminSafety = () => {
                     value={partialRefundInput}
                     onChange={(event) => setPartialRefundInput(event.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, waivePlatformFee ? disputeTotalPaidAmount : disputeServiceRateAmount)})`}
+                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, disputeServiceRateAmount + (waiveCustomerPlatformFee ? disputeCustomerPlatformFeeAmount : 0))})`}
                   />
                 </div>
               ) : null}

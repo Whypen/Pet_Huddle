@@ -115,6 +115,9 @@ begin
         'serviceTypes', jsonb_build_array('Pet Grooming'),
         'currency', 'HKD',
         'finalPrice', '110.00',
+        'service_rate_amount', '100.00',
+        'customer_platform_fee_amount', '10.00',
+        'provider_platform_fee_amount', '10.00',
         'platform_fee_amount', '10.00',
         'rate', 'fixed'
       ),
@@ -145,6 +148,9 @@ begin
         'serviceTypes', jsonb_build_array('Boarding'),
         'currency', 'HKD',
         'finalPrice', '220.00',
+        'service_rate_amount', '200.00',
+        'customer_platform_fee_amount', '20.00',
+        'provider_platform_fee_amount', '20.00',
         'platform_fee_amount', '20.00',
         'rate', 'fixed'
       ),
@@ -192,9 +198,15 @@ begin
         'money', jsonb_build_object(
           'currency', 'hkd',
           'total_paid_amount', 110.00,
+          'service_rate_amount', 100.00,
+          'customer_platform_fee_amount', 10.00,
+          'provider_platform_fee_amount', 10.00,
           'platform_fee_amount', 10.00,
-          'provider_receives_amount', 0,
-          'customer_refund_amount', 0
+          'waive_customer_platform_fee', false,
+          'waive_provider_platform_fee', false,
+          'provider_receives_amount', 90.00,
+          'customer_refund_amount', 0,
+          'huddle_retained_amount', 20.00
         )
       ),
       null,
@@ -223,9 +235,15 @@ begin
         'money', jsonb_build_object(
           'currency', 'hkd',
           'total_paid_amount', 220.00,
+          'service_rate_amount', 200.00,
+          'customer_platform_fee_amount', 20.00,
+          'provider_platform_fee_amount', 20.00,
           'platform_fee_amount', 20.00,
-          'provider_receives_amount', 0,
-          'customer_refund_amount', 0
+          'waive_customer_platform_fee', false,
+          'waive_provider_platform_fee', false,
+          'provider_receives_amount', 180.00,
+          'customer_refund_amount', 0,
+          'huddle_retained_amount', 40.00
         )
       ),
       null,
