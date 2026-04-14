@@ -1443,7 +1443,7 @@ const AdminSafety = () => {
         </Tabs>
       )}
 
-      <Sheet open={caseSelection !== null} onOpenChange={(open) => !open && setCaseSelection(null)}>
+      <Sheet modal={false} open={caseSelection !== null} onOpenChange={(open) => !open && setCaseSelection(null)}>
         <SheetContent side="right" className="w-full sm:max-w-[720px] lg:max-w-[860px] overflow-y-auto">
           {caseSelection?.type === "report" && (
             <>
