@@ -81,6 +81,14 @@ const Auth = () => {
   }, [showTurnstileDiag]);
 
   useEffect(() => {
+    if (loginTurnstile.isTokenUsable || loginTurnstile.error) {
+      setAuthError((current) => (
+        current === "Complete human verification first." ? "" : current
+      ));
+    }
+  }, [loginTurnstile.error, loginTurnstile.isTokenUsable]);
+
+  useEffect(() => {
     if (!blockedMessageFromState) return;
     setAuthError(blockedMessageFromState);
     toast.error(blockedMessageFromState);
@@ -137,7 +145,9 @@ const Auth = () => {
     if (!values.email) return;
     const turnstileToken = readLoginTurnstileToken();
     if (!turnstileToken) {
-      setAuthError("Complete human verification first.");
+      if (loginTurnstile.error) {
+        setAuthError(loginTurnstile.error);
+      }
       return;
     }
     const result = await signIn(values.email, values.password, undefined, turnstileToken);

@@ -20,7 +20,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     flowState !== "idle";
   const onboardingComplete = isRegisteredUserProfile(profile);
 
-  if (loading || hydrating) {
+  if (loading || (hydrating && !profile)) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />

@@ -153,6 +153,13 @@ function normalizePhoneForCompare(value: string | null | undefined): string {
   return String(value || "").trim().replace(/\D/g, "");
 }
 
+function parseTimestampMs(value: unknown): number {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 // ── Logger helper ─────────────────────────────────────────────────────────────
 // Uses service_role client — bypasses RLS for insert.
 
@@ -415,37 +422,54 @@ Deno.serve(async (req: Request) => {
   let sendError: string | null = null;
 
   if (accessToken && userId) {
+    const { data: { user: currentUser }, error: currentUserErr } =
+      await serviceClient.auth.getUser(accessToken);
+    if (currentUserErr || !currentUser) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: CORS,
+      });
+    }
+    const currentUserObj = currentUser as Record<string, unknown>;
+    const targetPhone = normalizePhoneForCompare(rawPhone);
+    const previousSentAtMs = parseTimestampMs(currentUserObj.phone_change_sent_at);
+
     // Call /auth/v1/user PUT directly with the user's JWT.
     // supabase-js auth.updateUser() throws "Auth session missing!" when
     // persistSession:false because it reads from internal session state,
     // not from global.headers.Authorization. The REST call is identical
     // to what auth.updateUser() does internally and avoids that check.
+    const authHeaders = {
+      "Authorization": `Bearer ${accessToken}`,
+      "apikey": anonKey,
+      "Content-Type": "application/json",
+    };
+
     const authResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
       method: "PUT",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "apikey": anonKey,
-        "Content-Type": "application/json",
-      },
+      headers: authHeaders,
       body: JSON.stringify({ phone: rawPhone }),
     });
     const authBody = await authResp.json().catch(() => ({})) as Record<string, unknown>;
+
     if (!authResp.ok) {
       sendError = authBody.msg || authBody.message || authBody.error_description || `auth_update_failed_${authResp.status}`;
     } else {
-      const userObj = (authBody.user && typeof authBody.user === "object")
-        ? (authBody.user as Record<string, unknown>)
-        : authBody;
-      const targetPhone = normalizePhoneForCompare(rawPhone);
-      const phoneChange = normalizePhoneForCompare(
-        String(userObj?.new_phone || userObj?.phone_change || ""),
-      );
-      const phoneChangeSentAt = String(userObj?.phone_change_sent_at || "").trim();
-      // Supabase may return phone_change without a leading "+".
-      // Compare canonical digits only and trust phone_change_sent_at as the
-      // authoritative signal that a phone-change OTP was dispatched.
-      if (!userObj || !phoneChange || phoneChange !== targetPhone || !phoneChangeSentAt) {
+      const { data: { user: refreshedUser }, error: refreshedErr } =
+        await serviceClient.auth.getUser(accessToken);
+      if (refreshedErr || !refreshedUser) {
         sendError = "provider_send_failed";
+      } else {
+        const refreshedUserObj = refreshedUser as Record<string, unknown>;
+        const pendingPhone = normalizePhoneForCompare(
+          String(refreshedUserObj.new_phone ?? refreshedUserObj.phone_change ?? ""),
+        );
+        const sentAtMs = parseTimestampMs(refreshedUserObj.phone_change_sent_at);
+        const sentAtAdvanced = sentAtMs > previousSentAtMs;
+        // Treat send as successful only when Supabase reflects the target pending
+        // phone and the send timestamp actually advanced for this request/resend.
+        if (!pendingPhone || pendingPhone !== targetPhone || sentAtMs <= 0 || !sentAtAdvanced) {
+          sendError = "provider_send_failed";
+        }
       }
     }
   } else {

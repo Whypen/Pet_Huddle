@@ -321,7 +321,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     clearSignupScopedStorage([]);
   }, [clearTransientUserStorage, isHydrationRunCurrent]);
 
-  const fetchProfile = useCallback(async (userId: string, runId: number) => {
+  const fetchProfile = useCallback(async (
+    userId: string,
+    runId: number,
+    options: { preserveExisting?: boolean } = {},
+  ) => {
+    const preserveExisting = options.preserveExisting === true;
     try {
       const { data, error } = await supabase
         .from("profiles")
@@ -331,7 +336,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!isHydrationRunCurrent(runId)) return;
       if (error) throw error;
       if (!data) {
-        setProfile(null);
+        if (!preserveExisting) {
+          setProfile(null);
+        }
         return;
       }
 
@@ -385,7 +392,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       if (!isHydrationRunCurrent(runId)) return;
       console.error("[AuthContext] fetchProfile failed", error);
-      setProfile(null);
+      if (!preserveExisting) {
+        setProfile(null);
+      }
     }
   }, [isHydrationRunCurrent]);
 
@@ -459,10 +468,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearSignupScopedStorage([previousUserIdRef.current, data.user.email, data.user.id]);
     }
 
+    const sameUserAsCurrent = previousUserIdRef.current === data.user.id;
+    const preserveExistingProfile = sameUserAsCurrent && Boolean(profile);
     previousUserIdRef.current = data.user.id;
-    setProfile(null);
+    if (!preserveExistingProfile) {
+      setProfile(null);
+    }
     setUser(data.user);
-    await fetchProfile(data.user.id, runId);
+    await fetchProfile(data.user.id, runId, { preserveExisting: preserveExistingProfile });
     if (!isHydrationRunCurrent(runId)) return;
     void touchProfileActivity();
     setLoading(false);
@@ -472,6 +485,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     clearTransientUserStorage,
     fetchProfile,
     isHydrationRunCurrent,
+    profile,
     resetAuthBoundary,
     touchProfileActivity,
   ]);
