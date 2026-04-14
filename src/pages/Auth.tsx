@@ -21,6 +21,7 @@ import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -54,7 +55,6 @@ const Auth = () => {
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(showTurnstileDiag);
   const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>(showTurnstileDiag ? "signin" : "choice");
-  const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
 
   // ── MFA challenge state ────────────────────────────────────────────────────
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
@@ -132,35 +132,6 @@ const Auth = () => {
     defaultValues: { remember: true },
   });
 
-  const clearAuthTokens = () => {
-    Object.keys(localStorage).forEach((key) => {
-      if (key.includes("auth-token") && key.startsWith("sb-")) {
-        localStorage.removeItem(key);
-      }
-      if (key.includes("supabase.auth.token")) {
-        localStorage.removeItem(key);
-      }
-    });
-  };
-
-  const disableSessionOnly = () => {
-    localStorage.setItem("huddle_stay_logged_in", "true");
-    if (sessionOnlyHandlerRef.current) {
-      window.removeEventListener("beforeunload", sessionOnlyHandlerRef.current);
-      window.removeEventListener("pagehide", sessionOnlyHandlerRef.current);
-      sessionOnlyHandlerRef.current = null;
-    }
-  };
-
-  const enableSessionOnly = () => {
-    localStorage.setItem("huddle_stay_logged_in", "false");
-    if (!sessionOnlyHandlerRef.current) {
-      sessionOnlyHandlerRef.current = clearAuthTokens;
-      window.addEventListener("beforeunload", clearAuthTokens);
-      window.addEventListener("pagehide", clearAuthTokens);
-    }
-  };
-
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
     if (!values.email) return;
@@ -178,10 +149,10 @@ const Auth = () => {
 
     if (values.remember) {
       localStorage.setItem("auth_login_identifier", values.email);
-      disableSessionOnly();
+      enablePersistentSession();
     } else {
       localStorage.removeItem("auth_login_identifier");
-      enableSessionOnly();
+      enableSessionOnlyAuth();
     }
 
     if (result.mfaRequired && result.mfaFactorId) {

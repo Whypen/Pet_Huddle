@@ -27,6 +27,7 @@ import { SignupShell } from "@/components/signup/SignupShell";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
+import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
@@ -95,7 +96,6 @@ const SignupCredentials = () => {
   const [signinError, setSigninError] = useState("");
   const [signinRemember, setSigninRemember] = useState(true);
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
-  const sessionOnlyHandlerRef = useRef<(() => void) | null>(null);
   const duplicateCheckRef = useRef(0);
   const loginTurnstile = useTurnstile("login");
   const presignupTurnstile = useTurnstile("send_pre_signup_verify");
@@ -475,31 +475,6 @@ const SignupCredentials = () => {
     }
   };
 
-  const clearAuthTokens = () => {
-    Object.keys(localStorage).forEach((key) => {
-      if (key.includes("auth-token") && key.startsWith("sb-")) localStorage.removeItem(key);
-      if (key.includes("supabase.auth.token")) localStorage.removeItem(key);
-    });
-  };
-
-  const disableSessionOnly = () => {
-    localStorage.setItem("huddle_stay_logged_in", "true");
-    if (sessionOnlyHandlerRef.current) {
-      window.removeEventListener("beforeunload", sessionOnlyHandlerRef.current);
-      window.removeEventListener("pagehide", sessionOnlyHandlerRef.current);
-      sessionOnlyHandlerRef.current = null;
-    }
-  };
-
-  const enableSessionOnly = () => {
-    localStorage.setItem("huddle_stay_logged_in", "false");
-    if (!sessionOnlyHandlerRef.current) {
-      sessionOnlyHandlerRef.current = clearAuthTokens;
-      window.addEventListener("beforeunload", clearAuthTokens);
-      window.addEventListener("pagehide", clearAuthTokens);
-    }
-  };
-
   // ── Hint text helper ────────────────────────────────────────────────────────
 
   // OAuth onboarding CTA requirements (all must pass):
@@ -805,10 +780,10 @@ const SignupCredentials = () => {
 
                   if (signinRemember) {
                     localStorage.setItem("auth_login_identifier", signinEmail);
-                    disableSessionOnly();
+                    enablePersistentSession();
                   } else {
                     localStorage.removeItem("auth_login_identifier");
-                    enableSessionOnly();
+                    enableSessionOnlyAuth();
                   }
 
                   toast.success("Signed in successfully");

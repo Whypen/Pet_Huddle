@@ -14,7 +14,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { SETPROFILE_PREFILL_KEY, SIGNUP_VERIFY_SUBMITTED_KEY } from "@/lib/signupOnboarding";
+import {
+  SETPROFILE_PREFILL_KEY,
+  SIGNUP_VERIFY_SUBMITTED_KEY,
+  buildScopedStorageKey,
+  normalizeStorageOwner,
+} from "@/lib/signupOnboarding";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -47,15 +52,27 @@ const SignupVerify = () => {
 
   const snapshotSetProfilePrefill = () => {
     try {
-      localStorage.setItem(
-        SETPROFILE_PREFILL_KEY,
-        JSON.stringify({
+      const owner = normalizeStorageOwner(data.email || "");
+      const payload = {
+        prefill_owner: owner,
+        form_data: {
           display_name: data.display_name || "",
           social_id: data.social_id || "",
           phone: data.phone || "",
           dob: data.dob || "",
-        }),
+          legal_name: data.legal_name || "",
+        },
+        display_name: data.display_name || "",
+        social_id: data.social_id || "",
+        phone: data.phone || "",
+        dob: data.dob || "",
+        legal_name: data.legal_name || "",
+      };
+      localStorage.setItem(
+        owner ? buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner) : SETPROFILE_PREFILL_KEY,
+        JSON.stringify(payload),
       );
+      localStorage.setItem(SETPROFILE_PREFILL_KEY, JSON.stringify(payload));
     } catch {
       // no-op
     }

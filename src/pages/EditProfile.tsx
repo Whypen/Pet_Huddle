@@ -752,7 +752,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const cachedPrefill = (() => {
       if (!prefillKey || !allowLocalPrefill) return {} as Record<string, unknown>;
       try {
-        const raw = localStorage.getItem(prefillKey) || "{}";
+        const raw = localStorage.getItem(prefillKey) || localStorage.getItem(SETPROFILE_PREFILL_KEY) || "{}";
         return JSON.parse(raw) as Record<string, unknown>;
       } catch {
         return {} as Record<string, unknown>;
@@ -801,6 +801,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupSeedOwner = normalizeStorageOwner(signupData.email || "");
     const authSeedOwner = normalizeStorageOwner(user?.email || user?.id || "");
     const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
+    const authMetadata = (user?.user_metadata as Record<string, unknown> | null) ?? null;
+    const authPhoneSeed = String(user?.phone || authMetadata?.phone_e164 || "").trim();
     const signupDob = allowSignupSeed ? signupData.dob : "";
     const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
     const signupSocialId = allowSignupSeed ? signupData.social_id : "";
@@ -808,7 +810,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupLegalName = allowSignupSeed ? signupData.legal_name : "";
     const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name");
     const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name");
-    const phone = profile?.phone || signupPhone || cachedValue("phone");
+    const phone = profile?.phone || signupPhone || cachedValue("phone") || authPhoneSeed;
     const dob = profile?.dob || signupDob || cachedValue("dob");
     const bio = profile?.bio || cachedValue("bio");
     // Normalise to DB constraint: lowercase, only a-z 0-9 . _

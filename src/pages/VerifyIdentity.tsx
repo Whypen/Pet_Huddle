@@ -896,7 +896,7 @@ export function VerifyIdentity({
   const navigate = useNavigate();
   const location = useLocation();
   const { user, profile, loading: authLoading, refreshProfile } = useAuth();
-  const { flowState, setFlowState, data: signupData } = useSignup();
+  const { flowState, setFlowState, data: signupData, update: updateSignupData } = useSignup();
   const showTurnstileDiag = useMemo(
     () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
     [location.search],
@@ -1776,6 +1776,7 @@ export function VerifyIdentity({
     setPhoneVerificationState("verified");
     setPhoneVerificationError(null);
     setPhoneOtpCode("");
+    updateSignupData({ phone: normalizedPhone, otp_verified: true });
     if (user?.id) {
       try {
         await supabase.from("profiles").update({ phone: normalizedPhone }).eq("id", user.id);
@@ -1784,19 +1785,29 @@ export function VerifyIdentity({
           console.debug("[VerifyIdentity.phone] profile phone update failed", error);
         }
       }
-      if (profile?.id === user.id) {
-        const { error: verificationError } = await supabase.from("verification_requests").insert({
-          user_id: user.id,
-          request_type: "phone",
-          status: "approved",
-          provider: "supabase",
-          submitted_data: { phone: normalizedPhone },
-          verification_result: { status: "approved" },
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            phone_verified_local: true,
+            phone_e164: normalizedPhone,
+          },
         });
-        if (verificationError) {
-          if (import.meta.env.DEV) {
-            console.debug("[VerifyIdentity.phone] verification_requests insert failed", verificationError);
-          }
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.debug("[VerifyIdentity.phone] metadata update failed", error);
+        }
+      }
+      const { error: verificationError } = await supabase.from("verification_requests").insert({
+        user_id: user.id,
+        request_type: "phone",
+        status: "approved",
+        provider: "supabase",
+        submitted_data: { phone: normalizedPhone },
+        verification_result: { status: "approved" },
+      });
+      if (verificationError) {
+        if (import.meta.env.DEV) {
+          console.debug("[VerifyIdentity.phone] verification_requests insert failed", verificationError);
         }
       }
     }
