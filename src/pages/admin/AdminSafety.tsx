@@ -1626,14 +1626,6 @@ const AdminSafety = () => {
                     >
                       {disputeHeader?.service_chat_id ?? "-"}
                     </button>{" "}
-                    <a
-                      href={`/service-chat?room=${disputeHeader?.service_chat_id ?? ""}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-2 text-xs underline decoration-dotted underline-offset-2"
-                    >
-                      Open Route
-                    </a>
                   </div>
                   <div className="font-mono text-xs">Payment intent: {disputeHeader?.stripe_payment_intent_id ?? "-"}</div>
                 </section>
