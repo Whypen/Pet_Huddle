@@ -47,6 +47,9 @@ type OtpSendReasonCode =
   | "rate_limited"
   | "already_verified"
   | "user_not_found"
+  | "phone_in_use"
+  | "invalid_phone"
+  | "session_missing"
   | "provider_send_failed";
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
@@ -88,6 +91,31 @@ function getClientIp(req: Request): string {
 
 function classifyOtpSendError(raw: string): OtpSendReasonCode {
   const message = String(raw || "").toLowerCase();
+  if (
+    message.includes("same phone number") ||
+    message.includes("already been registered") ||
+    message.includes("already registered") ||
+    message.includes("already in use") ||
+    message.includes("already used")
+  ) {
+    return "phone_in_use";
+  }
+  if (
+    message.includes("invalid phone") ||
+    message.includes("phone number is invalid") ||
+    message.includes("not a valid phone") ||
+    message.includes("sms phone number")
+  ) {
+    return "invalid_phone";
+  }
+  if (
+    message.includes("unauthorized") ||
+    message.includes("invalid jwt") ||
+    message.includes("jwt") ||
+    message.includes("auth_update_failed_401")
+  ) {
+    return "session_missing";
+  }
   if (
     message.includes("provider") ||
     message.includes("twilio") ||
@@ -435,6 +463,14 @@ Deno.serve(async (req: Request) => {
       ? 429
       : reasonCode === "sms_region_blocked"
         ? 403
+        : reasonCode === "already_verified"
+          ? 409
+          : reasonCode === "phone_in_use"
+            ? 409
+            : reasonCode === "invalid_phone"
+              ? 400
+              : reasonCode === "session_missing"
+                ? 401
         : 500;
     await logAttempt(serviceClient, {
       phoneHash, ip: clientIp,

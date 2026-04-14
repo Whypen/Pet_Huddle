@@ -38,6 +38,9 @@ type SendOtpReasonCode =
   | "rate_limited"
   | "already_verified"
   | "user_not_found"
+  | "phone_in_use"
+  | "invalid_phone"
+  | "session_missing"
   | "provider_send_failed";
 
 type VerifyOtpReasonCode =
@@ -113,6 +116,12 @@ const mapSendOtpFailure = (
   }
   if (statusCode === 401 || raw.includes("unauthorized") || raw.includes("jwt") || raw.includes("auth_required")) {
     return { message: "Please sign in again and try once more.", unavailable: false };
+  }
+  if (reasonCode === "phone_in_use" || raw.includes("already used by another account") || raw.includes("already in use") || raw.includes("already been registered")) {
+    return { message: "This phone number is already used by another account.", unavailable: false };
+  }
+  if (reasonCode === "invalid_phone" || raw.includes("invalid phone")) {
+    return { message: "Enter a valid phone number.", unavailable: false };
   }
   if (statusCode === 403 && (raw.includes("turnstile") || raw.includes("human_verification"))) {
     return { message: "Please complete the verification first.", unavailable: false };
