@@ -193,7 +193,6 @@ type SortState<K extends string> = {
 type ReportAction =
   | "clear_restrictions"
   | "warn"
-  | "shadow_restrict"
   | "hard_ban"
   | "pause_sentinel"
   | "mark_dismissed"
@@ -212,6 +211,14 @@ type DisputeDecisionAction =
 
 type PendingDisputeAction = {
   action: DisputeDecisionAction;
+};
+
+type PendingRestrictionToggle = {
+  area: "reports" | "disputes";
+  targetUserId: string;
+  targetLabel: string;
+  key: RestrictionFlagKey;
+  nextEnabled: boolean;
 };
 
 type RestrictionFlagKey =
@@ -256,9 +263,19 @@ const restrictionFlagOptions: Array<{ key: RestrictionFlagKey; label: string; he
   { key: "social_posting_disabled", label: "Social Posting Disabled", helper: "User cannot create posts, comments, or replies." },
   { key: "marketplace_hidden", label: "Marketplace Hidden", helper: "User’s Carer/Provider profile is hidden from Service tab." },
   { key: "service_disabled", label: "Service Access Disabled", helper: "User cannot browse/request provider profiles or start service booking/request flows." },
-  { key: "map_hidden", label: "Map Hidden", helper: "User is incognito and not publicly visible on map." },
+  { key: "map_hidden", label: "Map Hidden", helper: "User is incognito and not publicly visible on map. Others cannot see this user, but the user can still see themselves on their own map." },
   { key: "map_disabled", label: "Map Disabled", helper: "User cannot pin alerts or create map alert pins." },
 ];
+
+const restrictionImpactCopy: Record<RestrictionFlagKey, string> = {
+  chat_disabled: "Blocks sending messages and starting chats.",
+  discovery_hidden: "Removes user from discovery visibility to other users.",
+  social_posting_disabled: "Blocks creating posts, comments, and replies.",
+  marketplace_hidden: "Hides provider/carer profile from Service surfaces.",
+  service_disabled: "Blocks requesting or starting service bookings.",
+  map_hidden: "Hides map visibility to other users while preserving self-view.",
+  map_disabled: "Blocks creating map pins and map alert reports.",
+};
 
 const parseNumberCandidate = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -496,6 +513,12 @@ const AdminSafety = () => {
   const [partialRefundInput, setPartialRefundInput] = useState("");
   const [waiveCustomerPlatformFee, setWaiveCustomerPlatformFee] = useState(false);
   const [waiveProviderPlatformFee, setWaiveProviderPlatformFee] = useState(false);
+  const [pendingRestrictionToggle, setPendingRestrictionToggle] = useState<PendingRestrictionToggle | null>(null);
+  const [restrictionToggleLoading, setRestrictionToggleLoading] = useState(false);
+  const [disputeRestrictionTarget, setDisputeRestrictionTarget] = useState<"requester" | "provider">("requester");
+  const [disputeParticipantRestrictions, setDisputeParticipantRestrictions] = useState<
+    Record<string, { marketplace_hidden: boolean; service_disabled: boolean }>
+  >({});
   const [mediaViewerOpen, setMediaViewerOpen] = useState(false);
   const [mediaViewerTitle, setMediaViewerTitle] = useState("Media Viewer");
   const [mediaViewerItems, setMediaViewerItems] = useState<MediaViewerItem[]>([]);
@@ -905,6 +928,28 @@ const AdminSafety = () => {
   }, [selectedDisputeId]);
 
   useEffect(() => {
+    if (!selectedDisputeId) {
+      setDisputeParticipantRestrictions({});
+      return;
+    }
+    const run = async () => {
+      const requesterId = disputeHeader?.requester_id ?? null;
+      const providerId = disputeHeader?.provider_id ?? null;
+      const entries = await Promise.all([
+        requesterId ? loadRestrictionPairForUser(requesterId).then((flags) => [requesterId, flags] as const) : null,
+        providerId ? loadRestrictionPairForUser(providerId).then((flags) => [providerId, flags] as const) : null,
+      ]);
+      const next: Record<string, { marketplace_hidden: boolean; service_disabled: boolean }> = {};
+      for (const entry of entries) {
+        if (!entry) continue;
+        next[entry[0]] = entry[1];
+      }
+      setDisputeParticipantRestrictions(next);
+    };
+    void run();
+  }, [selectedDisputeId, disputeHeader?.requester_id, disputeHeader?.provider_id]);
+
+  useEffect(() => {
     const loadUserTimeline = async () => {
       if (!selectedUserId) {
         setUserTimeline([]);
@@ -1069,7 +1114,6 @@ const AdminSafety = () => {
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
     if (action.action === "warn") return "Warn";
-    if (action.action === "shadow_restrict") return "Shadow Restrict";
     if (action.action === "hard_ban") return "Hard Ban";
     if (action.action === "mark_dismissed") return "Mark Dismissed";
     if (action.action === "mark_false_report") return "Mark False Report";
@@ -1099,6 +1143,111 @@ const AdminSafety = () => {
       setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
     }
     setRefreshing(false);
+  };
+
+  const loadRestrictionPairForUser = async (userId: string | null | undefined) => {
+    if (!userId) return { marketplace_hidden: false, service_disabled: false };
+    const [marketplaceRes, serviceRes] = await Promise.all([
+      supabase.rpc("is_user_restriction_active" as never, {
+        p_user_id: userId,
+        p_restriction_key: "marketplace_hidden",
+      } as never),
+      supabase.rpc("is_user_restriction_active" as never, {
+        p_user_id: userId,
+        p_restriction_key: "service_disabled",
+      } as never),
+    ]);
+    return {
+      marketplace_hidden: marketplaceRes.data === true,
+      service_disabled: serviceRes.data === true,
+    };
+  };
+
+  const refreshDisputeParticipantRestrictions = async () => {
+    const requesterId = disputeHeader?.requester_id ?? null;
+    const providerId = disputeHeader?.provider_id ?? null;
+    const entries = await Promise.all([
+      requesterId ? loadRestrictionPairForUser(requesterId).then((flags) => [requesterId, flags] as const) : null,
+      providerId ? loadRestrictionPairForUser(providerId).then((flags) => [providerId, flags] as const) : null,
+    ]);
+    const next: Record<string, { marketplace_hidden: boolean; service_disabled: boolean }> = {};
+    for (const entry of entries) {
+      if (!entry) continue;
+      next[entry[0]] = entry[1];
+    }
+    setDisputeParticipantRestrictions(next);
+  };
+
+  const executeRestrictionToggle = async (toggle: PendingRestrictionToggle) => {
+    if (restrictionToggleLoading) return;
+    setRestrictionToggleLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
+    const restrictionOption = restrictionFlagOptions.find((option) => option.key === toggle.key);
+    const note = moderatorNote.trim() || null;
+    const { error } = await supabase.rpc(
+      "admin_set_user_restriction" as never,
+      {
+        p_target_user_id: toggle.targetUserId,
+        p_restriction_key: toggle.key,
+        p_enabled: toggle.nextEnabled,
+        p_note: note,
+        p_source: "manual",
+      } as never,
+    );
+    setRestrictionToggleLoading(false);
+    if (error) {
+      if (toggle.area === "reports") {
+        setActionError(error.message || "Failed to update restriction.");
+      } else {
+        setDisputeActionError(error.message || "Failed to update dispute restriction.");
+      }
+      return;
+    }
+    if (toggle.area === "reports") {
+      setShadowFlags((prev) => ({ ...prev, [toggle.key]: toggle.nextEnabled }));
+      setActionSuccess(
+        `${restrictionOption?.label ?? toggle.key} ${toggle.nextEnabled ? "enabled" : "disabled"}${toggle.nextEnabled ? " (72h default)" : ""}.`,
+      );
+    } else {
+      setDisputeActionSuccess(
+        `${restrictionOption?.label ?? toggle.key} ${toggle.nextEnabled ? "enabled" : "disabled"} for ${toggle.targetLabel}.`,
+      );
+    }
+    await loadQueues();
+    if (selectedReportTargetId) await loadReportCasefile(selectedReportTargetId);
+    if (selectedDisputeId) {
+      await loadDisputeCasefile(selectedDisputeId);
+      await refreshDisputeParticipantRestrictions();
+    }
+    setPendingRestrictionToggle(null);
+  };
+
+  const handleRestrictionSwitch = (
+    area: "reports" | "disputes",
+    targetUserId: string | null | undefined,
+    targetLabel: string,
+    key: RestrictionFlagKey,
+    nextEnabled: boolean,
+  ) => {
+    if (!targetUserId) return;
+    if (nextEnabled) {
+      setPendingRestrictionToggle({
+        area,
+        targetUserId,
+        targetLabel,
+        key,
+        nextEnabled,
+      });
+      return;
+    }
+    void executeRestrictionToggle({
+      area,
+      targetUserId,
+      targetLabel,
+      key,
+      nextEnabled,
+    });
   };
 
   const openFalseReportAction = (reporterUserId: string | null) => {
@@ -1173,6 +1322,35 @@ const AdminSafety = () => {
     setActionError(null);
     setActionSuccess(null);
 
+    if (pendingAction.action === "clear_restrictions") {
+      const { error } = await supabase.rpc(
+        "admin_clear_user_restrictions" as never,
+        {
+          p_target_user_id: selectedReportTargetId,
+          p_note: trimmedNote || null,
+        } as never,
+      );
+      setActionLoading(false);
+      if (error) {
+        setActionError(error.message || "Failed to clear restrictions.");
+        return;
+      }
+      setShadowFlags({
+        chat_disabled: false,
+        discovery_hidden: false,
+        social_posting_disabled: false,
+        marketplace_hidden: false,
+        service_disabled: false,
+        map_hidden: false,
+        map_disabled: false,
+      });
+      setPendingAction(null);
+      setActionSuccess("Cleared all active restrictions.");
+      await loadQueues();
+      await loadReportCasefile(selectedReportTargetId);
+      return;
+    }
+
     const payload: Record<string, unknown> = {
       p_target_user_id: selectedReportTargetId,
       p_action: pendingAction.action,
@@ -1182,17 +1360,7 @@ const AdminSafety = () => {
       p_warn_message: pendingAction.action === "warn" ? warnMessageDraft.trim() : null,
     };
 
-    if (pendingAction.action === "shadow_restrict") {
-      const activeFlags = restrictionFlagOptions.reduce<Record<string, boolean>>((acc, option) => {
-        if (shadowFlags[option.key]) {
-          acc[option.key] = true;
-        }
-        return acc;
-      }, {});
-      payload.p_restriction_flags = activeFlags;
-    } else {
-      payload.p_restriction_flags = {};
-    }
+    payload.p_restriction_flags = {};
 
     const { data, error } = await supabase.rpc(
       "admin_apply_report_moderation" as never,
@@ -2025,7 +2193,17 @@ const AdminSafety = () => {
                             <Switch
                               checked={shadowFlags[flag.key]}
                               onCheckedChange={(checked) =>
-                                setShadowFlags((prev) => ({ ...prev, [flag.key]: checked }))
+                                handleRestrictionSwitch(
+                                  "reports",
+                                  selectedReportTargetId,
+                                  resolveIdentityLabel(
+                                    reportHeader?.target_display_name,
+                                    reportHeader?.target_social_id,
+                                    selectedReportTargetId,
+                                  ).name,
+                                  flag.key,
+                                  checked,
+                                )
                               }
                             />
                           </div>
@@ -2240,6 +2418,58 @@ const AdminSafety = () => {
                       <div className="text-xs text-muted-foreground">Huddle Retains</div>
                       <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingHuddleRetainedAmount)}</div>
                     </div>
+                  </div>
+
+                  <div className="rounded-md border p-3 space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">Dispute Restrictions (72h default)</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Apply to:</span>
+                      <select
+                        value={disputeRestrictionTarget}
+                        onChange={(event) => setDisputeRestrictionTarget(event.target.value as "requester" | "provider")}
+                        className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                      >
+                        <option value="requester">Requester</option>
+                        <option value="provider">Provider</option>
+                      </select>
+                    </div>
+                    {(() => {
+                      const targetUserId =
+                        disputeRestrictionTarget === "provider" ? (disputeHeader?.provider_id ?? null) : (disputeHeader?.requester_id ?? null);
+                      const targetLabel =
+                        disputeRestrictionTarget === "provider"
+                          ? resolveIdentityLabel(disputeHeader?.provider_display_name, disputeHeader?.provider_social_id, disputeHeader?.provider_id).name
+                          : resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).name;
+                      const targetRestrictions = targetUserId ? disputeParticipantRestrictions[targetUserId] : undefined;
+                      return (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                            <div>
+                              <div className="text-sm">Marketplace Hidden</div>
+                              <div className="text-xs text-muted-foreground">Hide provider profile from Service surfaces.</div>
+                            </div>
+                            <Switch
+                              checked={targetRestrictions?.marketplace_hidden === true}
+                              onCheckedChange={(checked) =>
+                                handleRestrictionSwitch("disputes", targetUserId, targetLabel, "marketplace_hidden", checked)
+                              }
+                            />
+                          </label>
+                          <label className="flex items-center justify-between rounded-md border px-3 py-2">
+                            <div>
+                              <div className="text-sm">Service Access Disabled</div>
+                              <div className="text-xs text-muted-foreground">Block starting booking/request flows.</div>
+                            </div>
+                            <Switch
+                              checked={targetRestrictions?.service_disabled === true}
+                              onCheckedChange={(checked) =>
+                                handleRestrictionSwitch("disputes", targetUserId, targetLabel, "service_disabled", checked)
+                              }
+                            />
+                          </label>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="space-y-2">
@@ -2539,6 +2769,45 @@ const AdminSafety = () => {
         canRequestService={false}
         zIndexBase={9200}
       />
+
+      <AlertDialog
+        open={pendingRestrictionToggle !== null}
+        onOpenChange={(open) => {
+          if (!open && !restrictionToggleLoading) setPendingRestrictionToggle(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Restriction</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRestrictionToggle
+                ? `${restrictionFlagOptions.find((option) => option.key === pendingRestrictionToggle.key)?.label ?? pendingRestrictionToggle.key} will be applied to ${pendingRestrictionToggle.targetLabel}.`
+                : "Confirm restriction update."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {pendingRestrictionToggle ? (
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <div>{restrictionImpactCopy[pendingRestrictionToggle.key]}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                This restriction lasts 72 hours by default and applies across sessions until expiry or manual clear.
+              </div>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restrictionToggleLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restrictionToggleLoading || !pendingRestrictionToggle}
+              onClick={(event) => {
+                event.preventDefault();
+                if (!pendingRestrictionToggle) return;
+                void executeRestrictionToggle(pendingRestrictionToggle);
+              }}
+            >
+              {restrictionToggleLoading ? "Applying..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={pendingAction !== null} onOpenChange={(open) => !open && setPendingAction(null)}>
         <AlertDialogContent>

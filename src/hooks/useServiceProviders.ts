@@ -67,9 +67,28 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
       if (rowsError) throw rowsError;
 
       const providerRows = rows ?? [];
-      const providerIds = providerRows
+      let providerIds = providerRows
         .map((row) => String((row as Record<string, unknown>).user_id ?? ""))
         .filter(Boolean);
+
+      if (providerIds.length > 0) {
+        const { data: hiddenRows, error: hiddenErr } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>,
+        ) => Promise<{ data: Array<{ user_id?: string }> | null; error: { message?: string } | null }>)(
+          "get_users_with_active_restriction",
+          { p_user_ids: providerIds, p_restriction_key: "marketplace_hidden" },
+        );
+        if (hiddenErr) throw hiddenErr;
+        const hiddenSet = new Set(
+          (hiddenRows ?? [])
+            .map((row) => String(row?.user_id || "").trim())
+            .filter(Boolean),
+        );
+        if (hiddenSet.size > 0) {
+          providerIds = providerIds.filter((id) => !hiddenSet.has(id));
+        }
+      }
 
       if (providerIds.length === 0) {
         setProviders([]);

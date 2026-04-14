@@ -27,6 +27,7 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -43,6 +44,7 @@ import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 import { detectSensitiveImage } from "@/lib/sensitiveContent";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 
 
 const tags = [
@@ -464,6 +466,7 @@ const buildFeedCursor = (thread?: Thread | null): FeedCursor | null => {
 export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef }: NoticeBoardProps) => {
   const { t } = useLanguage();
   const { user, profile } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const { showUpsellBanner } = useUpsellBanner();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -477,6 +480,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const lastCursorRef = useRef<{ created_at: string; id: string } | null>(null);
   const mentionTablesAvailableRef = useRef(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [socialRestrictionModalOpen, setSocialRestrictionModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -558,6 +562,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const remainingCreateWords = MAX_COMPOSER_WORDS - createWordsUsed;
   const PULL_REFRESH_THRESHOLD = 44;
   const PULL_REFRESH_DEBOUNCE_MS = 7000;
+  const isSocialPostingBlocked = isActive("social_posting_disabled");
 
   useEffect(() => {
     noticesRef.current = notices;
@@ -1618,9 +1623,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   useEffect(() => {
     if (composeSignal > 0) {
-      setIsCreateOpen(true);
+      if (isSocialPostingBlocked) {
+        setSocialRestrictionModalOpen(true);
+      } else {
+        setIsCreateOpen(true);
+      }
     }
-  }, [composeSignal]);
+  }, [composeSignal, isSocialPostingBlocked]);
 
   useEffect(() => {
     if (!MENTION_LIVE_SUGGESTIONS_ENABLED) {
@@ -2019,6 +2028,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const handleReply = async (thread: Thread) => {
+    if (isSocialPostingBlocked) {
+      setSocialRestrictionModalOpen(true);
+      return;
+    }
     if (!user) return;
     if (!thread?.id) {
       toast.info("Thread not available.");
@@ -2301,6 +2314,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [buildFallbackMentionEntries]);
 
   const handleCreateNotice = async () => {
+    if (isSocialPostingBlocked) {
+      setSocialRestrictionModalOpen(true);
+      return;
+    }
     const nextErrors: { title?: string; content?: string } = {};
     if (!title.trim()) nextErrors.title = t("Title is required");
     if (!content.trim()) nextErrors.content = t("Content is required");
@@ -3403,6 +3420,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     }
                                   } else {
                                     next.add(notice.id);
+                                    if (isSocialPostingBlocked) {
+                                      setSocialRestrictionModalOpen(true);
+                                      return next;
+                                    }
                                     setReplyFor(notice.id);
                                     setReplyContent("");
                                     setReplyMentions([]);
@@ -3980,6 +4001,25 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         targetName={reportTargetName}
         source="Social"
       />
+      <Dialog open={socialRestrictionModalOpen} onOpenChange={setSocialRestrictionModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Posting Access Limited</DialogTitle>
+            <DialogDescription>
+              Your ability to post or reply has been limited due to recent account activity that does not meet our community safety standards.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              className="h-10 rounded-full bg-brandBlue px-4 text-sm font-semibold text-white"
+              onClick={() => setSocialRestrictionModalOpen(false)}
+            >
+              Confirm
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     <AlertDialog open={!!confirmBlockId} onOpenChange={(v) => !v && setConfirmBlockId(null)}>
       <AlertDialogContent>

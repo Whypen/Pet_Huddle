@@ -15,6 +15,7 @@ import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { ReportModal } from "@/components/moderation/ReportModal";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 
 type ChatMessage = {
   id: string;
@@ -89,6 +90,7 @@ const ChatDialogue = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const [roomId, setRoomId] = useState<string | null>(null);
   const [roomName, setRoomName] = useState<string>("Conversation");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -126,6 +128,7 @@ const ChatDialogue = () => {
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
+  const chatDisabledBySafety = isActive("chat_disabled");
   const firstHelloStarters = useMemo(
     () => [
       "Hey there—what drew your pack to Huddle?",
@@ -561,7 +564,8 @@ const ChatDialogue = () => {
     const cannotSend =
       blockState === "blocked_by_them" ||
       blockState === "blocked_by_me" ||
-      unmatchState === "unmatched_by_them";
+      unmatchState === "unmatched_by_them" ||
+      chatDisabledBySafety;
     if (!roomId || !profile?.id || sending || cannotSend) return;
     const text = chatInput.trim();
     if (!text && composerUploads.length === 0) return;
@@ -588,7 +592,7 @@ const ChatDialogue = () => {
       setSending(false);
       setUploadingComposer(false);
     }
-  }, [blockState, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
+  }, [blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
 
   const openCounterpartProfile = useCallback(async () => {
     if (!counterpart?.id) return;
@@ -1012,6 +1016,14 @@ const ChatDialogue = () => {
           </div>
         )}
         <div className="flex items-center gap-2">
+          {chatDisabledBySafety ? (
+            <div className="flex flex-1 items-center gap-2 rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <Lock className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                Your messaging access is currently restricted due to recent account activity that does not meet our community safety standards.
+              </span>
+            </div>
+          ) : (
           <div className="flex flex-1 items-center gap-2 rounded-[12px] bg-[rgba(255,255,255,0.72)] px-1.5 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)]">
           <button
             type="button"
@@ -1066,12 +1078,14 @@ const ChatDialogue = () => {
             }
           />
           </div>
+          )}
           <button
             type="button"
             onClick={() => void sendMessage()}
             disabled={
               sending ||
               uploadingComposer ||
+              chatDisabledBySafety ||
               blockState === "blocked_by_them" ||
               blockState === "blocked_by_me" ||
               unmatchState === "unmatched_by_them" ||

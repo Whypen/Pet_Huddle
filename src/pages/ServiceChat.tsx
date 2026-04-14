@@ -27,6 +27,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ServiceStatus } from "@/components/service-chat/types";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ReportModal } from "@/components/moderation/ReportModal";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 
 type ActiveSheet = "request" | "quote" | "payment" | "review" | "dispute" | null;
 type BlockState = "none" | "blocked_by_me" | "blocked_by_them";
@@ -37,6 +38,7 @@ const ServiceChat = () => {
   const roomId = String(searchParams.get("room") || searchParams.get("roomId") || "").trim();
   const paidFlag = String(searchParams.get("paid") || searchParams.get("payment") || "").trim();
   const { user, profile, loading: authLoading } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const userId = String(user?.id || profile?.id || "");
 
   const {
@@ -91,6 +93,7 @@ const ServiceChat = () => {
   const isRequester = role === "requester";
   const isProvider = role === "provider";
   const hasRequest = Boolean(serviceChat?.request_card);
+  const chatDisabledBySafety = isActive("chat_disabled");
   const hasQuote = Boolean(serviceChat?.quote_card);
   const noMessagesYet = messages.length === 0;
   const requesterAllowsProfileAccess = serviceChat?.request_card?.allowProfileAccess !== false;
@@ -217,6 +220,7 @@ const ServiceChat = () => {
 
   const handleSendMessage = async (event: FormEvent) => {
     event.preventDefault();
+    if (chatDisabledBySafety) return;
     if (!composer.trim() && composerUploads.length === 0) return;
     setSendingMessage(true);
     setUploadingComposer(composerUploads.length > 0);
@@ -463,6 +467,7 @@ const ServiceChat = () => {
             composer={composer}
             composerLocked={Boolean(!hasRequest)}
             sendingMessage={sendingMessage || uploadingComposer}
+            chatDisabled={chatDisabledBySafety}
             servicePeriodPassed={servicePeriodPassed}
             onComposerChange={setComposer}
             onSendMessage={handleSendMessage}

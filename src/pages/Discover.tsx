@@ -21,6 +21,8 @@ import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
 import { startStripeCheckout } from "@/lib/stripeCheckout";
 import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { RestrictionBanner } from "@/components/safety/RestrictionBanner";
 
 type DiscoveryPet = {
   species?: string | null;
@@ -145,6 +147,7 @@ const resolveDiscoveryLocationLabel = ({
 const Discover = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const { t } = useLanguage();
   const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
@@ -282,7 +285,7 @@ const Discover = () => {
         const minAge = Math.max(16, discoveryMinAge || 16);
         const maxAge = Math.max(minAge, discoveryMaxAge || 99);
         const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-          "social_discovery",
+          "social_discovery_restricted",
           {
             p_user_id: profile.id,
             p_lat: anchorLat,
@@ -820,6 +823,9 @@ const Discover = () => {
         onClose={closeUpsellModal}
         onBuy={() => buyAddOn(upsellModal.type)}
       />
+      {isActive("discovery_hidden") ? (
+        <RestrictionBanner message="Your profile visibility is currently restricted due to recent account activity that does not meet our community safety standards." />
+      ) : null}
     </div>
   );
 };

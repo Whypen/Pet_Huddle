@@ -1,5 +1,5 @@
 import { FormEvent } from "react";
-import { ImagePlus, SendHorizontal } from "lucide-react";
+import { ImagePlus, Lock, SendHorizontal } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
 
 type PrimaryAction = {
@@ -26,6 +26,7 @@ type Props = {
   onAttachPhoto: () => void;
   onOpenDispute: () => void;
   onAskRevise: () => void;
+  chatDisabled?: boolean;
 };
 
 export const ActionBar = ({
@@ -46,6 +47,7 @@ export const ActionBar = ({
   onAttachPhoto,
   onOpenDispute,
   onAskRevise,
+  chatDisabled = false,
 }: Props) => {
   return (
     <div className="border-t border-border/40 bg-background px-4 py-2 pb-[max(8px,env(safe-area-inset-bottom))] space-y-2">
@@ -72,6 +74,14 @@ export const ActionBar = ({
       </div>
 
       <form onSubmit={onSendMessage} className="flex items-center gap-2">
+        {chatDisabled ? (
+          <div className="flex h-10 flex-1 items-center gap-2 rounded-[12px] border border-amber-200 bg-amber-50 px-3 text-xs text-amber-900">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              Your messaging access is currently restricted due to recent account activity that does not meet our community safety standards.
+            </span>
+          </div>
+        ) : (
         <div className="flex h-10 flex-1 items-center gap-2 rounded-[12px] bg-[rgba(255,255,255,0.72)] px-1.5 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)]">
           <button
             type="button"
@@ -90,9 +100,10 @@ export const ActionBar = ({
             className="h-10 flex-1 border-0 bg-transparent px-1 text-[16px] text-[var(--text-primary,#424965)] outline-none focus:outline-none"
           />
         </div>
+        )}
         <button
           type="submit"
-          disabled={composerLocked || sendingMessage || !composer.trim()}
+          disabled={chatDisabled || composerLocked || sendingMessage || !composer.trim()}
           className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brandBlue text-white shadow-[0_4px_16px_rgba(33,69,207,0.28)] disabled:opacity-45"
           aria-label="Send message"
         >

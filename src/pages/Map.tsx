@@ -39,6 +39,8 @@ import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/Fr
 import { loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -221,6 +223,7 @@ function formatOpeningHours(hours: string): string {
 // ==========================================================================
 const MapPage = () => {
   const { user, profile, refreshProfile } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
@@ -258,6 +261,7 @@ const MapPage = () => {
   const [publicProfileName, setPublicProfileName] = useState<string>("");
   const [publicProfileUserId, setPublicProfileUserId] = useState<string | null>(null);
   const [publicProfileData, setPublicProfileData] = useState<Record<string, unknown> | null>(null);
+  const [mapRestrictionModalOpen, setMapRestrictionModalOpen] = useState(false);
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
   const [pinning, setPinning] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -1028,6 +1032,35 @@ const MapPage = () => {
         .concat(fallbackDots)
         .filter((row): row is MapAlert => row.marker_state !== "hidden")
         .filter((row) => !(row.creator_id && blockedUserIds.has(row.creator_id)));
+      const creatorIds = Array.from(
+        new Set(
+          visibleOnly
+            .map((row) => row.creator_id)
+            .filter((value): value is string => Boolean(value && value !== user?.id)),
+        ),
+      );
+      if (creatorIds.length > 0) {
+        const { data: hiddenRows, error: hiddenErr } = await (supabase.rpc as (
+          fn: string,
+          args?: Record<string, unknown>,
+        ) => Promise<{ data: Array<{ user_id?: string }> | null; error: unknown }>)(
+          "get_users_with_active_restriction",
+          { p_user_ids: creatorIds, p_restriction_key: "map_hidden" },
+        );
+        if (!hiddenErr) {
+          const hiddenSet = new Set(
+            (hiddenRows ?? [])
+              .map((row) => String(row?.user_id || "").trim())
+              .filter(Boolean),
+          );
+          const filtered = visibleOnly.filter((row) => {
+            if (!row.creator_id || row.creator_id === user?.id) return true;
+            return !hiddenSet.has(row.creator_id);
+          });
+          setDbAlerts(filtered);
+          return filtered;
+        }
+      }
       setDbAlerts(visibleOnly);
       return visibleOnly;
     } catch (error) {
@@ -1037,7 +1070,7 @@ const MapPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, userLocation?.lat, userLocation?.lng]);
+  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, user?.id, userLocation?.lat, userLocation?.lng]);
 
   const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
     const trimmedAlertId = String(alertId || "").trim();
@@ -1120,7 +1153,28 @@ const MapPage = () => {
       if (error) throw error;
       const dbPins = (Array.isArray(data) ? data : []) as FriendPin[];
       if (dbPins.length > 0) {
-        const friendIds = dbPins.map((pin) => pin.id).filter(Boolean);
+        const hiddenCandidateIds = dbPins
+          .map((pin) => pin.id)
+          .filter((id): id is string => Boolean(id && id !== user?.id));
+        let visiblePins = dbPins;
+        if (hiddenCandidateIds.length > 0) {
+          const { data: hiddenRows, error: hiddenErr } = await (supabase.rpc as (
+            fn: string,
+            args?: Record<string, unknown>,
+          ) => Promise<{ data: Array<{ user_id?: string }> | null; error: unknown }>)(
+            "get_users_with_active_restriction",
+            { p_user_ids: hiddenCandidateIds, p_restriction_key: "map_hidden" },
+          );
+          if (!hiddenErr) {
+            const hiddenSet = new Set(
+              (hiddenRows ?? [])
+                .map((row) => String(row?.user_id || "").trim())
+                .filter(Boolean),
+            );
+            visiblePins = dbPins.filter((pin) => !hiddenSet.has(pin.id));
+          }
+        }
+        const friendIds = visiblePins.map((pin) => pin.id).filter(Boolean);
         if (friendIds.length > 0) {
           const { data: profileRows } = await supabase
             .from("profiles")
@@ -1133,13 +1187,13 @@ const MapPage = () => {
             ])
           );
           setFriendPins(
-            dbPins.map((pin) => ({
+            visiblePins.map((pin) => ({
               ...pin,
               is_verified: verifiedById.get(pin.id) ?? false,
             }))
           );
         } else {
-          setFriendPins(dbPins);
+          setFriendPins(visiblePins);
         }
       } else {
         setFriendPins([]);
@@ -1341,6 +1395,10 @@ const MapPage = () => {
   // Broadcast: start a NEW draft pin flow every time
   // ==========================================================================
   const openBroadcast = () => {
+    if (isActive("map_disabled")) {
+      setMapRestrictionModalOpen(true);
+      return;
+    }
     setBroadcastPreviewPin(null);
     setIsPickingBroadcastLocation(false);
     setIsBroadcastOpen(true);
@@ -1673,6 +1731,10 @@ const MapPage = () => {
         alertType={draftBroadcastType}
         onAlertTypeChange={(next) => setDraftBroadcastType((next === "Lost" || next === "Caution" || next === "Others") ? next : "Stray")}
         onRequestPinLocation={() => {
+          if (isActive("map_disabled")) {
+            setMapRestrictionModalOpen(true);
+            return;
+          }
           if (!map.current) {
             const fallback = userLocation ?? { lat: defaultCenter[1], lng: defaultCenter[0] };
             setBroadcastPreviewPin(fallback);
@@ -1713,6 +1775,25 @@ const MapPage = () => {
           });
         }}
       />
+      <Dialog open={mapRestrictionModalOpen} onOpenChange={setMapRestrictionModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Map Alert Access Paused</DialogTitle>
+            <DialogDescription>
+              Your ability to pin map alerts has been paused due to recent account activity that does not meet our community safety standards.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              className="h-10 rounded-full bg-brandBlue px-4 text-sm font-semibold text-white"
+              onClick={() => setMapRestrictionModalOpen(false)}
+            >
+              Confirm
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ================================================================ */}
       {/* PinDetailModal — Viewer POV + Abuse Shield                       */}

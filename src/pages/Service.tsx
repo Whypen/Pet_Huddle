@@ -16,6 +16,9 @@ import { useServiceProviders } from "@/hooks/useServiceProviders";
 import { useServiceAnalytics } from "@/hooks/useServiceAnalytics";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RestrictionBanner } from "@/components/safety/RestrictionBanner";
 
 const DEFAULT_FILTERS: ServiceFilterState = {
   search: "",
@@ -33,6 +36,7 @@ const DEFAULT_FILTERS: ServiceFilterState = {
 const Service = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { isActive } = useSafetyRestrictions();
   const [proximityAnchor, setProximityAnchor] = useState<{ lat: number; lng: number } | null>(null);
   const { providers, loading, error, toggleBookmark, refresh } = useServiceProviders(proximityAnchor);
   const [filters, setFilters] = useState<ServiceFilterState>(DEFAULT_FILTERS);
@@ -40,6 +44,7 @@ const Service = () => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isDateOpen, setIsDateOpen] = useState(false);
   const [activeProviderId, setActiveProviderId] = useState<string | null>(null);
+  const [serviceRestrictionModalOpen, setServiceRestrictionModalOpen] = useState(false);
   const [deckCompressed, setDeckCompressed] = useState(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [pullOffset, setPullOffset] = useState(0);
@@ -121,6 +126,10 @@ const Service = () => {
   };
 
   const handleRequestService = useCallback(async (providerUserId: string) => {
+    if (isActive("service_disabled")) {
+      setServiceRestrictionModalOpen(true);
+      return;
+    }
     if (!profile?.id) {
       toast.error("Sign in required.");
       return;
@@ -152,6 +161,10 @@ const Service = () => {
         toast.error("This provider cannot receive service requests yet.");
         return;
       }
+      if (reason.includes("service_access_disabled")) {
+        setServiceRestrictionModalOpen(true);
+        return;
+      }
       if (reason.includes("provider_profile_missing")) {
         toast.error("This provider profile is incomplete and can't receive requests yet.");
         return;
@@ -178,7 +191,7 @@ const Service = () => {
       }
       toast.error("Unable to start service chat right now.");
     }
-  }, [navigate, profile?.id]);
+  }, [isActive, navigate, profile?.id]);
 
   const triggerPullRefresh = useCallback(async () => {
     if (pullRefreshing) return;
@@ -373,6 +386,28 @@ const Service = () => {
         onClose={() => setActiveProviderId(null)}
         onRequestService={handleRequestService}
       />
+      <Dialog open={serviceRestrictionModalOpen} onOpenChange={setServiceRestrictionModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Booking Access On Hold</DialogTitle>
+            <DialogDescription>
+              Your booking access has been placed on hold due to recent account activity that does not meet our community safety standards.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <button
+              type="button"
+              className="h-10 rounded-full bg-brandBlue px-4 text-sm font-semibold text-white"
+              onClick={() => setServiceRestrictionModalOpen(false)}
+            >
+              Confirm
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {isActive("marketplace_hidden") ? (
+        <RestrictionBanner message="Your profile visibility is currently restricted due to recent account activity that does not meet our community safety standards." />
+      ) : null}
     </div>
   );
 };

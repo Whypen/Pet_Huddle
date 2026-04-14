@@ -72,6 +72,13 @@ export function ReportModal({
   const [submitting, setSubmitting] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
+  const reportSourceOrigin = (() => {
+    if (source === "Chat" || source === "Group Chat") return "friends chats";
+    if (source === "Map") return "maps";
+    if (source === "Social") return "social";
+    return "other";
+  })();
+
   const reset = useCallback(() => {
     setReasons(new Set());
     setOtherText("");
@@ -113,6 +120,7 @@ export function ReportModal({
         p_categories: selectedCategories,
         p_details: details.trim() || null,
         p_attachment_urls: attachmentUrls,
+        p_source: reportSourceOrigin,
       });
 
       // Fire email via edge function (best-effort)

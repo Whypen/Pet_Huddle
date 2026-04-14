@@ -2626,7 +2626,7 @@ const Chats = () => {
           const hasExplicitHeightFilter =
             isPremium && (filters.heightMin > DEFAULT_FILTERS.heightMin || filters.heightMax < DEFAULT_FILTERS.heightMax);
           const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-            "social_discovery",
+            "social_discovery_restricted",
             {
               p_user_id: profile.id,
               p_lat: anchor.lat,
@@ -2705,7 +2705,7 @@ const Chats = () => {
             }
           }
         } catch (edgeErr) {
-          console.warn("[Chats] social_discovery rpc unavailable", edgeErr);
+          console.warn("[Chats] social_discovery_restricted rpc unavailable", edgeErr);
           setDiscoveryProfiles([]);
           return;
         }
