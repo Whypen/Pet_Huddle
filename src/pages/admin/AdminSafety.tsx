@@ -26,18 +26,30 @@ import {
 } from "@/components/ui/alert-dialog";
 
 type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["Row"] & {
+  target_display_name?: string | null;
+  target_social_id?: string | null;
   moderation_state?: string | null;
   automation_paused?: boolean | null;
   restriction_flags?: Record<string, boolean> | null;
+  case_status?: "open" | "resolved" | "dismissed" | null;
+  latest_action_source?: "manual" | "sentinel" | null;
 };
 type ReportCasefileRow = Database["public"]["Views"]["view_admin_report_casefile"]["Row"] & {
+  target_display_name?: string | null;
+  target_social_id?: string | null;
+  reporter_display_name?: string | null;
+  reporter_social_id?: string | null;
   moderation_state?: string | null;
   automation_paused?: boolean | null;
   restriction_flags?: Record<string, boolean> | null;
+  case_status?: "open" | "resolved" | "dismissed" | null;
   moderation_note?: string | null;
+  reporter_false_report_count?: number | null;
 };
 type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes_queue"]["Row"];
-type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"];
+type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
+  action_source?: "manual" | "sentinel" | null;
+};
 type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"];
 
 type ActiveTab = "reports" | "disputes" | "audit";
@@ -49,13 +61,13 @@ type CaseSelection =
 
 type SortDirection = "asc" | "desc";
 type ReportsSortKey =
-  | "target_user_id"
+  | "target_identity"
   | "report_count"
   | "unique_reporters"
   | "total_score"
   | "latest_report_at"
   | "attachment_evidence_count"
-  | "latest_support_subject";
+  | "case_status";
 type DisputesSortKey =
   | "booking_id"
   | "requester"
@@ -64,18 +76,26 @@ type DisputesSortKey =
   | "dispute_status"
   | "dispute_created_at"
   | "dispute_updated_at";
-type AuditSortKey = "action" | "target" | "actor" | "created_at";
+type AuditSortKey = "source" | "action" | "target" | "actor" | "created_at";
 
 type SortState<K extends string> = {
   key: K;
   direction: SortDirection;
 };
 
-type ReportAction = "set_active" | "warn" | "shadow_restrict" | "hard_ban" | "pause_sentinel";
+type ReportAction =
+  | "clear_restrictions"
+  | "warn"
+  | "shadow_restrict"
+  | "hard_ban"
+  | "pause_sentinel"
+  | "mark_dismissed"
+  | "mark_false_report";
 
 type PendingReportAction = {
   action: ReportAction;
   pauseSentinel?: boolean;
+  reporterUserId?: string | null;
 };
 
 type RestrictionFlagKey =
@@ -83,7 +103,9 @@ type RestrictionFlagKey =
   | "discovery_hidden"
   | "social_posting_disabled"
   | "marketplace_hidden"
-  | "map_hidden";
+  | "service_disabled"
+  | "map_hidden"
+  | "map_disabled";
 
 const formatDateTime = (value: string | null) => {
   if (!value) return "-";
@@ -112,12 +134,14 @@ const getSortIconClassName = (active: boolean) =>
   `text-[10px] leading-none ${active ? "text-slate-400" : "text-slate-300"}`;
 
 const unresolvedStatuses = new Set(["open", "awaiting_evidence", "under_review", "decision_ready"]);
-const restrictionFlagOptions: Array<{ key: RestrictionFlagKey; label: string }> = [
-  { key: "chat_disabled", label: "Chat Disabled" },
-  { key: "discovery_hidden", label: "Discovery Hidden" },
-  { key: "social_posting_disabled", label: "Social Posting Disabled" },
-  { key: "marketplace_hidden", label: "Marketplace Hidden" },
-  { key: "map_hidden", label: "Map Hidden" },
+const restrictionFlagOptions: Array<{ key: RestrictionFlagKey; label: string; helper: string }> = [
+  { key: "chat_disabled", label: "Chat Disabled", helper: "User cannot send messages or start chats." },
+  { key: "discovery_hidden", label: "Discovery Hidden", helper: "User is removed from discovery visibility." },
+  { key: "social_posting_disabled", label: "Social Posting Disabled", helper: "User cannot create posts, comments, or replies." },
+  { key: "marketplace_hidden", label: "Marketplace Hidden", helper: "User’s Carer/Provider profile is hidden from Service tab." },
+  { key: "service_disabled", label: "Service Access Disabled", helper: "User cannot browse/request provider profiles or start service booking/request flows." },
+  { key: "map_hidden", label: "Map Hidden", helper: "User is incognito and not publicly visible on map." },
+  { key: "map_disabled", label: "Map Disabled", helper: "User cannot pin alerts or create map alert pins." },
 ];
 
 const parseNumberCandidate = (value: unknown): number | null => {
@@ -161,6 +185,20 @@ const badgeClasses =
 const demoBadgeClasses =
   "inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800";
 const DEMO_FIXTURE_MARKER = "[DEMO_FIXTURE_ADMIN_SAFETY_V1]";
+const sentinelBadgeClasses =
+  "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800";
+
+const resolveIdentityLabel = (displayName: string | null | undefined, socialId: string | null | undefined, fallbackId: string | null | undefined) => {
+  const name = displayName?.trim() || "Unknown User";
+  const social = socialId?.trim() ? `@${socialId.trim()}` : "@unknown";
+  return { name, social, fallback: fallbackId ?? "-" };
+};
+
+const formatCaseStatus = (status: string | null | undefined) => {
+  if (status === "resolved") return "Resolved";
+  if (status === "dismissed") return "Dismissed";
+  return "Open";
+};
 
 const ADMIN_EMAIL_ALLOWLIST = new Set([
   "twenty_illkid@msn.com",
@@ -172,6 +210,7 @@ const AdminSafety = () => {
   const { profile, user, loading: authLoading, hydrating } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>("reports");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [reportsQueue, setReportsQueue] = useState<ReportsQueueRow[]>([]);
   const [disputesQueue, setDisputesQueue] = useState<DisputesQueueRow[]>([]);
@@ -199,12 +238,16 @@ const AdminSafety = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [reportsCaseFilter, setReportsCaseFilter] = useState<"open" | "resolved" | "dismissed" | "all">("open");
+  const [selectedReporterForPenalty, setSelectedReporterForPenalty] = useState<string | null>(null);
   const [shadowFlags, setShadowFlags] = useState<Record<RestrictionFlagKey, boolean>>({
     chat_disabled: false,
     discovery_hidden: false,
     social_posting_disabled: false,
     marketplace_hidden: false,
+    service_disabled: false,
     map_hidden: false,
+    map_disabled: false,
   });
 
   const selectedReportTargetId = caseSelection?.type === "report" ? caseSelection.targetUserId : null;
@@ -260,12 +303,18 @@ const AdminSafety = () => {
   };
 
   const reportsSorted = useMemo(() => {
-    const rows = [...reportsQueue];
+    const rows = [...reportsQueue].filter((row) => {
+      if (reportsCaseFilter === "all") return true;
+      return (row.case_status ?? "open") === reportsCaseFilter;
+    });
     rows.sort((a, b) => {
       let result = 0;
       switch (reportsSort.key) {
-        case "target_user_id":
-          result = compareStrings(a.target_user_id, b.target_user_id);
+        case "target_identity":
+          result = compareStrings(
+            `${a.target_display_name ?? ""} ${a.target_social_id ?? ""} ${a.target_user_id ?? ""}`,
+            `${b.target_display_name ?? ""} ${b.target_social_id ?? ""} ${b.target_user_id ?? ""}`,
+          );
           break;
         case "report_count":
           result = compareNumbers(a.report_count, b.report_count);
@@ -282,14 +331,14 @@ const AdminSafety = () => {
         case "attachment_evidence_count":
           result = compareNumbers(a.has_attachments ? 1 : 0, b.has_attachments ? 1 : 0);
           break;
-        case "latest_support_subject":
-          result = compareStrings(a.latest_support_subject, b.latest_support_subject);
+        case "case_status":
+          result = compareStrings(a.case_status, b.case_status);
           break;
       }
       return applyDirection(result, reportsSort.direction);
     });
     return rows;
-  }, [reportsQueue, reportsSort]);
+  }, [reportsQueue, reportsSort, reportsCaseFilter]);
 
   const disputesSorted = useMemo(() => {
     const rows = [...disputesQueue];
@@ -345,6 +394,9 @@ const AdminSafety = () => {
     rows.sort((a, b) => {
       let result = 0;
       switch (auditSort.key) {
+        case "source":
+          result = compareStrings(a.action_source, b.action_source);
+          break;
         case "action":
           result = compareStrings(a.action, b.action);
           break;
@@ -502,8 +554,12 @@ const AdminSafety = () => {
       discovery_hidden: sourceFlags.discovery_hidden === true,
       social_posting_disabled: sourceFlags.social_posting_disabled === true,
       marketplace_hidden: sourceFlags.marketplace_hidden === true,
+      service_disabled: sourceFlags.service_disabled === true,
       map_hidden: sourceFlags.map_hidden === true,
+      map_disabled: sourceFlags.map_disabled === true,
     });
+    const firstReporter = reportCasefile.find((row) => Boolean(row.reporter_user_id))?.reporter_user_id ?? null;
+    setSelectedReporterForPenalty(firstReporter);
   }, [selectedReportTargetId, reportCasefile, reportQueueByTarget]);
 
   if (authLoading || hydrating) {
@@ -523,21 +579,30 @@ const AdminSafety = () => {
   const currentReportState = reportHeader?.moderation_state ?? reportCasefile[0]?.moderation_state ?? "active";
   const currentAutomationPaused =
     reportHeader?.automation_paused ?? reportCasefile[0]?.automation_paused ?? false;
+  const currentCaseStatus = reportHeader?.case_status ?? reportCasefile[0]?.case_status ?? "open";
   const reportDrawerIsDemo =
     (selectedReportTargetId ? demoReportTargetIds.has(selectedReportTargetId) : false) ||
     reportCasefile.some((row) => hasDemoMarker(row.details));
 
   const actionLabel = (action: PendingReportAction) => {
-    if (action.action === "set_active") return "Set Active";
+    if (action.action === "clear_restrictions") return "Clear Restrictions";
     if (action.action === "warn") return "Warn";
     if (action.action === "shadow_restrict") return "Shadow Restrict";
     if (action.action === "hard_ban") return "Hard Ban";
+    if (action.action === "mark_dismissed") return "Mark Dismissed";
+    if (action.action === "mark_false_report") return "Mark False Report";
     return action.pauseSentinel ? "Pause Sentinel" : "Resume Sentinel";
   };
 
   const needsNote = (action: PendingReportAction) => {
-    if (action.action === "pause_sentinel") return action.pauseSentinel === true;
-    return true;
+    return action.action === "hard_ban" || action.action === "mark_false_report";
+  };
+
+  const refreshSafetyData = async () => {
+    setRefreshing(true);
+    await loadQueues();
+    if (selectedReportTargetId) await loadReportCasefile(selectedReportTargetId);
+    setRefreshing(false);
   };
 
   const openReportActionConfirm = (action: PendingReportAction) => {
@@ -554,6 +619,10 @@ const AdminSafety = () => {
       setActionError("Moderator note is required for this action.");
       return;
     }
+    if (pendingAction.action === "mark_false_report" && !pendingAction.reporterUserId) {
+      setActionError("Select a reporter to penalize for false report.");
+      return;
+    }
 
     setActionLoading(true);
     setActionError(null);
@@ -564,6 +633,7 @@ const AdminSafety = () => {
       p_action: pendingAction.action,
       p_note: trimmedNote || null,
       p_pause_sentinel: pendingAction.action === "pause_sentinel" ? pendingAction.pauseSentinel : null,
+      p_reporter_user_id: pendingAction.action === "mark_false_report" ? pendingAction.reporterUserId ?? null : null,
     };
 
     if (pendingAction.action === "shadow_restrict") {
@@ -599,9 +669,14 @@ const AdminSafety = () => {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-6 lg:px-8 space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Trust &amp; Safety Console</h1>
-        <p className="text-sm text-muted-foreground">Read-only foundation for reports, disputes, and audit trail.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Trust &amp; Safety Console</h1>
+          <p className="text-sm text-muted-foreground">Read-only foundation for reports, disputes, and audit trail.</p>
+        </div>
+        <Button type="button" variant="outline" onClick={() => { void refreshSafetyData(); }} disabled={refreshing || loading}>
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </Button>
       </div>
 
       {loading ? (
@@ -615,15 +690,28 @@ const AdminSafety = () => {
           </TabsList>
 
           <TabsContent value="reports" className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm text-muted-foreground">Case Status Filter</div>
+              <select
+                value={reportsCaseFilter}
+                onChange={(event) => setReportsCaseFilter(event.target.value as "open" | "resolved" | "dismissed" | "all")}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="open">Open</option>
+                <option value="resolved">Resolved</option>
+                <option value="dismissed">Dismissed</option>
+                <option value="all">All</option>
+              </select>
+            </div>
             <div className="rounded-xl border bg-card">
               <div className="max-h-[65vh] overflow-auto">
                 <table className="min-w-[920px] w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur supports-[backdrop-filter]:bg-muted/70">
                     <tr className="text-left">
                       <th className="px-3 py-2">
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setReportsSort, "target_user_id")}>
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setReportsSort, "target_identity")}>
                           Target User
-                          <span className={getSortIconClassName(reportsSort.key === "target_user_id")}>{getSortIcon(reportsSort.direction)}</span>
+                          <span className={getSortIconClassName(reportsSort.key === "target_identity")}>{getSortIcon(reportsSort.direction)}</span>
                         </button>
                       </th>
                       <th className="px-3 py-2">
@@ -657,9 +745,9 @@ const AdminSafety = () => {
                         </button>
                       </th>
                       <th className="px-3 py-2 hidden xl:table-cell">
-                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setReportsSort, "latest_support_subject")}>
-                          Latest Support Subject
-                          <span className={getSortIconClassName(reportsSort.key === "latest_support_subject")}>{getSortIcon(reportsSort.direction)}</span>
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setReportsSort, "case_status")}>
+                          Case Status
+                          <span className={getSortIconClassName(reportsSort.key === "case_status")}>{getSortIcon(reportsSort.direction)}</span>
                         </button>
                       </th>
                     </tr>
@@ -683,7 +771,23 @@ const AdminSafety = () => {
                         >
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs">{row.target_user_id ?? "-"}</span>
+                              <a
+                                href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="min-w-0"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <div className="truncate text-sm font-medium">
+                                  {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).social}
+                                </div>
+                                <div className="font-mono text-[10px] text-muted-foreground/80">
+                                  {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).fallback}
+                                </div>
+                              </a>
                               {row.target_user_id && demoReportTargetIds.has(row.target_user_id) ? (
                                 <span className={demoBadgeClasses}>Demo</span>
                               ) : null}
@@ -694,7 +798,9 @@ const AdminSafety = () => {
                           <td className="px-3 py-2">{row.total_score ?? 0}</td>
                           <td className="px-3 py-2">{formatDateTime(row.latest_report_at)}</td>
                           <td className="px-3 py-2 hidden lg:table-cell">{row.has_attachments ? 1 : 0}</td>
-                          <td className="px-3 py-2 hidden xl:table-cell">{row.latest_support_subject ?? "-"}</td>
+                          <td className="px-3 py-2 hidden xl:table-cell">
+                            <span className={badgeClasses}>{formatCaseStatus(row.case_status)}</span>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -796,6 +902,12 @@ const AdminSafety = () => {
                   <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur supports-[backdrop-filter]:bg-muted/70">
                     <tr className="text-left">
                       <th className="px-3 py-2">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setAuditSort, "source")}>
+                          Source
+                          <span className={getSortIconClassName(auditSort.key === "source")}>{getSortIcon(auditSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setAuditSort, "action")}>
                           Action
                           <span className={getSortIconClassName(auditSort.key === "action")}>{getSortIcon(auditSort.direction)}</span>
@@ -825,13 +937,18 @@ const AdminSafety = () => {
                   <tbody>
                     {auditSorted.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                        <td colSpan={6} className="px-3 py-8 text-center text-sm text-muted-foreground">
                           No audit entries yet.
                         </td>
                       </tr>
                     ) : (
                       auditSorted.map((row) => (
                         <tr key={row.audit_id} className="border-b last:border-b-0 align-top hover:bg-muted/30">
+                          <td className="px-3 py-2">
+                            <span className={row.action_source === "sentinel" ? sentinelBadgeClasses : badgeClasses}>
+                              {row.action_source === "sentinel" ? "Sentinel" : "Manual"}
+                            </span>
+                          </td>
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
                               <span className={badgeClasses}>{row.action}</span>
@@ -860,7 +977,8 @@ const AdminSafety = () => {
               <SheetHeader>
                 <SheetTitle>Report Case File</SheetTitle>
                 <SheetDescription>
-                  Target {selectedReportTargetId}
+                  {resolveIdentityLabel(reportHeader?.target_display_name, reportHeader?.target_social_id, selectedReportTargetId).name}{" "}
+                  ({resolveIdentityLabel(reportHeader?.target_display_name, reportHeader?.target_social_id, selectedReportTargetId).social})
                 </SheetDescription>
               </SheetHeader>
 
@@ -872,11 +990,16 @@ const AdminSafety = () => {
                     <div>Unique reporters: {reportHeader?.unique_reporters ?? 0}</div>
                     <div>Total score: {reportHeader?.total_score ?? 0}</div>
                     <div>Latest: {formatDateTime(reportHeader?.latest_report_at ?? null)}</div>
+                    <div>Case status: {formatCaseStatus(currentCaseStatus)}</div>
+                    <div>Latest source: {reportHeader?.latest_action_source === "sentinel" ? "Sentinel" : "Manual"}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <span className={badgeClasses}>Moderation: {currentReportState}</span>
                     <span className={badgeClasses}>
                       {currentAutomationPaused ? "Sentinel Paused" : "Sentinel Active"}
+                    </span>
+                    <span className={reportHeader?.latest_action_source === "sentinel" ? sentinelBadgeClasses : badgeClasses}>
+                      {reportHeader?.latest_action_source === "sentinel" ? "Sentinel" : "Manual"}
                     </span>
                     {reportDrawerIsDemo ? (
                       <span className={demoBadgeClasses}>Demo Fixture</span>
@@ -899,9 +1022,23 @@ const AdminSafety = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={badgeClasses}>Score {row.score}</span>
                           <span className={badgeClasses}>{formatDateTime(row.report_created_at)}</span>
+                          {hasDemoMarker(row.details) ? <span className={demoBadgeClasses}>Demo</span> : null}
                         </div>
-                        <div>Reporter: {row.reporter_display_name ?? row.reporter_user_id}</div>
-                        <div>Target: {row.target_display_name ?? row.target_user_id}</div>
+                        <div>
+                          Reporter:{" "}
+                          <a href={`/carerprofile?user_id=${row.reporter_user_id}`} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                            {resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name}
+                          </a>{" "}
+                          <span className="text-muted-foreground">({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})</span>
+                          <span className="ml-2 text-xs text-muted-foreground">False-report count: {row.reporter_false_report_count ?? 0}</span>
+                        </div>
+                        <div>
+                          Target:{" "}
+                          <a href={`/carerprofile?user_id=${row.target_user_id}`} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                            {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name}
+                          </a>{" "}
+                          <span className="text-muted-foreground">({resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).social})</span>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {(row.categories ?? []).map((tag) => (
                             <span key={`${row.report_id}-${tag}`} className={badgeClasses}>{tag}</span>
@@ -909,6 +1046,17 @@ const AdminSafety = () => {
                         </div>
                         <div className="whitespace-pre-wrap break-words">{row.details ?? "-"}</div>
                         <div>Attachments: {(row.attachment_urls ?? []).length}</div>
+                        {(row.attachment_urls ?? []).length > 0 ? (
+                          <div className="space-y-1">
+                            {(row.attachment_urls ?? []).map((url, index) => (
+                              <div key={`${row.report_id}-att-${index}`} className="text-xs">
+                                <a href={url} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                                  Attachment {index + 1}
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                         <div className="text-xs text-muted-foreground">
                           Support mirror: {row.support_subject ?? "-"}
                         </div>
@@ -927,7 +1075,7 @@ const AdminSafety = () => {
                       id="moderator-note"
                       value={moderatorNote}
                       onChange={(event) => setModeratorNote(event.target.value)}
-                      placeholder="Required for Set Active, Warn, Shadow Restrict, Hard Ban, and Pause Sentinel ON."
+                      placeholder="Required for Hard Ban and Mark False Report."
                       rows={4}
                     />
                   </div>
@@ -936,17 +1084,40 @@ const AdminSafety = () => {
                     <div className="text-xs font-medium text-muted-foreground">Shadow Restriction Flags</div>
                     <div className="grid gap-2 sm:grid-cols-2">
                       {restrictionFlagOptions.map((flag) => (
-                        <label key={flag.key} className="flex items-center justify-between rounded-md border px-3 py-2">
-                          <span className="text-sm">{flag.label}</span>
-                          <Switch
-                            checked={shadowFlags[flag.key]}
-                            onCheckedChange={(checked) =>
-                              setShadowFlags((prev) => ({ ...prev, [flag.key]: checked }))
-                            }
-                          />
+                        <label key={flag.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                          <div>
+                            <div className="text-sm">{flag.label}</div>
+                            <div className="text-xs text-muted-foreground">{flag.helper}</div>
+                          </div>
+                          <div className="shrink-0">
+                            <Switch
+                              checked={shadowFlags[flag.key]}
+                              onCheckedChange={(checked) =>
+                                setShadowFlags((prev) => ({ ...prev, [flag.key]: checked }))
+                              }
+                            />
+                          </div>
                         </label>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground">False Report Penalty Target</div>
+                    <select
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={selectedReporterForPenalty ?? ""}
+                      onChange={(event) => setSelectedReporterForPenalty(event.target.value || null)}
+                    >
+                      <option value="">Select reporter</option>
+                      {reportCasefile
+                        .filter((row) => Boolean(row.reporter_user_id))
+                        .map((row) => (
+                          <option key={`reporter-opt-${row.report_id}`} value={row.reporter_user_id ?? ""}>
+                            {resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name} ({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})
+                          </option>
+                        ))}
+                    </select>
                   </div>
 
                   <div className="rounded-md border p-3">
@@ -973,9 +1144,9 @@ const AdminSafety = () => {
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-                    <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "set_active" })}>
-                      Set Active
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                    <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "clear_restrictions" })}>
+                      Clear Restrictions
                     </Button>
                     <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "warn" })}>
                       Warn
@@ -1000,7 +1171,22 @@ const AdminSafety = () => {
                         })
                       }
                     >
-                      {currentAutomationPaused ? "Resume Sentinel" : "Pause Sentinel"}
+                      Pause Sentinel
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "mark_dismissed" })}>
+                      Mark Dismissed
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        openReportActionConfirm({
+                          action: "mark_false_report",
+                          reporterUserId: selectedReporterForPenalty,
+                        })
+                      }
+                    >
+                      Mark False Report
                     </Button>
                   </div>
                 </section>
@@ -1059,7 +1245,9 @@ const AdminSafety = () => {
             <AlertDialogDescription>
               {pendingAction?.action === "hard_ban"
                 ? "This action is irreversible and will apply a full account ban with identifier blocks."
-                : "This moderation action will be applied immediately and written to admin audit logs."}
+                : pendingAction?.action === "mark_false_report"
+                  ? "This applies a false-report penalty to the selected reporter and writes immutable audit history."
+                  : "This moderation action will be applied immediately and written to admin audit logs."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingAction && needsNote(pendingAction) && !moderatorNote.trim() ? (
