@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
+import { PublicCarerProfileModal } from "@/components/service/PublicCarerProfileModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -59,6 +60,7 @@ type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"]
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
 type ServiceChatMeta = {
   serviceLabel: string;
+  bookingPeriodLabel: string;
   serviceDate: string | null;
 };
 type SafetyUserRow = {
@@ -233,9 +235,9 @@ const getDisputeServiceMeta = (
   row: DisputesQueueRow,
 ): ServiceChatMeta => {
   if (!row.service_chat_id) {
-    return { serviceLabel: "Service booked", serviceDate: null };
+    return { serviceLabel: "Unknown Service", bookingPeriodLabel: "Unknown booking period", serviceDate: null };
   }
-  return map[row.service_chat_id] ?? { serviceLabel: "Service booked", serviceDate: null };
+  return map[row.service_chat_id] ?? { serviceLabel: "Unknown Service", bookingPeriodLabel: "Unknown booking period", serviceDate: null };
 };
 
 const badgeClasses =
@@ -308,6 +310,7 @@ const AdminSafety = () => {
   const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatRow | null>(null);
   const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
   const [profilePreviewName, setProfilePreviewName] = useState<string>("");
+  const [carerPreviewUserId, setCarerPreviewUserId] = useState<string | null>(null);
   const [userTimeline, setUserTimeline] = useState<SafetyUserTimelineRow[]>([]);
   const [userTimelineFilter, setUserTimelineFilter] = useState<"all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit">("all");
   const [serviceChatTotals, setServiceChatTotals] = useState<Record<string, number | null>>({});
@@ -640,14 +643,30 @@ const AdminSafety = () => {
               typedChat.request_card && typeof typedChat.request_card === "object"
                 ? (typedChat.request_card as Record<string, unknown>)
                 : {};
-            const serviceType = String(requestCard.serviceType ?? requestCard.service_type ?? "Service booked").trim();
+            const serviceTypes = Array.isArray(requestCard.serviceTypes)
+              ? requestCard.serviceTypes.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+              : [];
+            const primaryServiceType = String(requestCard.serviceType ?? requestCard.service_type ?? "").trim();
+            const serviceLabel = serviceTypes.length > 0
+              ? serviceTypes.join(" · ")
+              : primaryServiceType || "Unknown Service";
             const requestedDates = Array.isArray(requestCard.requestedDates)
               ? requestCard.requestedDates.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
               : [];
             const requestedDate = typeof requestCard.requestedDate === "string" ? requestCard.requestedDate : null;
-            const firstDate = requestedDates.length > 0 ? [...requestedDates].sort()[0] : requestedDate;
+            const sortedDates = requestedDates.length > 0 ? [...requestedDates].sort() : requestedDate ? [requestedDate] : [];
+            const firstDate = sortedDates.length > 0 ? sortedDates[0] : null;
+            const lastDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : null;
+            const bookingPeriodLabel = firstDate
+              ? firstDate === lastDate
+                ? firstDate
+                : `${firstDate} to ${lastDate}`
+              : typedChat.request_opened_at
+                ? formatDateTime(typedChat.request_opened_at)
+                : "Unknown booking period";
             meta[typedChat.id] = {
-              serviceLabel: serviceType || "Service booked",
+              serviceLabel,
+              bookingPeriodLabel,
               serviceDate: firstDate ?? typedChat.request_opened_at ?? null,
             };
           }
@@ -784,7 +803,7 @@ const AdminSafety = () => {
     : undefined;
   const currentDisputeMeta: ServiceChatMeta = disputeHeader
     ? getDisputeServiceMeta(serviceChatMetaById, disputeHeader)
-    : { serviceLabel: "Service booked", serviceDate: null };
+    : { serviceLabel: "Unknown Service", bookingPeriodLabel: "Unknown booking period", serviceDate: null };
   const currentReportState = reportHeader?.moderation_state ?? reportCasefile[0]?.moderation_state ?? "active";
   const currentAutomationPaused =
     reportHeader?.automation_paused ?? reportCasefile[0]?.automation_paused ?? false;
@@ -1141,22 +1160,26 @@ const AdminSafety = () => {
                           <td className="px-3 py-2">
                             <div className="text-sm font-medium">{getDisputeServiceMeta(serviceChatMetaById, row).serviceLabel}</div>
                             <div className="text-xs text-muted-foreground">
-                              Date: {formatDateTime(getDisputeServiceMeta(serviceChatMetaById, row).serviceDate)}
+                              Booking period: {getDisputeServiceMeta(serviceChatMetaById, row).bookingPeriodLabel}
                             </div>
                             <div className="font-mono text-[10px] text-muted-foreground/80">
                               Booking ID: {row.service_chat_id ?? "-"}
                             </div>
                           </td>
                           <td className="px-3 py-2">
-                            <a
-                              href={`/carerprofile?user_id=${row.requester_id ?? ""}`}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
                               className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
-                              onClick={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openPublicProfilePreview(
+                                  row.requester_id,
+                                  resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).name,
+                                );
+                              }}
                             >
                               {resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).name}
-                            </a>
+                            </button>
                             <div className="text-xs text-muted-foreground">
                               {resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).social}
                             </div>
@@ -1165,15 +1188,16 @@ const AdminSafety = () => {
                             </div>
                           </td>
                           <td className="px-3 py-2 hidden lg:table-cell">
-                            <a
-                              href={`/carerprofile?user_id=${row.provider_id ?? ""}`}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
                               className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
-                              onClick={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setCarerPreviewUserId(row.provider_id ?? null);
+                              }}
                             >
                               {resolveIdentityLabel(row.provider_display_name, row.provider_social_id, row.provider_id).name}
-                            </a>
+                            </button>
                             <div className="text-xs text-muted-foreground">
                               {resolveIdentityLabel(row.provider_display_name, row.provider_social_id, row.provider_id).social}
                             </div>
@@ -1242,7 +1266,7 @@ const AdminSafety = () => {
                       </th>
                       <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "moderation_state")}>
-                          Moderation
+                          Moderation State
                           <span className={getSortIconClassName(usersSort.key === "moderation_state")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
@@ -1252,45 +1276,45 @@ const AdminSafety = () => {
                           <span className={getSortIconClassName(usersSort.key === "reports_received")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden lg:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "reports_filed")}>
                           Reports Filed
                           <span className={getSortIconClassName(usersSort.key === "reports_filed")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden xl:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "false_report_count")}>
-                          False Reports
+                          False Reports Count
                           <span className={getSortIconClassName(usersSort.key === "false_report_count")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden lg:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "penalty_count")}>
-                          Penalties
+                          Penalty Count
                           <span className={getSortIconClassName(usersSort.key === "penalty_count")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden xl:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "cumulative_penalty_score")}>
-                          Penalty Score
+                          Cumulative Penalty Score
                           <span className={getSortIconClassName(usersSort.key === "cumulative_penalty_score")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden xl:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "trust_weight")}>
                           Trust Weight
                           <span className={getSortIconClassName(usersSort.key === "trust_weight")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
-                      <th className="px-3 py-2 hidden lg:table-cell">
+                      <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "disputes_involved")}>
-                          Disputes
+                          Disputes Involved
                           <span className={getSortIconClassName(usersSort.key === "disputes_involved")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
                       <th className="px-3 py-2">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "latest_safety_activity")}>
-                          Latest Activity
+                          Latest Safety Activity
                           <span className={getSortIconClassName(usersSort.key === "latest_safety_activity")}>{getSortIcon(usersSort.direction)}</span>
                         </button>
                       </th>
@@ -1327,12 +1351,12 @@ const AdminSafety = () => {
                             </td>
                             <td className="px-3 py-2"><span className={badgeClasses}>{formatModerationState(row.moderation_state)}</span></td>
                             <td className="px-3 py-2">{row.reports_received ?? 0}</td>
-                            <td className="px-3 py-2 hidden lg:table-cell">{row.reports_filed ?? 0}</td>
-                            <td className="px-3 py-2 hidden xl:table-cell">{row.false_report_count ?? 0}</td>
-                            <td className="px-3 py-2 hidden lg:table-cell">{row.penalty_count ?? 0}</td>
-                            <td className="px-3 py-2 hidden xl:table-cell">{row.cumulative_penalty_score ?? 0}</td>
-                            <td className="px-3 py-2 hidden xl:table-cell">{row.trust_weight ?? 0}</td>
-                            <td className="px-3 py-2 hidden lg:table-cell">{row.disputes_involved ?? 0}</td>
+                            <td className="px-3 py-2">{row.reports_filed ?? 0}</td>
+                            <td className="px-3 py-2">{row.false_report_count ?? 0}</td>
+                            <td className="px-3 py-2">{row.penalty_count ?? 0}</td>
+                            <td className="px-3 py-2">{row.cumulative_penalty_score ?? 0}</td>
+                            <td className="px-3 py-2">{row.trust_weight ?? 0}</td>
+                            <td className="px-3 py-2">{row.disputes_involved ?? 0}</td>
                             <td className="px-3 py-2">{formatDateTime(row.latest_safety_activity)}</td>
                           </tr>
                         );
@@ -1667,7 +1691,7 @@ const AdminSafety = () => {
                       Service booked: {currentDisputeMeta.serviceLabel}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Date: {formatDateTime(currentDisputeMeta.serviceDate)}
+                      Booking period: {currentDisputeMeta.bookingPeriodLabel}
                     </div>
                     <div className="font-mono text-[10px] text-muted-foreground/80">
                       Booking ID: {disputeHeader?.service_chat_id ?? "-"}
@@ -1687,28 +1711,31 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Participants</h3>
                   <div>
                     Requester:{" "}
-                    <a
-                      href={`/carerprofile?user_id=${disputeHeader?.requester_id ?? ""}`}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
                       className="underline decoration-dotted underline-offset-2"
+                      onClick={() =>
+                        openPublicProfilePreview(
+                          disputeHeader?.requester_id ?? null,
+                          resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).name,
+                        )
+                      }
                     >
                       {resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).name}
-                    </a>{" "}
+                    </button>{" "}
                     <span className="text-muted-foreground">
                       ({resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).social})
                     </span>
                   </div>
                   <div>
                     Provider:{" "}
-                    <a
-                      href={`/carerprofile?user_id=${disputeHeader?.provider_id ?? ""}`}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
                       className="underline decoration-dotted underline-offset-2"
+                      onClick={() => setCarerPreviewUserId(disputeHeader?.provider_id ?? null)}
                     >
                       {resolveIdentityLabel(disputeHeader?.provider_display_name, disputeHeader?.provider_social_id, disputeHeader?.provider_id).name}
-                    </a>{" "}
+                    </button>{" "}
                     <span className="text-muted-foreground">
                       ({resolveIdentityLabel(disputeHeader?.provider_display_name, disputeHeader?.provider_social_id, disputeHeader?.provider_id).social})
                     </span>
@@ -1890,6 +1917,12 @@ const AdminSafety = () => {
         fallbackName={profilePreviewName}
         viewedUserId={profilePreviewUserId}
         data={null}
+      />
+      <PublicCarerProfileModal
+        isOpen={Boolean(carerPreviewUserId)}
+        providerUserId={carerPreviewUserId}
+        onClose={() => setCarerPreviewUserId(null)}
+        canRequestService={false}
       />
 
       <AlertDialog open={pendingAction !== null} onOpenChange={(open) => !open && setPendingAction(null)}>
