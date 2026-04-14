@@ -70,8 +70,9 @@ const lazyWithChunkRecovery = <T extends ComponentType<unknown>>(
         const retried = sessionStorage.getItem(flagKey) === "1";
         if (!retried) {
           sessionStorage.setItem(flagKey, "1");
-          window.location.reload();
-          return new Promise<never>(() => undefined);
+          throw new Error(
+            "Chunk load failed for this route. Please refresh manually to load the latest version.",
+          );
         }
       }
       throw error;

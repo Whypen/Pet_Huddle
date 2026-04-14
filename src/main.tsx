@@ -41,7 +41,10 @@ const resetServiceWorkerCachesOnce = async () => {
     console.warn("Service worker reset failed:", error);
   }
 };
-void resetServiceWorkerCachesOnce();
+const ENABLE_AUTOMATIC_RUNTIME_RELOAD = false;
+if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
+  void resetServiceWorkerCachesOnce();
+}
 
 const CHUNK_RELOAD_ATTEMPTS_KEY = "huddle:chunk-reload-attempts";
 const CHUNK_RELOAD_MAX_ATTEMPTS = 6;
@@ -161,7 +164,9 @@ const syncToLatestEntryBundleOnce = async () => {
   }
 };
 
-void syncToLatestEntryBundleOnce();
+if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
+  void syncToLatestEntryBundleOnce();
+}
 window.addEventListener("error", (event) => {
   const target = event.target as (EventTarget & { tagName?: string; src?: string }) | null;
   const scriptSrc = typeof target?.src === "string" ? target.src : "";

@@ -42,6 +42,8 @@ type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["
   restriction_flags?: Record<string, boolean> | null;
   case_status?: "open" | "resolved" | "dismissed" | null;
   latest_action_source?: "manual" | "sentinel" | null;
+  latest_action?: string | null;
+  latest_action_at?: string | null;
 };
 type ReportCasefileRow = Database["public"]["Views"]["view_admin_report_casefile"]["Row"] & {
   target_display_name?: string | null;
@@ -1052,11 +1054,12 @@ const AdminSafety = () => {
     if (source === "sentinel") return "Automation";
     return "Manual";
   })();
-  const reportLastActionLabel = reportHeader?.latest_action_source
-    ? reportHeader.latest_action_source === "sentinel"
+  const hasRealReportAction = Boolean(reportHeader?.latest_action || reportHeader?.latest_action_at);
+  const reportLastActionLabel = !hasRealReportAction
+    ? "No manual action yet"
+    : reportHeader?.latest_action_source === "sentinel"
       ? "Last action: Automation"
-      : "Last action: Manual"
-    : "Last action: None";
+      : "Last action: Manual";
 
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
@@ -1207,8 +1210,8 @@ const AdminSafety = () => {
     setWaiveCustomerPlatformFee(action === "full_refund");
     setWaiveProviderPlatformFee(false);
     if (action === "partial_refund") {
-      const maxRefund = disputeServiceRateAmount;
-      const seedRefund = Math.min(disputeExistingRefundAmount, maxRefund);
+      const existingServiceRefundPortion = Math.min(disputeExistingRefundAmount, disputeServiceRateAmount);
+      const seedRefund = Math.min(existingServiceRefundPortion, disputeServiceRateAmount);
       setPartialRefundInput(seedRefund > 0 ? seedRefund.toFixed(2) : "");
     } else {
       setPartialRefundInput("");
@@ -1236,7 +1239,10 @@ const AdminSafety = () => {
       };
     }
 
-    const providerFeeDeduction = waiveProviderPlatformFee ? 0 : providerPlatformFee;
+    const waiveCustomerFeeEffective = pendingDisputeAction.action === "release_full" ? false : waiveCustomerPlatformFee;
+    const providerFeeDeduction = pendingDisputeAction.action === "full_refund"
+      ? 0
+      : (waiveProviderPlatformFee ? 0 : providerPlatformFee);
     const providerReceivesOnFullRelease = Math.max(serviceRate - providerFeeDeduction, 0);
     if (pendingDisputeAction.action === "release_full") {
       const huddleRetains = Math.max(totalPaid - providerReceivesOnFullRelease, 0);
@@ -1245,7 +1251,7 @@ const AdminSafety = () => {
         serviceRate,
         customerPlatformFee,
         providerPlatformFee,
-        waiveCustomerPlatformFee,
+        waiveCustomerPlatformFee: false,
         waiveProviderPlatformFee,
         providerReceivesOnFullRelease,
         providerReceives: providerReceivesOnFullRelease,
@@ -1255,7 +1261,7 @@ const AdminSafety = () => {
     }
 
     if (pendingDisputeAction.action === "full_refund") {
-      const customerRefunded = serviceRate + (waiveCustomerPlatformFee ? customerPlatformFee : 0);
+      const customerRefunded = serviceRate + (waiveCustomerFeeEffective ? customerPlatformFee : 0);
       const providerReceives = 0;
       const huddleRetains = Math.max(totalPaid - customerRefunded - providerReceives, 0);
       return {
@@ -1263,7 +1269,7 @@ const AdminSafety = () => {
         serviceRate,
         customerPlatformFee,
         providerPlatformFee,
-        waiveCustomerPlatformFee,
+        waiveCustomerPlatformFee: waiveCustomerFeeEffective,
         waiveProviderPlatformFee,
         providerReceivesOnFullRelease,
         providerReceives,
@@ -1272,22 +1278,22 @@ const AdminSafety = () => {
       };
     }
 
-    const parsedRefund = parseAmount(partialRefundInput) ?? 0;
-    const maxRefund = serviceRate + (waiveCustomerPlatformFee ? customerPlatformFee : 0);
-    const clampedRefund = Math.max(Math.min(parsedRefund, maxRefund), 0);
-    const serviceRefundPortion = Math.max(Math.min(clampedRefund, serviceRate), 0);
+    const parsedServiceRefund = parseAmount(partialRefundInput) ?? 0;
+    const serviceRefundPortion = Math.max(Math.min(parsedServiceRefund, serviceRate), 0);
+    const customerFeeRefundPortion = waiveCustomerFeeEffective ? customerPlatformFee : 0;
+    const customerRefunded = serviceRefundPortion + customerFeeRefundPortion;
     const providerReceives = Math.max(serviceRate - serviceRefundPortion - providerFeeDeduction, 0);
-    const huddleRetains = Math.max(totalPaid - clampedRefund - providerReceives, 0);
+    const huddleRetains = Math.max(totalPaid - customerRefunded - providerReceives, 0);
     return {
       totalPaid,
       serviceRate,
       customerPlatformFee,
       providerPlatformFee,
-      waiveCustomerPlatformFee,
+      waiveCustomerPlatformFee: waiveCustomerFeeEffective,
       waiveProviderPlatformFee,
       providerReceivesOnFullRelease,
       providerReceives,
-      customerRefunded: clampedRefund,
+      customerRefunded,
       huddleRetains,
     };
   };
@@ -1305,11 +1311,11 @@ const AdminSafety = () => {
     if (pendingDisputeAction.action === "partial_refund") {
       const parsed = parseAmount(partialRefundInput);
       if (parsed === null || parsed < 0) {
-        setDisputeActionError("Enter a valid partial refund amount.");
+        setDisputeActionError("Enter a valid service refund amount.");
         return;
       }
-      const maxRefund = disputeServiceRateAmount + (waiveCustomerPlatformFee ? disputeCustomerPlatformFeeAmount : 0);
-      refundAmount = Math.max(Math.min(parsed, maxRefund), 0);
+      const maxServiceRefund = disputeServiceRateAmount;
+      refundAmount = Math.max(Math.min(parsed, maxServiceRefund), 0);
     }
 
     setDisputeActionLoading(true);
@@ -1324,7 +1330,7 @@ const AdminSafety = () => {
         p_note: trimmedNote,
         p_customer_refund_amount: refundAmount,
         p_waive_customer_platform_fee: pendingDisputeAction.action === "release_full" ? false : waiveCustomerPlatformFee,
-        p_waive_provider_platform_fee: waiveProviderPlatformFee,
+        p_waive_provider_platform_fee: pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee,
       } as never,
     );
 
@@ -1888,11 +1894,13 @@ const AdminSafety = () => {
                     <span className={currentAutomationPaused ? badgeClasses : automationBadgeClasses}>
                       {currentAutomationPaused ? "Automation: Off" : "Automation: On"}
                     </span>
-                    {reportHeader?.latest_action_source ? (
-                      <span className={reportHeader.latest_action_source === "sentinel" ? automationBadgeClasses : badgeClasses}>
-                        {reportHeader.latest_action_source === "sentinel" ? "Last action: Automation" : "Last action: Manual"}
+                    {hasRealReportAction ? (
+                      <span className={reportHeader?.latest_action_source === "sentinel" ? automationBadgeClasses : badgeClasses}>
+                        {reportLastActionLabel}
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{reportLastActionLabel}</span>
+                    )}
                     {reportDrawerIsDemo ? (
                       <span className={demoBadgeClasses}>Demo Fixture</span>
                     ) : null}
@@ -2065,18 +2073,6 @@ const AdminSafety = () => {
                       onClick={() => openReportActionConfirm({ action: "hard_ban" })}
                     >
                       Hard Ban
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        openReportActionConfirm({
-                          action: "pause_sentinel",
-                          pauseSentinel: !currentAutomationPaused,
-                        })
-                      }
-                    >
-                      {currentAutomationPaused ? "Automation: On" : "Automation: Off"}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "mark_dismissed" })}>
                       Mark Dismissed
@@ -2679,6 +2675,7 @@ const AdminSafety = () => {
                     type="checkbox"
                     checked={waiveCustomerPlatformFee}
                     onChange={(event) => setWaiveCustomerPlatformFee(event.target.checked)}
+                    disabled={pendingDisputeAction.action === "release_full"}
                   />
                   <span>Waive platform fee from Customer</span>
                 </label>
@@ -2687,6 +2684,7 @@ const AdminSafety = () => {
                     type="checkbox"
                     checked={waiveProviderPlatformFee}
                     onChange={(event) => setWaiveProviderPlatformFee(event.target.checked)}
+                    disabled={pendingDisputeAction.action === "full_refund"}
                   />
                   <span>Waive platform fee from Provider</span>
                 </label>
@@ -2695,7 +2693,7 @@ const AdminSafety = () => {
               {pendingDisputeAction.action === "partial_refund" ? (
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground" htmlFor="partial-refund-amount">
-                    Partial refund amount (customer refunded)
+                    Partial refund amount (service refund only)
                   </label>
                   <input
                     id="partial-refund-amount"
@@ -2705,7 +2703,7 @@ const AdminSafety = () => {
                     value={partialRefundInput}
                     onChange={(event) => setPartialRefundInput(event.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, disputeServiceRateAmount + (waiveCustomerPlatformFee ? disputeCustomerPlatformFeeAmount : 0))})`}
+                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, disputeServiceRateAmount)})`}
                   />
                 </div>
               ) : null}
