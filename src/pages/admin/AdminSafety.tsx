@@ -365,6 +365,29 @@ const formatCurrencyAmount = (currencyCode: string | null | undefined, amount: n
   }
 };
 
+const stripDemoFixtureMarker = (value: string | null | undefined) => {
+  if (!value) return "-";
+  return value
+    .replaceAll(DEMO_FIXTURE_MARKER, "")
+    .replace(/\bOpen fixture\.\s*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+};
+
+const resolveStorageOrPublicUrl = (rawValue: string | null | undefined) => {
+  const value = (rawValue ?? "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  const normalized = value.replace(/^\/+/, "");
+  if (normalized.startsWith("notices/")) {
+    return supabase.storage.from("notices").getPublicUrl(normalized).data.publicUrl;
+  }
+  if (normalized.startsWith("alerts/")) {
+    return supabase.storage.from("alerts").getPublicUrl(normalized).data.publicUrl;
+  }
+  return value;
+};
+
 const formatEventGroupLabel = (group: string) => {
   if (group === "reports_received") return "Reports Received";
   if (group === "reports_filed") return "Reports Filed";
@@ -444,6 +467,7 @@ const AdminSafety = () => {
   const [disputeActionError, setDisputeActionError] = useState<string | null>(null);
   const [disputeActionSuccess, setDisputeActionSuccess] = useState<string | null>(null);
   const [partialRefundInput, setPartialRefundInput] = useState("");
+  const [waivePlatformFee, setWaivePlatformFee] = useState(false);
   const [reportsCaseFilter, setReportsCaseFilter] = useState<"open" | "resolved" | "dismissed" | "all">("open");
   const [selectedReporterForPenalty, setSelectedReporterForPenalty] = useState<string | null>(null);
   const [shadowFlags, setShadowFlags] = useState<Record<RestrictionFlagKey, boolean>>({
@@ -901,6 +925,7 @@ const AdminSafety = () => {
     setDisputeActionSuccess(null);
     setDisputeAdminNote("");
     setPartialRefundInput("");
+    setWaivePlatformFee(false);
     setServiceChatPreview(null);
     setServiceChatPreviewOpen(false);
   }, [selectedDisputeId]);
@@ -950,7 +975,7 @@ const AdminSafety = () => {
     0,
     0,
   );
-  const disputeRefundableAmount = Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount, 0);
+  const disputeServiceRateAmount = Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount, 0);
   const disputeExistingRefundAmount = Math.max(
     parseAmount(disputeHeader?.customer_refund_amount) ??
     parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
@@ -968,7 +993,7 @@ const AdminSafety = () => {
         ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).provider_receives_amount
         : null
       : null) ??
-    Math.max(disputeRefundableAmount - disputeExistingRefundAmount, 0),
+    Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount - disputeExistingRefundAmount, 0),
     0,
   );
   const disputeCurrencyCode =
@@ -1128,8 +1153,11 @@ const AdminSafety = () => {
   const openDisputeActionConfirm = (action: DisputeDecisionAction) => {
     resetDisputeActionFeedback();
     setPendingDisputeAction({ action });
+    const defaultWaive = action === "full_refund";
+    setWaivePlatformFee(defaultWaive);
     if (action === "partial_refund") {
-      const seedRefund = Math.min(disputeExistingRefundAmount, disputeRefundableAmount);
+      const maxRefund = defaultWaive ? disputeTotalPaidAmount : disputeServiceRateAmount;
+      const seedRefund = Math.min(disputeExistingRefundAmount, maxRefund);
       setPartialRefundInput(seedRefund > 0 ? seedRefund.toFixed(2) : "");
     } else {
       setPartialRefundInput("");
@@ -1141,37 +1169,53 @@ const AdminSafety = () => {
       return {
         totalPaid: disputeTotalPaidAmount,
         platformFee: disputePlatformFeeAmount,
+        serviceRate: disputeServiceRateAmount,
+        waivePlatformFee: false,
         providerReceives: disputeExistingProviderAmount,
         customerRefunded: disputeExistingRefundAmount,
+        platformFeeRetained: disputePlatformFeeAmount,
       };
     }
 
     const totalPaid = disputeTotalPaidAmount;
     const platformFee = disputePlatformFeeAmount;
-    const refundable = disputeRefundableAmount;
+    const serviceRate = disputeServiceRateAmount;
     if (pendingDisputeAction.action === "release_full") {
       return {
         totalPaid,
         platformFee,
-        providerReceives: refundable,
+        serviceRate,
+        waivePlatformFee: false,
+        platformFeeRetained: platformFee,
+        providerReceives: serviceRate,
         customerRefunded: 0,
       };
     }
     if (pendingDisputeAction.action === "full_refund") {
+      const platformFeeRetained = waivePlatformFee ? 0 : platformFee;
+      const customerRefunded = waivePlatformFee ? totalPaid : serviceRate;
       return {
         totalPaid,
         platformFee,
+        serviceRate,
+        waivePlatformFee,
+        platformFeeRetained,
         providerReceives: 0,
-        customerRefunded: refundable,
+        customerRefunded,
       };
     }
 
     const parsedRefund = parseAmount(partialRefundInput) ?? 0;
-    const clampedRefund = Math.max(Math.min(parsedRefund, refundable), 0);
+    const maxRefund = waivePlatformFee ? totalPaid : serviceRate;
+    const clampedRefund = Math.max(Math.min(parsedRefund, maxRefund), 0);
+    const platformFeeRetained = waivePlatformFee ? 0 : platformFee;
     return {
       totalPaid,
       platformFee,
-      providerReceives: Math.max(refundable - clampedRefund, 0),
+      serviceRate,
+      waivePlatformFee,
+      platformFeeRetained,
+      providerReceives: Math.max(totalPaid - platformFeeRetained - clampedRefund, 0),
       customerRefunded: clampedRefund,
     };
   };
@@ -1192,7 +1236,8 @@ const AdminSafety = () => {
         setDisputeActionError("Enter a valid partial refund amount.");
         return;
       }
-      refundAmount = Math.max(Math.min(parsed, disputeRefundableAmount), 0);
+      const maxRefund = waivePlatformFee ? disputeTotalPaidAmount : disputeServiceRateAmount;
+      refundAmount = Math.max(Math.min(parsed, maxRefund), 0);
     }
 
     setDisputeActionLoading(true);
@@ -1206,6 +1251,7 @@ const AdminSafety = () => {
         p_action: pendingDisputeAction.action,
         p_note: trimmedNote,
         p_customer_refund_amount: refundAmount,
+        p_waive_platform_fee: pendingDisputeAction.action === "release_full" ? false : waivePlatformFee,
       } as never,
     );
 
@@ -1848,7 +1894,7 @@ const AdminSafety = () => {
                           <div className="space-y-1">
                             {(row.attachment_urls ?? []).map((url, index) => (
                               <div key={`${row.report_id}-att-${index}`} className="text-xs">
-                                <a href={url} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                                <a href={resolveStorageOrPublicUrl(url)} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
                                   Attachment {index + 1}
                                 </a>
                               </div>
@@ -2054,15 +2100,15 @@ const AdminSafety = () => {
 
                 <section className="rounded-lg border p-3 space-y-2">
                   <h3 className="font-semibold">Dispute Detail</h3>
-                  <div className="whitespace-pre-wrap break-words">{disputeCasefile?.description ?? "-"}</div>
-                  <div>Admin notes: {disputeCasefile?.admin_notes ?? "-"}</div>
+                        <div className="whitespace-pre-wrap break-words">{stripDemoFixtureMarker(disputeCasefile?.description)}</div>
+                  <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
                   <div>Evidence URLs: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</div>
                   {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
                     <div className="space-y-1">
                       {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).map((url, index) => (
                         <div key={`${selectedDisputeId}-evidence-${index}`} className="text-xs">
                           <a
-                            href={url}
+                            href={resolveStorageOrPublicUrl(url)}
                             target="_blank"
                             rel="noreferrer"
                             className="underline decoration-dotted underline-offset-2"
@@ -2102,6 +2148,10 @@ const AdminSafety = () => {
                     <div>
                       <div className="text-xs text-muted-foreground">Platform Fee</div>
                       <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputePlatformFeeAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Service Rate</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeServiceRateAmount)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Provider Receives</div>
@@ -2443,6 +2493,14 @@ const AdminSafety = () => {
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().platformFee)}</div>
                 </div>
                 <div>
+                  <div className="text-xs text-muted-foreground">Service Rate</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().serviceRate)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Waive Platform Fee</div>
+                  <div className="font-medium">{getPendingDisputeBreakdown().waivePlatformFee ? "Yes" : "No"}</div>
+                </div>
+                <div>
                   <div className="text-xs text-muted-foreground">Provider Receives</div>
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().providerReceives)}</div>
                 </div>
@@ -2451,6 +2509,17 @@ const AdminSafety = () => {
                   <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().customerRefunded)}</div>
                 </div>
               </div>
+
+              {pendingDisputeAction.action === "partial_refund" || pendingDisputeAction.action === "full_refund" ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={waivePlatformFee}
+                    onChange={(event) => setWaivePlatformFee(event.target.checked)}
+                  />
+                  <span>Waive platform fee</span>
+                </label>
+              ) : null}
 
               {pendingDisputeAction.action === "partial_refund" ? (
                 <div className="space-y-1">
@@ -2465,7 +2534,7 @@ const AdminSafety = () => {
                     value={partialRefundInput}
                     onChange={(event) => setPartialRefundInput(event.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, disputeRefundableAmount)})`}
+                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, waivePlatformFee ? disputeTotalPaidAmount : disputeServiceRateAmount)})`}
                   />
                 </div>
               ) : null}

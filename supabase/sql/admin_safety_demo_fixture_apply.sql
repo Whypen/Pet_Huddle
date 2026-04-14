@@ -88,7 +88,7 @@ begin
     array['Unsafe or harmful behavior (online or in-person)'],
     8,
     v_tag || ' Evidence-backed safety report for queue testing',
-    array['https://demo.invalid/evidence-1.jpg'],
+    array['https://huddle.pet/huddle-logo.jpg'],
     true,
     now() - interval '90 minutes',
     now() - interval '90 minutes'

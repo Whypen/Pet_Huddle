@@ -41,13 +41,17 @@ interface ReportModalProps {
 async function uploadReportImages(files: File[]): Promise<string[]> {
   const urls: string[] = [];
   for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
     const ext = file.name.split(".").pop() || "jpg";
-    const path = `reports/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await supabase.storage.from("notices").upload(path, file);
-    if (!error) {
-      const { data } = supabase.storage.from("notices").getPublicUrl(path);
-      urls.push(data.publicUrl);
-    }
+    const path = `reports/attachments/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await supabase.storage.from("notices").upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+    if (error) continue;
+    const { data } = supabase.storage.from("notices").getPublicUrl(path);
+    if (data?.publicUrl) urls.push(data.publicUrl);
   }
   return urls;
 }

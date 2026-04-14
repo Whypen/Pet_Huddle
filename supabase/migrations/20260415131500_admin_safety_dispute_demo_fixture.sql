@@ -114,8 +114,8 @@ begin
         'serviceType', 'Pet Grooming',
         'serviceTypes', jsonb_build_array('Pet Grooming'),
         'currency', 'HKD',
-        'finalPrice', '230.00',
-        'platform_fee_amount', '23.00',
+        'finalPrice', '110.00',
+        'platform_fee_amount', '10.00',
         'rate', 'fixed'
       ),
       now() - interval '2 day 8 hour',
@@ -144,8 +144,8 @@ begin
         'serviceType', 'Boarding',
         'serviceTypes', jsonb_build_array('Boarding'),
         'currency', 'HKD',
-        'finalPrice', '520.00',
-        'platform_fee_amount', '52.00',
+        'finalPrice', '220.00',
+        'platform_fee_amount', '20.00',
         'rate', 'fixed'
       ),
       now() - interval '1 day 12 hour',
@@ -175,13 +175,13 @@ begin
       v_service_chat_open,
       v_requester,
       'service_quality',
-      v_tag || ' Open dispute: quality concern for Pet Grooming service.',
+      'Open dispute: quality concern for Pet Grooming service.',
       array[
-        'https://example.com/' || replace(v_tag, '[', '') || '/grooming-before.jpg',
-        'https://example.com/' || replace(v_tag, '[', '') || '/grooming-after.jpg'
+        'https://huddle.pet/huddle-logo.jpg',
+        'https://huddle.pet/huddle-favicon-v5.png'
       ]::text[],
       'open',
-      v_tag || ' Open fixture. Funds should remain on hold until decision.',
+      'Funds should remain on hold until decision.',
       now() - interval '2 day',
       now() - interval '2 day',
       null,
@@ -191,8 +191,8 @@ begin
         'demo_fixture_tag', v_tag,
         'money', jsonb_build_object(
           'currency', 'hkd',
-          'total_paid_amount', 230.00,
-          'platform_fee_amount', 23.00,
+          'total_paid_amount', 110.00,
+          'platform_fee_amount', 10.00,
           'provider_receives_amount', 0,
           'customer_refund_amount', 0
         )
@@ -207,7 +207,10 @@ begin
       v_requester,
       'booking_scope',
       v_tag || ' Decision-ready dispute: service period mismatch for Boarding.',
-      array['https://example.com/' || replace(v_tag, '[', '') || '/boarding-chat-export.pdf']::text[],
+      array[
+        'https://huddle.pet/huddle-icon-512-v5.png',
+        'https://huddle.pet/apple-touch-icon.png'
+      ]::text[],
       'decision_ready',
       v_tag || ' Decision-ready fixture for admin action testing.',
       now() - interval '1 day 9 hour',
@@ -219,8 +222,8 @@ begin
         'demo_fixture_tag', v_tag,
         'money', jsonb_build_object(
           'currency', 'hkd',
-          'total_paid_amount', 520.00,
-          'platform_fee_amount', 52.00,
+          'total_paid_amount', 220.00,
+          'platform_fee_amount', 20.00,
           'provider_receives_amount', 0,
           'customer_refund_amount', 0
         )
