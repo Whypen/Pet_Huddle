@@ -46,17 +46,50 @@ type ReportCasefileRow = Database["public"]["Views"]["view_admin_report_casefile
   moderation_note?: string | null;
   reporter_false_report_count?: number | null;
 };
-type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes_queue"]["Row"];
+type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes_queue"]["Row"] & {
+  requester_social_id?: string | null;
+  provider_social_id?: string | null;
+  evidence_urls?: string[] | null;
+};
 type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
   action_source?: "manual" | "sentinel" | null;
 };
 type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"];
+type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
+type SafetyUserRow = {
+  user_id: string | null;
+  display_name: string | null;
+  social_id: string | null;
+  moderation_state: string | null;
+  automation_paused: boolean | null;
+  case_status: string | null;
+  is_banned_effective: boolean | null;
+  reports_received: number | null;
+  reports_filed: number | null;
+  false_report_count: number | null;
+  penalty_count: number | null;
+  cumulative_penalty_score: number | null;
+  trust_weight: number | null;
+  disputes_involved: number | null;
+  latest_safety_activity: string | null;
+};
+type SafetyUserTimelineRow = {
+  user_id: string | null;
+  event_type: string;
+  event_group: string;
+  event_date: string | null;
+  description: string | null;
+  related_id: string | null;
+  severity: string | null;
+  source: string | null;
+};
 
-type ActiveTab = "reports" | "disputes" | "audit";
+type ActiveTab = "reports" | "disputes" | "users" | "audit";
 
 type CaseSelection =
   | { type: "report"; targetUserId: string }
   | { type: "dispute"; disputeId: string }
+  | { type: "user"; userId: string }
   | null;
 
 type SortDirection = "asc" | "desc";
@@ -77,6 +110,17 @@ type DisputesSortKey =
   | "dispute_created_at"
   | "dispute_updated_at";
 type AuditSortKey = "source" | "action" | "target" | "actor" | "created_at";
+type UsersSortKey =
+  | "identity"
+  | "moderation_state"
+  | "reports_received"
+  | "reports_filed"
+  | "false_report_count"
+  | "penalty_count"
+  | "cumulative_penalty_score"
+  | "trust_weight"
+  | "disputes_involved"
+  | "latest_safety_activity";
 
 type SortState<K extends string> = {
   key: K;
@@ -200,6 +244,32 @@ const formatCaseStatus = (status: string | null | undefined) => {
   return "Open";
 };
 
+const formatModerationState = (value: string | null | undefined) => {
+  if (!value) return "active";
+  return value.replaceAll("_", " ");
+};
+
+const formatEventGroupLabel = (group: string) => {
+  if (group === "reports_received") return "Reports Received";
+  if (group === "reports_filed") return "Reports Filed";
+  if (group === "disputes") return "Disputes";
+  if (group === "penalties") return "Penalties";
+  return "Audit";
+};
+
+const eventBadgeClassByGroup = (group: string) => {
+  if (group === "penalties") {
+    return "inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700";
+  }
+  if (group === "disputes") {
+    return "inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700";
+  }
+  if (group === "audit") {
+    return "inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700";
+  }
+  return "inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700";
+};
+
 const ADMIN_EMAIL_ALLOWLIST = new Set([
   "twenty_illkid@msn.com",
   "fongpoman114@gmail.com",
@@ -214,12 +284,16 @@ const AdminSafety = () => {
 
   const [reportsQueue, setReportsQueue] = useState<ReportsQueueRow[]>([]);
   const [disputesQueue, setDisputesQueue] = useState<DisputesQueueRow[]>([]);
+  const [usersQueue, setUsersQueue] = useState<SafetyUserRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditTimelineRow[]>([]);
   const [demoReportTargetIds, setDemoReportTargetIds] = useState<Set<string>>(new Set());
 
   const [caseSelection, setCaseSelection] = useState<CaseSelection>(null);
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
+  const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatRow | null>(null);
+  const [userTimeline, setUserTimeline] = useState<SafetyUserTimelineRow[]>([]);
+  const [userTimelineFilter, setUserTimelineFilter] = useState<"all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit">("all");
   const [serviceChatTotals, setServiceChatTotals] = useState<Record<string, number | null>>({});
   const [reportsSort, setReportsSort] = useState<SortState<ReportsSortKey>>({
     key: "latest_report_at",
@@ -233,6 +307,11 @@ const AdminSafety = () => {
     key: "created_at",
     direction: "desc",
   });
+  const [usersSort, setUsersSort] = useState<SortState<UsersSortKey>>({
+    key: "latest_safety_activity",
+    direction: "desc",
+  });
+  const [usersSearch, setUsersSearch] = useState("");
   const [moderatorNote, setModeratorNote] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingReportAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -252,6 +331,7 @@ const AdminSafety = () => {
 
   const selectedReportTargetId = caseSelection?.type === "report" ? caseSelection.targetUserId : null;
   const selectedDisputeId = caseSelection?.type === "dispute" ? caseSelection.disputeId : null;
+  const selectedUserId = caseSelection?.type === "user" ? caseSelection.userId : null;
   const isAdmin =
     profile?.is_admin === true ||
     profile?.user_role === "admin" ||
@@ -415,8 +495,65 @@ const AdminSafety = () => {
     return rows;
   }, [auditRows, auditSort]);
 
+  const usersSorted = useMemo(() => {
+    const rows = [...usersQueue];
+    rows.sort((a, b) => {
+      let result = 0;
+      switch (usersSort.key) {
+        case "identity":
+          result = compareStrings(
+            `${a.display_name ?? ""} ${a.social_id ?? ""} ${a.user_id ?? ""}`,
+            `${b.display_name ?? ""} ${b.social_id ?? ""} ${b.user_id ?? ""}`,
+          );
+          break;
+        case "moderation_state":
+          result = compareStrings(a.moderation_state, b.moderation_state);
+          break;
+        case "reports_received":
+          result = compareNumbers(a.reports_received, b.reports_received);
+          break;
+        case "reports_filed":
+          result = compareNumbers(a.reports_filed, b.reports_filed);
+          break;
+        case "false_report_count":
+          result = compareNumbers(a.false_report_count, b.false_report_count);
+          break;
+        case "penalty_count":
+          result = compareNumbers(a.penalty_count, b.penalty_count);
+          break;
+        case "cumulative_penalty_score":
+          result = compareNumbers(a.cumulative_penalty_score, b.cumulative_penalty_score);
+          break;
+        case "trust_weight":
+          result = compareNumbers(a.trust_weight, b.trust_weight);
+          break;
+        case "disputes_involved":
+          result = compareNumbers(a.disputes_involved, b.disputes_involved);
+          break;
+        case "latest_safety_activity":
+          result = compareNumbers(parseTime(a.latest_safety_activity), parseTime(b.latest_safety_activity));
+          break;
+      }
+      return applyDirection(result, usersSort.direction);
+    });
+    return rows;
+  }, [usersQueue, usersSort]);
+
   const loadQueues = async () => {
-    const [reportsRes, disputesRes, auditRes] = await Promise.all([
+    const userQuery = usersSearch.trim();
+    const wildcard = `%${userQuery}%`;
+    let usersSelect = supabase
+      .from("view_admin_safety_users")
+      .select("*")
+      .order("latest_safety_activity", { ascending: false })
+      .limit(500);
+    if (userQuery.length > 0) {
+      usersSelect = usersSelect.or(
+        `display_name.ilike.${wildcard},social_id.ilike.${wildcard},user_id::text.ilike.${wildcard}`,
+      );
+    }
+
+    const [reportsRes, disputesRes, auditRes, usersRes] = await Promise.all([
       supabase
         .from("view_admin_reports_queue")
         .select("*")
@@ -430,6 +567,7 @@ const AdminSafety = () => {
         .select("*")
         .order("created_at", { ascending: false })
         .limit(200),
+      usersSelect,
     ]);
 
     if (!reportsRes.error) {
@@ -478,6 +616,7 @@ const AdminSafety = () => {
       }
     }
     if (!auditRes.error) setAuditRows(auditRes.data ?? []);
+    if (!usersRes.error) setUsersQueue((usersRes.data ?? []) as unknown as SafetyUserRow[]);
   };
 
   const loadReportCasefile = async (targetUserId: string | null) => {
@@ -522,6 +661,7 @@ const AdminSafety = () => {
     const loadDisputeCasefile = async () => {
       if (!selectedDisputeId) {
         setDisputeCasefile(null);
+        setServiceChatPreview(null);
         return;
       }
 
@@ -536,6 +676,28 @@ const AdminSafety = () => {
 
     void loadDisputeCasefile();
   }, [selectedDisputeId]);
+
+  useEffect(() => {
+    const loadUserTimeline = async () => {
+      if (!selectedUserId) {
+        setUserTimeline([]);
+        return;
+      }
+      let query = supabase
+        .from("view_admin_safety_user_timeline")
+        .select("*")
+        .eq("user_id", selectedUserId)
+        .order("event_date", { ascending: false })
+        .limit(400);
+      if (userTimelineFilter !== "all") {
+        query = query.eq("event_group", userTimelineFilter);
+      }
+      const { data } = await query;
+      setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
+    };
+
+    void loadUserTimeline();
+  }, [selectedUserId, userTimelineFilter]);
 
   useEffect(() => {
     resetActionFeedback();
@@ -602,7 +764,38 @@ const AdminSafety = () => {
     setRefreshing(true);
     await loadQueues();
     if (selectedReportTargetId) await loadReportCasefile(selectedReportTargetId);
+    if (selectedUserId) {
+      let query = supabase
+        .from("view_admin_safety_user_timeline")
+        .select("*")
+        .eq("user_id", selectedUserId)
+        .order("event_date", { ascending: false })
+        .limit(400);
+      if (userTimelineFilter !== "all") {
+        query = query.eq("event_group", userTimelineFilter);
+      }
+      const { data } = await query;
+      setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
+    }
     setRefreshing(false);
+  };
+
+  const openFalseReportAction = (reporterUserId: string | null) => {
+    setSelectedReporterForPenalty(reporterUserId);
+    openReportActionConfirm({
+      action: "mark_false_report",
+      reporterUserId,
+    });
+  };
+
+  const openServiceChatPreview = async (serviceChatId: string | null) => {
+    if (!serviceChatId) return;
+    const { data } = await supabase
+      .from("service_chats")
+      .select("*")
+      .eq("id", serviceChatId)
+      .maybeSingle();
+    setServiceChatPreview(data ?? null);
   };
 
   const openReportActionConfirm = (action: PendingReportAction) => {
@@ -686,6 +879,7 @@ const AdminSafety = () => {
           <TabsList>
             <TabsTrigger value="reports">Reports</TabsTrigger>
             <TabsTrigger value="disputes">Disputes</TabsTrigger>
+            <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="audit">Audit Log</TabsTrigger>
           </TabsList>
 
@@ -771,23 +965,29 @@ const AdminSafety = () => {
                         >
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
-                              <a
-                                href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="min-w-0"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <div className="truncate text-sm font-medium">
+                              <div className="min-w-0">
+                                <a
+                                  href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
+                                </a>
+                                <a
+                                  href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block text-xs text-muted-foreground underline decoration-dotted underline-offset-2"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).social}
-                                </div>
+                                </a>
                                 <div className="font-mono text-[10px] text-muted-foreground/80">
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).fallback}
                                 </div>
-                              </a>
+                              </div>
                               {row.target_user_id && demoReportTargetIds.has(row.target_user_id) ? (
                                 <span className={demoBadgeClasses}>Demo</span>
                               ) : null}
@@ -878,8 +1078,40 @@ const AdminSafety = () => {
                           }}
                         >
                           <td className="px-3 py-2 font-mono text-xs">{row.service_chat_id ?? "-"}</td>
-                          <td className="px-3 py-2">{row.requester_display_name ?? row.requester_id ?? "-"}</td>
-                          <td className="px-3 py-2 hidden lg:table-cell">{row.provider_display_name ?? row.provider_id ?? "-"}</td>
+                          <td className="px-3 py-2">
+                            <a
+                              href={`/carerprofile?user_id=${row.requester_id ?? ""}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).name}
+                            </a>
+                            <div className="text-xs text-muted-foreground">
+                              {resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).social}
+                            </div>
+                            <div className="font-mono text-[10px] text-muted-foreground/80">
+                              {resolveIdentityLabel(row.requester_display_name, row.requester_social_id, row.requester_id).fallback}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 hidden lg:table-cell">
+                            <a
+                              href={`/carerprofile?user_id=${row.provider_id ?? ""}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {resolveIdentityLabel(row.provider_display_name, row.provider_social_id, row.provider_id).name}
+                            </a>
+                            <div className="text-xs text-muted-foreground">
+                              {resolveIdentityLabel(row.provider_display_name, row.provider_social_id, row.provider_id).social}
+                            </div>
+                            <div className="font-mono text-[10px] text-muted-foreground/80">
+                              {resolveIdentityLabel(row.provider_display_name, row.provider_social_id, row.provider_id).fallback}
+                            </div>
+                          </td>
                           <td className="px-3 py-2 hidden xl:table-cell">
                             {getDisputeTotalPaidValue(serviceChatTotals, row) ?? "-"}
                           </td>
@@ -888,6 +1120,154 @@ const AdminSafety = () => {
                           <td className="px-3 py-2">{formatDateTime(row.dispute_created_at)}</td>
                         </tr>
                       ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="users" className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={usersSearch}
+                onChange={(event) => setUsersSearch(event.target.value)}
+                placeholder="Search name, @social_id, or UUID"
+                className="h-9 min-w-[220px] flex-1 rounded-md border border-input bg-background px-3 text-sm"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  void refreshSafetyData();
+                }}
+                disabled={refreshing || loading}
+              >
+                Search
+              </Button>
+              {usersSearch.trim() ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setUsersSearch("");
+                    void refreshSafetyData();
+                  }}
+                  disabled={refreshing || loading}
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <div className="rounded-xl border bg-card">
+              <div className="max-h-[65vh] overflow-auto">
+                <table className="min-w-[1180px] w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur supports-[backdrop-filter]:bg-muted/70">
+                    <tr className="text-left">
+                      <th className="px-3 py-2">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "identity")}>
+                          Name
+                          <span className={getSortIconClassName(usersSort.key === "identity")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "moderation_state")}>
+                          Moderation
+                          <span className={getSortIconClassName(usersSort.key === "moderation_state")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "reports_received")}>
+                          Reports Received
+                          <span className={getSortIconClassName(usersSort.key === "reports_received")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden lg:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "reports_filed")}>
+                          Reports Filed
+                          <span className={getSortIconClassName(usersSort.key === "reports_filed")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden xl:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "false_report_count")}>
+                          False Reports
+                          <span className={getSortIconClassName(usersSort.key === "false_report_count")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden lg:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "penalty_count")}>
+                          Penalties
+                          <span className={getSortIconClassName(usersSort.key === "penalty_count")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden xl:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "cumulative_penalty_score")}>
+                          Penalty Score
+                          <span className={getSortIconClassName(usersSort.key === "cumulative_penalty_score")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden xl:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "trust_weight")}>
+                          Trust Weight
+                          <span className={getSortIconClassName(usersSort.key === "trust_weight")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 hidden lg:table-cell">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "disputes_involved")}>
+                          Disputes
+                          <span className={getSortIconClassName(usersSort.key === "disputes_involved")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                      <th className="px-3 py-2">
+                        <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setUsersSort, "latest_safety_activity")}>
+                          Latest Activity
+                          <span className={getSortIconClassName(usersSort.key === "latest_safety_activity")}>{getSortIcon(usersSort.direction)}</span>
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersSorted.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                          No users in safety index yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      usersSorted.map((row) => {
+                        const identity = resolveIdentityLabel(row.display_name, row.social_id, row.user_id);
+                        return (
+                          <tr
+                            key={row.user_id ?? `${identity.name}-${identity.social}`}
+                            className={`cursor-pointer border-b last:border-b-0 hover:bg-muted/30 ${row.is_banned_effective ? "opacity-80" : ""}`}
+                            onClick={() => {
+                              if (!row.user_id) return;
+                              setCaseSelection({ type: "user", userId: row.user_id });
+                            }}
+                          >
+                            <td className="px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium">{identity.name}</div>
+                                  <div className="text-xs text-muted-foreground">{identity.social}</div>
+                                  <div className="font-mono text-[10px] text-muted-foreground/80">{identity.fallback}</div>
+                                </div>
+                                {row.is_banned_effective ? <span className={badgeClasses}>Banned</span> : null}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2"><span className={badgeClasses}>{formatModerationState(row.moderation_state)}</span></td>
+                            <td className="px-3 py-2">{row.reports_received ?? 0}</td>
+                            <td className="px-3 py-2 hidden lg:table-cell">{row.reports_filed ?? 0}</td>
+                            <td className="px-3 py-2 hidden xl:table-cell">{row.false_report_count ?? 0}</td>
+                            <td className="px-3 py-2 hidden lg:table-cell">{row.penalty_count ?? 0}</td>
+                            <td className="px-3 py-2 hidden xl:table-cell">{row.cumulative_penalty_score ?? 0}</td>
+                            <td className="px-3 py-2 hidden xl:table-cell">{row.trust_weight ?? 0}</td>
+                            <td className="px-3 py-2 hidden lg:table-cell">{row.disputes_involved ?? 0}</td>
+                            <td className="px-3 py-2">{formatDateTime(row.latest_safety_activity)}</td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -1031,6 +1411,16 @@ const AdminSafety = () => {
                           </a>{" "}
                           <span className="text-muted-foreground">({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})</span>
                           <span className="ml-2 text-xs text-muted-foreground">False-report count: {row.reporter_false_report_count ?? 0}</span>
+                          {row.reporter_user_id ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="ml-2 h-7 px-2 text-xs"
+                              onClick={() => openFalseReportAction(row.reporter_user_id)}
+                            >
+                              Mark False Report
+                            </Button>
+                          ) : null}
                         </div>
                         <div>
                           Target:{" "}
@@ -1057,9 +1447,11 @@ const AdminSafety = () => {
                             ))}
                           </div>
                         ) : null}
-                        <div className="text-xs text-muted-foreground">
-                          Support mirror: {row.support_subject ?? "-"}
-                        </div>
+                        {row.support_subject ? (
+                          <div className="text-xs text-muted-foreground">
+                            Linked Support Ticket: {row.support_subject}
+                          </div>
+                        ) : null}
                       </div>
                     ))
                   )}
@@ -1100,24 +1492,6 @@ const AdminSafety = () => {
                         </label>
                       ))}
                     </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">False Report Penalty Target</div>
-                    <select
-                      className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={selectedReporterForPenalty ?? ""}
-                      onChange={(event) => setSelectedReporterForPenalty(event.target.value || null)}
-                    >
-                      <option value="">Select reporter</option>
-                      {reportCasefile
-                        .filter((row) => Boolean(row.reporter_user_id))
-                        .map((row) => (
-                          <option key={`reporter-opt-${row.report_id}`} value={row.reporter_user_id ?? ""}>
-                            {resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name} ({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})
-                          </option>
-                        ))}
-                    </select>
                   </div>
 
                   <div className="rounded-md border p-3">
@@ -1179,12 +1553,7 @@ const AdminSafety = () => {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() =>
-                        openReportActionConfirm({
-                          action: "mark_false_report",
-                          reporterUserId: selectedReporterForPenalty,
-                        })
-                      }
+                      onClick={() => openFalseReportAction(selectedReporterForPenalty)}
                     >
                       Mark False Report
                     </Button>
@@ -1218,9 +1587,54 @@ const AdminSafety = () => {
 
                 <section className="rounded-lg border p-3 space-y-2">
                   <h3 className="font-semibold">Participants</h3>
-                  <div>Requester: {disputeHeader?.requester_display_name ?? disputeHeader?.requester_id ?? "-"}</div>
-                  <div>Provider: {disputeHeader?.provider_display_name ?? disputeHeader?.provider_id ?? "-"}</div>
-                  <div className="font-mono text-xs">Service chat: {disputeHeader?.service_chat_id ?? "-"}</div>
+                  <div>
+                    Requester:{" "}
+                    <a
+                      href={`/carerprofile?user_id=${disputeHeader?.requester_id ?? ""}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2"
+                    >
+                      {resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).name}
+                    </a>{" "}
+                    <span className="text-muted-foreground">
+                      ({resolveIdentityLabel(disputeHeader?.requester_display_name, disputeHeader?.requester_social_id, disputeHeader?.requester_id).social})
+                    </span>
+                  </div>
+                  <div>
+                    Provider:{" "}
+                    <a
+                      href={`/carerprofile?user_id=${disputeHeader?.provider_id ?? ""}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2"
+                    >
+                      {resolveIdentityLabel(disputeHeader?.provider_display_name, disputeHeader?.provider_social_id, disputeHeader?.provider_id).name}
+                    </a>{" "}
+                    <span className="text-muted-foreground">
+                      ({resolveIdentityLabel(disputeHeader?.provider_display_name, disputeHeader?.provider_social_id, disputeHeader?.provider_id).social})
+                    </span>
+                  </div>
+                  <div className="font-mono text-xs">
+                    Service Chat:{" "}
+                    <button
+                      type="button"
+                      className="underline decoration-dotted underline-offset-2"
+                      onClick={() => {
+                        void openServiceChatPreview(disputeHeader?.service_chat_id ?? null);
+                      }}
+                    >
+                      {disputeHeader?.service_chat_id ?? "-"}
+                    </button>{" "}
+                    <a
+                      href={`/service-chat?room=${disputeHeader?.service_chat_id ?? ""}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 text-xs underline decoration-dotted underline-offset-2"
+                    >
+                      Open Route
+                    </a>
+                  </div>
                   <div className="font-mono text-xs">Payment intent: {disputeHeader?.stripe_payment_intent_id ?? "-"}</div>
                 </section>
 
@@ -1228,7 +1642,145 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Dispute Detail</h3>
                   <div className="whitespace-pre-wrap break-words">{disputeCasefile?.description ?? "-"}</div>
                   <div>Admin notes: {disputeCasefile?.admin_notes ?? "-"}</div>
-                  <div>Evidence URLs: {(disputeCasefile?.evidence_urls ?? []).length}</div>
+                  <div>Evidence URLs: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</div>
+                  {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
+                    <div className="space-y-1">
+                      {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).map((url, index) => (
+                        <div key={`${selectedDisputeId}-evidence-${index}`} className="text-xs">
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline decoration-dotted underline-offset-2"
+                          >
+                            Evidence {index + 1}
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
+
+                {serviceChatPreview ? (
+                  <section className="rounded-lg border p-3 space-y-2">
+                    <h3 className="font-semibold">Service Chat Preview (Read-only)</h3>
+                    <div className="font-mono text-xs">Chat ID: {serviceChatPreview.id}</div>
+                    <div>Status: {serviceChatPreview.status}</div>
+                    <div>Requester finished: {serviceChatPreview.requester_mark_finished ? "Yes" : "No"}</div>
+                    <div>Provider finished: {serviceChatPreview.provider_mark_finished ? "Yes" : "No"}</div>
+                    <div>Request opened: {formatDateTime(serviceChatPreview.request_opened_at)}</div>
+                    <div>Payout release requested: {formatDateTime(serviceChatPreview.payout_release_requested_at)}</div>
+                    <div>Payout released: {formatDateTime(serviceChatPreview.payout_released_at)}</div>
+                  </section>
+                ) : null}
+              </div>
+            </>
+          )}
+
+          {caseSelection?.type === "user" && (
+            <>
+              <SheetHeader>
+                <SheetTitle>User Safety Case File</SheetTitle>
+                <SheetDescription>
+                  {resolveIdentityLabel(
+                    usersQueue.find((row) => row.user_id === selectedUserId)?.display_name,
+                    usersQueue.find((row) => row.user_id === selectedUserId)?.social_id,
+                    selectedUserId,
+                  ).name}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="mt-4 space-y-4 text-sm">
+                <section className="rounded-lg border p-3 space-y-2">
+                  <h3 className="font-semibold">User Summary</h3>
+                  {(() => {
+                    const userRow = usersQueue.find((row) => row.user_id === selectedUserId);
+                    if (!userRow) {
+                      return <p className="text-muted-foreground">No user summary found.</p>;
+                    }
+                    const identity = resolveIdentityLabel(userRow.display_name, userRow.social_id, userRow.user_id);
+                    return (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <a
+                            href={`/carerprofile?user_id=${userRow.user_id ?? ""}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium underline decoration-dotted underline-offset-2"
+                          >
+                            {identity.name}
+                          </a>
+                          <span className="text-muted-foreground">{identity.social}</span>
+                          {userRow.is_banned_effective ? <span className={badgeClasses}>Banned</span> : null}
+                        </div>
+                        <div className="font-mono text-[10px] text-muted-foreground/80">{identity.fallback}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>Moderation state: {formatModerationState(userRow.moderation_state)}</div>
+                          <div>Sentinel: {userRow.automation_paused ? "Paused" : "Active"}</div>
+                          <div>Reports received: {userRow.reports_received ?? 0}</div>
+                          <div>Reports filed: {userRow.reports_filed ?? 0}</div>
+                          <div>False reports: {userRow.false_report_count ?? 0}</div>
+                          <div>Penalty count: {userRow.penalty_count ?? 0}</div>
+                          <div>Cumulative penalty score: {userRow.cumulative_penalty_score ?? 0}</div>
+                          <div>Trust weight: {userRow.trust_weight ?? 0}</div>
+                          <div>Disputes involved: {userRow.disputes_involved ?? 0}</div>
+                          <div>Latest safety activity: {formatDateTime(userRow.latest_safety_activity)}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </section>
+
+                <section className="rounded-lg border p-3 space-y-3">
+                  <h3 className="font-semibold">Unified History Timeline</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: "all", label: "All" },
+                      { id: "reports_received", label: "Reports Received" },
+                      { id: "reports_filed", label: "Reports Filed" },
+                      { id: "disputes", label: "Disputes" },
+                      { id: "penalties", label: "Penalties" },
+                      { id: "audit", label: "Audit" },
+                    ].map((filter) => (
+                      <Button
+                        key={filter.id}
+                        type="button"
+                        size="sm"
+                        variant={userTimelineFilter === filter.id ? "default" : "outline"}
+                        onClick={() =>
+                          setUserTimelineFilter(
+                            filter.id as "all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit",
+                          )
+                        }
+                      >
+                        {filter.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {userTimeline.length === 0 ? (
+                    <p className="text-muted-foreground">No timeline entries for this user.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {userTimeline.map((event) => (
+                        <div
+                          key={`${event.event_group}-${event.related_id}-${event.event_date}`}
+                          className="rounded-md border p-2 space-y-1"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={eventBadgeClassByGroup(event.event_group)}>
+                              {formatEventGroupLabel(event.event_group)}
+                            </span>
+                            <span className={badgeClasses}>{event.event_type}</span>
+                            <span className="text-xs text-muted-foreground">{formatDateTime(event.event_date)}</span>
+                          </div>
+                          <div className="whitespace-pre-wrap break-words">{event.description ?? "-"}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Source: {event.source ?? "-"} | Severity: {event.severity ?? "-"} | Related: {event.related_id ?? "-"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </div>
             </>
@@ -1253,6 +1805,43 @@ const AdminSafety = () => {
           {pendingAction && needsNote(pendingAction) && !moderatorNote.trim() ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               Moderator note is required before confirming.
+            </div>
+          ) : null}
+          {pendingAction?.action === "mark_false_report" ? (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="false-report-reporter-select">
+                Reporter to penalize
+              </label>
+              <select
+                id="false-report-reporter-select"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={selectedReporterForPenalty ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value || null;
+                  setSelectedReporterForPenalty(next);
+                  setPendingAction((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          reporterUserId: next,
+                        }
+                      : prev,
+                  );
+                }}
+              >
+                <option value="">Select reporter</option>
+                {Array.from(
+                  new Map(
+                    reportCasefile
+                      .filter((row) => Boolean(row.reporter_user_id))
+                      .map((row) => [row.reporter_user_id as string, row]),
+                  ).values(),
+                ).map((row) => (
+                  <option key={`dialog-reporter-${row.report_id}`} value={row.reporter_user_id ?? ""}>
+                    {resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name} ({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})
+                  </option>
+                ))}
+              </select>
             </div>
           ) : null}
           <AlertDialogFooter>
