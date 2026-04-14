@@ -1444,7 +1444,12 @@ const AdminSafety = () => {
       )}
 
       <Sheet modal={false} open={caseSelection !== null} onOpenChange={(open) => !open && setCaseSelection(null)}>
-        <SheetContent side="right" className="w-full sm:max-w-[720px] lg:max-w-[860px] overflow-y-auto">
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-[720px] lg:max-w-[860px] overflow-y-auto"
+          onInteractOutside={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+        >
           {caseSelection?.type === "report" && (
             <>
               <SheetHeader>
