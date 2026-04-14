@@ -1,5 +1,4 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
 import { Loader2 } from "lucide-react";
@@ -12,26 +11,16 @@ interface ProtectedRouteProps {
 }
 
 export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
-  const { user, session, loading, profile, mfaPending } = useAuth();
+  const { user, session, loading, hydrating, profile, mfaPending } = useAuth();
   const { flowState } = useSignup();
   const location = useLocation();
-  const [profileWaitExceeded, setProfileWaitExceeded] = useState(false);
   const allowOnboardingRoutes = ["/verify-identity", "/set-profile", "/set-pet"].includes(location.pathname);
   const allowOnboardingWithoutAuth =
     ["/verify-identity", "/set-profile"].includes(location.pathname) &&
     flowState !== "idle";
   const onboardingComplete = isRegisteredUserProfile(profile);
 
-  useEffect(() => {
-    if (!user || profile) {
-      setProfileWaitExceeded(false);
-      return;
-    }
-    const timeout = window.setTimeout(() => setProfileWaitExceeded(true), 1500);
-    return () => window.clearTimeout(timeout);
-  }, [user, profile]);
-
-  if (loading) {
+  if (loading || hydrating) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -40,9 +29,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!user) {
-    // A session exists but user hasn't been set yet: either the session is
-    // still hydrating (mfaPending=false) or the MFA challenge is in-flight
-    // (mfaPending=true). In both cases show a spinner — never redirect to /auth.
+    // Session/user resolution is still in-flight: never redirect on transient null.
     if (session) {
       return (
         <div className="min-h-svh flex items-center justify-center bg-background">
@@ -57,19 +44,18 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!profile) {
-    if (!profileWaitExceeded) {
+    // Keep route stable while profile resolution is unresolved but session is valid.
+    if (session) {
       return (
         <div className="min-h-svh flex items-center justify-center bg-background">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
       );
     }
-    // No profile after wait — not a registered user (abandoned signup, deleted
-    // account, or OAuth mid-signup). Never send to /set-profile; always /auth.
-    // /set-profile is only for users who have a profile that is incomplete.
     if (allowOnboardingRoutes) {
       return <>{children}</>;
     }
+    // No active session and no profile is a true invalid state.
     return <Navigate to="/auth" replace />;
   }
 

@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -441,7 +441,8 @@ const ADMIN_EMAIL_ALLOWLIST = new Set([
 ]);
 
 const AdminSafety = () => {
-  const { profile, user, loading: authLoading, hydrating } = useAuth();
+  const { profile, user, session, loading: authLoading, hydrating } = useAuth();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<ActiveTab>("reports");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -966,6 +967,14 @@ const AdminSafety = () => {
     return <div className="p-4 md:p-6 text-sm text-muted-foreground">Checking admin access...</div>;
   }
 
+  if (!session && !user) {
+    return <Navigate to="/auth" state={{ from: location }} replace />;
+  }
+
+  if ((session || user) && !profile) {
+    return <div className="p-4 md:p-6 text-sm text-muted-foreground">Resolving admin access...</div>;
+  }
+
   if (!isAdmin) {
     return <Navigate to="/" replace />;
   }
@@ -1240,7 +1249,8 @@ const AdminSafety = () => {
     }
 
     const waiveCustomerFeeEffective = waiveCustomerPlatformFee;
-    const providerFeeDeduction = waiveProviderPlatformFee ? 0 : providerPlatformFee;
+    const waiveProviderFeeEffective = pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee;
+    const providerFeeDeduction = waiveProviderFeeEffective ? 0 : providerPlatformFee;
     const providerReceivesOnFullRelease = Math.max(serviceRate - providerFeeDeduction, 0);
     if (pendingDisputeAction.action === "release_full") {
       const customerRefunded = waiveCustomerFeeEffective ? customerPlatformFee : 0;
@@ -1251,7 +1261,7 @@ const AdminSafety = () => {
         customerPlatformFee,
         providerPlatformFee,
         waiveCustomerPlatformFee: waiveCustomerFeeEffective,
-        waiveProviderPlatformFee,
+        waiveProviderPlatformFee: waiveProviderFeeEffective,
         providerReceivesOnFullRelease,
         providerReceives: providerReceivesOnFullRelease,
         customerRefunded,
@@ -1269,7 +1279,7 @@ const AdminSafety = () => {
         customerPlatformFee,
         providerPlatformFee,
         waiveCustomerPlatformFee: waiveCustomerFeeEffective,
-        waiveProviderPlatformFee,
+        waiveProviderPlatformFee: false,
         providerReceivesOnFullRelease,
         providerReceives,
         customerRefunded,
@@ -1289,7 +1299,7 @@ const AdminSafety = () => {
       customerPlatformFee,
       providerPlatformFee,
       waiveCustomerPlatformFee: waiveCustomerFeeEffective,
-      waiveProviderPlatformFee,
+      waiveProviderPlatformFee: waiveProviderFeeEffective,
       providerReceivesOnFullRelease,
       providerReceives,
       customerRefunded,
@@ -1329,7 +1339,7 @@ const AdminSafety = () => {
         p_note: trimmedNote,
         p_customer_refund_amount: refundAmount,
         p_waive_customer_platform_fee: waiveCustomerPlatformFee,
-        p_waive_provider_platform_fee: waiveProviderPlatformFee,
+        p_waive_provider_platform_fee: pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee,
       } as never,
     );
 
@@ -2687,6 +2697,7 @@ const AdminSafety = () => {
                     type="checkbox"
                     checked={waiveProviderPlatformFee}
                     onChange={(event) => setWaiveProviderPlatformFee(event.target.checked)}
+                    disabled={pendingDisputeAction.action === "full_refund"}
                   />
                   <span>Waive platform fee from Provider</span>
                 </label>
