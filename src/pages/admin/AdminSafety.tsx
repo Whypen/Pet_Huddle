@@ -292,7 +292,9 @@ const extractAmountFromPayload = (payload: unknown): number | null => {
 const getDisputeTotalPaidValue = (
   totals: Record<string, number | null>,
   row: DisputesQueueRow,
-) => (row.service_chat_id ? totals[row.service_chat_id] ?? null : null);
+) =>
+  parseAmount(row.total_paid_amount) ??
+  (row.service_chat_id ? totals[row.service_chat_id] ?? null : null);
 const getDisputeServiceMeta = (
   map: Record<string, ServiceChatMeta | undefined>,
   row: DisputesQueueRow,
