@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Sheet,
@@ -56,6 +57,10 @@ type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_tim
 };
 type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"];
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
+type ServiceChatMeta = {
+  serviceLabel: string;
+  serviceDate: string | null;
+};
 type SafetyUserRow = {
   user_id: string | null;
   display_name: string | null;
@@ -223,6 +228,15 @@ const getDisputeTotalPaidValue = (
   totals: Record<string, number | null>,
   row: DisputesQueueRow,
 ) => (row.service_chat_id ? totals[row.service_chat_id] ?? null : null);
+const getDisputeServiceMeta = (
+  map: Record<string, ServiceChatMeta | undefined>,
+  row: DisputesQueueRow,
+): ServiceChatMeta => {
+  if (!row.service_chat_id) {
+    return { serviceLabel: "Service booked", serviceDate: null };
+  }
+  return map[row.service_chat_id] ?? { serviceLabel: "Service booked", serviceDate: null };
+};
 
 const badgeClasses =
   "inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground";
@@ -292,9 +306,12 @@ const AdminSafety = () => {
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
   const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatRow | null>(null);
+  const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
+  const [profilePreviewName, setProfilePreviewName] = useState<string>("");
   const [userTimeline, setUserTimeline] = useState<SafetyUserTimelineRow[]>([]);
   const [userTimelineFilter, setUserTimelineFilter] = useState<"all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit">("all");
   const [serviceChatTotals, setServiceChatTotals] = useState<Record<string, number | null>>({});
+  const [serviceChatMetaById, setServiceChatMetaById] = useState<Record<string, ServiceChatMeta>>({});
   const [reportsSort, setReportsSort] = useState<SortState<ReportsSortKey>>({
     key: "latest_report_at",
     direction: "desc",
@@ -496,7 +513,23 @@ const AdminSafety = () => {
   }, [auditRows, auditSort]);
 
   const usersSorted = useMemo(() => {
-    const rows = [...usersQueue];
+    const queryRaw = usersSearch.trim().toLowerCase();
+    const queryNoAt = queryRaw.startsWith("@") ? queryRaw.slice(1) : queryRaw;
+    const filtered = queryRaw
+      ? usersQueue.filter((row) => {
+          const displayName = (row.display_name ?? "").toLowerCase();
+          const social = (row.social_id ?? "").toLowerCase();
+          const socialWithAt = `@${social}`;
+          const userId = (row.user_id ?? "").toLowerCase();
+          return (
+            displayName.includes(queryRaw) ||
+            social.includes(queryNoAt) ||
+            socialWithAt.includes(queryRaw) ||
+            userId.includes(queryRaw)
+          );
+        })
+      : usersQueue;
+    const rows = [...filtered];
     rows.sort((a, b) => {
       let result = 0;
       switch (usersSort.key) {
@@ -537,21 +570,14 @@ const AdminSafety = () => {
       return applyDirection(result, usersSort.direction);
     });
     return rows;
-  }, [usersQueue, usersSort]);
+  }, [usersQueue, usersSort, usersSearch]);
 
   const loadQueues = async () => {
-    const userQuery = usersSearch.trim();
-    const wildcard = `%${userQuery}%`;
-    let usersSelect = supabase
+    const usersSelect = supabase
       .from("view_admin_safety_users")
       .select("*")
       .order("latest_safety_activity", { ascending: false })
       .limit(500);
-    if (userQuery.length > 0) {
-      usersSelect = usersSelect.or(
-        `display_name.ilike.${wildcard},social_id.ilike.${wildcard},user_id::text.ilike.${wildcard}`,
-      );
-    }
 
     const [reportsRes, disputesRes, auditRes, usersRes] = await Promise.all([
       supabase
@@ -604,15 +630,33 @@ const AdminSafety = () => {
           .in("id", Array.from(new Set(chatIds)));
         if (chats) {
           const totals: Record<string, number | null> = {};
+          const meta: Record<string, ServiceChatMeta> = {};
           for (const chat of chats) {
-            const quoteTotal = extractAmountFromPayload(chat.quote_card);
-            const requestTotal = extractAmountFromPayload(chat.request_card);
-            totals[chat.id] = quoteTotal ?? requestTotal ?? null;
+            const typedChat = chat as ServiceChatRow;
+            const quoteTotal = extractAmountFromPayload(typedChat.quote_card);
+            const requestTotal = extractAmountFromPayload(typedChat.request_card);
+            totals[typedChat.id] = quoteTotal ?? requestTotal ?? null;
+            const requestCard =
+              typedChat.request_card && typeof typedChat.request_card === "object"
+                ? (typedChat.request_card as Record<string, unknown>)
+                : {};
+            const serviceType = String(requestCard.serviceType ?? requestCard.service_type ?? "Service booked").trim();
+            const requestedDates = Array.isArray(requestCard.requestedDates)
+              ? requestCard.requestedDates.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+              : [];
+            const requestedDate = typeof requestCard.requestedDate === "string" ? requestCard.requestedDate : null;
+            const firstDate = requestedDates.length > 0 ? [...requestedDates].sort()[0] : requestedDate;
+            meta[typedChat.id] = {
+              serviceLabel: serviceType || "Service booked",
+              serviceDate: firstDate ?? typedChat.request_opened_at ?? null,
+            };
           }
           setServiceChatTotals(totals);
+          setServiceChatMetaById(meta);
         }
       } else {
         setServiceChatTotals({});
+        setServiceChatMetaById({});
       }
     }
     if (!auditRes.error) setAuditRows(auditRes.data ?? []);
@@ -738,6 +782,9 @@ const AdminSafety = () => {
   const disputeHeader = selectedDisputeId
     ? disputeQueueById.get(selectedDisputeId)
     : undefined;
+  const currentDisputeMeta: ServiceChatMeta = disputeHeader
+    ? getDisputeServiceMeta(serviceChatMetaById, disputeHeader)
+    : { serviceLabel: "Service booked", serviceDate: null };
   const currentReportState = reportHeader?.moderation_state ?? reportCasefile[0]?.moderation_state ?? "active";
   const currentAutomationPaused =
     reportHeader?.automation_paused ?? reportCasefile[0]?.automation_paused ?? false;
@@ -796,6 +843,12 @@ const AdminSafety = () => {
       .eq("id", serviceChatId)
       .maybeSingle();
     setServiceChatPreview(data ?? null);
+  };
+
+  const openPublicProfilePreview = (userId: string | null | undefined, fallbackName: string | null | undefined) => {
+    if (!userId) return;
+    setProfilePreviewUserId(userId);
+    setProfilePreviewName(fallbackName ?? "Profile");
   };
 
   const openReportActionConfirm = (action: PendingReportAction) => {
@@ -966,24 +1019,32 @@ const AdminSafety = () => {
                           <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
                               <div className="min-w-0">
-                                <a
-                                  href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <button
+                                  type="button"
                                   className="truncate text-sm font-medium underline decoration-dotted underline-offset-2"
-                                  onClick={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openPublicProfilePreview(
+                                      row.target_user_id,
+                                      resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name,
+                                    );
+                                  }}
                                 >
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name}
-                                </a>
-                                <a
-                                  href={`/carerprofile?user_id=${row.target_user_id ?? ""}`}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                </button>
+                                <button
+                                  type="button"
                                   className="block text-xs text-muted-foreground underline decoration-dotted underline-offset-2"
-                                  onClick={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openPublicProfilePreview(
+                                      row.target_user_id,
+                                      resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name,
+                                    );
+                                  }}
                                 >
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).social}
-                                </a>
+                                </button>
                                 <div className="font-mono text-[10px] text-muted-foreground/80">
                                   {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).fallback}
                                 </div>
@@ -1077,7 +1138,15 @@ const AdminSafety = () => {
                             setCaseSelection({ type: "dispute", disputeId: row.dispute_id });
                           }}
                         >
-                          <td className="px-3 py-2 font-mono text-xs">{row.service_chat_id ?? "-"}</td>
+                          <td className="px-3 py-2">
+                            <div className="text-sm font-medium">{getDisputeServiceMeta(serviceChatMetaById, row).serviceLabel}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Date: {formatDateTime(getDisputeServiceMeta(serviceChatMetaById, row).serviceDate)}
+                            </div>
+                            <div className="font-mono text-[10px] text-muted-foreground/80">
+                              Booking ID: {row.service_chat_id ?? "-"}
+                            </div>
+                          </td>
                           <td className="px-3 py-2">
                             <a
                               href={`/carerprofile?user_id=${row.requester_id ?? ""}`}
@@ -1406,9 +1475,18 @@ const AdminSafety = () => {
                         </div>
                         <div>
                           Reporter:{" "}
-                          <a href={`/carerprofile?user_id=${row.reporter_user_id}`} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                          <button
+                            type="button"
+                            className="underline decoration-dotted underline-offset-2"
+                            onClick={() =>
+                              openPublicProfilePreview(
+                                row.reporter_user_id,
+                                resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name,
+                              )
+                            }
+                          >
                             {resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).name}
-                          </a>{" "}
+                          </button>{" "}
                           <span className="text-muted-foreground">({resolveIdentityLabel(row.reporter_display_name, row.reporter_social_id, row.reporter_user_id).social})</span>
                           <span className="ml-2 text-xs text-muted-foreground">False-report count: {row.reporter_false_report_count ?? 0}</span>
                           {row.reporter_user_id ? (
@@ -1424,9 +1502,18 @@ const AdminSafety = () => {
                         </div>
                         <div>
                           Target:{" "}
-                          <a href={`/carerprofile?user_id=${row.target_user_id}`} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+                          <button
+                            type="button"
+                            className="underline decoration-dotted underline-offset-2"
+                            onClick={() =>
+                              openPublicProfilePreview(
+                                row.target_user_id,
+                                resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name,
+                              )
+                            }
+                          >
                             {resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).name}
-                          </a>{" "}
+                          </button>{" "}
                           <span className="text-muted-foreground">({resolveIdentityLabel(row.target_display_name, row.target_social_id, row.target_user_id).social})</span>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -1575,6 +1662,17 @@ const AdminSafety = () => {
               <div className="mt-4 space-y-4 text-sm">
                 <section className="rounded-lg border p-3 space-y-2">
                   <h3 className="font-semibold">Dispute Summary</h3>
+                  <div className="rounded-md border bg-muted/20 p-2">
+                    <div className="text-sm font-medium">
+                      Service booked: {currentDisputeMeta.serviceLabel}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Date: {formatDateTime(currentDisputeMeta.serviceDate)}
+                    </div>
+                    <div className="font-mono text-[10px] text-muted-foreground/80">
+                      Booking ID: {disputeHeader?.service_chat_id ?? "-"}
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>Status: {disputeHeader?.dispute_status ?? "-"}</div>
                     <div>Category: {disputeHeader?.dispute_category ?? "-"}</div>
@@ -1695,10 +1793,12 @@ const AdminSafety = () => {
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <a
-                            href={`/carerprofile?user_id=${userRow.user_id ?? ""}`}
-                            target="_blank"
-                            rel="noreferrer"
+                            href="#"
                             className="text-sm font-medium underline decoration-dotted underline-offset-2"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              openPublicProfilePreview(userRow.user_id, identity.name);
+                            }}
                           >
                             {identity.name}
                           </a>
@@ -1779,6 +1879,18 @@ const AdminSafety = () => {
           )}
         </SheetContent>
       </Sheet>
+
+      <PublicProfileSheet
+        isOpen={Boolean(profilePreviewUserId)}
+        onClose={() => {
+          setProfilePreviewUserId(null);
+          setProfilePreviewName("");
+        }}
+        loading={false}
+        fallbackName={profilePreviewName}
+        viewedUserId={profilePreviewUserId}
+        data={null}
+      />
 
       <AlertDialog open={pendingAction !== null} onOpenChange={(open) => !open && setPendingAction(null)}>
         <AlertDialogContent>
