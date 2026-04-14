@@ -26,6 +26,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["Row"] & {
   target_display_name?: string | null;
@@ -62,6 +69,7 @@ type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes
   platform_fee_amount?: number | null;
   provider_receives_amount?: number | null;
   customer_refund_amount?: number | null;
+  currency_code?: string | null;
 };
 type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
   action_source?: "manual" | "sentinel" | null;
@@ -79,6 +87,28 @@ type ServiceChatMeta = {
   serviceLabel: string;
   bookingPeriodLabel: string;
   serviceDate: string | null;
+};
+type ServiceChatPreviewData = {
+  service_chat_id: string;
+  chat_id: string;
+  status: string | null;
+  requester_id: string | null;
+  provider_id: string | null;
+  requester_display_name: string | null;
+  requester_social_id: string | null;
+  provider_display_name: string | null;
+  provider_social_id: string | null;
+  request_opened_at: string | null;
+  payout_release_requested_at: string | null;
+  payout_released_at: string | null;
+  messages: Array<{
+    id: string;
+    sender_id: string | null;
+    sender_display_name: string | null;
+    sender_social_id: string | null;
+    content: string | null;
+    created_at: string | null;
+  }>;
 };
 type SafetyUserRow = {
   user_id: string | null;
@@ -167,7 +197,6 @@ type PendingReportAction = {
 };
 
 type DisputeDecisionAction =
-  | "hold_funds"
   | "release_full"
   | "partial_refund"
   | "full_refund";
@@ -293,7 +322,6 @@ const formatModerationState = (value: string | null | undefined) => {
 };
 
 const formatDisputeDecisionAction = (action: DisputeDecisionAction) => {
-  if (action === "hold_funds") return "Hold Funds";
   if (action === "release_full") return "Release Full";
   if (action === "partial_refund") return "Partial Refund";
   return "Full Refund";
@@ -309,6 +337,33 @@ const parseAmount = (value: unknown): number | null => {
 };
 
 const formatMoneyAmount = (value: number) => value.toFixed(2);
+
+const formatDisputeStatusLabel = (status: string | null | undefined) => {
+  const normalized = (status ?? "").toLowerCase();
+  if (normalized === "open") return "Open";
+  if (normalized === "under_review" || normalized === "awaiting_evidence") return "Under Review";
+  if (normalized === "decision_ready") return "Decision Ready";
+  if (normalized === "resolved_release_full") return "Resolved — Release Full";
+  if (normalized === "resolved_partial_refund") return "Resolved — Partial Refund";
+  if (normalized === "resolved_refund_full") return "Resolved — Full Refund";
+  if (normalized === "resolved_hold") return "Under Review";
+  return status ?? "-";
+};
+
+const formatCurrencyAmount = (currencyCode: string | null | undefined, amount: number) => {
+  const code = (currencyCode ?? "HKD").toUpperCase();
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  try {
+    return new Intl.NumberFormat("en-HK", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(safeAmount);
+  } catch {
+    return `HK$${safeAmount.toFixed(2)}`;
+  }
+};
 
 const formatEventGroupLabel = (group: string) => {
   if (group === "reports_received") return "Reports Received";
@@ -352,7 +407,8 @@ const AdminSafety = () => {
   const [caseSelection, setCaseSelection] = useState<CaseSelection>(null);
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
   const [disputeCasefile, setDisputeCasefile] = useState<ServiceDisputeRow | null>(null);
-  const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatRow | null>(null);
+  const [serviceChatPreview, setServiceChatPreview] = useState<ServiceChatPreviewData | null>(null);
+  const [serviceChatPreviewOpen, setServiceChatPreviewOpen] = useState(false);
   const [profilePreviewUserId, setProfilePreviewUserId] = useState<string | null>(null);
   const [profilePreviewName, setProfilePreviewName] = useState<string>("");
   const [carerPreviewUserId, setCarerPreviewUserId] = useState<string | null>(null);
@@ -752,6 +808,7 @@ const AdminSafety = () => {
     if (!disputeId) {
       setDisputeCasefile(null);
       setServiceChatPreview(null);
+      setServiceChatPreviewOpen(false);
       return;
     }
 
@@ -844,6 +901,8 @@ const AdminSafety = () => {
     setDisputeActionSuccess(null);
     setDisputeAdminNote("");
     setPartialRefundInput("");
+    setServiceChatPreview(null);
+    setServiceChatPreviewOpen(false);
   }, [selectedDisputeId]);
 
   if (authLoading || hydrating) {
@@ -912,6 +971,27 @@ const AdminSafety = () => {
     Math.max(disputeRefundableAmount - disputeExistingRefundAmount, 0),
     0,
   );
+  const disputeCurrencyCode =
+    disputeHeader?.currency_code ??
+    (typeof disputeHeader?.decision_payload === "object" &&
+    disputeHeader?.decision_payload &&
+    typeof (disputeHeader.decision_payload as Record<string, unknown>).money === "object"
+      ? ((
+          (disputeHeader.decision_payload as Record<string, unknown>).money as Record<string, unknown>
+        ).currency as string | undefined)
+      : undefined) ??
+    "HKD";
+  const disputeDecisionSourceLabel = (() => {
+    if (!disputeHeader?.decision_action) return "No Decision Yet";
+    const source =
+      typeof disputeHeader?.decision_payload === "object" &&
+      disputeHeader?.decision_payload &&
+      typeof (disputeHeader.decision_payload as Record<string, unknown>).source === "string"
+        ? String((disputeHeader.decision_payload as Record<string, unknown>).source).toLowerCase()
+        : "manual";
+    if (source === "sentinel") return "Sentinel";
+    return "Manual";
+  })();
 
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
@@ -958,12 +1038,18 @@ const AdminSafety = () => {
 
   const openServiceChatPreview = async (serviceChatId: string | null) => {
     if (!serviceChatId) return;
-    const { data } = await supabase
-      .from("service_chats")
-      .select("*")
-      .eq("id", serviceChatId)
-      .maybeSingle();
-    setServiceChatPreview(data ?? null);
+    const { data, error } = await supabase.rpc(
+      "admin_get_service_chat_preview" as never,
+      { p_service_chat_id: serviceChatId } as never,
+    );
+    if (error) {
+      setServiceChatPreview(null);
+      setDisputeActionError(error.message || "Unable to load service chat preview.");
+      return;
+    }
+    const preview = (data as ServiceChatPreviewData | null) ?? null;
+    setServiceChatPreview(preview);
+    setServiceChatPreviewOpen(Boolean(preview));
   };
 
   const openPublicProfilePreview = (userId: string | null | undefined, fallbackName: string | null | undefined) => {
@@ -1063,14 +1149,6 @@ const AdminSafety = () => {
     const totalPaid = disputeTotalPaidAmount;
     const platformFee = disputePlatformFeeAmount;
     const refundable = disputeRefundableAmount;
-    if (pendingDisputeAction.action === "hold_funds") {
-      return {
-        totalPaid,
-        platformFee,
-        providerReceives: 0,
-        customerRefunded: 0,
-      };
-    }
     if (pendingDisputeAction.action === "release_full") {
       return {
         totalPaid,
@@ -1418,9 +1496,11 @@ const AdminSafety = () => {
                             </div>
                           </td>
                           <td className="px-3 py-2 hidden xl:table-cell">
-                            {getDisputeTotalPaidValue(serviceChatTotals, row) ?? "-"}
+                            {getDisputeTotalPaidValue(serviceChatTotals, row) !== null
+                              ? formatCurrencyAmount(row.currency_code, getDisputeTotalPaidValue(serviceChatTotals, row) ?? 0)
+                              : "-"}
                           </td>
-                          <td className="px-3 py-2"><span className={badgeClasses}>{row.dispute_status}</span></td>
+                          <td className="px-3 py-2"><span className={badgeClasses}>{formatDisputeStatusLabel(row.dispute_status)}</span></td>
                           <td className="px-3 py-2 hidden lg:table-cell">{formatDateTime(row.dispute_updated_at)}</td>
                           <td className="px-3 py-2">{formatDateTime(row.dispute_created_at)}</td>
                         </tr>
@@ -1915,7 +1995,7 @@ const AdminSafety = () => {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <div>Status: {disputeHeader?.dispute_status ?? "-"}</div>
+                    <div>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</div>
                     <div>Category: {disputeHeader?.dispute_category ?? "-"}</div>
                     <div>Chat status: {disputeHeader?.chat_status ?? "-"}</div>
                     <div>Evidence count: {disputeHeader?.evidence_count ?? 0}</div>
@@ -1995,47 +2075,41 @@ const AdminSafety = () => {
                   ) : null}
                 </section>
 
-                {serviceChatPreview ? (
-                  <section className="rounded-lg border p-3 space-y-2">
-                    <h3 className="font-semibold">Service Chat Preview (Read-only)</h3>
-                    <div className="font-mono text-xs">Chat ID: {serviceChatPreview.id}</div>
-                    <div>Status: {serviceChatPreview.status}</div>
-                    <div>Requester finished: {serviceChatPreview.requester_mark_finished ? "Yes" : "No"}</div>
-                    <div>Provider finished: {serviceChatPreview.provider_mark_finished ? "Yes" : "No"}</div>
-                    <div>Request opened: {formatDateTime(serviceChatPreview.request_opened_at)}</div>
-                    <div>Payout release requested: {formatDateTime(serviceChatPreview.payout_release_requested_at)}</div>
-                    <div>Payout released: {formatDateTime(serviceChatPreview.payout_released_at)}</div>
-                  </section>
-                ) : null}
-
                 <section className="rounded-lg border p-3 space-y-3">
                   <h3 className="font-semibold">Dispute Decision Controls</h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className={badgeClasses}>Status: {disputeHeader?.dispute_status ?? "-"}</span>
+                    <span className={badgeClasses}>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</span>
                     <span className={badgeClasses}>
-                      Source: {disputeHeader?.decision_action ? "Manual" : "Pending"}
+                      Decision Source: {disputeDecisionSourceLabel}
                     </span>
                     {disputeHeader?.decision_at ? (
                       <span className={badgeClasses}>Last Decision: {formatDateTime(disputeHeader.decision_at)}</span>
                     ) : null}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+                    <div className="text-sm font-medium text-amber-900">Funds on Hold</div>
+                    <div className="text-xs text-amber-800">
+                      This dispute keeps payout on hold until a final decision is recorded.
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
                     <div>
                       <div className="text-xs text-muted-foreground">Total Paid</div>
-                      <div className="font-medium">{formatMoneyAmount(disputeTotalPaidAmount)}</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeTotalPaidAmount)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Platform Fee</div>
-                      <div className="font-medium">{formatMoneyAmount(disputePlatformFeeAmount)}</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputePlatformFeeAmount)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Provider Receives</div>
-                      <div className="font-medium">{formatMoneyAmount(disputeExistingProviderAmount)}</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingProviderAmount)}</div>
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">Customer Refunded</div>
-                      <div className="font-medium">{formatMoneyAmount(disputeExistingRefundAmount)}</div>
+                      <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, disputeExistingRefundAmount)}</div>
                     </div>
                   </div>
 
@@ -2064,9 +2138,6 @@ const AdminSafety = () => {
                   ) : null}
 
                   <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                    <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("hold_funds")}>
-                      Hold Funds
-                    </Button>
                     <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("release_full")}>
                       Release Full
                     </Button>
@@ -2195,6 +2266,69 @@ const AdminSafety = () => {
         </SheetContent>
       </Sheet>
 
+      <Dialog
+        open={serviceChatPreviewOpen}
+        onOpenChange={(open) => {
+          setServiceChatPreviewOpen(open);
+          if (!open) setServiceChatPreview(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[82vh] overflow-y-auto !z-[9400]">
+          <DialogHeader>
+            <DialogTitle>Service Chat Preview (Read-only)</DialogTitle>
+            <DialogDescription>
+              Admin preview for dispute context only.
+            </DialogDescription>
+          </DialogHeader>
+
+          {serviceChatPreview ? (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="font-mono text-xs">Service Chat ID: {serviceChatPreview.service_chat_id}</div>
+                <div className="font-mono text-xs">Chat ID: {serviceChatPreview.chat_id}</div>
+                <div>Status: {serviceChatPreview.status ?? "-"}</div>
+                <div>Opened: {formatDateTime(serviceChatPreview.request_opened_at)}</div>
+              </div>
+              <div className="rounded-md border p-3 space-y-1">
+                <div>
+                  Requester: {resolveIdentityLabel(serviceChatPreview.requester_display_name, serviceChatPreview.requester_social_id, serviceChatPreview.requester_id).name}{" "}
+                  <span className="text-muted-foreground">({resolveIdentityLabel(serviceChatPreview.requester_display_name, serviceChatPreview.requester_social_id, serviceChatPreview.requester_id).social})</span>
+                </div>
+                <div>
+                  Provider: {resolveIdentityLabel(serviceChatPreview.provider_display_name, serviceChatPreview.provider_social_id, serviceChatPreview.provider_id).name}{" "}
+                  <span className="text-muted-foreground">({resolveIdentityLabel(serviceChatPreview.provider_display_name, serviceChatPreview.provider_social_id, serviceChatPreview.provider_id).social})</span>
+                </div>
+              </div>
+              <div className="rounded-md border p-3">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  Messages ({serviceChatPreview.messages.length})
+                </div>
+                {serviceChatPreview.messages.length === 0 ? (
+                  <div className="text-muted-foreground">No messages found for this service chat.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {serviceChatPreview.messages.map((message) => (
+                      <div key={message.id} className="rounded-md border p-2">
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).name}{" "}
+                            ({resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).social})
+                          </span>
+                          <span>{formatDateTime(message.created_at)}</span>
+                        </div>
+                        <div className="whitespace-pre-wrap break-words">{message.content ?? "-"}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">No chat preview loaded.</div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <PublicProfileSheet
         isOpen={Boolean(profilePreviewUserId)}
         onClose={() => {
@@ -2302,19 +2436,19 @@ const AdminSafety = () => {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <div className="text-xs text-muted-foreground">Total Paid</div>
-                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().totalPaid)}</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().totalPaid)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Platform Fee</div>
-                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().platformFee)}</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().platformFee)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Provider Receives</div>
-                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().providerReceives)}</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().providerReceives)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-muted-foreground">Customer Refunded</div>
-                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().customerRefunded)}</div>
+                  <div className="font-medium">{formatCurrencyAmount(disputeCurrencyCode, getPendingDisputeBreakdown().customerRefunded)}</div>
                 </div>
               </div>
 
@@ -2331,7 +2465,7 @@ const AdminSafety = () => {
                     value={partialRefundInput}
                     onChange={(event) => setPartialRefundInput(event.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder={`0.00 (max ${formatMoneyAmount(disputeRefundableAmount)})`}
+                    placeholder={`0.00 (max ${formatCurrencyAmount(disputeCurrencyCode, disputeRefundableAmount)})`}
                   />
                 </div>
               ) : null}
