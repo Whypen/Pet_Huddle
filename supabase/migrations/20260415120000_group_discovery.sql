@@ -89,8 +89,20 @@ ALTER TABLE public.notifications
 ALTER TABLE public.notifications
   ADD CONSTRAINT notifications_type_check CHECK (
     type = ANY (ARRAY[
-      'alert'::text,
-      'admin'::text,
+      'wave'::text,
+      'star'::text,
+      'match'::text,
+      'message'::text,
+      'group_invite'::text,
+      'broadcast'::text,
+      'mention'::text,
+      'thread_reply'::text,
+      'booking'::text,
+      'system'::text,
+      'family_invite'::text,
+      'chats'::text,
+      'map'::text,
+      'social'::text,
       'group_join_request'::text,
       'group_approved'::text,
       'group_joined_via_code'::text
