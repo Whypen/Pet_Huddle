@@ -98,6 +98,16 @@ const firstString = (...values: unknown[]) => {
   return null;
 };
 
+const isExpiredAlertCopy = (value: unknown) => {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "your alert has expired and is no longer visible";
+};
+
+const isSuppressedNotification = (row: Partial<NotificationRow>) => {
+  return isExpiredAlertCopy(row.message) || isExpiredAlertCopy(row.body) || isExpiredAlertCopy(row.title);
+};
+
 const normalizeNotificationHref = (
   href: string | null,
   type: string,
@@ -359,12 +369,12 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     const refreshUnread = async () => {
       const res = await supabase
         .from("notifications" as "profiles")
-        .select("id,metadata,data" as "*")
+        .select("id,message,body,title,metadata,data" as "*")
         .eq("user_id", user.id)
         .eq("read" as "user_id", false);
       if (cancelled) return;
-      const rows = (res as { data: Array<{ metadata?: Record<string, unknown>; data?: Record<string, unknown> }> | null }).data ?? [];
-      const count = rows.filter((r) => !r.data?.skip_history && !r.metadata?.skip_history).length;
+      const rows = (res as { data: Array<Partial<NotificationRow>> | null }).data ?? [];
+      const count = rows.filter((r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)).length;
       setUnreadCount(count);
     };
 
@@ -428,7 +438,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       if (cancelled) return;
       const allRows = (res.data ?? []) as NotificationRow[];
       const rows = allRows.filter(
-        (r) => !r.data?.skip_history && !r.metadata?.skip_history
+        (r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)
       );
       setNotifRows(rows);
       setNotifLoading(false);
