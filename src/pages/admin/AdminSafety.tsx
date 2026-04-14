@@ -314,6 +314,8 @@ const demoBadgeClasses =
 const DEMO_FIXTURE_MARKER = "[DEMO_FIXTURE_ADMIN_SAFETY_V1]";
 const automationBadgeClasses =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800";
+const DEFAULT_WARN_MESSAGE =
+  "Huddle only works when the neighborhood is safe and friendly for everyone.\nWe’ve noticed some recent activity on your account that doesn't quite align with our community standards.\nIf you think this is a mistake, please reach out to our team at support@huddle.pet";
 
 const resolveIdentityLabel = (displayName: string | null | undefined, socialId: string | null | undefined, fallbackId: string | null | undefined) => {
   const name = displayName?.trim() || "Unknown User";
@@ -480,6 +482,7 @@ const AdminSafety = () => {
   });
   const [usersSearch, setUsersSearch] = useState("");
   const [moderatorNote, setModeratorNote] = useState("");
+  const [warnMessageDraft, setWarnMessageDraft] = useState(DEFAULT_WARN_MESSAGE);
   const [pendingAction, setPendingAction] = useState<PendingReportAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1054,13 +1057,6 @@ const AdminSafety = () => {
     if (source === "sentinel") return "Automation";
     return "Manual";
   })();
-  const hasRealReportAction = Boolean(reportHeader?.latest_action || reportHeader?.latest_action_at);
-  const reportLastActionLabel = !hasRealReportAction
-    ? "No manual action yet"
-    : reportHeader?.latest_action_source === "sentinel"
-      ? "Last action: Automation"
-      : "Last action: Manual";
-
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
     if (action.action === "warn") return "Warn";
@@ -1140,6 +1136,9 @@ const AdminSafety = () => {
   const openReportActionConfirm = (action: PendingReportAction) => {
     resetActionFeedback();
     setPendingAction(action);
+    if (action.action === "warn") {
+      setWarnMessageDraft(DEFAULT_WARN_MESSAGE);
+    }
   };
 
   const resetDisputeActionFeedback = () => {
@@ -1171,6 +1170,7 @@ const AdminSafety = () => {
       p_note: trimmedNote || null,
       p_pause_sentinel: pendingAction.action === "pause_sentinel" ? pendingAction.pauseSentinel : null,
       p_reporter_user_id: pendingAction.action === "mark_false_report" ? pendingAction.reporterUserId ?? null : null,
+      p_warn_message: pendingAction.action === "warn" ? warnMessageDraft.trim() : null,
     };
 
     if (pendingAction.action === "shadow_restrict") {
@@ -1239,23 +1239,22 @@ const AdminSafety = () => {
       };
     }
 
-    const waiveCustomerFeeEffective = pendingDisputeAction.action === "release_full" ? false : waiveCustomerPlatformFee;
-    const providerFeeDeduction = pendingDisputeAction.action === "full_refund"
-      ? 0
-      : (waiveProviderPlatformFee ? 0 : providerPlatformFee);
+    const waiveCustomerFeeEffective = waiveCustomerPlatformFee;
+    const providerFeeDeduction = waiveProviderPlatformFee ? 0 : providerPlatformFee;
     const providerReceivesOnFullRelease = Math.max(serviceRate - providerFeeDeduction, 0);
     if (pendingDisputeAction.action === "release_full") {
-      const huddleRetains = Math.max(totalPaid - providerReceivesOnFullRelease, 0);
+      const customerRefunded = waiveCustomerFeeEffective ? customerPlatformFee : 0;
+      const huddleRetains = Math.max(totalPaid - providerReceivesOnFullRelease - customerRefunded, 0);
       return {
         totalPaid,
         serviceRate,
         customerPlatformFee,
         providerPlatformFee,
-        waiveCustomerPlatformFee: false,
+        waiveCustomerPlatformFee: waiveCustomerFeeEffective,
         waiveProviderPlatformFee,
         providerReceivesOnFullRelease,
         providerReceives: providerReceivesOnFullRelease,
-        customerRefunded: 0,
+        customerRefunded,
         huddleRetains,
       };
     }
@@ -1329,8 +1328,8 @@ const AdminSafety = () => {
         p_action: pendingDisputeAction.action,
         p_note: trimmedNote,
         p_customer_refund_amount: refundAmount,
-        p_waive_customer_platform_fee: pendingDisputeAction.action === "release_full" ? false : waiveCustomerPlatformFee,
-        p_waive_provider_platform_fee: pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee,
+        p_waive_customer_platform_fee: waiveCustomerPlatformFee,
+        p_waive_provider_platform_fee: waiveProviderPlatformFee,
       } as never,
     );
 
@@ -1887,20 +1886,12 @@ const AdminSafety = () => {
                     <div>Latest: {formatDateTime(reportHeader?.latest_report_at ?? null)}</div>
                     <div>Case status: {formatCaseStatus(currentCaseStatus)}</div>
                     <div>Automation: {currentAutomationPaused ? "Off" : "On"}</div>
-                    <div>{reportLastActionLabel}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <span className={badgeClasses}>Moderation: {formatModerationState(currentReportState)}</span>
                     <span className={currentAutomationPaused ? badgeClasses : automationBadgeClasses}>
                       {currentAutomationPaused ? "Automation: Off" : "Automation: On"}
                     </span>
-                    {hasRealReportAction ? (
-                      <span className={reportHeader?.latest_action_source === "sentinel" ? automationBadgeClasses : badgeClasses}>
-                        {reportLastActionLabel}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">{reportLastActionLabel}</span>
-                    )}
                     {reportDrawerIsDemo ? (
                       <span className={demoBadgeClasses}>Demo Fixture</span>
                     ) : null}
@@ -2057,15 +2048,12 @@ const AdminSafety = () => {
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
                     <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "clear_restrictions" })}>
                       Clear Restrictions
                     </Button>
                     <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "warn" })}>
                       Warn
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => openReportActionConfirm({ action: "shadow_restrict" })}>
-                      Shadow Restrict
                     </Button>
                     <Button
                       type="button"
@@ -2553,12 +2541,28 @@ const AdminSafety = () => {
                 ? "This action is irreversible and will apply a full account ban with identifier blocks."
                 : pendingAction?.action === "mark_false_report"
                   ? "This applies a false-report penalty to the selected reporter and writes immutable audit history."
+                  : pendingAction?.action === "warn"
+                    ? "This sends a warning chat message to the user and updates moderation state to under review."
                   : "This moderation action will be applied immediately and written to admin audit logs."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {pendingAction && needsNote(pendingAction) && !moderatorNote.trim() ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               Moderator note is required before confirming.
+            </div>
+          ) : null}
+          {pendingAction?.action === "warn" ? (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="warn-message-draft">
+                Warning message (editable)
+              </label>
+              <Textarea
+                id="warn-message-draft"
+                value={warnMessageDraft}
+                onChange={(event) => setWarnMessageDraft(event.target.value)}
+                rows={5}
+                placeholder={DEFAULT_WARN_MESSAGE}
+              />
             </div>
           ) : null}
           {pendingAction?.action === "mark_false_report" ? (
@@ -2675,7 +2679,6 @@ const AdminSafety = () => {
                     type="checkbox"
                     checked={waiveCustomerPlatformFee}
                     onChange={(event) => setWaiveCustomerPlatformFee(event.target.checked)}
-                    disabled={pendingDisputeAction.action === "release_full"}
                   />
                   <span>Waive platform fee from Customer</span>
                 </label>
@@ -2684,7 +2687,6 @@ const AdminSafety = () => {
                     type="checkbox"
                     checked={waiveProviderPlatformFee}
                     onChange={(event) => setWaiveProviderPlatformFee(event.target.checked)}
-                    disabled={pendingDisputeAction.action === "full_refund"}
                   />
                   <span>Waive platform fee from Provider</span>
                 </label>
