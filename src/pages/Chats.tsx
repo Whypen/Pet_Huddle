@@ -4538,33 +4538,33 @@ const Chats = () => {
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setIsSearchOpen(!isSearchOpen)}
-                className="h-12 w-12 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+                className="h-8 w-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
               >
-                <Search className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
+                <Search className="w-4 h-4 text-muted-foreground" strokeWidth={1.75} />
               </button>
               {mainTab === "groups" && (
                 <>
                   <button
                     onClick={() => setIsJoinWithCodeOpen(true)}
-                    className="h-12 w-12 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
+                    className="h-8 w-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
                     aria-label="Join with code"
                   >
-                    <Hash className="w-5 h-5 text-muted-foreground" strokeWidth={1.75} />
+                    <Hash className="w-4 h-4 text-muted-foreground" strokeWidth={1.75} />
                   </button>
                   <button
                     onClick={handleCreateGroup}
                     className={cn(
-                      "h-12 w-12 rounded-full flex items-center justify-center transition-colors",
+                      "h-8 w-8 rounded-full flex items-center justify-center transition-colors",
                       isVerified
                         ? "bg-accent text-accent-foreground hover:bg-accent/90"
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
                     )}
                     aria-label="Create Group"
                   >
-                    <Users className="w-5 h-5" strokeWidth={1.75} />
+                    <Users className="w-4 h-4" strokeWidth={1.75} />
                   </button>
                 </>
               )}
@@ -4899,9 +4899,13 @@ const Chats = () => {
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" strokeWidth={1.75} />
                       </div>
                     ) : exploreGroups.length === 0 ? (
-                      <div className="flex flex-col items-center py-10 gap-3">
-                        <Users className="w-8 h-8 text-muted-foreground" strokeWidth={1.5} />
-                        <p className="text-center text-[15px] text-muted-foreground max-w-[26ch]">
+                      <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
+                        <img
+                          src={emptyChatImage}
+                          alt="No groups yet"
+                          className="w-full max-w-[320px] object-contain"
+                        />
+                        <p className="mt-2 px-2 text-center text-[15px] leading-relaxed text-[rgba(74,73,101,0.70)]">
                           No public groups nearby yet. Be the first to create one!
                         </p>
                       </div>
@@ -5443,7 +5447,7 @@ const Chats = () => {
         <DialogContent className="max-w-sm !z-[9800] !top-[38%] !translate-y-0">
           <DialogHeader>
             <DialogTitle>Identity verification required</DialogTitle>
-            <DialogDescription>Finish verification to sunlock group chats</DialogDescription>
+            <DialogDescription>Finish verification to unlock Group Creation feature</DialogDescription>
           </DialogHeader>
           <DialogFooter className="!flex-row gap-2 pt-2">
             <NeuButton
