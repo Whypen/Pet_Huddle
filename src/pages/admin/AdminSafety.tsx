@@ -1917,12 +1917,14 @@ const AdminSafety = () => {
         fallbackName={profilePreviewName}
         viewedUserId={profilePreviewUserId}
         data={null}
+        zIndexBase={9100}
       />
       <PublicCarerProfileModal
         isOpen={Boolean(carerPreviewUserId)}
         providerUserId={carerPreviewUserId}
         onClose={() => setCarerPreviewUserId(null)}
         canRequestService={false}
+        zIndexBase={9200}
       />
 
       <AlertDialog open={pendingAction !== null} onOpenChange={(open) => !open && setPendingAction(null)}>

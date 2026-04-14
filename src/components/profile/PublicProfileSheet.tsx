@@ -71,9 +71,10 @@ type PublicProfileSheetProps = {
   viewedUserId?: string | null;
   onStarQuotaBlocked?: (tier: "plus" | "gold") => void;
   hideStartChatAction?: boolean;
+  zIndexBase?: number;
 };
 
-export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, data, viewedUserId, onStarQuotaBlocked, hideStartChatAction = false }: PublicProfileSheetProps) => {
+export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, data, viewedUserId, onStarQuotaBlocked, hideStartChatAction = false, zIndexBase = 5500 }: PublicProfileSheetProps) => {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [resolvedData, setResolvedData] = useState<PublicProfileSheetData | null>(data);
@@ -339,14 +340,16 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
       {isOpen && (
         <>
           <motion.div
-            className="fixed inset-0 z-[5500] bg-black/50"
+            className="fixed inset-0 bg-black/50"
+            style={{ zIndex: zIndexBase }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
           <motion.div
-            className="fixed inset-0 z-[5501] flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
+            className="fixed inset-0 flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
+            style={{ zIndex: zIndexBase + 1 }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -486,7 +489,8 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           <AnimatePresence>
             {starFlightVisible && (
               <motion.div
-                className="pointer-events-none fixed inset-0 z-[5750]"
+                className="pointer-events-none fixed inset-0"
+                style={{ zIndex: zIndexBase + 250 }}
                 initial={{ opacity: 1 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -506,14 +510,16 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
             {petViewOpen && (
               <>
                 <motion.div
-                  className="fixed inset-0 z-[5600] bg-black/45"
+                  className="fixed inset-0 bg-black/45"
+                  style={{ zIndex: zIndexBase + 100 }}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onClick={closePetView}
                 />
                 <motion.div
-                  className="fixed inset-0 z-[5601] flex items-center justify-center px-4"
+                  className="fixed inset-0 flex items-center justify-center px-4"
+                  style={{ zIndex: zIndexBase + 101 }}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}

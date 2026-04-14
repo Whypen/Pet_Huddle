@@ -13,6 +13,7 @@ interface PublicCarerProfileModalProps {
   onClose: () => void;
   onRequestService?: (providerUserId: string) => void;
   canRequestService?: boolean;
+  zIndexBase?: number;
 }
 
 export function PublicCarerProfileModal({
@@ -21,6 +22,7 @@ export function PublicCarerProfileModal({
   onClose,
   onRequestService,
   canRequestService = true,
+  zIndexBase = 6200,
 }: PublicCarerProfileModalProps) {
   const [loading, setLoading] = useState(false);
   const [provider, setProvider] = useState<ProviderSummary | null>(null);
@@ -173,7 +175,8 @@ export function PublicCarerProfileModal({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm z-[6200]"
+            className="fixed inset-0 bg-foreground/40 backdrop-blur-sm"
+            style={{ zIndex: zIndexBase }}
           />
 
           <motion.div
@@ -181,7 +184,8 @@ export function PublicCarerProfileModal({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed top-[70px] left-4 right-4 max-w-md mx-auto bg-card rounded-2xl z-[6210] overflow-hidden shadow-elevated max-h-[80vh]"
+            className="fixed top-[70px] left-4 right-4 max-w-md mx-auto bg-card rounded-2xl overflow-hidden shadow-elevated max-h-[80vh]"
+            style={{ zIndex: zIndexBase + 10 }}
           >
             <button
               onClick={onClose}
