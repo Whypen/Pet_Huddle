@@ -158,6 +158,9 @@ const getDisputeTotalPaidValue = (
 
 const badgeClasses =
   "inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-foreground";
+const demoBadgeClasses =
+  "inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800";
+const DEMO_FIXTURE_MARKER = "[DEMO_FIXTURE_ADMIN_SAFETY_V1]";
 
 const ADMIN_EMAIL_ALLOWLIST = new Set([
   "twenty_illkid@msn.com",
@@ -173,6 +176,7 @@ const AdminSafety = () => {
   const [reportsQueue, setReportsQueue] = useState<ReportsQueueRow[]>([]);
   const [disputesQueue, setDisputesQueue] = useState<DisputesQueueRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditTimelineRow[]>([]);
+  const [demoReportTargetIds, setDemoReportTargetIds] = useState<Set<string>>(new Set());
 
   const [caseSelection, setCaseSelection] = useState<CaseSelection>(null);
   const [reportCasefile, setReportCasefile] = useState<ReportCasefileRow[]>([]);
@@ -221,6 +225,18 @@ const AdminSafety = () => {
   const resetActionFeedback = () => {
     setActionError(null);
     setActionSuccess(null);
+  };
+
+  const hasDemoMarker = (value: string | null | undefined) =>
+    typeof value === "string" && value.includes(DEMO_FIXTURE_MARKER);
+
+  const isDemoAuditRow = (row: AuditTimelineRow) => {
+    if (hasDemoMarker(row.notes)) return true;
+    if (row.details && typeof row.details === "object") {
+      const payload = row.details as Record<string, unknown>;
+      if (payload.demo_fixture_tag === DEMO_FIXTURE_MARKER) return true;
+    }
+    return false;
   };
 
   const disputeQueueById = useMemo(() => {
@@ -364,7 +380,29 @@ const AdminSafety = () => {
         .limit(200),
     ]);
 
-    if (!reportsRes.error) setReportsQueue((reportsRes.data ?? []) as ReportsQueueRow[]);
+    if (!reportsRes.error) {
+      const reportRows = (reportsRes.data ?? []) as ReportsQueueRow[];
+      setReportsQueue(reportRows);
+
+      const targetIds = reportRows
+        .map((row) => row.target_user_id)
+        .filter((value): value is string => Boolean(value));
+
+      if (targetIds.length > 0) {
+        const { data: demoRows } = await supabase
+          .from("view_admin_report_casefile")
+          .select("target_user_id, details")
+          .in("target_user_id", Array.from(new Set(targetIds)))
+          .ilike("details", `%${DEMO_FIXTURE_MARKER}%`);
+
+        const nextDemoIds = new Set<string>((demoRows ?? [])
+          .map((row) => row.target_user_id)
+          .filter((value): value is string => Boolean(value)));
+        setDemoReportTargetIds(nextDemoIds);
+      } else {
+        setDemoReportTargetIds(new Set());
+      }
+    }
     if (!disputesRes.error) {
       const rows = disputesRes.data ?? [];
       setDisputesQueue(rows);
@@ -485,6 +523,9 @@ const AdminSafety = () => {
   const currentReportState = reportHeader?.moderation_state ?? reportCasefile[0]?.moderation_state ?? "active";
   const currentAutomationPaused =
     reportHeader?.automation_paused ?? reportCasefile[0]?.automation_paused ?? false;
+  const reportDrawerIsDemo =
+    (selectedReportTargetId ? demoReportTargetIds.has(selectedReportTargetId) : false) ||
+    reportCasefile.some((row) => hasDemoMarker(row.details));
 
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "set_active") return "Set Active";
@@ -640,7 +681,14 @@ const AdminSafety = () => {
                             setCaseSelection({ type: "report", targetUserId: row.target_user_id });
                           }}
                         >
-                          <td className="px-3 py-2 font-mono text-xs">{row.target_user_id ?? "-"}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs">{row.target_user_id ?? "-"}</span>
+                              {row.target_user_id && demoReportTargetIds.has(row.target_user_id) ? (
+                                <span className={demoBadgeClasses}>Demo</span>
+                              ) : null}
+                            </div>
+                          </td>
                           <td className="px-3 py-2">{row.report_count ?? 0}</td>
                           <td className="px-3 py-2 hidden lg:table-cell">{row.unique_reporters ?? 0}</td>
                           <td className="px-3 py-2">{row.total_score ?? 0}</td>
@@ -784,7 +832,12 @@ const AdminSafety = () => {
                     ) : (
                       auditSorted.map((row) => (
                         <tr key={row.audit_id} className="border-b last:border-b-0 align-top hover:bg-muted/30">
-                          <td className="px-3 py-2"><span className={badgeClasses}>{row.action}</span></td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-2">
+                              <span className={badgeClasses}>{row.action}</span>
+                              {isDemoAuditRow(row) ? <span className={demoBadgeClasses}>Demo</span> : null}
+                            </div>
+                          </td>
                           <td className="px-3 py-2">{row.target_display_name ?? row.target_user_id ?? "-"}</td>
                           <td className="px-3 py-2 hidden lg:table-cell">{row.actor_display_name ?? row.actor_id}</td>
                           <td className="px-3 py-2">{formatDateTime(row.created_at)}</td>
@@ -825,6 +878,9 @@ const AdminSafety = () => {
                     <span className={badgeClasses}>
                       {currentAutomationPaused ? "Sentinel Paused" : "Sentinel Active"}
                     </span>
+                    {reportDrawerIsDemo ? (
+                      <span className={demoBadgeClasses}>Demo Fixture</span>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {(reportHeader?.category_tags ?? []).map((tag) => (
