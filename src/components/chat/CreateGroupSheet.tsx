@@ -136,7 +136,7 @@ export function CreateGroupSheet({
           description: description.trim() || null,
           created_by: user.id,
         })
-        .select("id")
+        .select("id, room_code")
         .single();
 
       if (chatError || !chat) throw chatError ?? new Error("No chat returned");
@@ -148,9 +148,10 @@ export function CreateGroupSheet({
       if (participantError) throw participantError;
 
       // 3. Insert system message
+      const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;
       const systemContent =
         visibility === "private"
-          ? `Room Code: ${roomCodePlaceholder} — Share this instead of your phone number`
+          ? `Room Code: ${roomCode ?? roomCodePlaceholder} — Share this with people you trust`
           : joinMethod === "request"
           ? "This is a public group. People can request to join and you approve them."
           : "This is a public group. Anyone can join instantly.";

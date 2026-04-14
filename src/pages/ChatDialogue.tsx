@@ -894,8 +894,10 @@ const ChatDialogue = () => {
               !isGroup &&
               firstStarUserMessageId != null &&
               message.id === firstStarUserMessageId;
+            const isSystemMsg = message.kind === "system";
             const isMembershipHint =
               isGroup &&
+              !isSystemMsg &&
               attachments.length === 0 &&
               normalizedText.length > 0 &&
               (/just joined the chat\.$/i.test(normalizedText) || /left the group\.$/i.test(normalizedText));
@@ -913,12 +915,18 @@ const ChatDialogue = () => {
                     </span>
                   </div>
                 ) : null}
-                {isGroup && !mine && !isMembershipHint && (
+                {isGroup && !mine && !isMembershipHint && !isSystemMsg && (
                   <div className="pl-1 mb-0.5 text-[11px] font-semibold text-muted-foreground">
                     {senderNames[message.sender_id] || ""}
                   </div>
                 )}
-                {isMembershipHint ? (
+                {isSystemMsg ? (
+                  <div className="flex justify-center py-2">
+                    <span className="rounded-full bg-[rgba(59,130,246,0.10)] px-3 py-1 text-[12px] font-medium text-[#3B82F6] text-center max-w-[80%]">
+                      {normalizedText}
+                    </span>
+                  </div>
+                ) : isMembershipHint ? (
                   <div className="flex justify-center py-1">
                     <span className="rounded-full bg-[rgba(120,128,150,0.15)] px-3 py-1 text-xs font-medium text-[#8C93AA]">
                       {normalizedText}
