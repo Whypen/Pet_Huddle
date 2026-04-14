@@ -52,11 +52,28 @@ type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes
   requester_social_id?: string | null;
   provider_social_id?: string | null;
   evidence_urls?: string[] | null;
+  decision_action?: string | null;
+  decision_note?: string | null;
+  decision_payload?: Record<string, unknown> | null;
+  decision_actor_id?: string | null;
+  decision_at?: string | null;
+  decision_version?: number | null;
+  total_paid_amount?: number | null;
+  platform_fee_amount?: number | null;
+  provider_receives_amount?: number | null;
+  customer_refund_amount?: number | null;
 };
 type AuditTimelineRow = Database["public"]["Views"]["view_admin_safety_audit_timeline"]["Row"] & {
   action_source?: "manual" | "sentinel" | null;
 };
-type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"];
+type ServiceDisputeRow = Database["public"]["Tables"]["service_disputes"]["Row"] & {
+  decision_action?: string | null;
+  decision_note?: string | null;
+  decision_payload?: Record<string, unknown> | null;
+  decision_actor_id?: string | null;
+  decision_at?: string | null;
+  decision_version?: number | null;
+};
 type ServiceChatRow = Database["public"]["Tables"]["service_chats"]["Row"];
 type ServiceChatMeta = {
   serviceLabel: string;
@@ -147,6 +164,16 @@ type PendingReportAction = {
   action: ReportAction;
   pauseSentinel?: boolean;
   reporterUserId?: string | null;
+};
+
+type DisputeDecisionAction =
+  | "hold_funds"
+  | "release_full"
+  | "partial_refund"
+  | "full_refund";
+
+type PendingDisputeAction = {
+  action: DisputeDecisionAction;
 };
 
 type RestrictionFlagKey =
@@ -265,6 +292,24 @@ const formatModerationState = (value: string | null | undefined) => {
   return value.replaceAll("_", " ");
 };
 
+const formatDisputeDecisionAction = (action: DisputeDecisionAction) => {
+  if (action === "hold_funds") return "Hold Funds";
+  if (action === "release_full") return "Release Full";
+  if (action === "partial_refund") return "Partial Refund";
+  return "Full Refund";
+};
+
+const parseAmount = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const formatMoneyAmount = (value: number) => value.toFixed(2);
+
 const formatEventGroupLabel = (group: string) => {
   if (group === "reports_received") return "Reports Received";
   if (group === "reports_filed") return "Reports Filed";
@@ -337,6 +382,12 @@ const AdminSafety = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [disputeAdminNote, setDisputeAdminNote] = useState("");
+  const [pendingDisputeAction, setPendingDisputeAction] = useState<PendingDisputeAction | null>(null);
+  const [disputeActionLoading, setDisputeActionLoading] = useState(false);
+  const [disputeActionError, setDisputeActionError] = useState<string | null>(null);
+  const [disputeActionSuccess, setDisputeActionSuccess] = useState<string | null>(null);
+  const [partialRefundInput, setPartialRefundInput] = useState("");
   const [reportsCaseFilter, setReportsCaseFilter] = useState<"open" | "resolved" | "dismissed" | "all">("open");
   const [selectedReporterForPenalty, setSelectedReporterForPenalty] = useState<string | null>(null);
   const [shadowFlags, setShadowFlags] = useState<Record<RestrictionFlagKey, boolean>>({
@@ -697,6 +748,22 @@ const AdminSafety = () => {
     setReportCasefile((data ?? []) as ReportCasefileRow[]);
   };
 
+  const loadDisputeCasefile = async (disputeId: string | null) => {
+    if (!disputeId) {
+      setDisputeCasefile(null);
+      setServiceChatPreview(null);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("service_disputes")
+      .select("*")
+      .eq("id", disputeId)
+      .maybeSingle();
+
+    setDisputeCasefile((data as ServiceDisputeRow | null) ?? null);
+  };
+
   useEffect(() => {
     const load = async () => {
       if (authLoading || hydrating) {
@@ -721,23 +788,7 @@ const AdminSafety = () => {
   }, [selectedReportTargetId]);
 
   useEffect(() => {
-    const loadDisputeCasefile = async () => {
-      if (!selectedDisputeId) {
-        setDisputeCasefile(null);
-        setServiceChatPreview(null);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("service_disputes")
-        .select("*")
-        .eq("id", selectedDisputeId)
-        .maybeSingle();
-
-      setDisputeCasefile(data ?? null);
-    };
-
-    void loadDisputeCasefile();
+    void loadDisputeCasefile(selectedDisputeId);
   }, [selectedDisputeId]);
 
   useEffect(() => {
@@ -787,6 +838,14 @@ const AdminSafety = () => {
     setSelectedReporterForPenalty(firstReporter);
   }, [selectedReportTargetId, reportCasefile, reportQueueByTarget]);
 
+  useEffect(() => {
+    setPendingDisputeAction(null);
+    setDisputeActionError(null);
+    setDisputeActionSuccess(null);
+    setDisputeAdminNote("");
+    setPartialRefundInput("");
+  }, [selectedDisputeId]);
+
   if (authLoading || hydrating) {
     return <div className="p-4 md:p-6 text-sm text-muted-foreground">Checking admin access...</div>;
   }
@@ -811,6 +870,48 @@ const AdminSafety = () => {
   const reportDrawerIsDemo =
     (selectedReportTargetId ? demoReportTargetIds.has(selectedReportTargetId) : false) ||
     reportCasefile.some((row) => hasDemoMarker(row.details));
+  const disputeTotalPaidAmount = Math.max(
+    parseAmount(disputeHeader?.total_paid_amount) ??
+    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
+      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
+        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).total_paid_amount
+        : null
+      : null) ??
+    getDisputeTotalPaidValue(serviceChatTotals, disputeHeader ?? ({} as DisputesQueueRow)) ??
+    0,
+    0,
+  );
+  const disputePlatformFeeAmount = Math.max(
+    parseAmount(disputeHeader?.platform_fee_amount) ??
+    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
+      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
+        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).platform_fee_amount
+        : null
+      : null) ??
+    0,
+    0,
+  );
+  const disputeRefundableAmount = Math.max(disputeTotalPaidAmount - disputePlatformFeeAmount, 0);
+  const disputeExistingRefundAmount = Math.max(
+    parseAmount(disputeHeader?.customer_refund_amount) ??
+    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
+      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
+        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).customer_refund_amount
+        : null
+      : null) ??
+    0,
+    0,
+  );
+  const disputeExistingProviderAmount = Math.max(
+    parseAmount(disputeHeader?.provider_receives_amount) ??
+    parseAmount(disputeCasefile?.decision_payload && typeof disputeCasefile.decision_payload === "object"
+      ? (disputeCasefile.decision_payload as Record<string, unknown>)?.money && typeof (disputeCasefile.decision_payload as Record<string, unknown>).money === "object"
+        ? ((disputeCasefile.decision_payload as Record<string, unknown>).money as Record<string, unknown>).provider_receives_amount
+        : null
+      : null) ??
+    Math.max(disputeRefundableAmount - disputeExistingRefundAmount, 0),
+    0,
+  );
 
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
@@ -830,6 +931,7 @@ const AdminSafety = () => {
     setRefreshing(true);
     await loadQueues();
     if (selectedReportTargetId) await loadReportCasefile(selectedReportTargetId);
+    if (selectedDisputeId) await loadDisputeCasefile(selectedDisputeId);
     if (selectedUserId) {
       let query = supabase
         .from("view_admin_safety_user_timeline")
@@ -873,6 +975,11 @@ const AdminSafety = () => {
   const openReportActionConfirm = (action: PendingReportAction) => {
     resetActionFeedback();
     setPendingAction(action);
+  };
+
+  const resetDisputeActionFeedback = () => {
+    setDisputeActionError(null);
+    setDisputeActionSuccess(null);
   };
 
   const executeReportAction = async () => {
@@ -930,6 +1037,111 @@ const AdminSafety = () => {
 
     await loadQueues();
     await loadReportCasefile(selectedReportTargetId);
+  };
+
+  const openDisputeActionConfirm = (action: DisputeDecisionAction) => {
+    resetDisputeActionFeedback();
+    setPendingDisputeAction({ action });
+    if (action === "partial_refund") {
+      const seedRefund = Math.min(disputeExistingRefundAmount, disputeRefundableAmount);
+      setPartialRefundInput(seedRefund > 0 ? seedRefund.toFixed(2) : "");
+    } else {
+      setPartialRefundInput("");
+    }
+  };
+
+  const getPendingDisputeBreakdown = () => {
+    if (!pendingDisputeAction) {
+      return {
+        totalPaid: disputeTotalPaidAmount,
+        platformFee: disputePlatformFeeAmount,
+        providerReceives: disputeExistingProviderAmount,
+        customerRefunded: disputeExistingRefundAmount,
+      };
+    }
+
+    const totalPaid = disputeTotalPaidAmount;
+    const platformFee = disputePlatformFeeAmount;
+    const refundable = disputeRefundableAmount;
+    if (pendingDisputeAction.action === "hold_funds") {
+      return {
+        totalPaid,
+        platformFee,
+        providerReceives: 0,
+        customerRefunded: 0,
+      };
+    }
+    if (pendingDisputeAction.action === "release_full") {
+      return {
+        totalPaid,
+        platformFee,
+        providerReceives: refundable,
+        customerRefunded: 0,
+      };
+    }
+    if (pendingDisputeAction.action === "full_refund") {
+      return {
+        totalPaid,
+        platformFee,
+        providerReceives: 0,
+        customerRefunded: refundable,
+      };
+    }
+
+    const parsedRefund = parseAmount(partialRefundInput) ?? 0;
+    const clampedRefund = Math.max(Math.min(parsedRefund, refundable), 0);
+    return {
+      totalPaid,
+      platformFee,
+      providerReceives: Math.max(refundable - clampedRefund, 0),
+      customerRefunded: clampedRefund,
+    };
+  };
+
+  const executeDisputeAction = async () => {
+    if (!selectedDisputeId || !pendingDisputeAction || disputeActionLoading) return;
+
+    const trimmedNote = disputeAdminNote.trim();
+    if (!trimmedNote) {
+      setDisputeActionError("Admin note is required for dispute decisions.");
+      return;
+    }
+
+    let refundAmount: number | null = null;
+    if (pendingDisputeAction.action === "partial_refund") {
+      const parsed = parseAmount(partialRefundInput);
+      if (parsed === null || parsed < 0) {
+        setDisputeActionError("Enter a valid partial refund amount.");
+        return;
+      }
+      refundAmount = Math.max(Math.min(parsed, disputeRefundableAmount), 0);
+    }
+
+    setDisputeActionLoading(true);
+    setDisputeActionError(null);
+    setDisputeActionSuccess(null);
+
+    const { error } = await supabase.rpc(
+      "admin_apply_dispute_decision" as never,
+      {
+        p_dispute_id: selectedDisputeId,
+        p_action: pendingDisputeAction.action,
+        p_note: trimmedNote,
+        p_customer_refund_amount: refundAmount,
+      } as never,
+    );
+
+    if (error) {
+      setDisputeActionLoading(false);
+      setDisputeActionError(error.message || "Failed to apply dispute decision.");
+      return;
+    }
+
+    setPendingDisputeAction(null);
+    setDisputeActionLoading(false);
+    setDisputeActionSuccess(`Applied: ${formatDisputeDecisionAction(pendingDisputeAction.action)}.`);
+    await loadQueues();
+    await loadDisputeCasefile(selectedDisputeId);
   };
 
   return (
@@ -1795,6 +2007,77 @@ const AdminSafety = () => {
                     <div>Payout released: {formatDateTime(serviceChatPreview.payout_released_at)}</div>
                   </section>
                 ) : null}
+
+                <section className="rounded-lg border p-3 space-y-3">
+                  <h3 className="font-semibold">Dispute Decision Controls</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={badgeClasses}>Status: {disputeHeader?.dispute_status ?? "-"}</span>
+                    <span className={badgeClasses}>
+                      Source: {disputeHeader?.decision_action ? "Manual" : "Pending"}
+                    </span>
+                    {disputeHeader?.decision_at ? (
+                      <span className={badgeClasses}>Last Decision: {formatDateTime(disputeHeader.decision_at)}</span>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">Total Paid</div>
+                      <div className="font-medium">{formatMoneyAmount(disputeTotalPaidAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Platform Fee</div>
+                      <div className="font-medium">{formatMoneyAmount(disputePlatformFeeAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Provider Receives</div>
+                      <div className="font-medium">{formatMoneyAmount(disputeExistingProviderAmount)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">Customer Refunded</div>
+                      <div className="font-medium">{formatMoneyAmount(disputeExistingRefundAmount)}</div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground" htmlFor="dispute-admin-note">
+                      Admin Note (required)
+                    </label>
+                    <Textarea
+                      id="dispute-admin-note"
+                      value={disputeAdminNote}
+                      onChange={(event) => setDisputeAdminNote(event.target.value)}
+                      placeholder="Explain the decision for audit history."
+                      rows={3}
+                    />
+                  </div>
+
+                  {disputeActionError ? (
+                    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {disputeActionError}
+                    </div>
+                  ) : null}
+                  {disputeActionSuccess ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {disputeActionSuccess}
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("hold_funds")}>
+                      Hold Funds
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("release_full")}>
+                      Release Full
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("partial_refund")}>
+                      Partial Refund
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => openDisputeActionConfirm("full_refund")}>
+                      Full Refund
+                    </Button>
+                  </div>
+                </section>
               </div>
             </>
           )}
@@ -1998,6 +2281,79 @@ const AdminSafety = () => {
               disabled={actionLoading}
             >
               {actionLoading ? "Applying..." : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={pendingDisputeAction !== null} onOpenChange={(open) => !open && setPendingDisputeAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingDisputeAction ? `Confirm ${formatDisputeDecisionAction(pendingDisputeAction.action)}` : "Confirm Dispute Decision"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This stores an admin dispute decision and audit trail only. No Stripe payout/refund/transfer execution happens in this phase.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {pendingDisputeAction ? (
+            <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="text-xs text-muted-foreground">Total Paid</div>
+                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().totalPaid)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Platform Fee</div>
+                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().platformFee)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Provider Receives</div>
+                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().providerReceives)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Customer Refunded</div>
+                  <div className="font-medium">{formatMoneyAmount(getPendingDisputeBreakdown().customerRefunded)}</div>
+                </div>
+              </div>
+
+              {pendingDisputeAction.action === "partial_refund" ? (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="partial-refund-amount">
+                    Partial refund amount
+                  </label>
+                  <input
+                    id="partial-refund-amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={partialRefundInput}
+                    onChange={(event) => setPartialRefundInput(event.target.value)}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    placeholder={`0.00 (max ${formatMoneyAmount(disputeRefundableAmount)})`}
+                  />
+                </div>
+              ) : null}
+
+              {!disputeAdminNote.trim() ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  Admin note is required before confirming.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={disputeActionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void executeDisputeAction();
+              }}
+              disabled={disputeActionLoading}
+            >
+              {disputeActionLoading ? "Applying..." : "Confirm"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
