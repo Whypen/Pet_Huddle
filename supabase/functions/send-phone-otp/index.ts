@@ -122,7 +122,7 @@ function classifyOtpSendError(raw: string): OtpSendReasonCode {
 }
 
 function normalizePhoneForCompare(value: string | null | undefined): string {
-  return String(value || "").trim().replace(/[^\d+]/g, "");
+  return String(value || "").trim().replace(/\D/g, "");
 }
 
 // ── Logger helper ─────────────────────────────────────────────────────────────
@@ -411,7 +411,9 @@ Deno.serve(async (req: Request) => {
       const targetPhone = normalizePhoneForCompare(rawPhone);
       const phoneChange = normalizePhoneForCompare(String(userObj?.phone_change || ""));
       const phoneChangeSentAt = String(userObj?.phone_change_sent_at || "").trim();
-      // Treat as success only when the auth response proves a fresh phone-change OTP dispatch state.
+      // Supabase may return phone_change without a leading "+".
+      // Compare canonical digits only and trust phone_change_sent_at as the
+      // authoritative signal that a phone-change OTP was dispatched.
       if (!userObj || !phoneChange || phoneChange !== targetPhone || !phoneChangeSentAt) {
         sendError = "provider_send_failed";
       }
