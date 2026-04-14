@@ -650,6 +650,7 @@ const Chats = () => {
   const [groupImageUploading, setGroupImageUploading] = useState(false);
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupPendingInvites, setGroupPendingInvites] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [groupJoinRequests, setGroupJoinRequests] = useState<{ requestId: string; userId: string; name: string; avatarUrl?: string | null }[]>([]);
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupAddSearch, setGroupAddSearch] = useState("");
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
@@ -1744,6 +1745,33 @@ const Chats = () => {
         }
       } catch {
         setGroupPendingInvites([]);
+      }
+      // Fetch pending join requests (for public groups with join_method=request)
+      try {
+        const { data: requestRows } = await supabase
+          .from("group_join_requests")
+          .select("id, user_id, profiles!group_join_requests_user_id_fkey(display_name, avatar_url)")
+          .eq("chat_id", groupManageId)
+          .eq("status", "pending");
+        if (Array.isArray(requestRows)) {
+          setGroupJoinRequests(
+            requestRows
+              .map((row: {
+                id: string;
+                user_id: string;
+                profiles?: { display_name?: string | null; avatar_url?: string | null } | null;
+              }) => ({
+                requestId: row.id,
+                userId: row.user_id,
+                name: row.profiles?.display_name || "Someone",
+                avatarUrl: row.profiles?.avatar_url || null,
+              }))
+          );
+        } else {
+          setGroupJoinRequests([]);
+        }
+      } catch {
+        setGroupJoinRequests([]);
       }
       // Fetch mutual waves for invite
       try {
@@ -5216,6 +5244,69 @@ const Chats = () => {
                 </NeuButton>
               </label>
             </div>
+
+            {/* Join Requests — approve or decline */}
+            {groupJoinRequests.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold text-brandText/70 mb-2">
+                  Join requests{" "}
+                  <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-brandBlue text-white text-[10px] font-bold">
+                    {groupJoinRequests.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {groupJoinRequests.map((req) => (
+                    <div key={req.requestId} className="flex items-center justify-between py-1.5">
+                      <div className="flex items-center gap-2">
+                        <UserAvatar avatarUrl={req.avatarUrl ?? null} name={req.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
+                        <span className="text-sm text-brandText">{req.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await supabase
+                                .from("group_join_requests")
+                                .update({ status: "approved" })
+                                .eq("id", req.requestId);
+                              await supabase
+                                .from("chat_participants")
+                                .insert({ chat_id: groupManageId!, user_id: req.userId, role: "member" });
+                              setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
+                              setGroupMembers((prev) => [...prev, { id: req.userId, name: req.name, avatarUrl: req.avatarUrl }]);
+                              setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
+                              toast.success(`${req.name} approved`);
+                            } catch {
+                              toast.error("Couldn't approve request.");
+                            }
+                          }}
+                          className="h-6 px-2 rounded-full bg-brandBlue/10 text-brandBlue text-[11px] font-semibold hover:bg-brandBlue/20 transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await supabase
+                                .from("group_join_requests")
+                                .update({ status: "declined" })
+                                .eq("id", req.requestId);
+                              setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
+                              toast.success(`${req.name} declined`);
+                            } catch {
+                              toast.error("Couldn't decline request.");
+                            }
+                          }}
+                          className="h-6 px-2 rounded-full bg-muted text-muted-foreground text-[11px] font-semibold hover:bg-muted/80 transition-colors"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Members List — fetched from backend, with working Remove */}
             <div>
