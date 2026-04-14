@@ -623,6 +623,8 @@ const Chats = () => {
     created_at: string;
   }>>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
+  // IDs of groups where current user has a pending join request
+  const [sentJoinRequests, setSentJoinRequests] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
@@ -3561,13 +3563,27 @@ const Chats = () => {
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
     try {
-      const { data } = await supabase
-        .from("chats")
-        .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at")
-        .eq("type", "group")
-        .eq("visibility", "public")
-        .order("last_message_at", { ascending: false })
-        .limit(50);
+      const [{ data }, { data: requestRows }] = await Promise.all([
+        supabase
+          .from("chats")
+          .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at")
+          .eq("type", "group")
+          .eq("visibility", "public")
+          .order("last_message_at", { ascending: false })
+          .limit(50),
+        user?.id
+          ? supabase
+              .from("group_join_requests")
+              .select("chat_id")
+              .eq("user_id", user.id)
+              .eq("status", "pending")
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      if (requestRows) {
+        setSentJoinRequests(new Set((requestRows as Array<{ chat_id: string }>).map((r) => r.chat_id)));
+      }
+
       if (!data) return;
 
       // Client-side ranking: R_pet (0–3) × 3 + R_active (0–2)
@@ -3599,7 +3615,7 @@ const Chats = () => {
     } finally {
       setExploreLoading(false);
     }
-  }, [profile?.pets]);
+  }, [profile?.pets, user?.id]);
 
   useEffect(() => {
     if (mainTab === "groups" && groupSubTab === "explore") {
@@ -4910,14 +4926,41 @@ const Chats = () => {
                         </p>
                       </div>
                     ) : (
-                      exploreGroups.map((group, index) => (
+                      exploreGroups.map((group, index) => {
+                        const isMember = groups.some((g) => g.id === group.id);
+                        const hasSentRequest = sentJoinRequests.has(group.id);
+
+                        const handleExploreCardCTA = async (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          if (!user?.id) { toast.error("Sign in to join groups."); return; }
+                          if (isMember) {
+                            navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                            return;
+                          }
+                          if (group.join_method === "instant") {
+                            const { error } = await supabase
+                              .from("chat_participants")
+                              .insert({ chat_id: group.id, user_id: user.id, role: "member" });
+                            if (error) { toast.error("Couldn't join. Please try again."); return; }
+                            toast.success(`Joined ${group.name}!`);
+                            navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                          } else {
+                            const { error } = await supabase
+                              .from("group_join_requests")
+                              .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
+                            if (error && error.code !== "23505") { toast.error("Couldn't send request. Please try again."); return; }
+                            setSentJoinRequests((prev) => new Set([...prev, group.id]));
+                            toast.success("Request sent!");
+                          }
+                        };
+
+                        return (
                         <motion.div
                           key={group.id}
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.04, duration: 0.2 }}
-                          onClick={() => navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`)}
-                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl cursor-pointer hover:bg-accent/5 transition-colors"
+                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl"
                         >
                           <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
                             {group.avatar_url ? (
@@ -4954,9 +4997,38 @@ const Chats = () => {
                                 : "No messages yet"}
                             </p>
                           </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" strokeWidth={1.75} />
+                          {/* CTA */}
+                          {isMember ? (
+                            <button
+                              onClick={handleExploreCardCTA}
+                              className="flex-shrink-0 flex items-center gap-0.5 text-[13px] font-medium text-primary"
+                            >
+                              Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
+                            </button>
+                          ) : hasSentRequest ? (
+                            <span className="flex-shrink-0 text-[12px] font-medium text-muted-foreground px-3 py-1 rounded-full bg-accent/40">
+                              Requested
+                            </span>
+                          ) : group.join_method === "instant" ? (
+                            <button
+                              onClick={handleExploreCardCTA}
+                              className="flex-shrink-0 text-[13px] font-semibold text-white px-3 py-1 rounded-full"
+                              style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                            >
+                              Join
+                            </button>
+                          ) : (
+                            <button
+                              onClick={handleExploreCardCTA}
+                              className="flex-shrink-0 text-[13px] font-semibold px-3 py-1 rounded-full border"
+                              style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
+                            >
+                              Request
+                            </button>
+                          )}
                         </motion.div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 )}

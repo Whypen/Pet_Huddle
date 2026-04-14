@@ -141,6 +141,21 @@ export function CreateGroupSheet({
 
       if (chatError || !chat) throw chatError ?? new Error("No chat returned");
 
+      // 1b. Upload group photo if provided
+      if (photoFile) {
+        const ext = photoFile.name.split(".").pop() ?? "jpg";
+        const path = `groups/${chat.id}/${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("avatars")
+          .upload(path, photoFile, { upsert: true });
+        if (!uploadErr) {
+          const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+          if (pub?.publicUrl) {
+            await supabase.from("chats").update({ avatar_url: pub.publicUrl }).eq("id", chat.id);
+          }
+        }
+      }
+
       // 2. Add creator as admin participant
       const { error: participantError } = await supabase
         .from("chat_participants")
