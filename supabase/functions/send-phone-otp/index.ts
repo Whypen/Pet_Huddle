@@ -409,7 +409,9 @@ Deno.serve(async (req: Request) => {
         ? (authBody.user as Record<string, unknown>)
         : null;
       const targetPhone = normalizePhoneForCompare(rawPhone);
-      const phoneChange = normalizePhoneForCompare(String(userObj?.phone_change || ""));
+      const phoneChange = normalizePhoneForCompare(
+        String(userObj?.new_phone || userObj?.phone_change || ""),
+      );
       const phoneChangeSentAt = String(userObj?.phone_change_sent_at || "").trim();
       // Supabase may return phone_change without a leading "+".
       // Compare canonical digits only and trust phone_change_sent_at as the
