@@ -16,15 +16,17 @@ import { useNavigate } from "react-router-dom";
 interface JoinWithCodeSheetProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Pre-fill the code field (e.g. from /join/:code invite link) */
+  initialCode?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function JoinWithCodeSheet({ isOpen, onClose }: JoinWithCodeSheetProps) {
+export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCodeSheetProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [code, setCode]         = useState("");
+  const [code, setCode]         = useState(initialCode ?? "");
   const [isJoining, setIsJoining] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 

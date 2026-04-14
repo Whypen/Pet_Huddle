@@ -48,6 +48,7 @@ import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
 import CarerProfile from "./pages/CarerProfile";
 import Social from "./pages/Social";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
+import JoinGroup from "./pages/JoinGroup";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
 
@@ -178,6 +179,8 @@ const App = () => (
                   <Route path="/turnstile-health-resetaction" element={<TurnstileHealthResetAction />} />
                   {/* Email verification callback — token in URL is the auth, no session required */}
                   <Route path="/verify" element={<VerifyCallback />} />
+                  {/* Group invite link — code from /join/:code invite URLs */}
+                  <Route path="/join/:code" element={<JoinGroup />} />
 
                   {/* Protected Routes */}
                   <Route
