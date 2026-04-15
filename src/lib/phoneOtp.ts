@@ -186,7 +186,7 @@ const mapVerifyOtpFailure = (
 
 type StoredOtpChallenge = {
   challengeId: string;
-  otpType: "phone_change" | "sms";
+  otpType: "sms";
   phoneKey: string;
   ownerId: string | null;
   createdAt: string;
@@ -205,7 +205,7 @@ function readStoredOtpChallenge(): StoredOtpChallenge | null {
     const parsed = JSON.parse(raw) as Partial<StoredOtpChallenge> | null;
     if (!parsed || typeof parsed !== "object") return null;
     const challengeId = String(parsed.challengeId || "").trim();
-    const otpType = parsed.otpType === "sms" ? "sms" : parsed.otpType === "phone_change" ? "phone_change" : null;
+    const otpType = parsed.otpType === "sms" ? "sms" : null;
     const phoneKey = normalizePhoneKey(String(parsed.phoneKey || ""));
     const ownerId = parsed.ownerId ? String(parsed.ownerId) : null;
     const createdAt = String(parsed.createdAt || "");
@@ -277,7 +277,7 @@ export async function requestPhoneOtp(
   if (TEST_OTP_SHORTCUT_ENABLED) {
     writeStoredOtpChallenge({
       challengeId: "test-shortcut",
-      otpType: "phone_change",
+      otpType: "sms",
       phoneKey,
       ownerId: null,
       createdAt: new Date().toISOString(),
@@ -294,7 +294,7 @@ export async function requestPhoneOtp(
 
   type SendResponse = {
     ok: boolean;
-    otp_type: "phone_change" | "sms";
+    otp_type: "sms";
     challenge_id: string;
     expires_at?: string | null;
     cooldown_seconds?: number;
@@ -353,7 +353,7 @@ export async function requestPhoneOtp(
 
   writeStoredOtpChallenge({
     challengeId: data.challenge_id,
-    otpType: data.otp_type ?? (hasSession ? "phone_change" : "sms"),
+    otpType: data.otp_type ?? "sms",
     phoneKey,
     ownerId: userProbe.data.user?.id ?? null,
     createdAt: new Date().toISOString(),
@@ -364,9 +364,9 @@ export async function requestPhoneOtp(
 
 // ── verifyPhoneOtp ────────────────────────────────────────────────────────────
 // Canonical verify path. Calls verify-phone-otp edge function which:
-//   • caps verify attempts to 3 per phone per 24 h (DB-enforced)
+//   • caps verify attempts per active challenge (DB-enforced)
 //   • logs every attempt to phone_otp_attempts
-//   • uses otp_type to call the correct Supabase Auth verifyOtp path
+//   • requires the stored challenge_id + authenticated access token
 
 export async function verifyPhoneOtp(
   phone: string,
@@ -404,40 +404,26 @@ export async function verifyPhoneOtp(
     return { ok: false, error: "Your verification session expired. Request a new code." };
   }
 
-  const otpType = challenge.otpType;
+  if (!accessToken) {
+    clearStoredOtpChallenge({ ownerId, phoneKey });
+    return { ok: false, error: "Your verification session expired. Please sign in again." };
+  }
 
-  if (otpType === "phone_change") {
-    // Authenticated path — JWT required by edge function for phone_change
-    const res = await postPublicFunction<VerifyResponse>(
-      "verify-phone-otp",
-      {
-        phone: normalizedPhone,
-        token: normalizedToken,
-        otp_type: "phone_change",
-        challenge_id: challenge.challengeId,
-        device_id: deviceId,
-      },
-      { accessToken },
-    );
-    if (res.error || !res.data?.ok) {
-      errorMsg = res.error?.message ?? res.data?.error ?? "invalid_code";
-      statusCode = res.status;
-      errorDetails = (res.error?.details as VerifyOtpErrorDetails | null | undefined) ?? null;
-    }
-  } else {
-    // Unauthenticated path — no JWT; edge function uses sms verifyOtp
-    const res = await postPublicFunction<VerifyResponse>("verify-phone-otp", {
-      phone:    normalizedPhone,
-      token:    normalizedToken,
+  const res = await postPublicFunction<VerifyResponse>(
+    "verify-phone-otp",
+    {
+      phone: normalizedPhone,
+      token: normalizedToken,
       otp_type: "sms",
       challenge_id: challenge.challengeId,
       device_id: deviceId,
-    });
-    if (res.error || !res.data?.ok) {
-      errorMsg = res.error?.message ?? res.data?.error ?? "invalid_code";
-      statusCode = res.status;
-      errorDetails = (res.error?.details as VerifyOtpErrorDetails | null | undefined) ?? null;
-    }
+    },
+    { accessToken },
+  );
+  if (res.error || !res.data?.ok) {
+    errorMsg = res.error?.message ?? res.data?.error ?? "invalid_code";
+    statusCode = res.status;
+    errorDetails = (res.error?.details as VerifyOtpErrorDetails | null | undefined) ?? null;
   }
 
   if (errorMsg) {
