@@ -159,19 +159,25 @@ const ChatDialogue = () => {
       };
     }
     try {
-      const parsed = JSON.parse(content) as { text?: string; attachments?: Attachment[] };
-      if (parsed && typeof parsed === "object" && Array.isArray(parsed.attachments)) {
-        return {
-          text: String(parsed.text || ""),
-          attachments: parsed.attachments
-            .filter((item) => item && typeof item.url === "string" && item.url)
-            .map((item) => ({
-              url: String(item.url),
-              mime: String(item.mime || ""),
-              name: String(item.name || "media"),
-            })),
-          share: null,
-        };
+      const parsed = JSON.parse(content) as { text?: string; attachments?: Attachment[]; kind?: string };
+      if (parsed && typeof parsed === "object") {
+        // System messages: {"kind":"system","text":"..."}
+        if (parsed.kind === "system") {
+          return { text: String(parsed.text || ""), attachments: [], share: null, kind: "system" };
+        }
+        if (Array.isArray(parsed.attachments)) {
+          return {
+            text: String(parsed.text || ""),
+            attachments: parsed.attachments
+              .filter((item) => item && typeof item.url === "string" && item.url)
+              .map((item) => ({
+                url: String(item.url),
+                mime: String(item.mime || ""),
+                name: String(item.name || "media"),
+              })),
+            share: null,
+          };
+        }
       }
     } catch {
       // plain text fallback
@@ -898,7 +904,7 @@ const ChatDialogue = () => {
               !isGroup &&
               firstStarUserMessageId != null &&
               message.id === firstStarUserMessageId;
-            const isSystemMsg = message.kind === "system";
+            const isSystemMsg = parsed.kind === "system";
             const isMembershipHint =
               isGroup &&
               !isSystemMsg &&

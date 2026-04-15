@@ -91,6 +91,10 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
         .insert({ chat_id: chat.id, user_id: user.id });
       if (memberError) throw memberError;
 
+      // Welcome message + notify admin (non-blocking)
+      void supabase.rpc("post_group_welcome_message", { p_chat_id: chat.id, p_user_id: user.id });
+      void supabase.rpc("notify_group_join", { p_chat_id: chat.id, p_user_id: user.id });
+
       toast.success(`Joined ${chat.name}!`);
       resetAndClose();
       navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}`);

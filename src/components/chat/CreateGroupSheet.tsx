@@ -1,6 +1,5 @@
 /**
  * CreateGroupSheet — single-scroll bottom sheet for creating public/private pet groups.
- * Replaces the old CreateGroupDialog contact-picker model.
  */
 
 import { useState, type ChangeEvent } from "react";
@@ -24,13 +23,17 @@ interface CreateGroupSheetProps {
 type Visibility  = "public" | "private";
 type JoinMethod  = "request" | "instant";
 
+// Aligned with CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS in profileOptions.ts
 const PET_FOCUS_OPTIONS = [
   "Dogs",
   "Cats",
-  "Small pets",
-  "Rabbits",
   "Birds",
-  "All pets",
+  "Fish",
+  "Reptiles",
+  "Small Mammals",
+  "Rabbits",
+  "Farm Animals",
+  "All Pets",
 ] as const;
 
 const roomCodePlaceholder = "— —";
@@ -58,15 +61,15 @@ export function CreateGroupSheet({
   const { user } = useAuth();
 
   // Form state
-  const [groupName,       setGroupName]       = useState("");
-  const [locationLabel,   setLocationLabel]   = useState("");
+  const [groupName,        setGroupName]        = useState("");
+  const [locationLabel,    setLocationLabel]    = useState("");
   const [selectedPetFocus, setSelectedPetFocus] = useState<string[]>([]);
-  const [description,     setDescription]     = useState("");
-  const [visibility,      setVisibility]      = useState<Visibility>("public");
-  const [joinMethod,      setJoinMethod]      = useState<JoinMethod>("request");
-  const [photoPreview,    setPhotoPreview]    = useState<string | null>(null);
-  const [photoFile,       setPhotoFile]       = useState<File | null>(null);
-  const [isCreating,      setIsCreating]      = useState(false);
+  const [description,      setDescription]      = useState("");
+  const [visibility,       setVisibility]       = useState<Visibility>("public");
+  const [joinMethod,       setJoinMethod]       = useState<JoinMethod>("request");
+  const [photoPreview,     setPhotoPreview]     = useState<string | null>(null);
+  const [photoFile,        setPhotoFile]        = useState<File | null>(null);
+  const [isCreating,       setIsCreating]       = useState(false);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -96,14 +99,14 @@ export function CreateGroupSheet({
   };
 
   const togglePetFocus = (option: string) => {
-    if (option === "All pets") {
+    if (option === "All Pets") {
       setSelectedPetFocus(prev =>
-        prev.includes("All pets") ? [] : ["All pets"]
+        prev.includes("All Pets") ? [] : ["All Pets"]
       );
       return;
     }
     setSelectedPetFocus(prev => {
-      const withoutAll = prev.filter(p => p !== "All pets");
+      const withoutAll = prev.filter(p => p !== "All Pets");
       return withoutAll.includes(option)
         ? withoutAll.filter(p => p !== option)
         : [...withoutAll, option];
@@ -168,19 +171,24 @@ export function CreateGroupSheet({
         .insert({ chat_id: chat.id, user_id: user.id });
       if (memberError) throw memberError;
 
-      // 3. Insert system message
+      // 3. Insert system message into chat_messages (the active message table)
       const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;
-      const systemContent =
+      const systemText =
         visibility === "private"
           ? `Room Code: ${roomCode ?? roomCodePlaceholder} — Share this with people you trust`
           : joinMethod === "request"
           ? "This is a public group. People can request to join and you approve them."
           : "This is a public group. Anyone can join instantly.";
 
-      const { error: messageError } = await supabase
-        .from("messages")
-        .insert({ chat_id: chat.id, sender_id: user.id, content: systemContent, kind: "system" });
-      if (messageError) throw messageError;
+      // Store as JSON so ChatDialogue can identify and render it as a system pill
+      await supabase
+        .from("chat_messages")
+        .insert({
+          chat_id: chat.id,
+          sender_id: user.id,
+          content: JSON.stringify({ kind: "system", text: systemText }),
+        });
+      // Non-blocking — a missing system message doesn't break the group
 
       toast.success("Your group is live!");
       onClose();
@@ -202,6 +210,7 @@ export function CreateGroupSheet({
       onClose={onClose}
       title="Create a group"
       contentClassName="pb-2"
+      className="!px-4"
     >
       {/* Scrollable body */}
       <div className="flex flex-col space-y-5">
@@ -240,11 +249,10 @@ export function CreateGroupSheet({
           </div>
         </div>
 
-        {/* Field 2: Location */}
+        {/* Field 2: Location — no hint text */}
         <FormField
           label="Location"
-          placeholder="Neighborhood or area"
-          hint="Where do you usually meet? E.g. Kadıköy, Kowloon Park"
+          placeholder="Neighbourhood or area, e.g. Kadıköy"
           value={locationLabel}
           onChange={e => setLocationLabel(e.target.value)}
         />
@@ -267,9 +275,6 @@ export function CreateGroupSheet({
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-[var(--text-tertiary)] pl-1 mt-[6px]">
-            Choose what kind of pets this group is for.
-          </p>
         </div>
 
         {/* Field 4: Description */}
@@ -295,25 +300,17 @@ export function CreateGroupSheet({
               onClick={() => setVisibility("public")}
               onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("public")}
             >
-              {/* Radio dot */}
               <span className="mt-0.5 flex-shrink-0">
                 {visibility === "public" ? (
-                  <span
-                    className="block w-[10px] h-[10px] rounded-full"
-                    style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                  />
+                  <span className="block w-[10px] h-[10px] rounded-full bg-white" />
                 ) : (
-                  <span
-                    className="block w-[10px] h-[10px] rounded-full border-2"
-                    style={{ borderColor: "var(--blue, #3B82F6)" }}
-                  />
+                  <span className="block w-[10px] h-[10px] rounded-full border-2"
+                    style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
               <span className="flex flex-col">
-                <span className="text-[13px] font-semibold text-[var(--text-primary)]">
-                  Public
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5 leading-snug">
+                <span className="text-[13px] font-semibold">Public</span>
+                <span className="text-[11px] mt-0.5 leading-snug opacity-80">
                   Visible in Explore. Pet lovers nearby can find it.
                 </span>
               </span>
@@ -328,25 +325,17 @@ export function CreateGroupSheet({
               onClick={() => setVisibility("private")}
               onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("private")}
             >
-              {/* Radio dot */}
               <span className="mt-0.5 flex-shrink-0">
                 {visibility === "private" ? (
-                  <span
-                    className="block w-[10px] h-[10px] rounded-full"
-                    style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                  />
+                  <span className="block w-[10px] h-[10px] rounded-full bg-white" />
                 ) : (
-                  <span
-                    className="block w-[10px] h-[10px] rounded-full border-2"
-                    style={{ borderColor: "var(--blue, #3B82F6)" }}
-                  />
+                  <span className="block w-[10px] h-[10px] rounded-full border-2"
+                    style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
               <span className="flex flex-col">
-                <span className="text-[13px] font-semibold text-[var(--text-primary)]">
-                  Private
-                </span>
-                <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5 leading-snug">
+                <span className="text-[13px] font-semibold">Private</span>
+                <span className="text-[11px] mt-0.5 leading-snug opacity-80">
                   Hidden. People join with a code.
                 </span>
               </span>
@@ -381,25 +370,18 @@ export function CreateGroupSheet({
                   >
                     <span className="mt-0.5 flex-shrink-0">
                       {joinMethod === "request" ? (
-                        <span
-                          className="block w-[8px] h-[8px] rounded-full"
-                          style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                        />
+                        <span className="block w-[8px] h-[8px] rounded-full bg-white" />
                       ) : (
-                        <span
-                          className="block w-[8px] h-[8px] rounded-full border-2"
-                          style={{ borderColor: "var(--blue, #3B82F6)" }}
-                        />
+                        <span className="block w-[8px] h-[8px] rounded-full border-2"
+                          style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
                     <span className="flex flex-col">
-                      <span className="text-[13px] font-semibold text-[var(--text-primary)]">
+                      <span className="text-[13px] font-semibold">
                         Send a join request{" "}
-                        <span className="text-[11px] font-normal text-[var(--text-tertiary)]">
-                          (recommended)
-                        </span>
+                        <span className="text-[11px] font-normal opacity-70">(recommended)</span>
                       </span>
-                      <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                      <span className="text-[11px] mt-0.5 opacity-70">
                         You approve each new member.
                       </span>
                     </span>
@@ -414,22 +396,15 @@ export function CreateGroupSheet({
                   >
                     <span className="mt-0.5 flex-shrink-0">
                       {joinMethod === "instant" ? (
-                        <span
-                          className="block w-[8px] h-[8px] rounded-full"
-                          style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                        />
+                        <span className="block w-[8px] h-[8px] rounded-full bg-white" />
                       ) : (
-                        <span
-                          className="block w-[8px] h-[8px] rounded-full border-2"
-                          style={{ borderColor: "var(--blue, #3B82F6)" }}
-                        />
+                        <span className="block w-[8px] h-[8px] rounded-full border-2"
+                          style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
                     <span className="flex flex-col">
-                      <span className="text-[13px] font-semibold text-[var(--text-primary)]">
-                        Join instantly
-                      </span>
-                      <span className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                      <span className="text-[13px] font-semibold">Join instantly</span>
+                      <span className="text-[11px] mt-0.5 opacity-70">
                         Anyone can join right away.
                       </span>
                     </span>
@@ -443,7 +418,7 @@ export function CreateGroupSheet({
 
       </div>{/* end scrollable body */}
 
-      {/* Sticky footer CTA — rendered inside GlassSheet children, after the scroll area */}
+      {/* Sticky footer CTA */}
       <div className="pt-3 border-t border-white/20 mt-5">
         <NeuButton
           onClick={handleCreate}

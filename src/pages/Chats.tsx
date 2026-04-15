@@ -484,6 +484,13 @@ interface Group {
   unread: number;
   invitePending?: boolean;
   inviterName?: string | null;
+  // Discovery fields — populated from chats table
+  petFocus?: string[] | null;
+  locationLabel?: string | null;
+  lastMessageAt?: string | null;
+  joinMethod?: string | null;
+  description?: string | null;
+  isAdmin?: boolean;
 }
 
 interface GroupContactOption {
@@ -621,6 +628,8 @@ const Chats = () => {
     join_method: string;
     last_message_at: string | null;
     created_at: string;
+    description: string | null;
+    _score?: number;
   }>>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   // IDs of groups where current user has a pending join request
@@ -1926,7 +1935,7 @@ const Chats = () => {
       }
 
       const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, { data: serviceChats, error: serviceChatsError }, matchesRows] = await Promise.all([
-        supabase.from("chats").select("id, name, avatar_url, type").in("id", roomIds),
+        supabase.from("chats").select("id, name, avatar_url, type, pet_focus, location_label, last_message_at, join_method, description, created_by").in("id", roomIds),
         supabase
           .from("chat_room_members")
           .select("chat_id, user_id")
@@ -2187,6 +2196,12 @@ const Chats = () => {
             unread: unreadByRoom.get(roomId) || 0,
             invitePending: Boolean(pendingInvite),
             inviterName: pendingInvite?.inviterName || null,
+            petFocus: Array.isArray(room.pet_focus) ? (room.pet_focus as string[]) : null,
+            locationLabel: (room.location_label as string | null) ?? null,
+            lastMessageAt: (last?.created_at as string | null) ?? null,
+            joinMethod: (room.join_method as string | null) ?? null,
+            description: (room.description as string | null) ?? null,
+            isAdmin: (room.created_by as string | null) === profile.id,
           });
           continue;
         }
@@ -3566,11 +3581,11 @@ const Chats = () => {
       const [{ data }, { data: requestRows }] = await Promise.all([
         supabase
           .from("chats")
-          .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at")
+          .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at, description")
           .eq("type", "group")
           .eq("visibility", "public")
-          .order("last_message_at", { ascending: false })
-          .limit(50),
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(100),
         user?.id
           ? supabase
               .from("group_join_requests")
@@ -3586,28 +3601,42 @@ const Chats = () => {
 
       if (!data) return;
 
-      // Client-side ranking: R_pet (0–3) × 3 + R_active (0–2)
+      // The user's joined group IDs — filter these out of Explore (they live in My Groups)
+      const joinedIds = new Set(groups.map((g) => g.id));
+
+      // Client-side ranking: proximity (0|4) + pet relevance (0|1|3)×3 + activity (0–2)
       const userSpecies: string[] = (
         (Array.isArray(profile?.pets) ? profile.pets : []) as Array<{ species?: string }>
       )
         .map((p) => (p.species ?? "").toLowerCase())
         .filter(Boolean);
 
-      const scored = data.map((g) => {
-        const focusLower = (g.pet_focus ?? []).map((f: string) => f.toLowerCase());
-        let petScore = 0;
-        if (focusLower.includes("all pets")) {
-          petScore = 1;
-        } else if (userSpecies.length > 0 && userSpecies.some((s) => focusLower.includes(s))) {
-          petScore = 3;
-        }
-        const msSince = g.last_message_at ? Date.now() - new Date(g.last_message_at).getTime() : Infinity;
-        const activeScore = msSince < 86_400_000 ? 2 : msSince < 604_800_000 ? 1 : 0;
-        return { ...g, _score: petScore * 3 + activeScore };
-      });
+      // Extract meaningful location tokens from user's profile location for proximity matching
+      const userLocWords = (profile?.location_name || "")
+        .toLowerCase()
+        .split(/[\s,]+/)
+        .filter((w) => w.length > 2);
+
+      const scored = (data as Array<{ id: string; name: string; avatar_url: string | null; location_label: string | null; pet_focus: string[] | null; join_method: string; last_message_at: string | null; created_at: string; description: string | null }>)
+        .filter((g) => !joinedIds.has(g.id))
+        .map((g) => {
+          const focusLower = (g.pet_focus ?? []).map((f) => f.toLowerCase());
+          let petScore = 0;
+          if (focusLower.includes("all pets")) {
+            petScore = 1;
+          } else if (userSpecies.length > 0 && userSpecies.some((s) => focusLower.some((f) => f.includes(s) || s.includes(f)))) {
+            petScore = 3;
+          }
+          const msSince = g.last_message_at ? Date.now() - new Date(g.last_message_at).getTime() : Infinity;
+          const activeScore = msSince < 86_400_000 ? 2 : msSince < 604_800_000 ? 1 : 0;
+          // Proximity: does the group's location share any meaningful word with user's location?
+          const groupLocWords = (g.location_label || "").toLowerCase().split(/[\s,]+/).filter((w) => w.length > 2);
+          const proxScore = userLocWords.length > 0 && groupLocWords.some((w) => userLocWords.includes(w)) ? 4 : 0;
+          return { ...g, _score: proxScore + petScore * 3 + activeScore };
+        });
 
       scored.sort((a, b) =>
-        b._score - a._score ||
+        (b._score ?? 0) - (a._score ?? 0) ||
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
@@ -3615,7 +3644,7 @@ const Chats = () => {
     } finally {
       setExploreLoading(false);
     }
-  }, [profile?.pets, user?.id]);
+  }, [profile?.pets, profile?.location_name, user?.id, groups]);
 
   useEffect(() => {
     if (mainTab === "groups" && groupSubTab === "explore") {
@@ -4942,12 +4971,15 @@ const Chats = () => {
                               .from("chat_participants")
                               .insert({ chat_id: group.id, user_id: user.id, role: "member" });
                             if (error) { toast.error("Couldn't join. Please try again."); return; }
-                            // Also insert into chat_room_members so group appears in My Groups
                             const { error: memberErr } = await supabase
                               .from("chat_room_members")
                               .insert({ chat_id: group.id, user_id: user.id });
                             if (memberErr) { toast.error("Couldn't join. Please try again."); return; }
+                            // Welcome message + admin notification (non-blocking)
+                            void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
+                            void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
                             toast.success(`Joined ${group.name}!`);
+                            void loadConversations();
                             navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
                           } else {
                             const { error } = await supabase
@@ -5001,6 +5033,11 @@ const Chats = () => {
                                   })()
                                 : "No messages yet"}
                             </p>
+                            {group.description && (
+                              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                                {group.description}
+                              </p>
+                            )}
                           </div>
                           {/* CTA */}
                           {isMember ? (
@@ -5058,10 +5095,15 @@ const Chats = () => {
                   ) : (
                     filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
                       <div key={group.id} className="relative overflow-hidden rounded-xl">
+                        {/* Swipe-to-leave: leave action revealed behind */}
+                        <div className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 bg-red-500/10 rounded-xl pointer-events-none">
+                          <Trash2 className="w-4 h-4 text-red-500 opacity-0 transition-opacity" style={{ opacity: swipeDeleteGroupId === group.id ? 1 : 0 }} />
+                        </div>
+
                         <motion.div
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.05 }}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.04, duration: 0.2 }}
                           drag="x"
                           dragConstraints={{ left: -80, right: 0 }}
                           dragElastic={0.1}
@@ -5075,121 +5117,127 @@ const Chats = () => {
                             }
                           }}
                           onClick={() => handleGroupClick(group)}
-                          className="flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
+                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl cursor-pointer"
                         >
-                          {/* Group Avatar */}
-                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
+                          {/* Avatar — clickable for admin only */}
+                          <div
+                            className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center relative"
+                            onClick={(e) => {
+                              if (!group.isAdmin) return;
+                              e.stopPropagation();
+                              if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                              setGroupManageId(group.id);
+                            }}
+                          >
                             {group.avatarUrl ? (
-                              <img src={group.avatarUrl || profilePlaceholder} alt={group.name} className="w-full h-full object-cover" />
+                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
                             ) : (
-                              <Users className="w-6 h-6 text-primary" />
+                              <Users className="w-6 h-6 text-primary" strokeWidth={1.75} />
+                            )}
+                            {/* Admin edit hint overlay */}
+                            {group.isAdmin && (
+                              <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity rounded-full">
+                                <Pencil className="w-3.5 h-3.5 text-white" />
+                              </div>
                             )}
                           </div>
 
-                          <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
-                            <div className="min-w-0">
-                              {/* Primary: group name */}
-                              <h4 className="truncate font-semibold leading-[1.2]">{t(group.name)}</h4>
-                              {/* Secondary: sender: preview */}
-                              <p className="mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
-                                {isGroupMembershipHint(group.lastMessage)
-                                  ? group.lastMessage || <span className="italic">No messages yet</span>
-                                  : group.lastMessageSender
-                                  ? <><span className="font-medium text-brandText/80">{group.lastMessageSender}:</span> {group.lastMessage}</>
-                                  : group.lastMessage || <span className="italic">No messages yet</span>
-                                }
-                              </p>
-                              {/* Bottom row: member count */}
-                              <p className="mt-1 text-[11px] font-[500] text-[#6B7280]">
-                                {group.invitePending ? "Invitation pending" : `${group.memberCount} members`}
-                              </p>
-                            </div>
-                            <div className="col-start-2 row-span-3 flex flex-col items-end gap-1.5 pt-0.5">
-                              <span className="text-xs text-[#9AA0B5]">{t(group.time)}</span>
-                              {group.unread > 0 ? (
-                                <span className="w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
+                          {/* Text content */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-[15px] truncate text-brandText">{group.name}</p>
+                              {group.unread > 0 && (
+                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
                                   {group.unread > 9 ? "9+" : group.unread}
                                 </span>
-                              ) : group.invitePending ? (
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (!profile?.id) return;
-                                    try {
-                                      let data: unknown = null;
-                                      let error: { message?: string } | null = null;
-                                      if (group.inviteId) {
-                                        const byId = await (supabase.rpc as (
-                                          fn: string,
-                                          params?: Record<string, unknown>
-                                        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                          "accept_group_chat_invite_by_id",
-                                          {
-                                          p_invite_id: group.inviteId,
-                                          }
-                                        );
-                                        data = byId.data;
-                                        error = byId.error;
-                                      } else {
-                                        const byChat = await (supabase.rpc as (
-                                          fn: string,
-                                          params?: Record<string, unknown>
-                                        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                          "accept_group_chat_invite",
-                                          {
-                                          p_chat_id: group.id,
-                                          }
-                                        );
-                                        data = byChat.data;
-                                        error = byChat.error;
-                                      }
-                                      if (error) throw error;
-                                      const joined = Array.isArray(data)
-                                        ? ((data[0] || {}) as { joined?: unknown }).joined === true
-                                        : false;
-                                      if (!joined) {
-                                        toast.error("Invite is no longer available.");
-                                        return;
-                                      }
-                                      toast.success(`Joined ${group.name}`);
-                                      await loadConversations();
-                                      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-                                    } catch (err: unknown) {
-                                      const msg =
-                                        err && typeof err === "object" && "message" in err
-                                          ? String((err as { message?: string }).message || "")
-                                          : "";
-                                      toast.error(msg ? `Unable to join group right now: ${msg}` : "Unable to join group right now.");
-                                    }
-                                  }}
-                                  className="h-7 rounded-full border border-[#3653BE]/30 px-2 text-[11px] font-semibold text-[#3653BE] hover:bg-[#3653BE]/5"
-                                  aria-label="Join group"
-                                >
-                                  Join
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!isVerified) {
-                                      setGroupVerifyGateOpen(true);
-                                      return;
-                                    }
-                                    setGroupManageId(group.id);
-                                  }}
-                                  className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-muted"
-                                  aria-label="Manage group"
-                                >
-                                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-                                </button>
+                              )}
+                              {group.isAdmin && (
+                                <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/60 text-accent-foreground">Admin</span>
                               )}
                             </div>
+                            {group.locationLabel && (
+                              <p className="text-[12px] text-muted-foreground truncate mt-0.5">
+                                <MapPin className="inline w-3 h-3 mr-0.5" strokeWidth={1.75} />{group.locationLabel}
+                              </p>
+                            )}
+                            {group.petFocus && group.petFocus.length > 0 && (
+                              <div className="flex gap-1 mt-1 flex-wrap">
+                                {group.petFocus.slice(0, 3).map((tag) => (
+                                  <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/60 text-accent-foreground font-medium">
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              {group.lastMessageAt
+                                ? (() => {
+                                    const ms = Date.now() - new Date(group.lastMessageAt).getTime();
+                                    if (ms < 3_600_000) return `Active ${Math.floor(ms / 60_000)}m ago`;
+                                    if (ms < 86_400_000) return "Active today";
+                                    if (ms < 604_800_000) return "Active this week";
+                                    return "Not recently active";
+                                  })()
+                                : group.memberCount
+                                ? `${group.memberCount} members`
+                                : "No messages yet"}
+                            </p>
+                            {group.description && (
+                              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                                {group.description}
+                              </p>
+                            )}
                           </div>
-                          {/* Swipe trash indicator */}
-                          {swipeDeleteGroupId === group.id && (
-                            <div className="absolute right-3 w-8 h-8 rounded-full border-2 border-red-500 flex items-center justify-center">
-                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                            </div>
+
+                          {/* Invite pending CTA */}
+                          {group.invitePending && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (!profile?.id) return;
+                                try {
+                                  let data: unknown = null;
+                                  let error: { message?: string } | null = null;
+                                  if (group.inviteId) {
+                                    const byId = await (supabase.rpc as (
+                                      fn: string,
+                                      params?: Record<string, unknown>
+                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                      "accept_group_chat_invite_by_id",
+                                      { p_invite_id: group.inviteId }
+                                    );
+                                    data = byId.data;
+                                    error = byId.error;
+                                  } else {
+                                    const byChat = await (supabase.rpc as (
+                                      fn: string,
+                                      params?: Record<string, unknown>
+                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                      "accept_group_chat_invite",
+                                      { p_chat_id: group.id }
+                                    );
+                                    data = byChat.data;
+                                    error = byChat.error;
+                                  }
+                                  if (error) throw error;
+                                  const joined = Array.isArray(data)
+                                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
+                                    : false;
+                                  if (!joined) { toast.error("Invite is no longer available."); return; }
+                                  toast.success(`Joined ${group.name}`);
+                                  await loadConversations();
+                                  navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                                } catch (err: unknown) {
+                                  const msg = err && typeof err === "object" && "message" in err
+                                    ? String((err as { message?: string }).message || "")
+                                    : "";
+                                  toast.error(msg ? `Unable to join group right now: ${msg}` : "Unable to join group right now.");
+                                }
+                              }}
+                              className="flex-shrink-0 h-7 rounded-full border border-[#3653BE]/30 px-2 text-[11px] font-semibold text-[#3653BE] hover:bg-[#3653BE]/5"
+                            >
+                              Join
+                            </button>
                           )}
                         </motion.div>
                       </div>
