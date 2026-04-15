@@ -1,0 +1,3 @@
+-- Remote migration history placeholder.
+-- This file exists only to keep local migration history aligned with the
+-- already-applied remote version 20260415111101.
