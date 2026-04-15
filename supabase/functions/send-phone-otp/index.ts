@@ -602,7 +602,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const otpType: "sms" = "sms";
+  const otpType = "sms" as const;
   const sentAtIso = new Date().toISOString();
   const expiresAtIso = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   let challengeId = "";
