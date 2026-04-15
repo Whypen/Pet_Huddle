@@ -398,12 +398,11 @@ const extractMoneyField = (payload: unknown, key: string): number | null => {
 const formatDisputeStatusLabel = (status: string | null | undefined) => {
   const normalized = (status ?? "").toLowerCase();
   if (normalized === "open") return "Open";
-  if (normalized === "under_review" || normalized === "awaiting_evidence") return "Under Review";
-  if (normalized === "decision_ready") return "Decision Ready";
+  if (normalized === "under_review" || normalized === "awaiting_evidence" || normalized === "decision_ready") return "Open";
   if (normalized === "resolved_release_full") return "Resolved — Release Full";
   if (normalized === "resolved_partial_refund") return "Resolved — Partial Refund";
   if (normalized === "resolved_refund_full") return "Resolved — Full Refund";
-  if (normalized === "resolved_hold") return "Under Review";
+  if (normalized === "resolved_hold") return "Open";
   return status ?? "-";
 };
 
@@ -1157,17 +1156,6 @@ const AdminSafety = () => {
         ).currency as string | undefined)
       : undefined) ??
     "HKD";
-  const disputeDecisionSourceLabel = (() => {
-    if (!disputeHeader?.decision_action) return "No Decision Yet";
-    const source =
-      typeof disputeHeader?.decision_payload === "object" &&
-      disputeHeader?.decision_payload &&
-      typeof (disputeHeader.decision_payload as Record<string, unknown>).source === "string"
-        ? String((disputeHeader.decision_payload as Record<string, unknown>).source).toLowerCase()
-        : "manual";
-    if (source === "sentinel") return "Automation";
-    return "Manual";
-  })();
   const actionLabel = (action: PendingReportAction) => {
     if (action.action === "clear_restrictions") return "Clear Restrictions";
     if (action.action === "warn") return "Warn";
@@ -1568,8 +1556,20 @@ const AdminSafety = () => {
     });
 
     if (error) {
+      let detailedMessage = error.message || "Failed to apply dispute decision.";
+      const maybeError = error as { context?: Response };
+      if (maybeError.context instanceof Response) {
+        try {
+          const body = await maybeError.context.json() as { error?: string; detail?: string };
+          if (body?.error) {
+            detailedMessage = body.detail ? `${body.error}: ${body.detail}` : body.error;
+          }
+        } catch {
+          // ignore parse errors and keep base message
+        }
+      }
       setDisputeActionLoading(false);
-      setDisputeActionError(error.message || "Failed to apply dispute decision.");
+      setDisputeActionError(detailedMessage);
       return;
     }
     if (data && typeof data === "object" && "error" in data) {
@@ -2441,9 +2441,6 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Dispute Decision Controls</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={badgeClasses}>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</span>
-                    <span className={badgeClasses}>
-                      Decision Source: {disputeDecisionSourceLabel}
-                    </span>
                     {disputeHeader?.decision_at ? (
                       <span className={badgeClasses}>Last Decision: {formatDateTime(disputeHeader.decision_at)}</span>
                     ) : null}
