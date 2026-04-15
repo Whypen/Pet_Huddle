@@ -1458,7 +1458,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     setPhoneOtpVerified(false);
     setPhoneOtpUnavailable(false);
     setPhoneSentMaskedHint(maskPhoneForOtpNotice(formData.phone.trim()));
-    setPhoneOtpMessage(`Verification request accepted for ${maskPhoneForOtpNotice(formData.phone.trim())}. Delivery can take up to 2 minutes.`);
+    setPhoneOtpMessage(`Verification request accepted for ${maskPhoneForOtpNotice(formData.phone.trim())}.`);
     if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
     setOtpCountdown(result.cooldownSeconds || 90);
     otpCountdownRef.current = setInterval(() => {

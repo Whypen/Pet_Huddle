@@ -413,7 +413,7 @@ function PhoneVerificationCard({
             ) : null}
             {otpSent && maskedPhoneHint ? (
               <p className="text-[12px] text-[var(--text-tertiary)]">
-                Verification request accepted for {maskedPhoneHint}. Delivery can take up to 2 minutes.
+                Verification request accepted for {maskedPhoneHint}.
               </p>
             ) : null}
           </div>

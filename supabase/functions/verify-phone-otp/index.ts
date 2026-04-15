@@ -28,7 +28,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 interface RequestBody {
   phone:     string;
   token:     string;
-  otp_type:  "phone_change" | "sms";
+  otp_type:  "sms";
   challenge_id: string;
   device_id?:  string;
   session_id?: string;
@@ -49,11 +49,12 @@ type PhoneOtpChallengeRow = {
   id: string;
   user_id: string | null;
   phone_e164: string;
-  otp_type: "phone_change" | "sms";
+  otp_type: "sms";
   status: "sent" | "verified" | "expired" | "failed";
   verify_attempt_count: number;
   expires_at: string;
   created_at: string;
+  provider_ref: string | null;
 };
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -114,6 +115,41 @@ function normalizePhoneForCompare(value: string | null | undefined): string {
   return String(value || "").trim().replace(/\D/g, "");
 }
 
+async function checkTwilioVerification(opts: {
+  accountSid: string;
+  authToken: string;
+  verifyServiceSid: string;
+  phone: string;
+  token: string;
+}): Promise<{ sid: string; status: string; valid: boolean }> {
+  const body = new URLSearchParams({
+    To: opts.phone,
+    Code: opts.token,
+  });
+  const response = await fetch(
+    `https://verify.twilio.com/v2/Services/${opts.verifyServiceSid}/VerificationCheck`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(`${opts.accountSid}:${opts.authToken}`)}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  );
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(
+      String(payload.message || payload.detail || payload.code || `twilio_verify_failed_${response.status}`),
+    );
+  }
+  return {
+    sid: String(payload.sid || "").trim(),
+    status: String(payload.status || "").trim().toLowerCase(),
+    valid: payload.valid === true,
+  };
+}
+
 // ── Logger helper ─────────────────────────────────────────────────────────────
 
 async function logAttempt(
@@ -167,8 +203,18 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl    = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anonKey        = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const twilioAccountSid = String(Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
+  const twilioAuthToken = String(Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
+  const twilioVerifyServiceSid = String(Deno.env.get("TWILIO_VERIFY_SERVICE_SID") || "").trim();
 
-  if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !anonKey ||
+    !twilioAccountSid ||
+    !twilioAuthToken ||
+    !twilioVerifyServiceSid
+  ) {
     return new Response(JSON.stringify({ error: "Server misconfigured" }), {
       status: 500, headers: CORS,
     });
@@ -213,9 +259,19 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  if (otpType !== "phone_change" && otpType !== "sms") {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(challengeId)) {
     return new Response(
-      JSON.stringify({ error: "otp_type must be 'phone_change' or 'sms'" }),
+      JSON.stringify({
+        error: "Verification session missing. Request a new code.",
+        reason_code: "challenge_missing",
+      }),
+      { status: 400, headers: CORS },
+    );
+  }
+
+  if (otpType !== "sms") {
+    return new Response(
+      JSON.stringify({ error: "otp_type must be 'sms'" }),
       { status: 400, headers: CORS },
     );
   }
@@ -243,12 +299,10 @@ Deno.serve(async (req: Request) => {
     userId = user.id;
   }
 
-  // phone_change requires a valid JWT — the auth server needs the user context
-  // to know whose phone_confirmed_at to update.
-  if (otpType === "phone_change" && !userId) {
+  if (!userId) {
     return new Response(
       JSON.stringify({
-        error: "Unauthorized: phone_change verification requires authentication",
+        error: "Unauthorized: phone verification requires authentication",
         reason_code: "session_missing",
       }),
       { status: 401, headers: CORS },
@@ -258,7 +312,7 @@ Deno.serve(async (req: Request) => {
   const normalizedPhone = normalizePhoneForCompare(rawPhone);
   const { data: challengeData, error: challengeErr } = await serviceClient
     .from("phone_otp_challenges")
-    .select("id,user_id,phone_e164,otp_type,status,verify_attempt_count,expires_at,created_at")
+    .select("id,user_id,phone_e164,otp_type,status,verify_attempt_count,expires_at,created_at,provider_ref")
     .eq("id", challengeId)
     .maybeSingle();
   const challenge = challengeData as PhoneOtpChallengeRow | null;
@@ -294,7 +348,7 @@ Deno.serve(async (req: Request) => {
   if (
     challengePhone !== normalizedPhone ||
     challenge.otp_type !== otpType ||
-    (otpType === "phone_change" && challenge.user_id !== userId)
+    challenge.user_id !== userId
   ) {
     await logAttempt(serviceClient, {
       phoneHash, ip: clientIp, status: "failed",
@@ -375,44 +429,27 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // ── Call Supabase Auth verifyOtp ──────────────────────────────────────────
-  //
-  // phone_change: user-scoped client with the validated JWT.
-  //   Supabase Auth identifies the user via the Authorization header,
-  //   confirms the OTP, writes phone_confirmed_at. No new session.
-  //
-  // sms: anon client (no user context required).
-  //   Supabase Auth validates OTP for the phone-login user,
-  //   creates and returns a new session.
-
-  let verifyData: { user: object | null; session: object | null } | null = null;
   let verifyError: string | null = null;
+  let verifyApproved = false;
+  let verificationSid: string | null = null;
 
-  if (otpType === "phone_change") {
-    const userClient = createClient(supabaseUrl, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    });
-    const { data, error } = await userClient.auth.verifyOtp({
+  try {
+    const verification = await checkTwilioVerification({
+      accountSid: twilioAccountSid,
+      authToken: twilioAuthToken,
+      verifyServiceSid: twilioVerifyServiceSid,
       phone: rawPhone,
       token: rawToken,
-      type:  "phone_change",
     });
-    if (error) verifyError = error.message;
-    else verifyData = { user: data.user, session: data.session };
-
-  } else {
-    // sms path — anon client
-    const anonClient = createClient(supabaseUrl, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const { data, error } = await anonClient.auth.verifyOtp({
-      phone: rawPhone,
-      token: rawToken,
-      type:  "sms",
-    });
-    if (error) verifyError = error.message;
-    else verifyData = { user: data.user, session: data.session };
+    verificationSid = verification.sid || challenge.provider_ref || null;
+    verifyApproved = verification.valid || verification.status === "approved";
+    if (!verifyApproved) {
+      verifyError = verification.status === "pending"
+        ? "invalid verification code"
+        : verification.status || "verify_failed";
+    }
+  } catch (error) {
+    verifyError = error instanceof Error ? error.message : "verify_failed";
   }
 
   // ── Log and respond ───────────────────────────────────────────────────────
@@ -464,17 +501,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const verifiedAtIso = new Date().toISOString();
-  const targetUserId =
-    userId ||
-    (
-      verifyData?.user &&
-      typeof verifyData.user === "object" &&
-      verifyData.user !== null &&
-      "id" in verifyData.user &&
-      typeof (verifyData.user as { id?: unknown }).id === "string"
-        ? (verifyData.user as { id: string }).id
-        : null
-    );
+  const targetUserId = userId;
 
   await serviceClient
     .from("phone_otp_challenges")
@@ -483,6 +510,7 @@ Deno.serve(async (req: Request) => {
       verify_attempt_count: (challenge.verify_attempt_count ?? 0) + 1,
       verified_at: verifiedAtIso,
       error_reason: null,
+      provider_ref: verificationSid,
       updated_at: verifiedAtIso,
     })
     .eq("id", challenge.id);
@@ -505,9 +533,9 @@ Deno.serve(async (req: Request) => {
         request_type: "phone",
         status: "approved",
         provider: "supabase",
-        submitted_data: { phone: rawPhone, challenge_id: challenge.id, otp_type: otpType },
-        verification_result: { status: "approved", verified_at: verifiedAtIso },
-      });
+      submitted_data: { phone: rawPhone, challenge_id: challenge.id, otp_type: otpType },
+      verification_result: { status: "approved", verified_at: verifiedAtIso, provider_ref: verificationSid },
+    });
     if (verificationInsertError) {
       console.error("[verify-phone-otp] verification request insert error:", verificationInsertError.message);
     }
@@ -537,8 +565,8 @@ Deno.serve(async (req: Request) => {
     JSON.stringify({
       ok:      true,
       log_id:  logId,
-      user:    verifyData?.user    ?? null,
-      session: verifyData?.session ?? null,
+      user:    null,
+      session: null,
     }),
     { status: 200, headers: CORS },
   );

@@ -57,13 +57,14 @@ type PhoneOtpChallengeInsert = {
   user_id: string | null;
   phone_hash: string;
   phone_e164: string;
-  otp_type: "phone_change" | "sms";
+  otp_type: "sms";
   status: "sent";
   sent_at: string;
   expires_at: string;
   device_id: string | null;
   session_id: string | null;
-  provider: "supabase";
+  provider: "twilio";
+  provider_ref: string | null;
 };
 
 type ProfilePhoneRow = {
@@ -266,6 +267,43 @@ async function createChallenge(
   return data as { id: string; expires_at: string };
 }
 
+async function sendTwilioVerification(opts: {
+  accountSid: string;
+  authToken: string;
+  verifyServiceSid: string;
+  phone: string;
+}): Promise<{ sid: string; status: string }> {
+  const body = new URLSearchParams({
+    To: opts.phone,
+    Channel: "sms",
+  });
+  const response = await fetch(
+    `https://verify.twilio.com/v2/Services/${opts.verifyServiceSid}/Verifications`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(`${opts.accountSid}:${opts.authToken}`)}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    },
+  );
+
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(
+      String(payload.message || payload.detail || payload.code || `twilio_send_failed_${response.status}`),
+    );
+  }
+
+  const sid = String(payload.sid || "").trim();
+  const status = String(payload.status || "").trim().toLowerCase();
+  if (!sid || !status) {
+    throw new Error("twilio_send_missing_sid");
+  }
+  return { sid, status };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -282,13 +320,24 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl      = Deno.env.get("SUPABASE_URL")!;
   const serviceRoleKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const anonKey          = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const twilioAccountSid = String(Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
+  const twilioAuthToken = String(Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
+  const twilioVerifyServiceSid = String(Deno.env.get("TWILIO_VERIFY_SERVICE_SID") || "").trim();
   // ALLOWED_SMS_COUNTRY_CODES: comma-separated Twilio geo-permission ISOs.
   // Single source of truth for the business allowlist — set as a Supabase
   // project secret. Required; missing → fail-closed (500).
   const allowedIsosRaw   = Deno.env.get("ALLOWED_SMS_COUNTRY_CODES");
   const allowedIsos      = parseAllowedIsos(allowedIsosRaw);
 
-  if (!supabaseUrl || !serviceRoleKey || !anonKey || !allowedIsos) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey ||
+    !anonKey ||
+    !allowedIsos ||
+    !twilioAccountSid ||
+    !twilioAuthToken ||
+    !twilioVerifyServiceSid
+  ) {
     return new Response(JSON.stringify({ error: "Server misconfigured" }), {
       status: 500, headers: CORS,
     });
@@ -506,69 +555,24 @@ Deno.serve(async (req: Request) => {
   // Unauthenticated path: service_role client calls signInWithOtp.
   //   Supabase Auth sends an sms OTP. The verify step uses type "sms".
 
-  let sendError: string | null = null;
-
-  if (accessToken && userId) {
-    const { data: { user: currentUser }, error: currentUserErr } =
-      await serviceClient.auth.getUser(accessToken);
-    if (currentUserErr || !currentUser) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: CORS,
-      });
-    }
-    const currentUserObj = currentUser as Record<string, unknown>;
-    const targetPhone = normalizePhoneForCompare(rawPhone);
-    const previousSentAtMs = parseTimestampMs(currentUserObj.phone_change_sent_at);
-
-    // Call /auth/v1/user PUT directly with the user's JWT.
-    // supabase-js auth.updateUser() throws "Auth session missing!" when
-    // persistSession:false because it reads from internal session state,
-    // not from global.headers.Authorization. The REST call is identical
-    // to what auth.updateUser() does internally and avoids that check.
-    const authHeaders = {
-      "Authorization": `Bearer ${accessToken}`,
-      "apikey": anonKey,
-      "Content-Type": "application/json",
-    };
-
-    const authResp = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      method: "PUT",
-      headers: authHeaders,
-      body: JSON.stringify({ phone: rawPhone }),
+  if (!accessToken || !userId) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401, headers: CORS,
     });
-    const authBody = await authResp.json().catch(() => ({})) as Record<string, unknown>;
-
-    if (!authResp.ok) {
-      sendError = authBody.msg || authBody.message || authBody.error_description || `auth_update_failed_${authResp.status}`;
-    } else {
-      const { data: { user: refreshedUser }, error: refreshedErr } =
-        await serviceClient.auth.getUser(accessToken);
-      if (refreshedErr || !refreshedUser) {
-        sendError = "provider_send_failed";
-      } else {
-        const refreshedUserObj = refreshedUser as Record<string, unknown>;
-        const pendingPhone = normalizePhoneForCompare(
-          String(refreshedUserObj.new_phone ?? refreshedUserObj.phone_change ?? ""),
-        );
-        const sentAtMs = parseTimestampMs(refreshedUserObj.phone_change_sent_at);
-        const sentAtAdvanced = sentAtMs > previousSentAtMs;
-        // Treat send as successful only when Supabase reflects the target pending
-        // phone and the send timestamp actually advanced for this request/resend.
-        if (!pendingPhone || pendingPhone !== targetPhone || sentAtMs <= 0 || !sentAtAdvanced) {
-          sendError = "provider_send_failed";
-        }
-      }
-    }
-  } else {
-    // Unauthenticated path (phone-login users whose phone is in auth.users.phone)
-    const { error } = await serviceClient.auth.signInWithOtp({
-      phone: rawPhone,
-      options: { channel: "sms", shouldCreateUser: false },
-    });
-    if (error) sendError = error.message;
   }
 
-  if (sendError) {
+  let providerRef: string | null = null;
+
+  try {
+    const verification = await sendTwilioVerification({
+      accountSid: twilioAccountSid,
+      authToken: twilioAuthToken,
+      verifyServiceSid: twilioVerifyServiceSid,
+      phone: rawPhone,
+    });
+    providerRef = verification.sid;
+  } catch (error) {
+    const sendError = error instanceof Error ? error.message : "provider_send_failed";
     const reasonCode = classifyOtpSendError(sendError);
     const statusCode = reasonCode === "rate_limited"
       ? 429
@@ -598,7 +602,7 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  const otpType: "phone_change" | "sms" = (accessToken && userId) ? "phone_change" : "sms";
+  const otpType: "sms" = "sms";
   const sentAtIso = new Date().toISOString();
   const expiresAtIso = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   let challengeId = "";
@@ -616,7 +620,8 @@ Deno.serve(async (req: Request) => {
       expires_at: expiresAtIso,
       device_id: deviceId,
       session_id: sessionId,
-      provider: "supabase",
+      provider: "twilio",
+      provider_ref: providerRef,
     });
     challengeId = created.id;
     challengeExpiresAt = created.expires_at;
