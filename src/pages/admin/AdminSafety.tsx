@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -33,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { TEAM_HUDDLE_USER_ID } from "@/lib/teamHuddleIdentity";
 
 type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["Row"] & {
   target_display_name?: string | null;
@@ -149,6 +150,36 @@ type SafetyUserTimelineRow = {
   related_id: string | null;
   severity: string | null;
   source: string | null;
+};
+
+type CaseMessageCaseType = "report" | "dispute" | "user";
+type CaseMessageRecipientRole =
+  | "reported_user"
+  | "reporter"
+  | "requester"
+  | "provider"
+  | "user";
+
+type CaseMessageRecipientOption = {
+  userId: string;
+  role: CaseMessageRecipientRole;
+  label: string;
+  displayName: string;
+  socialId: string;
+};
+
+type TeamHuddleCorrespondenceRow = {
+  message_id: string;
+  chat_id: string;
+  sender_user_id: string | null;
+  sender_display_name: string | null;
+  sender_social_id: string | null;
+  message_body: string | null;
+  created_at: string | null;
+  is_team_huddle: boolean | null;
+  case_type: string | null;
+  case_id: string | null;
+  recipient_role: string | null;
 };
 
 type ActiveTab = "reports" | "disputes" | "users" | "audit";
@@ -347,6 +378,37 @@ const automationBadgeClasses =
 const DEFAULT_WARN_MESSAGE =
   "Huddle only works when the neighborhood is safe and friendly for everyone.\nWe’ve noticed some recent activity on your account that doesn't quite align with our community standards.\nIf you think this is a mistake, please reach out to our team at support@huddle.pet";
 
+const TEAM_HUDDLE_NOTIFICATION_COPY = "You have received a message from Team Huddle. Tap to view";
+
+const CASE_MESSAGE_TEMPLATES = [
+  {
+    id: "follow_up_context",
+    label: "Follow-up (Context Needed)",
+    body:
+      "Hi, we are reviewing a recent report involving your account. To help us maintain our community standards, please reply with any additional context or details about this interaction.\n\n*Note: This is an automated case notification. This thread is only monitored for information related to this specific report.*",
+  },
+  {
+    id: "evidence_request_dispute",
+    label: "Evidence Request (Dispute)",
+    body:
+      "We are currently reviewing your service dispute. To help us reach a resolution, please reply with any relevant photos or screenshots as attachments.\n\n*Note: This is an automated case notification. This thread is only monitored for evidence collection and is not a live support chat.*",
+  },
+  {
+    id: "dispute_resolution_final",
+    label: "Dispute Resolution (Final)",
+    body:
+      "Our review of your recent service dispute is complete. A final decision has been reached and processed. You can view the update in your Service history.\n\n*Note: This is an automated case notification. This thread is closed and is no longer monitored.*",
+  },
+  {
+    id: "warning_community_standards",
+    label: "Warning / Community Standards",
+    body:
+      "Huddle only works when the neighborhood is safe and friendly for everyone. We have noticed recent activity on your account that does not align with our community standards. If you believe this is a mistake, please contact our team at support@huddle.pet.\n\n*Note: This is an automated case notification. This thread is closed and is no longer monitored.*",
+  },
+] as const;
+
+type CaseMessageTemplateId = (typeof CASE_MESSAGE_TEMPLATES)[number]["id"];
+
 const resolveIdentityLabel = (displayName: string | null | undefined, socialId: string | null | undefined, fallbackId: string | null | undefined) => {
   const name = displayName?.trim() || "Unknown User";
   const social = socialId?.trim() ? `@${socialId.trim()}` : "@unknown";
@@ -428,6 +490,13 @@ const stripDemoFixtureMarker = (value: string | null | undefined) => {
     .replace(/\bOpen fixture\.\s*/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+};
+
+const createIdempotencyKey = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
 const resolveStorageOrPublicUrl = (rawValue: string | null | undefined) => {
@@ -554,6 +623,22 @@ const AdminSafety = () => {
     map_hidden: false,
     map_disabled: false,
   });
+  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [messageRecipientUserId, setMessageRecipientUserId] = useState<string | null>(null);
+  const [messageRecipientRole, setMessageRecipientRole] = useState<CaseMessageRecipientRole | null>(null);
+  const [messageTemplateId, setMessageTemplateId] = useState<CaseMessageTemplateId>("follow_up_context");
+  const [messageDraft, setMessageDraft] = useState<string>(CASE_MESSAGE_TEMPLATES[0].body);
+  const [messageIdempotencyKey, setMessageIdempotencyKey] = useState<string>(createIdempotencyKey());
+  const [messageSending, setMessageSending] = useState(false);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [messageSuccess, setMessageSuccess] = useState<string | null>(null);
+  const [resetRecordLoading, setResetRecordLoading] = useState(false);
+  const [resetRecordError, setResetRecordError] = useState<string | null>(null);
+  const [resetRecordSuccess, setResetRecordSuccess] = useState<string | null>(null);
+  const [correspondenceRecipientUserId, setCorrespondenceRecipientUserId] = useState<string | null>(null);
+  const [correspondenceRows, setCorrespondenceRows] = useState<TeamHuddleCorrespondenceRow[]>([]);
+  const [correspondenceLoading, setCorrespondenceLoading] = useState(false);
+  const [correspondenceError, setCorrespondenceError] = useState<string | null>(null);
 
   const selectedReportTargetId = caseSelection?.type === "report" ? caseSelection.targetUserId : null;
   const selectedDisputeId = caseSelection?.type === "dispute" ? caseSelection.disputeId : null;
@@ -574,6 +659,11 @@ const AdminSafety = () => {
   const resetActionFeedback = () => {
     setActionError(null);
     setActionSuccess(null);
+  };
+
+  const resetUserRecordFeedback = () => {
+    setResetRecordError(null);
+    setResetRecordSuccess(null);
   };
 
   const hasDemoMarker = (value: string | null | undefined) =>
@@ -783,6 +873,27 @@ const AdminSafety = () => {
     });
     return rows;
   }, [usersQueue, usersSort, usersSearch]);
+
+  const refreshUserTimeline = useCallback(async (
+    userId: string | null | undefined,
+    filter: "all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit" = userTimelineFilter,
+  ) => {
+    if (!userId) {
+      setUserTimeline([]);
+      return;
+    }
+    let query = supabase
+      .from("view_admin_safety_user_timeline")
+      .select("*")
+      .eq("user_id", userId)
+      .order("event_date", { ascending: false })
+      .limit(400);
+    if (filter !== "all") {
+      query = query.eq("event_group", filter);
+    }
+    const { data } = await query;
+    setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
+  }, [userTimelineFilter]);
 
   const loadQueues = async () => {
     const runLoad = async () => {
@@ -1009,26 +1120,42 @@ const AdminSafety = () => {
   }, [selectedDisputeId, disputeHeader?.requester_id, disputeHeader?.provider_id]);
 
   useEffect(() => {
-    const loadUserTimeline = async () => {
-      if (!selectedUserId) {
-        setUserTimeline([]);
-        return;
-      }
-      let query = supabase
-        .from("view_admin_safety_user_timeline")
-        .select("*")
-        .eq("user_id", selectedUserId)
-        .order("event_date", { ascending: false })
-        .limit(400);
-      if (userTimelineFilter !== "all") {
-        query = query.eq("event_group", userTimelineFilter);
-      }
-      const { data } = await query;
-      setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
-    };
+    const firstRecipient = currentMessageRecipients[0] ?? null;
+    if (!firstRecipient) {
+      setMessageRecipientUserId(null);
+      setMessageRecipientRole(null);
+      setCorrespondenceRecipientUserId(null);
+      setCorrespondenceRows([]);
+      return;
+    }
+    setMessageRecipientUserId((prev) =>
+      prev && currentMessageRecipients.some((option) => option.userId === prev)
+        ? prev
+        : firstRecipient.userId,
+    );
+    setCorrespondenceRecipientUserId((prev) =>
+      prev && currentMessageRecipients.some((option) => option.userId === prev)
+        ? prev
+        : firstRecipient.userId,
+    );
+  }, [currentMessageRecipients]);
 
-    void loadUserTimeline();
-  }, [selectedUserId, userTimelineFilter]);
+  useEffect(() => {
+    if (!messageRecipientUserId) {
+      setMessageRecipientRole(null);
+      return;
+    }
+    const option = currentMessageRecipients.find((item) => item.userId === messageRecipientUserId) ?? null;
+    setMessageRecipientRole(option?.role ?? null);
+  }, [currentMessageRecipients, messageRecipientUserId]);
+
+  useEffect(() => {
+    void loadTeamHuddleCorrespondence(correspondenceRecipientUserId);
+  }, [correspondenceRecipientUserId]);
+
+  useEffect(() => {
+    void refreshUserTimeline(selectedUserId, userTimelineFilter);
+  }, [refreshUserTimeline, selectedUserId, userTimelineFilter]);
 
   useEffect(() => {
     resetActionFeedback();
@@ -1054,6 +1181,10 @@ const AdminSafety = () => {
     const firstReporter = reportCasefile.find((row) => Boolean(row.reporter_user_id))?.reporter_user_id ?? null;
     setSelectedReporterForPenalty(firstReporter);
   }, [selectedReportTargetId, reportCasefile, reportQueueByTarget]);
+
+  useEffect(() => {
+    resetUserRecordFeedback();
+  }, [selectedUserId]);
 
   useEffect(() => {
     setPendingDisputeAction(null);
@@ -1096,6 +1227,130 @@ const AdminSafety = () => {
   const reportDrawerIsDemo =
     (selectedReportTargetId ? demoReportTargetIds.has(selectedReportTargetId) : false) ||
     reportCasefile.some((row) => hasDemoMarker(row.details));
+  const reportMessageRecipients: CaseMessageRecipientOption[] = (() => {
+    const recipients: CaseMessageRecipientOption[] = [];
+    if (selectedReportTargetId) {
+      const targetIdentity = resolveIdentityLabel(
+        reportHeader?.target_display_name,
+        reportHeader?.target_social_id,
+        selectedReportTargetId,
+      );
+      recipients.push({
+        userId: selectedReportTargetId,
+        role: "reported_user",
+        label: "Reported User",
+        displayName: targetIdentity.name,
+        socialId: targetIdentity.social,
+      });
+    }
+
+    const reporterMap = new Map<string, CaseMessageRecipientOption>();
+    for (const row of reportCasefile) {
+      if (!row.reporter_user_id) continue;
+      if (reporterMap.has(row.reporter_user_id)) continue;
+      const identity = resolveIdentityLabel(
+        row.reporter_display_name,
+        row.reporter_social_id,
+        row.reporter_user_id,
+      );
+      reporterMap.set(row.reporter_user_id, {
+        userId: row.reporter_user_id,
+        role: "reporter",
+        label: `Reporter ${reporterMap.size + 1}`,
+        displayName: identity.name,
+        socialId: identity.social,
+      });
+    }
+    recipients.push(...Array.from(reporterMap.values()));
+    return recipients;
+  })();
+
+  const disputeMessageRecipients: CaseMessageRecipientOption[] = (() => {
+    const recipients: CaseMessageRecipientOption[] = [];
+    if (disputeHeader?.requester_id) {
+      const identity = resolveIdentityLabel(
+        disputeHeader.requester_display_name,
+        disputeHeader.requester_social_id,
+        disputeHeader.requester_id,
+      );
+      recipients.push({
+        userId: disputeHeader.requester_id,
+        role: "requester",
+        label: "Requester",
+        displayName: identity.name,
+        socialId: identity.social,
+      });
+    }
+    if (disputeHeader?.provider_id) {
+      const identity = resolveIdentityLabel(
+        disputeHeader.provider_display_name,
+        disputeHeader.provider_social_id,
+        disputeHeader.provider_id,
+      );
+      recipients.push({
+        userId: disputeHeader.provider_id,
+        role: "provider",
+        label: "Provider",
+        displayName: identity.name,
+        socialId: identity.social,
+      });
+    }
+    return recipients;
+  })();
+
+  const userMessageRecipients: CaseMessageRecipientOption[] = (() => {
+    if (!selectedUserId) return [];
+    const userRow = usersQueue.find((row) => row.user_id === selectedUserId);
+    const identity = resolveIdentityLabel(userRow?.display_name, userRow?.social_id, selectedUserId);
+    return [
+      {
+        userId: selectedUserId,
+        role: "user",
+        label: "User",
+        displayName: identity.name,
+        socialId: identity.social,
+      },
+    ];
+  })();
+
+  const currentMessageRecipients: CaseMessageRecipientOption[] = (() => {
+    if (caseSelection?.type === "report") return reportMessageRecipients;
+    if (caseSelection?.type === "dispute") return disputeMessageRecipients;
+    if (caseSelection?.type === "user") return userMessageRecipients;
+    return [];
+  })();
+
+  const currentMessageRecipient = (() => {
+    if (!messageRecipientUserId) return null;
+    return currentMessageRecipients.find((option) => option.userId === messageRecipientUserId) ?? null;
+  })();
+
+  const correspondenceRecipient = (() => {
+    if (!correspondenceRecipientUserId) return null;
+    return currentMessageRecipients.find((option) => option.userId === correspondenceRecipientUserId) ?? null;
+  })();
+
+  const currentCaseMessageContext = (() => {
+    if (caseSelection?.type === "report") {
+      return {
+        caseType: "report" as CaseMessageCaseType,
+        caseId: selectedReportTargetId ? `report:${selectedReportTargetId}` : null,
+      };
+    }
+    if (caseSelection?.type === "dispute") {
+      return {
+        caseType: "dispute" as CaseMessageCaseType,
+        caseId: selectedDisputeId ?? null,
+      };
+    }
+    if (caseSelection?.type === "user") {
+      return {
+        caseType: "user" as CaseMessageCaseType,
+        caseId: selectedUserId ?? null,
+      };
+    }
+    return null;
+  })();
   const disputePayload = disputeCasefile?.decision_payload ?? disputeHeader?.decision_payload ?? null;
   const disputeTotalPaidAmount = Math.max(
     parseAmount(disputeHeader?.total_paid_amount) ??
@@ -1188,6 +1443,90 @@ const AdminSafety = () => {
       setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
     }
     setRefreshing(false);
+  };
+
+  const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
+    if (!recipientUserId) {
+      setCorrespondenceRows([]);
+      setCorrespondenceError(null);
+      return;
+    }
+    setCorrespondenceLoading(true);
+    setCorrespondenceError(null);
+    const { data, error } = await supabase.rpc(
+      "admin_get_team_huddle_correspondence" as never,
+      {
+        p_user_id: recipientUserId,
+        p_limit: 160,
+      } as never,
+    );
+    setCorrespondenceLoading(false);
+    if (error) {
+      setCorrespondenceRows([]);
+      setCorrespondenceError(error.message || "Unable to load official correspondence.");
+      return;
+    }
+    setCorrespondenceRows((data ?? []) as unknown as TeamHuddleCorrespondenceRow[]);
+  };
+
+  const openCaseMessageModal = () => {
+    setMessageError(null);
+    setMessageSuccess(null);
+    const defaultRecipient = currentMessageRecipient ?? currentMessageRecipients[0] ?? null;
+    setMessageRecipientUserId(defaultRecipient?.userId ?? null);
+    setMessageRecipientRole(defaultRecipient?.role ?? null);
+    setMessageTemplateId("follow_up_context");
+    setMessageDraft(CASE_MESSAGE_TEMPLATES[0].body);
+    setMessageIdempotencyKey(createIdempotencyKey());
+    setMessageModalOpen(true);
+  };
+
+  const sendCaseMessage = async () => {
+    if (messageSending) return;
+    if (!currentCaseMessageContext?.caseId) {
+      setMessageError("Case context is missing.");
+      return;
+    }
+    if (!messageRecipientUserId || !messageRecipientRole) {
+      setMessageError("Recipient is required.");
+      return;
+    }
+    const finalBody = messageDraft.trim();
+    if (!finalBody) {
+      setMessageError("Message body is required.");
+      return;
+    }
+
+    setMessageSending(true);
+    setMessageError(null);
+    const { data, error } = await supabase.rpc(
+      "admin_send_team_huddle_case_message" as never,
+      {
+        p_case_type: currentCaseMessageContext.caseType,
+        p_case_id: currentCaseMessageContext.caseId,
+        p_recipient_user_id: messageRecipientUserId,
+        p_recipient_role: messageRecipientRole,
+        p_message_body: finalBody,
+        p_idempotency_key: messageIdempotencyKey,
+      } as never,
+    );
+    setMessageSending(false);
+    if (error) {
+      setMessageError(error.message || "Failed to send Team Huddle message.");
+      return;
+    }
+
+    const payload = (data ?? {}) as Record<string, unknown>;
+    const resolvedChatId = typeof payload.chat_id === "string" ? payload.chat_id : null;
+    const resolvedHref = typeof payload.notification_href === "string" ? payload.notification_href : null;
+    setMessageSuccess(
+      `Message sent as Team Huddle.${resolvedChatId ? ` Chat: ${resolvedChatId}.` : ""}${resolvedHref ? ` Deep link: ${resolvedHref}` : ""}`,
+    );
+    setCorrespondenceRecipientUserId(messageRecipientUserId);
+    await loadTeamHuddleCorrespondence(messageRecipientUserId);
+    await loadQueues();
+    setMessageIdempotencyKey(createIdempotencyKey());
+    setMessageModalOpen(false);
   };
 
   async function loadRestrictionPairForUser(userId: string | null | undefined) {
@@ -1438,6 +1777,35 @@ const AdminSafety = () => {
     } else {
       setPartialRefundInput("");
     }
+  };
+
+  const handleResetUserRecord = async () => {
+    if (!selectedUserId || resetRecordLoading) return;
+    const confirmed = window.confirm(
+      "Reset this user's cumulative penalty score and moderation adjustment to 0? This preserves audit history and starts scoring fresh from now.",
+    );
+    if (!confirmed) return;
+
+    setResetRecordLoading(true);
+    resetUserRecordFeedback();
+
+    const { error } = await supabase.rpc(
+      "admin_reset_user_safety_record" as never,
+      {
+        p_target_user_id: selectedUserId,
+        p_note: "Admin reset record from /admin/safety users drawer.",
+      } as never,
+    );
+
+    setResetRecordLoading(false);
+    if (error) {
+      setResetRecordError(error.message || "Failed to reset record.");
+      return;
+    }
+
+    setResetRecordSuccess("Record reset. Cumulative penalty score and moderation adjustment are now zero-based.");
+    await loadQueues();
+    await refreshUserTimeline(selectedUserId, userTimelineFilter);
   };
 
   const getPendingDisputeBreakdown = () => {
@@ -2237,6 +2605,67 @@ const AdminSafety = () => {
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
+                  <h3 className="font-semibold">Official Correspondence</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground" htmlFor="report-correspondence-recipient">
+                      Recipient
+                    </label>
+                    <select
+                      id="report-correspondence-recipient"
+                      value={correspondenceRecipientUserId ?? ""}
+                      onChange={(event) => setCorrespondenceRecipientUserId(event.target.value || null)}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {reportMessageRecipients.map((recipient) => (
+                        <option key={`report-correspondence-${recipient.role}-${recipient.userId}`} value={recipient.userId}>
+                          {recipient.label}: {recipient.displayName} ({recipient.socialId})
+                        </option>
+                      ))}
+                    </select>
+                    <Button type="button" size="sm" variant="outline" onClick={openCaseMessageModal}>
+                      Message User
+                    </Button>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    {correspondenceRecipient ? (
+                      <div className="mb-2 text-xs text-muted-foreground">
+                        Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
+                      </div>
+                    ) : null}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border p-3 space-y-3">
                   <h3 className="font-semibold">Moderation Controls</h3>
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-muted-foreground" htmlFor="moderator-note">
@@ -2438,6 +2867,67 @@ const AdminSafety = () => {
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
+                  <h3 className="font-semibold">Official Correspondence</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground" htmlFor="dispute-correspondence-recipient">
+                      Recipient
+                    </label>
+                    <select
+                      id="dispute-correspondence-recipient"
+                      value={correspondenceRecipientUserId ?? ""}
+                      onChange={(event) => setCorrespondenceRecipientUserId(event.target.value || null)}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {disputeMessageRecipients.map((recipient) => (
+                        <option key={`dispute-correspondence-${recipient.role}-${recipient.userId}`} value={recipient.userId}>
+                          {recipient.label}: {recipient.displayName} ({recipient.socialId})
+                        </option>
+                      ))}
+                    </select>
+                    <Button type="button" size="sm" variant="outline" onClick={openCaseMessageModal}>
+                      Message User
+                    </Button>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    {correspondenceRecipient ? (
+                      <div className="mb-2 text-xs text-muted-foreground">
+                        Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
+                      </div>
+                    ) : null}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="rounded-lg border p-3 space-y-3">
                   <h3 className="font-semibold">Dispute Decision Controls</h3>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={badgeClasses}>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</span>
@@ -2622,8 +3112,8 @@ const AdminSafety = () => {
                         <div className="grid grid-cols-2 gap-2">
                           <div>Moderation state: {formatModerationState(userRow.moderation_state)}</div>
                           <div>Automation: {userRow.automation_paused ? "Off" : "On"}</div>
-                          <div>Reports received: {userRow.reports_received ?? 0}</div>
-                          <div>Reports filed: {userRow.reports_filed ?? 0}</div>
+                          <div>Reports received (against this user): {userRow.reports_received ?? 0}</div>
+                          <div>Reports filed (submitted by this user): {userRow.reports_filed ?? 0}</div>
                           <div>False reports: {userRow.false_report_count ?? 0}</div>
                           <div>Penalty count: {userRow.penalty_count ?? 0}</div>
                           <div>Cumulative penalty score: {userRow.cumulative_penalty_score ?? 0}</div>
@@ -2633,9 +3123,94 @@ const AdminSafety = () => {
                           <div>Disputes involved: {userRow.disputes_involved ?? 0}</div>
                           <div>Latest safety activity: {formatDateTime(userRow.latest_safety_activity)}</div>
                         </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={resetRecordLoading}
+                            onClick={handleResetUserRecord}
+                          >
+                            {resetRecordLoading ? "Resetting..." : "Reset Record"}
+                          </Button>
+                          <span className="text-xs text-muted-foreground">
+                            Resets cumulative penalty score and moderation adjustment to 0 from now on.
+                          </span>
+                        </div>
+                        {resetRecordError ? (
+                          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                            {resetRecordError}
+                          </div>
+                        ) : null}
+                        {resetRecordSuccess ? (
+                          <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                            {resetRecordSuccess}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })()}
+                </section>
+
+                <section className="rounded-lg border p-3 space-y-3">
+                  <h3 className="font-semibold">Official Correspondence</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-xs font-medium text-muted-foreground" htmlFor="user-correspondence-recipient">
+                      Recipient
+                    </label>
+                    <select
+                      id="user-correspondence-recipient"
+                      value={correspondenceRecipientUserId ?? ""}
+                      onChange={(event) => setCorrespondenceRecipientUserId(event.target.value || null)}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    >
+                      {userMessageRecipients.map((recipient) => (
+                        <option key={`user-correspondence-${recipient.userId}`} value={recipient.userId}>
+                          {recipient.label}: {recipient.displayName} ({recipient.socialId})
+                        </option>
+                      ))}
+                    </select>
+                    <Button type="button" size="sm" variant="outline" onClick={openCaseMessageModal}>
+                      Message User
+                    </Button>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    {correspondenceRecipient ? (
+                      <div className="mb-2 text-xs text-muted-foreground">
+                        Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
+                      </div>
+                    ) : null}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </section>
 
                 <section className="rounded-lg border p-3 space-y-3">
@@ -2755,6 +3330,132 @@ const AdminSafety = () => {
           ) : (
             <div className="text-sm text-muted-foreground">No chat preview loaded.</div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={messageModalOpen}
+        onOpenChange={(open) => {
+          if (messageSending) return;
+          setMessageModalOpen(open);
+          if (!open) {
+            setMessageError(null);
+            setMessageSuccess(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[86vh] overflow-y-auto !z-[9500]">
+          <DialogHeader>
+            <DialogTitle>Message User</DialogTitle>
+            <DialogDescription>
+              Sends an official Team Huddle case message using the existing direct chat system.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 text-sm">
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="case-message-recipient">
+                  Recipient
+                </label>
+                <select
+                  id="case-message-recipient"
+                  value={messageRecipientUserId ?? ""}
+                  onChange={(event) => setMessageRecipientUserId(event.target.value || null)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {currentMessageRecipients.map((recipient) => (
+                    <option key={`message-recipient-${recipient.role}-${recipient.userId}`} value={recipient.userId}>
+                      {recipient.label}: {recipient.displayName} ({recipient.socialId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="case-message-template">
+                  Template
+                </label>
+                <select
+                  id="case-message-template"
+                  value={messageTemplateId}
+                  onChange={(event) => {
+                    const nextId = event.target.value as CaseMessageTemplateId;
+                    const template = CASE_MESSAGE_TEMPLATES.find((item) => item.id === nextId) ?? CASE_MESSAGE_TEMPLATES[0];
+                    setMessageTemplateId(template.id);
+                    setMessageDraft(template.body);
+                  }}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  {CASE_MESSAGE_TEMPLATES.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="case-message-body">
+                Message (editable)
+              </label>
+              <Textarea
+                id="case-message-body"
+                rows={8}
+                value={messageDraft}
+                onChange={(event) => setMessageDraft(event.target.value)}
+              />
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-1 text-xs font-medium text-muted-foreground">Preview</div>
+              <div className="space-y-1">
+                {messageDraft.split("\n").map((line, index) => {
+                  const isItalicLine = /^\*.*\*$/.test(line.trim());
+                  const cleanLine = isItalicLine ? line.trim().slice(1, -1) : line;
+                  return (
+                    <p key={`message-preview-${index}`} className={isItalicLine ? "italic text-muted-foreground" : ""}>
+                      {cleanLine || "\u00a0"}
+                    </p>
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Notification copy: {TEAM_HUDDLE_NOTIFICATION_COPY}
+              </div>
+            </div>
+
+            {messageError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {messageError}
+              </div>
+            ) : null}
+            {messageSuccess ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                {messageSuccess}
+              </div>
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={messageSending}
+                onClick={() => setMessageModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={messageSending}
+                onClick={() => {
+                  void sendCaseMessage();
+                }}
+              >
+                {messageSending ? "Sending..." : "Send"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
