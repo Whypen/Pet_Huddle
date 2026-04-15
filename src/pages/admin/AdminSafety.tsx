@@ -488,6 +488,7 @@ const AdminSafety = () => {
   const [disputesQueue, setDisputesQueue] = useState<DisputesQueueRow[]>([]);
   const [usersQueue, setUsersQueue] = useState<SafetyUserRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditTimelineRow[]>([]);
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
   const [demoReportTargetIds, setDemoReportTargetIds] = useState<Set<string>>(new Set());
 
   const [caseSelection, setCaseSelection] = useState<CaseSelection>(null);
@@ -785,28 +786,64 @@ const AdminSafety = () => {
   }, [usersQueue, usersSort, usersSearch]);
 
   const loadQueues = async () => {
-    const usersSelect = supabase
-      .from("view_admin_safety_users")
-      .select("*")
-      .order("latest_safety_activity", { ascending: false })
-      .limit(500);
+    const runLoad = async () => {
+      const usersSelect = supabase
+        .from("view_admin_safety_users")
+        .select("*")
+        .order("latest_safety_activity", { ascending: false })
+        .limit(500);
 
-    const [reportsRes, disputesRes, auditRes, usersRes] = await Promise.all([
-      supabase
-        .from("view_admin_reports_queue")
-        .select("*")
-        .order("latest_report_at", { ascending: false }),
-      supabase
-        .from("view_admin_service_disputes_queue")
-        .select("*")
-        .order("dispute_created_at", { ascending: false }),
-      supabase
-        .from("view_admin_safety_audit_timeline")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(200),
-      usersSelect,
-    ]);
+      const [reportsRes, disputesRes, auditRes, usersRes] = await Promise.all([
+        supabase
+          .from("view_admin_reports_queue")
+          .select("*")
+          .order("latest_report_at", { ascending: false }),
+        supabase
+          .from("view_admin_service_disputes_queue")
+          .select("*")
+          .order("dispute_created_at", { ascending: false }),
+        supabase
+          .from("view_admin_safety_audit_timeline")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(200),
+        usersSelect,
+      ]);
+
+      return { reportsRes, disputesRes, auditRes, usersRes };
+    };
+
+    const normalizeError = (error: { message?: string } | null | undefined) =>
+      (error?.message || "").toLowerCase();
+    const isAuthError = (error: { message?: string } | null | undefined) => {
+      const text = normalizeError(error);
+      return (
+        text.includes("jwt") ||
+        text.includes("token") ||
+        text.includes("session") ||
+        text.includes("unauthorized") ||
+        text.includes("permission denied")
+      );
+    };
+
+    setQueueLoadError(null);
+
+    let { reportsRes, disputesRes, auditRes, usersRes } = await runLoad();
+
+    const firstError = reportsRes.error || disputesRes.error || auditRes.error || usersRes.error;
+    if (isAuthError(firstError)) {
+      await supabase.auth.refreshSession();
+      const retried = await runLoad();
+      reportsRes = retried.reportsRes;
+      disputesRes = retried.disputesRes;
+      auditRes = retried.auditRes;
+      usersRes = retried.usersRes;
+    }
+
+    const finalError = reportsRes.error || disputesRes.error || auditRes.error || usersRes.error;
+    if (finalError) {
+      setQueueLoadError(finalError.message || "Failed to load admin safety data.");
+    }
 
     if (!reportsRes.error) {
       const reportRows = (reportsRes.data ?? []) as ReportsQueueRow[];
@@ -1559,6 +1596,7 @@ const AdminSafety = () => {
         <div>
           <h1 className="text-2xl font-semibold">Trust &amp; Safety Console</h1>
           <p className="text-sm text-muted-foreground">Read-only foundation for reports, disputes, and audit trail.</p>
+          {queueLoadError ? <p className="mt-1 text-sm text-red-600">{queueLoadError}</p> : null}
         </div>
         <Button type="button" variant="outline" onClick={() => { void refreshSafetyData(); }} disabled={refreshing || loading}>
           {refreshing ? "Refreshing..." : "Refresh"}
