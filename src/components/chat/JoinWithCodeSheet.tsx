@@ -83,8 +83,12 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
       const { error: joinError } = await supabase
         .from("chat_participants")
         .insert({ chat_id: chat.id, user_id: user.id, role: "member" });
-
       if (joinError) throw joinError;
+
+      // Add to chat_room_members so the group appears in My Groups
+      await supabase
+        .from("chat_room_members")
+        .insert({ chat_id: chat.id, user_id: user.id });
 
       toast.success(`Joined ${chat.name}!`);
       resetAndClose();

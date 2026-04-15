@@ -156,11 +156,17 @@ export function CreateGroupSheet({
         }
       }
 
-      // 2. Add creator as admin participant
+      // 2. Add creator to chat_participants (role = admin, drives admin RLS checks)
       const { error: participantError } = await supabase
         .from("chat_participants")
         .insert({ chat_id: chat.id, user_id: user.id, role: "admin" });
       if (participantError) throw participantError;
+
+      // 2b. Add creator to chat_room_members (primary membership table — drives My Groups listing)
+      const { error: memberError } = await supabase
+        .from("chat_room_members")
+        .insert({ chat_id: chat.id, user_id: user.id });
+      if (memberError) throw memberError;
 
       // 3. Insert system message
       const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;

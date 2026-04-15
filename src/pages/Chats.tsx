@@ -4942,6 +4942,10 @@ const Chats = () => {
                               .from("chat_participants")
                               .insert({ chat_id: group.id, user_id: user.id, role: "member" });
                             if (error) { toast.error("Couldn't join. Please try again."); return; }
+                            // Also insert into chat_room_members so group appears in My Groups
+                            await supabase
+                              .from("chat_room_members")
+                              .insert({ chat_id: group.id, user_id: user.id });
                             toast.success(`Joined ${group.name}!`);
                             navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
                           } else {
@@ -5243,6 +5247,7 @@ const Chats = () => {
               if (!profile?.id || !deleteGroupConfirmId) return;
               try {
                 await supabase.from("chat_room_members").delete().eq("chat_id", deleteGroupConfirmId).eq("user_id", profile.id);
+                await supabase.from("chat_participants").delete().eq("chat_id", deleteGroupConfirmId).eq("user_id", profile.id);
                 setGroups((prev) => prev.filter((g) => g.id !== deleteGroupConfirmId));
                 toast.success("You left the group.");
               } catch {
@@ -5341,13 +5346,11 @@ const Chats = () => {
                         <button
                           onClick={async () => {
                             try {
-                              await supabase
-                                .from("group_join_requests")
-                                .update({ status: "approved" })
-                                .eq("id", req.requestId);
-                              await supabase
-                                .from("chat_participants")
-                                .insert({ chat_id: groupManageId!, user_id: req.userId, role: "member" });
+                              const { error: rpcError } = await supabase.rpc(
+                                "approve_group_join_request",
+                                { p_request_id: req.requestId }
+                              );
+                              if (rpcError) throw rpcError;
                               setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
                               setGroupMembers((prev) => [...prev, { id: req.userId, name: req.name, avatarUrl: req.avatarUrl }]);
                               setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
@@ -5363,10 +5366,11 @@ const Chats = () => {
                         <button
                           onClick={async () => {
                             try {
-                              await supabase
-                                .from("group_join_requests")
-                                .update({ status: "declined" })
-                                .eq("id", req.requestId);
+                              const { error: rpcError } = await supabase.rpc(
+                                "decline_group_join_request",
+                                { p_request_id: req.requestId }
+                              );
+                              if (rpcError) throw rpcError;
                               setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
                               toast.success(`${req.name} declined`);
                             } catch {
@@ -5402,7 +5406,11 @@ const Chats = () => {
                             return;
                           }
                           try {
-                            await supabase.from("chat_room_members").delete().eq("chat_id", groupManageId!).eq("user_id", m.id);
+                            const { error: rpcError } = await supabase.rpc(
+                              "remove_group_member",
+                              { p_chat_id: groupManageId!, p_user_id: m.id }
+                            );
+                            if (rpcError) throw rpcError;
                             setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
                             setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g));
                             toast.success(`${m.name} removed`);
