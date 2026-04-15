@@ -166,7 +166,18 @@ const syncToLatestEntryBundleOnce = async () => {
 
 if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
   void syncToLatestEntryBundleOnce();
+} else {
+  // Always run the proactive entry-bundle sync in production — it's targeted and safe.
+  // It reloads only when the cached main bundle is stale vs. the live index.html.
+  void syncToLatestEntryBundleOnce();
 }
+
+// Vite-native hook: fired when any dynamic import() fails to load.
+// Belt-and-suspenders on top of the error/unhandledrejection handlers below.
+window.addEventListener("vite:preloadError", () => {
+  void reloadForChunkFailure();
+});
+
 window.addEventListener("error", (event) => {
   const target = event.target as (EventTarget & { tagName?: string; src?: string }) | null;
   const scriptSrc = typeof target?.src === "string" ? target.src : "";
