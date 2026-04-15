@@ -1511,11 +1511,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
       return;
     }
-    if (normalizePhoneForCompare(normalizedPhone) !== normalizePhoneForCompare(phoneOriginalValue) && !phoneOtpVerified) {
-      setFieldErrors((prev) => ({ ...prev, phone: "Verify the new phone number before saving it." }));
-      toast.error("Verify the new phone number before saving it.");
-      return;
-    }
     setFieldErrors((prev) => ({ ...prev, phone: "" }));
     setPhoneEditMode(false);
   };
@@ -1559,14 +1554,22 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   };
 
   const getPersistedPhoneValue = useCallback(() => {
+    return formData.phone.trim() || null;
+  }, [formData.phone]);
+
+  const shouldRevokePhoneVerificationOnSave = useCallback(() => {
     const normalizedCurrentPhone = normalizePhoneForCompare(formData.phone);
     const normalizedOriginalPhone = normalizePhoneForCompare(phoneOriginalValue);
     const phoneChanged = normalizedCurrentPhone !== normalizedOriginalPhone;
-    if (!phoneChanged || phoneOtpVerified) {
-      return formData.phone.trim() || null;
-    }
-    return phoneOriginalValue.trim() || null;
+    return phoneChanged && !phoneOtpVerified;
   }, [formData.phone, phoneOriginalValue, phoneOtpVerified]);
+
+  const confirmPhoneVerificationReset = useCallback(() => {
+    if (!savedPhoneVerified || !shouldRevokePhoneVerificationOnSave()) return true;
+    return window.confirm(
+      "Saving this new phone number will remove your verified phone status until you verify the new number. Continue?",
+    );
+  }, [savedPhoneVerified, shouldRevokePhoneVerificationOnSave]);
 
   const getCanonicalProfileEmail = useCallback(
     (authUser: { email?: string | null } | null | undefined) => {
@@ -1583,12 +1586,19 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     try {
       const hasPets = petsProfileCount > 0 || formData.owns_pets;
       const persistedPhone = getPersistedPhoneValue();
+      const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
       await supabase.from("profiles").upsert(
         {
           id: user.id,
           email: getCanonicalProfileEmail(user),
           display_name: formData.display_name,
           phone: persistedPhone,
+          ...(shouldRevokePhoneVerification
+            ? {
+                phone_verification_status: "unverified" as const,
+                phone_verified_at: null,
+              }
+            : {}),
           social_id: formData.social_id || null,
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
@@ -1697,13 +1707,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const currentPhoneNormalized = normalizePhoneForCompare(formData.phone);
     const originalPhoneNormalized = normalizePhoneForCompare(phoneOriginalValue);
     const phoneChanged = currentPhoneNormalized !== originalPhoneNormalized;
-    if (phoneChanged && !phoneOtpVerified) {
+    if (phoneChanged && !phoneOtpVerified && !confirmPhoneVerificationReset()) {
       setPhoneEditMode(true);
-      setFieldErrors((prev) => ({
-        ...prev,
-        phone: "Verify the new phone number before saving it.",
-      }));
-      toast.error("Verify the new phone number before saving it.");
       return;
     }
     if (!formData.social_id.trim()) {
@@ -1806,6 +1811,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
       const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
       const persistedPhone = getPersistedPhoneValue();
+      const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
 
       const profilePayload = {
           email: getCanonicalProfileEmail(activeUser),
@@ -1860,6 +1866,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           },
           social_album: canonicalizeSocialAlbumEntries(formData.social_album),
           avatar_url: avatarUrl,
+          ...(shouldRevokePhoneVerification
+            ? {
+                phone_verification_status: "unverified" as const,
+                phone_verified_at: null,
+              }
+            : {}),
           updated_at: new Date().toISOString(),
       };
 
@@ -1915,8 +1927,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           console.warn("[EditProfile] refresh_identity_verification_status failed:", refreshIdentityStatusError.message);
         }
 
-        setSavedPhoneVerified(phoneOtpVerified);
+        const nextPhoneVerified = shouldRevokePhoneVerification ? false : phoneOtpVerified;
+        setSavedPhoneVerified(nextPhoneVerified);
+        setPhoneOtpVerified(nextPhoneVerified);
         setPhoneOriginalValue((getPersistedPhoneValue() || "").trim());
+        setPhoneOtpRequested(false);
+        setPhoneOtpCode("");
+        setPhoneSentMaskedHint(null);
+        setPhoneOtpMessage(
+          shouldRevokePhoneVerification
+            ? "Phone number saved. Verify this number to restore phone verification."
+            : null,
+        );
       }
 
       if (onboardingMode) {
@@ -2011,6 +2033,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
       const hasPets = petsProfileCount > 0 || formData.owns_pets;
       const persistedPhone = getPersistedPhoneValue();
+      const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
       await supabase
         .from("profiles")
         .upsert(
@@ -2027,6 +2050,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             weight: formData.weight ? parseFloat(formData.weight) : null,
             weight_unit: formData.weight_unit || "kg",
             phone: persistedPhone,
+            ...(shouldRevokePhoneVerification
+              ? {
+                  phone_verification_status: "unverified" as const,
+                  phone_verified_at: null,
+                }
+              : {}),
             relationship_status: formData.relationship_status || null,
             has_car: formData.has_car,
             languages: formData.languages.length > 0 ? formData.languages : null,
@@ -2426,7 +2455,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                       <p className="text-[12px] text-[var(--text-tertiary)] pl-1">
                         Standard SMS rates may apply.
                       </p>
-                      {phoneOtpTurnstile.error ? (
+                      {phoneOtpTurnstile.diag.widgetRendered && phoneOtpTurnstile.error ? (
                         <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                           {phoneOtpTurnstile.error}
                         </p>

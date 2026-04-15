@@ -1136,24 +1136,6 @@ export function VerifyIdentity({
     return snapshot.humanStatus;
   }, []);
 
-  const resolveCardVerificationState = useCallback(async () => {
-    const status = await fetchCardStatus();
-    setOverallVerificationStatus(status.verificationStatus);
-    syncCardUiFromResolvedStatus({
-      cardStatus: status.cardStatus,
-      cardVerified: status.cardStatus === "passed",
-      legalName: status.legalName,
-      cardBrand: status.cardBrand,
-      cardLast4: status.cardLast4,
-      cardFingerprintPresent: status.cardFingerprintPresent,
-      blockedIdentity: status.blockedIdentity,
-      setupIntentId: status.setupIntentId,
-      lastSetupError: status.cardLastError,
-      source: "resolve_card_status",
-    });
-    return status.cardStatus;
-  }, [syncCardUiFromResolvedStatus]);
-
   const toggleCard = (card: "phone" | "human" | "card") => setActiveCard((prev) => (prev === card ? null : card));
 
   const logCardState = useCallback((stage: string, extra?: Record<string, unknown>) => {
@@ -1306,6 +1288,24 @@ export function VerifyIdentity({
 
     logCardState("resolved_status_pending", { source: params.source, setupIntentId: params.setupIntentId ?? null });
   }, [cardFormVisible, cardSetupIntentId, cardVerificationState, cardErrorMessage, logCardState, resetCardFormRuntime]);
+
+  const resolveCardVerificationState = useCallback(async () => {
+    const status = await fetchCardStatus();
+    setOverallVerificationStatus(status.verificationStatus);
+    syncCardUiFromResolvedStatus({
+      cardStatus: status.cardStatus,
+      cardVerified: status.cardStatus === "passed",
+      legalName: status.legalName,
+      cardBrand: status.cardBrand,
+      cardLast4: status.cardLast4,
+      cardFingerprintPresent: status.cardFingerprintPresent,
+      blockedIdentity: status.blockedIdentity,
+      setupIntentId: status.setupIntentId,
+      lastSetupError: status.cardLastError,
+      source: "resolve_card_status",
+    });
+    return status.cardStatus;
+  }, [syncCardUiFromResolvedStatus]);
 
   const applySnapshot = useCallback((snapshot: {
     verificationStatus: BackendVerificationStatus;
