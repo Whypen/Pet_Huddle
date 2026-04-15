@@ -44,6 +44,7 @@ type ReportsQueueRow = Database["public"]["Views"]["view_admin_reports_queue"]["
   latest_action_source?: "manual" | "sentinel" | null;
   latest_action?: string | null;
   latest_action_at?: string | null;
+  latest_report_source?: string | null;
 };
 type ReportCasefileRow = Database["public"]["Views"]["view_admin_report_casefile"]["Row"] & {
   target_display_name?: string | null;
@@ -56,6 +57,7 @@ type ReportCasefileRow = Database["public"]["Views"]["view_admin_report_casefile
   case_status?: "open" | "resolved" | "dismissed" | null;
   moderation_note?: string | null;
   reporter_false_report_count?: number | null;
+  source_origin?: string | null;
 };
 type DisputesQueueRow = Database["public"]["Views"]["view_admin_service_disputes_queue"]["Row"] & {
   requester_social_id?: string | null;
@@ -349,6 +351,22 @@ const formatCaseStatus = (status: string | null | undefined) => {
 const formatModerationState = (value: string | null | undefined) => {
   if (!value) return "active";
   return value.replaceAll("_", " ");
+};
+
+const formatReportSourceOrigin = (value: string | null | undefined) => {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (!normalized) return "Unknown";
+  if (normalized === "friends chats" || normalized === "chat" || normalized === "group chat") return "Friends Chats";
+  if (normalized === "maps" || normalized === "map") return "Maps";
+  if (normalized === "social") return "Social";
+  if (normalized === "service chats" || normalized === "service chat" || normalized === "service") return "Service Chats";
+  if (normalized === "other") return "Other";
+  if (normalized === "unknown") return "Unknown";
+  return normalized
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
 };
 
 const formatDisputeDecisionAction = (action: DisputeDecisionAction) => {
@@ -1499,21 +1517,30 @@ const AdminSafety = () => {
     setDisputeActionError(null);
     setDisputeActionSuccess(null);
 
-    const { error } = await supabase.rpc(
-      "admin_apply_dispute_decision" as never,
-      {
-        p_dispute_id: selectedDisputeId,
-        p_action: pendingDisputeAction.action,
-        p_note: trimmedNote,
-        p_customer_refund_amount: refundAmount,
-        p_waive_customer_platform_fee: waiveCustomerPlatformFee,
-        p_waive_provider_platform_fee: pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee,
-      } as never,
-    );
+    const { data, error } = await supabase.functions.invoke("execute-service-dispute-decision", {
+      body: {
+        dispute_id: selectedDisputeId,
+        action: pendingDisputeAction.action,
+        note: trimmedNote,
+        customer_refund_amount: refundAmount,
+        waive_customer_platform_fee: waiveCustomerPlatformFee,
+        waive_provider_platform_fee: pendingDisputeAction.action === "full_refund" ? false : waiveProviderPlatformFee,
+      },
+    });
 
     if (error) {
       setDisputeActionLoading(false);
       setDisputeActionError(error.message || "Failed to apply dispute decision.");
+      return;
+    }
+    if (data && typeof data === "object" && "error" in data) {
+      const detail =
+        typeof (data as Record<string, unknown>).detail === "string"
+          ? String((data as Record<string, unknown>).detail)
+          : "";
+      const message = String((data as Record<string, unknown>).error || "Failed to apply dispute decision.");
+      setDisputeActionLoading(false);
+      setDisputeActionError(detail ? `${message}: ${detail}` : message);
       return;
     }
 
@@ -1596,6 +1623,7 @@ const AdminSafety = () => {
                           <span className={getSortIconClassName(reportsSort.key === "latest_report_at")}>{getSortIcon(reportsSort.direction)}</span>
                         </button>
                       </th>
+                      <th className="px-3 py-2 hidden xl:table-cell">Latest Source</th>
                       <th className="px-3 py-2 hidden lg:table-cell">
                         <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(setReportsSort, "attachment_evidence_count")}>
                           Attachment Evidence
@@ -1613,7 +1641,7 @@ const AdminSafety = () => {
                   <tbody>
                     {reportsSorted.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                        <td colSpan={8} className="px-3 py-8 text-center text-sm text-muted-foreground">
                           No reports in queue yet.
                         </td>
                       </tr>
@@ -1669,6 +1697,7 @@ const AdminSafety = () => {
                           <td className="px-3 py-2 hidden lg:table-cell">{row.unique_reporters ?? 0}</td>
                           <td className="px-3 py-2">{row.total_score ?? 0}</td>
                           <td className="px-3 py-2">{formatDateTime(row.latest_report_at)}</td>
+                          <td className="px-3 py-2 hidden xl:table-cell">{formatReportSourceOrigin(row.latest_report_source ?? null)}</td>
                           <td className="px-3 py-2 hidden lg:table-cell">{row.has_attachments ? 1 : 0}</td>
                           <td className="px-3 py-2 hidden xl:table-cell">
                             <span className={badgeClasses}>{formatCaseStatus(row.case_status)}</span>
@@ -2062,6 +2091,7 @@ const AdminSafety = () => {
                     <div>Unique reporters: {reportHeader?.unique_reporters ?? 0}</div>
                     <div>Total score: {reportHeader?.total_score ?? 0}</div>
                     <div>Latest: {formatDateTime(reportHeader?.latest_report_at ?? null)}</div>
+                    <div>Latest Source: {formatReportSourceOrigin(reportHeader?.latest_report_source ?? null)}</div>
                     <div>Case status: {formatCaseStatus(currentCaseStatus)}</div>
                     <div>Automation: {currentAutomationPaused ? "Off" : "On"}</div>
                   </div>
@@ -2091,6 +2121,7 @@ const AdminSafety = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={badgeClasses}>Score {row.score}</span>
                           <span className={badgeClasses}>{formatDateTime(row.report_created_at)}</span>
+                          <span className={badgeClasses}>Source: {formatReportSourceOrigin(row.source_origin ?? null)}</span>
                           {hasDemoMarker(row.details) ? <span className={demoBadgeClasses}>Demo</span> : null}
                         </div>
                         <div>
@@ -2903,7 +2934,7 @@ const AdminSafety = () => {
               {pendingDisputeAction ? `Confirm ${formatDisputeDecisionAction(pendingDisputeAction.action)}` : "Confirm Dispute Decision"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This stores an admin dispute decision and audit trail only. No Stripe payout/refund/transfer execution happens in this phase.
+              This executes the Stripe-backed dispute decision and records immutable admin audit metadata.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
