@@ -7,14 +7,15 @@ const SUPABASE_URL = rawSupabaseUrl ? rawSupabaseUrl.trim().replace(/\/+$/, "") 
 const rawPublicAuthBase = String(
   import.meta.env.VITE_PUBLIC_AUTH_BASE_URL || import.meta.env.VITE_API_URL || ""
 ).trim().replace(/\/+$/, "");
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-if (!SUPABASE_ANON_KEY) {
-  console.error("SUPABASE_ANON_KEY IS MISSING FROM ENV");
+const SUPABASE_PUBLIC_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY;
+if (!SUPABASE_PUBLIC_KEY) {
+  console.error("SUPABASE publishable key is missing from env");
 }
 console.log("Supabase URL initialized as:", SUPABASE_URL);
 console.log("[SUPABASE_ENV]", {
   url: SUPABASE_URL,
-  keyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 8) : "missing",
+  keyPrefix: SUPABASE_PUBLIC_KEY ? SUPABASE_PUBLIC_KEY.slice(0, 8) : "missing",
   publicAuthBase: rawPublicAuthBase || "unset",
 });
 
@@ -61,7 +62,7 @@ const rewrittenFetch: typeof fetch = (input, init) => {
   return fetch(rewritten ?? input, init);
 };
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY || "", {
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLIC_KEY || "", {
   auth: {
     storage: localStorage,
     persistSession: true,
