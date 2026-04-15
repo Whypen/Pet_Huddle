@@ -36,11 +36,12 @@ import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
-import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { handoffStripeCheckout, startStripeCheckout } from "@/lib/stripeCheckout";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
+import { resolveTeamHuddleAvatar } from "@/lib/teamHuddleIdentity";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -1523,6 +1524,58 @@ const Chats = () => {
     return Math.max(0, cap - used) + Math.max(0, extra);
   }, [profile?.tier]);
 
+  const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
+    dragY.set(0);
+    setSwipeDir(null);
+    if (currentId) {
+      if (action === "pass") {
+        setHiddenDiscoveryIds((prev) => {
+          if (!prev.has(currentId)) return prev;
+          const next = new Set(prev);
+          next.delete(currentId);
+          return next;
+        });
+        setDiscoveryProfiles((prev) => {
+          const index = prev.findIndex((item) => item.id === currentId);
+          if (index < 0) return prev;
+          const item = prev[index];
+          return [...prev.slice(0, index), ...prev.slice(index + 1), item];
+        });
+        setPassedDiscoveryIds((prev) => {
+          const next = new Set(prev);
+          next.add(currentId);
+          try {
+            const ids = Array.from(next);
+            sessionStorage.setItem(passedDiscoverySessionKey, JSON.stringify(ids));
+            localStorage.setItem(
+              passedDiscoveryKey,
+              JSON.stringify({ ids, sessionId: discoverySessionId })
+            );
+          } catch {
+            // ignore cache write failure
+          }
+          return next;
+        });
+      } else {
+        setHandledDiscoveryIds((prev) => {
+          const next = new Set(prev);
+          next.add(currentId);
+          try {
+            localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+          } catch {
+            // ignore cache write failure
+          }
+          return next;
+        });
+      }
+    }
+  }, [discoverySessionId, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
+
+  const commitDiscoverySwipe = useCallback((direction: "up" | "down", currentId?: string, action?: "wave" | "star" | "pass") => {
+    setSwipeDir(direction);
+    advanceDiscoveryCard(currentId, action);
+  }, [advanceDiscoveryCard]);
+
   const runStarAction = useCallback(async (target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> => {
     if (!profile?.id) return { sent: false, roomId: null };
     const tier = String(profile?.tier || "free").toLowerCase();
@@ -1620,15 +1673,14 @@ const Chats = () => {
     setStarCheckoutLoading(true);
     try {
       const selectedPlan = quotaConfig.stripePlans[starUpgradeTier][starUpgradeBilling];
-      const url = await startStripeCheckout({
+      await handoffStripeCheckout({
         mode: "subscription",
         type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
         lookupKey: selectedPlan.lookupKey,
         priceId: selectedPlan.priceId,
         successUrl: `${window.location.origin}/premium`,
         cancelUrl: `${window.location.origin}/chats`,
-      });
-      window.location.assign(url);
+      }, "chats-star-upgrade");
     } catch {
       toast.error("Unable to start checkout right now.");
     } finally {
@@ -2223,7 +2275,11 @@ const Chats = () => {
         const socialAlbumFallback = Array.isArray(otherProfile.social_album)
           ? String((otherProfile.social_album as unknown[])[0] || "").trim()
           : "";
-        const counterpartAvatar = (otherProfile.avatar_url as string | null) || socialAlbumFallback || ((room.avatar_url as string | null) ?? null);
+        const counterpartAvatar = resolveTeamHuddleAvatar(
+          (otherProfile.avatar_url as string | null) || socialAlbumFallback || ((room.avatar_url as string | null) ?? null),
+          counterpartName,
+          null,
+        );
         const availabilityList = Array.isArray(otherProfile.availability_status)
           ? (otherProfile.availability_status as unknown[]).map((entry) => String(entry || "").trim()).filter(Boolean)
           : [];
@@ -3067,58 +3123,6 @@ const Chats = () => {
     dragY.set(0);
     setDiscoveryRefreshTick((tick) => tick + 1);
   }, [dragY, passedDiscoveryKey, passedDiscoverySessionKey]);
-
-  const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
-    dragY.set(0);
-    setSwipeDir(null);
-    if (currentId) {
-      if (action === "pass") {
-        setHiddenDiscoveryIds((prev) => {
-          if (!prev.has(currentId)) return prev;
-          const next = new Set(prev);
-          next.delete(currentId);
-          return next;
-        });
-        setDiscoveryProfiles((prev) => {
-          const index = prev.findIndex((item) => item.id === currentId);
-          if (index < 0) return prev;
-          const item = prev[index];
-          return [...prev.slice(0, index), ...prev.slice(index + 1), item];
-        });
-        setPassedDiscoveryIds((prev) => {
-          const next = new Set(prev);
-          next.add(currentId);
-          try {
-            const ids = Array.from(next);
-            sessionStorage.setItem(passedDiscoverySessionKey, JSON.stringify(ids));
-            localStorage.setItem(
-              passedDiscoveryKey,
-              JSON.stringify({ ids, sessionId: discoverySessionId })
-            );
-          } catch {
-            // ignore cache write failure
-          }
-          return next;
-        });
-      } else {
-        setHandledDiscoveryIds((prev) => {
-          const next = new Set(prev);
-          next.add(currentId);
-          try {
-            localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
-          } catch {
-            // ignore cache write failure
-          }
-          return next;
-        });
-      }
-    }
-  }, [discoverySessionId, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
-
-  const commitDiscoverySwipe = useCallback((direction: "up" | "down", currentId?: string, action?: "wave" | "star" | "pass") => {
-    setSwipeDir(direction);
-    advanceDiscoveryCard(currentId, action);
-  }, [advanceDiscoveryCard]);
 
   const persistMatchedDiscoveryUser = useCallback((userId?: string | null) => {
     const normalized = String(userId || "").trim();
