@@ -666,6 +666,17 @@ const AdminSafety = () => {
     setResetRecordSuccess(null);
   };
   
+  const disputeQueueById = useMemo(() => {
+    const byId = new Map<string, DisputesQueueRow>();
+    for (const row of disputesQueue) {
+      if (row.dispute_id) byId.set(row.dispute_id, row);
+    }
+    return byId;
+  }, [disputesQueue]);
+  const disputeHeader = selectedDisputeId
+    ? disputeQueueById.get(selectedDisputeId)
+    : undefined;
+  
   const buildCurrentMessageRecipients = useCallback((): CaseMessageRecipientOption[] => {
     if (caseSelection?.type === "report") {
       const recipients: CaseMessageRecipientOption[] = [];
@@ -766,17 +777,6 @@ const AdminSafety = () => {
     }
     return false;
   };
-
-  const disputeQueueById = useMemo(() => {
-    const byId = new Map<string, DisputesQueueRow>();
-    for (const row of disputesQueue) {
-      if (row.dispute_id) byId.set(row.dispute_id, row);
-    }
-    return byId;
-  }, [disputesQueue]);
-  const disputeHeader = selectedDisputeId
-    ? disputeQueueById.get(selectedDisputeId)
-    : undefined;
 
   const toggleSort = <K extends string>(
     setter: Dispatch<SetStateAction<SortState<K>>>,
