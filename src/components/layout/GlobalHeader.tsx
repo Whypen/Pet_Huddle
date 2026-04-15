@@ -210,6 +210,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifRows, setNotifRows] = useState<NotificationRow[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
+  const notifOpenRef = useRef(false);
+  const headerOverlayOpenRef = useRef(false);
+  const lastVisibilityRefreshAtRef = useRef(0);
+  const lastHiddenAtRef = useRef<number | null>(null);
   const showUnreadDot = !notifOpen && unreadCount > 0;
 
   const isVerified = profile?.is_verified === true;
@@ -227,6 +231,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
   const onboardingComplete = isRegisteredUserProfile(profile ?? null);
+  const headerOverlayOpen =
+    notifOpen || menuOpen || supportOpen || logoutOpen || familySheetOpen || carerGateOpen;
+
+  useEffect(() => {
+    notifOpenRef.current = notifOpen;
+  }, [notifOpen]);
+
+  useEffect(() => {
+    headerOverlayOpenRef.current = headerOverlayOpen;
+  }, [headerOverlayOpen]);
+
   const requireCompletedProfile = useCallback(
     (actionLabel: string) => {
       if (!user) {
@@ -284,7 +299,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   useEffect(() => {
     const state = location.state as { openSettingsDrawer?: boolean; openSupportModal?: boolean } | null;
     if (!state?.openSettingsDrawer && !state?.openSupportModal) return;
-    void refreshProfile();
+    if (!headerOverlayOpenRef.current) {
+      void refreshProfile();
+    }
     if (state?.openSettingsDrawer) {
       setMenuOpen(true);
     }
@@ -297,13 +314,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   useEffect(() => {
     if (!user?.id) return;
     let inFlight = false;
-    let lastRunAt = 0;
     const maybeRefresh = async () => {
       const now = Date.now();
       if (inFlight) return;
-      if (now - lastRunAt < 1200) return;
+      if (headerOverlayOpenRef.current) return;
+      if (now - lastVisibilityRefreshAtRef.current < 15000) return;
       inFlight = true;
-      lastRunAt = now;
+      lastVisibilityRefreshAtRef.current = now;
       try {
         await refreshProfile();
       } finally {
@@ -311,17 +328,18 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       }
     };
     const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        lastHiddenAtRef.current = Date.now();
+        return;
+      }
       if (document.visibilityState !== "visible") return;
-      void maybeRefresh();
-    };
-    const onFocus = () => {
+      const lastHiddenAt = lastHiddenAtRef.current;
+      if (lastHiddenAt && Date.now() - lastHiddenAt < 1500) return;
       void maybeRefresh();
     };
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
     };
   }, [refreshProfile, user?.id]);
 
@@ -367,7 +385,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     let cancelled = false;
 
     const refreshUnread = async () => {
-      if (notifOpen) {
+      if (notifOpenRef.current) {
         setUnreadCount((prev) => (prev === 0 ? prev : 0));
         return;
       }
@@ -414,7 +432,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
-  }, [notifOpen, user]);
+  }, [user]);
 
   // ── Load notifications when drawer opens ────────────────────────────────────
   useEffect(() => {
