@@ -1138,6 +1138,30 @@ const AdminSafety = () => {
     setDisputeCasefile((data as ServiceDisputeRow | null) ?? null);
   };
 
+  const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
+    if (!recipientUserId) {
+      setCorrespondenceRows([]);
+      setCorrespondenceError(null);
+      return;
+    }
+    setCorrespondenceLoading(true);
+    setCorrespondenceError(null);
+    const { data, error } = await supabase.rpc(
+      "admin_get_team_huddle_correspondence" as never,
+      {
+        p_user_id: recipientUserId,
+        p_limit: 160,
+      } as never,
+    );
+    setCorrespondenceLoading(false);
+    if (error) {
+      setCorrespondenceRows([]);
+      setCorrespondenceError(error.message || "Unable to load official correspondence.");
+      return;
+    }
+    setCorrespondenceRows((data ?? []) as unknown as TeamHuddleCorrespondenceRow[]);
+  };
+
   useEffect(() => {
     const load = async () => {
       if (authLoading || hydrating) {
@@ -1532,30 +1556,6 @@ const AdminSafety = () => {
       setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
     }
     setRefreshing(false);
-  };
-
-  const loadTeamHuddleCorrespondence = async (recipientUserId: string | null) => {
-    if (!recipientUserId) {
-      setCorrespondenceRows([]);
-      setCorrespondenceError(null);
-      return;
-    }
-    setCorrespondenceLoading(true);
-    setCorrespondenceError(null);
-    const { data, error } = await supabase.rpc(
-      "admin_get_team_huddle_correspondence" as never,
-      {
-        p_user_id: recipientUserId,
-        p_limit: 160,
-      } as never,
-    );
-    setCorrespondenceLoading(false);
-    if (error) {
-      setCorrespondenceRows([]);
-      setCorrespondenceError(error.message || "Unable to load official correspondence.");
-      return;
-    }
-    setCorrespondenceRows((data ?? []) as unknown as TeamHuddleCorrespondenceRow[]);
   };
 
   const openCaseMessageModal = () => {
