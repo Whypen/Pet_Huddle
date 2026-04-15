@@ -126,9 +126,15 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
           : Promise.resolve({ data: [], error: null }),
       ]);
       if (profileErr) throw profileErr;
-      if (albumErr) throw albumErr;
-      if (bookmarkErr) throw bookmarkErr;
-      if (distanceResp.error) throw distanceResp.error;
+      if (albumErr) {
+        console.warn("[service.fetch_providers.album_rows_failed]", albumErr);
+      }
+      if (bookmarkErr) {
+        console.warn("[service.fetch_providers.bookmarks_failed]", bookmarkErr);
+      }
+      if (distanceResp.error) {
+        console.warn("[service.fetch_providers.distance_failed]", distanceResp.error);
+      }
 
       const publicProfileById = new Map(
         (profileRows ?? []).map((profileRow) => [String(profileRow.id), profileRow as Record<string, unknown>]),
@@ -158,7 +164,17 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
               : null;
 
           const albumRaw = canonicalizeSocialAlbumEntries((mergedProfile?.social_album as string[] | null) ?? []);
-          const albumUrls = await resolveSocialAlbumUrlList(albumRaw);
+          let albumUrls: string[] = [];
+          if (albumRaw.length > 0) {
+            try {
+              albumUrls = await resolveSocialAlbumUrlList(albumRaw);
+            } catch (error) {
+              console.warn("[service.fetch_providers.album_url_resolve_failed]", {
+                providerUserId,
+                error,
+              });
+            }
+          }
           const mapped = mapProviderRow(rowObj, mergedProfile, albumUrls, bookmarkedSet.has(providerUserId));
           mapped.distanceKm = distanceByUserId.get(providerUserId) ?? null;
           return mapped;

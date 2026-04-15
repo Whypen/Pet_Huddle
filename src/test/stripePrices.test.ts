@@ -25,7 +25,6 @@ vi.mock("@/integrations/supabase/client", () => ({
     },
   },
 }));
-
 describe("stripePrices snapshot bootstrap", () => {
   beforeEach(() => {
     vi.resetModules();

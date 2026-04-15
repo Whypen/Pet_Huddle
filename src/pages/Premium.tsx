@@ -31,6 +31,7 @@ import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
+import { openExternalUrl } from "@/lib/nativeShell";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -203,7 +204,11 @@ export default function PremiumPage() {
   // ── Live Stripe prices — cached at module level after first fetch ────────────
   const initialLivePrices = getCachedLivePrices({
     currency: savedPricingCurrency ?? undefined,
-  }) ?? getLastLivePricesSnapshot() ?? FALLBACK_PRICES;
+    country: profile?.location_country ?? undefined,
+  }) ?? getLastLivePricesSnapshot({
+    currency: savedPricingCurrency ?? undefined,
+    country: profile?.location_country ?? undefined,
+  }) ?? FALLBACK_PRICES;
   const [livePrices, setLivePrices] = useState<LivePriceMap>(initialLivePrices);
 
   useEffect(() => {
@@ -280,7 +285,7 @@ export default function PremiumPage() {
         if (error) throw error;
         const url = (data as { url?: string } | null)?.url;
         if (!url) throw new Error("checkout_url_missing");
-        window.location.assign(url);
+        openExternalUrl(url, "premium-addon-sequence");
       } catch {
         toast.error(t("Checkout unavailable. Please try again."));
       } finally {
@@ -396,7 +401,7 @@ export default function PremiumPage() {
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (!url) throw new Error("checkout_url_missing");
-      window.location.assign(url);
+      openExternalUrl(url, `premium-plan-${tier}`);
     } catch {
       sessionStorage.removeItem("pending_addons");
       toast.error(t("Checkout unavailable. Please try again."));
@@ -447,7 +452,7 @@ export default function PremiumPage() {
         if (error) throw error;
         const url = (data as { url?: string } | null)?.url;
         if (!url) throw new Error("checkout_url_missing");
-        window.location.assign(url);
+        openExternalUrl(url, "premium-share-perks");
       } catch {
         sessionStorage.removeItem("pending_addons");
         sessionStorage.removeItem("pending_pricing");
@@ -474,7 +479,7 @@ export default function PremiumPage() {
       if (error) throw error;
       const url = (data as { url?: string } | null)?.url;
       if (!url) throw new Error("checkout_url_missing");
-      window.location.assign(url);
+      openExternalUrl(url, "premium-addon-payment");
     } catch {
       toast.error(t("Checkout unavailable. Please try again."));
     } finally {
