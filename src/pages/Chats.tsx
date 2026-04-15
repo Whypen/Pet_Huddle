@@ -3781,6 +3781,12 @@ const Chats = () => {
     }
   };
 
+  const isTeamHuddleAvatarTapDisabled = useCallback(
+    (userId: string | null | undefined, displayName: string | null | undefined) =>
+      String(userId || "").trim() === TEAM_HUDDLE_USER_ID || isTeamHuddleIdentity(displayName, "teamhuddle"),
+    []
+  );
+
   // Nanny Booking: Open modal (no Safe Harbor popup — disclaimer is inside ChatDialogue)
   const handleNannyBookClick = (chat: ChatUser) => {
     setSelectedNanny(chat);
@@ -4728,10 +4734,14 @@ const Chats = () => {
                                     className="relative flex items-center gap-3 p-3 bg-card shadow-[0_0_0_1px_rgba(246,198,72,0.38),0_8px_20px_rgba(246,198,72,0.22)] cursor-pointer hover:bg-accent/5 transition-colors"
                                   >
                                     <div
-                                      className="relative cursor-pointer rounded-full"
+                                      className={cn(
+                                        "relative rounded-full",
+                                        isTeamHuddleAvatarTapDisabled(chat.peerUserId, chat.name) ? "cursor-default" : "cursor-pointer"
+                                      )}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         if (!chat.peerUserId) return;
+                                        if (isTeamHuddleAvatarTapDisabled(chat.peerUserId, chat.name)) return;
                                         handleProfileTap(chat.peerUserId, chat.name, chat.avatarUrl);
                                       }}
                                     >
@@ -4802,10 +4812,14 @@ const Chats = () => {
                             className="relative flex items-center gap-3 p-3 bg-card shadow-card cursor-pointer hover:bg-accent/5 transition-colors"
                           >
                             <div
-                              className="relative cursor-pointer"
+                              className={cn(
+                                "relative",
+                                isTeamHuddleAvatarTapDisabled(chat.peerUserId, chat.name) ? "cursor-default" : "cursor-pointer"
+                              )}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (!chat.peerUserId) return;
+                                if (isTeamHuddleAvatarTapDisabled(chat.peerUserId, chat.name)) return;
                                 handleProfileTap(chat.peerUserId, chat.name, chat.avatarUrl);
                               }}
                             >
