@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { HandPointing } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -20,49 +21,6 @@ const MAX_ASPECT = 4 / 3;
 
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
-
-const SensitiveTapIcon = () => (
-  <svg
-    width="72"
-    height="72"
-    viewBox="0 0 100 110"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    aria-hidden="true"
-  >
-    {/* ── Index finger pointing up ── */}
-    <path
-      d="M40 60 L40 22 Q40 10 48 10 Q56 10 56 22 L56 60"
-      stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"
-    />
-    {/* ── Palm / fist body ── */}
-    <path
-      d="M40 60 L26 60 Q18 60 18 70 L18 84 Q18 96 32 96 L66 96 Q82 96 82 84 L82 72 Q82 62 74 62 L56 60"
-      stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"
-    />
-    {/* ── Curled finger knuckle 1 ── */}
-    <path
-      d="M56 60 Q61 50 68 50 Q75 50 75 60"
-      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
-    />
-    {/* ── Curled finger knuckle 2 (smaller, merges into palm) ── */}
-    <path
-      d="M75 62 Q80 56 84 58 Q88 61 84 72"
-      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
-    />
-    {/* ── Thumb curling left ── */}
-    <path
-      d="M26 76 Q14 74 12 64 Q10 54 19 52 Q26 50 26 60"
-      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
-    />
-    {/* ── Tap dash 1 — NW ── */}
-    <line x1="36" y1="20" x2="28" y2="11" stroke="white" strokeWidth="5" strokeLinecap="round"/>
-    {/* ── Tap dash 2 — WNW ── */}
-    <line x1="30" y1="32" x2="19" y2="27" stroke="white" strokeWidth="5" strokeLinecap="round"/>
-    {/* ── Tap dash 3 — W ── */}
-    <line x1="27" y1="46" x2="15" y2="46" stroke="white" strokeWidth="5" strokeLinecap="round"/>
-  </svg>
-);
 
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -227,7 +185,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                       />
                       {!sensitiveRevealed ? (
                         <span className="pointer-events-none absolute inset-0 flex items-center justify-center drop-shadow-lg">
-                          <SensitiveTapIcon />
+                          <HandPointing size={72} weight="bold" color="white" />
                         </span>
                       ) : null}
                     </>

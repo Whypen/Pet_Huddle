@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, type PanInfo } from "framer-motion";
 import { Star, X, Loader2, Lock, SlidersHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -19,7 +19,8 @@ import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig, type QuotaBillingCycle } from "@/config/quotaConfig";
-import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { handoffStripeCheckout } from "@/lib/stripeCheckout";
+import { sendDiscoveryWave } from "@/lib/discoveryActions";
 import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { RestrictionBanner } from "@/components/safety/RestrictionBanner";
