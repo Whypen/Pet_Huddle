@@ -592,7 +592,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
   const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
-  const linkPreviewRemoteDisabledRef = useRef(true);
+  const linkPreviewRemoteDisabledRef = useRef(false);
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
@@ -3825,17 +3825,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               </div>
             )}
 
-      {hasMore && (
+      {loadingMore ? (
         <div className="flex justify-center pt-2">
-          <NeuButton
-            variant="secondary"
-            onClick={() => fetchNotices(false)}
-            disabled={loadingMore}
-          >
-            {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Load more")}
-          </NeuButton>
+          <div className="inline-flex items-center gap-2 rounded-full bg-[rgba(255,255,255,0.72)] px-4 py-2 text-sm text-muted-foreground shadow-sm">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Loading more posts...</span>
+          </div>
         </div>
-      )}
+      ) : null}
 
       {/* Create Notice Modal */}
       {typeof document !== "undefined" &&
