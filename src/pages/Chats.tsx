@@ -4943,9 +4943,10 @@ const Chats = () => {
                               .insert({ chat_id: group.id, user_id: user.id, role: "member" });
                             if (error) { toast.error("Couldn't join. Please try again."); return; }
                             // Also insert into chat_room_members so group appears in My Groups
-                            await supabase
+                            const { error: memberErr } = await supabase
                               .from("chat_room_members")
                               .insert({ chat_id: group.id, user_id: user.id });
+                            if (memberErr) { toast.error("Couldn't join. Please try again."); return; }
                             toast.success(`Joined ${group.name}!`);
                             navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
                           } else {
