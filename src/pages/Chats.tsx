@@ -43,6 +43,8 @@ import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 import {
+  TEAM_HUDDLE_USER_ID,
+  isTeamHuddleIdentity,
   resolveTeamHuddleAvatar,
   resolveTeamHuddleAvailability,
   resolveTeamHuddleDisplayName,
@@ -2315,6 +2317,9 @@ const Chats = () => {
             : null;
         const counterpartName =
           resolveTeamHuddleDisplayName(counterpartUserId, rawCounterpartName, counterpartSocialId) || fallbackName;
+        const isOfficialTeamHuddle =
+          counterpartUserId === TEAM_HUDDLE_USER_ID ||
+          isTeamHuddleIdentity(counterpartName, counterpartSocialId);
         const socialAlbumFallback = Array.isArray(otherProfile.social_album)
           ? String((otherProfile.social_album as unknown[])[0] || "").trim()
           : "";
@@ -2360,7 +2365,7 @@ const Chats = () => {
           avatarUrl: counterpartAvatar,
           socialAvailability,
           previewOverride: previewOverride || null,
-          isVerified: otherProfile.is_verified === true,
+          isVerified: isOfficialTeamHuddle || otherProfile.is_verified === true,
           hasCar: Boolean(otherProfile.has_car),
           isPremium: tier !== "free",
           lastMessage: preview,
@@ -2458,14 +2463,26 @@ const Chats = () => {
         if (!counterpart || counterpart === profile.id) continue;
         if (counterpartInActiveConversations.has(counterpart)) continue;
         const profileRow = (profileById.get(counterpart) || {}) as Record<string, unknown>;
+        const socialId =
+          typeof profileRow.social_id === "string" && profileRow.social_id.trim().length > 0
+            ? profileRow.social_id
+            : null;
+        const displayName = String(profileRow.display_name || "User");
+        const isOfficialTeamHuddle =
+          counterpart === TEAM_HUDDLE_USER_ID ||
+          isTeamHuddleIdentity(displayName, socialId);
         const socialAlbumFallback = Array.isArray(profileRow.social_album)
           ? String((profileRow.social_album as unknown[])[0] || "").trim()
           : "";
         avatarCandidates.set(counterpart, {
           userId: counterpart,
-          name: String(profileRow.display_name || "User"),
-          avatarUrl: (profileRow.avatar_url as string | null) || socialAlbumFallback || null,
-          isVerified: profileRow.is_verified === true,
+          name: resolveTeamHuddleDisplayName(counterpart, displayName, socialId) || displayName,
+          avatarUrl: resolveTeamHuddleAvatar(
+            (profileRow.avatar_url as string | null) || socialAlbumFallback || null,
+            displayName,
+            socialId,
+          ),
+          isVerified: isOfficialTeamHuddle || profileRow.is_verified === true,
           hasCar: Boolean(profileRow.has_car),
         });
       }
