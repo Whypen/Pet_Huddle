@@ -310,6 +310,15 @@ const extractAmountFromPayload = (payload: unknown): number | null => {
   return null;
 };
 
+const parseAmount = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
 const getDisputeTotalPaidValue = (
   totals: Record<string, number | null>,
   row: DisputesQueueRow,
@@ -373,15 +382,6 @@ const formatDisputeDecisionAction = (action: DisputeDecisionAction) => {
   if (action === "release_full") return "Release Full";
   if (action === "partial_refund") return "Partial Refund";
   return "Full Refund";
-};
-
-const parseAmount = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
 };
 
 const formatMoneyAmount = (value: number) => value.toFixed(2);
@@ -593,6 +593,9 @@ const AdminSafety = () => {
     }
     return byId;
   }, [disputesQueue]);
+  const disputeHeader = selectedDisputeId
+    ? disputeQueueById.get(selectedDisputeId)
+    : undefined;
 
   const toggleSort = <K extends string>(
     setter: Dispatch<SetStateAction<SortState<K>>>,
@@ -1045,9 +1048,6 @@ const AdminSafety = () => {
   const reportHeader = selectedReportTargetId
     ? reportQueueByTarget.get(selectedReportTargetId)
     : undefined;
-  const disputeHeader = selectedDisputeId
-    ? disputeQueueById.get(selectedDisputeId)
-    : undefined;
   const currentDisputeMeta: ServiceChatMeta = disputeHeader
     ? getDisputeServiceMeta(serviceChatMetaById, disputeHeader)
     : { serviceLabel: "Unknown Service", bookingPeriodLabel: "Unknown booking period", serviceDate: null };
@@ -1163,7 +1163,7 @@ const AdminSafety = () => {
     setRefreshing(false);
   };
 
-  const loadRestrictionPairForUser = async (userId: string | null | undefined) => {
+  async function loadRestrictionPairForUser(userId: string | null | undefined) {
     if (!userId) return { marketplace_hidden: false, service_disabled: false };
     const [marketplaceRes, serviceRes] = await Promise.all([
       supabase.rpc("is_user_restriction_active" as never, {
@@ -1179,7 +1179,7 @@ const AdminSafety = () => {
       marketplace_hidden: marketplaceRes.data === true,
       service_disabled: serviceRes.data === true,
     };
-  };
+  }
 
   const refreshDisputeParticipantRestrictions = async () => {
     const requesterId = disputeHeader?.requester_id ?? null;
@@ -1268,14 +1268,6 @@ const AdminSafety = () => {
     });
   };
 
-  const openFalseReportAction = (reporterUserId: string | null) => {
-    setSelectedReporterForPenalty(reporterUserId);
-    openReportActionConfirm({
-      action: "mark_false_report",
-      reporterUserId,
-    });
-  };
-
   const openServiceChatPreview = async (serviceChatId: string | null) => {
     if (!serviceChatId) return;
     const { data, error } = await supabase.rpc(
@@ -1315,6 +1307,14 @@ const AdminSafety = () => {
     if (action.action === "warn") {
       setWarnMessageDraft(DEFAULT_WARN_MESSAGE);
     }
+  };
+
+  const openFalseReportAction = (reporterUserId: string | null) => {
+    setSelectedReporterForPenalty(reporterUserId);
+    openReportActionConfirm({
+      action: "mark_false_report",
+      reporterUserId,
+    });
   };
 
   const resetDisputeActionFeedback = () => {
