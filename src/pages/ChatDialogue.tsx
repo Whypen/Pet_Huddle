@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +16,7 @@ import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { TEAM_HUDDLE_USER_ID, isTeamHuddleIdentity, resolveTeamHuddleAvatar } from "@/lib/teamHuddleIdentity";
 
 type ChatMessage = {
   id: string;
@@ -47,6 +48,7 @@ type CounterpartProfile = {
   availability: string | null;
   isVerified: boolean;
   hasCar: boolean;
+  isTeamHuddle: boolean;
 };
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
@@ -341,6 +343,8 @@ const ChatDialogue = () => {
 
     const displayName = String(profileRow?.display_name || fallbackName || "Conversation");
     const socialId = typeof profileRow?.social_id === "string" && profileRow.social_id ? String(profileRow.social_id) : null;
+    const isOfficialTeamHuddle =
+      counterpartId === TEAM_HUDDLE_USER_ID || isTeamHuddleIdentity(displayName, socialId);
     const availabilityList = Array.isArray(profileRow?.availability_status)
       ? profileRow.availability_status.map((v: unknown) => String(v || "").trim()).filter(Boolean)
       : [];
@@ -349,15 +353,18 @@ const ChatDialogue = () => {
         ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
         : normalizeAvailabilityLabel(String(profileRow?.social_role || profileRow?.user_role || ""));
 
-    setRoomName(displayName);
+    setRoomName(isOfficialTeamHuddle ? "Huddle" : displayName);
     setCounterpart({
       id: counterpartId,
-      displayName,
+      displayName: isOfficialTeamHuddle ? "Huddle" : displayName,
       socialId,
-      avatarUrl: (profileRow?.avatar_url as string | null) || null,
-      availability: availability || null,
-      isVerified: profileRow?.is_verified === true,
+      avatarUrl: isOfficialTeamHuddle
+        ? resolveTeamHuddleAvatar(null, "Team Huddle", "teamhuddle")
+        : resolveTeamHuddleAvatar((profileRow?.avatar_url as string | null) || null, displayName, socialId),
+      availability: isOfficialTeamHuddle ? "Safety Team" : (availability || null),
+      isVerified: isOfficialTeamHuddle ? true : profileRow?.is_verified === true,
       hasCar: Boolean(profileRow?.has_car),
+      isTeamHuddle: isOfficialTeamHuddle,
     });
 
     const { data: blocks } = await supabase
@@ -601,7 +608,7 @@ const ChatDialogue = () => {
   }, [blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
 
   const openCounterpartProfile = useCallback(async () => {
-    if (!counterpart?.id) return;
+    if (!counterpart?.id || counterpart.isTeamHuddle) return;
     const { data } = await supabase
       .from("profiles")
       .select("*")
@@ -609,7 +616,7 @@ const ChatDialogue = () => {
       .maybeSingle();
     setProfileSheetData((data as Record<string, unknown> | null) ?? null);
     setProfileSheetOpen(true);
-  }, [counterpart?.id]);
+  }, [counterpart?.id, counterpart?.isTeamHuddle]);
 
   const handleBlockToggle = useCallback(async () => {
     if (!counterpart?.id) return;
@@ -779,7 +786,7 @@ const ChatDialogue = () => {
             </>
           ) : (
             <>
-              <button onClick={() => void openCounterpartProfile()} className="shrink-0">
+              <button onClick={() => void openCounterpartProfile()} className="shrink-0" disabled={counterpart?.isTeamHuddle === true}>
                 <UserAvatar
                   avatarUrl={counterpart?.avatarUrl || null}
                   name={counterpart?.displayName || roomName}
@@ -789,10 +796,11 @@ const ChatDialogue = () => {
                   showBadges={true}
                 />
               </button>
-              <button onClick={() => void openCounterpartProfile()} className="min-w-0 flex-1 text-left">
-                <div className="truncate text-sm font-semibold text-brandText">
+              <button onClick={() => void openCounterpartProfile()} className="min-w-0 flex-1 text-left" disabled={counterpart?.isTeamHuddle === true}>
+                <div className="flex items-center gap-1 truncate text-sm font-semibold text-brandText">
                   {counterpart?.displayName || roomName}
-                  {counterpart?.socialId ? <span className="ml-1 text-xs font-medium text-muted-foreground">@{counterpart.socialId}</span> : null}
+                  {counterpart?.isVerified ? <BadgeCheck className="h-4 w-4 shrink-0 text-brandBlue" aria-label="Verified" /> : null}
+                  {counterpart?.socialId && !counterpart?.isTeamHuddle ? <span className="ml-1 text-xs font-medium text-muted-foreground">@{counterpart.socialId}</span> : null}
                 </div>
                 <div className="truncate text-xs text-muted-foreground">{counterpart?.availability || "Friend"}</div>
               </button>
@@ -819,7 +827,7 @@ const ChatDialogue = () => {
             >
               <MoreVertical className="h-4 w-4 text-muted-foreground" />
             </button>
-          ) : (
+          ) : counterpart?.isTeamHuddle ? null : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="rounded-full p-2 hover:bg-muted" aria-label="More">
