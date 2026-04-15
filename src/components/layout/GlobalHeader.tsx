@@ -190,7 +190,7 @@ interface Pet {
 export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: GlobalHeaderProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, profile, signOut, refreshProfile } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const { t } = useLanguage();
   const [pets, setPets] = useState<Pet[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -211,9 +211,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
   const notifOpenRef = useRef(false);
-  const headerOverlayOpenRef = useRef(false);
-  const lastVisibilityRefreshAtRef = useRef(0);
-  const lastHiddenAtRef = useRef<number | null>(null);
   const showUnreadDot = !notifOpen && unreadCount > 0;
 
   const isVerified = profile?.is_verified === true;
@@ -231,16 +228,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const isPlusOrAbove = normalizedTier === "plus" || normalizedTier === "gold";
   const isGold = normalizedTier === "gold";
   const onboardingComplete = isRegisteredUserProfile(profile ?? null);
-  const headerOverlayOpen =
-    notifOpen || menuOpen || supportOpen || logoutOpen || familySheetOpen || carerGateOpen;
 
   useEffect(() => {
     notifOpenRef.current = notifOpen;
   }, [notifOpen]);
-
-  useEffect(() => {
-    headerOverlayOpenRef.current = headerOverlayOpen;
-  }, [headerOverlayOpen]);
 
   const requireCompletedProfile = useCallback(
     (actionLabel: string) => {
@@ -299,9 +290,6 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   useEffect(() => {
     const state = location.state as { openSettingsDrawer?: boolean; openSupportModal?: boolean } | null;
     if (!state?.openSettingsDrawer && !state?.openSupportModal) return;
-    if (!headerOverlayOpenRef.current) {
-      void refreshProfile();
-    }
     if (state?.openSettingsDrawer) {
       setMenuOpen(true);
     }
@@ -309,39 +297,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       setSupportOpen(true);
     }
     navigate(`${location.pathname}${location.search}`, { replace: true, state: {} });
-  }, [location.pathname, location.search, location.state, navigate, refreshProfile]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    let inFlight = false;
-    const maybeRefresh = async () => {
-      const now = Date.now();
-      if (inFlight) return;
-      if (headerOverlayOpenRef.current) return;
-      if (now - lastVisibilityRefreshAtRef.current < 15000) return;
-      inFlight = true;
-      lastVisibilityRefreshAtRef.current = now;
-      try {
-        await refreshProfile();
-      } finally {
-        inFlight = false;
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        lastHiddenAtRef.current = Date.now();
-        return;
-      }
-      if (document.visibilityState !== "visible") return;
-      const lastHiddenAt = lastHiddenAtRef.current;
-      if (lastHiddenAt && Date.now() - lastHiddenAt < 1500) return;
-      void maybeRefresh();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refreshProfile, user?.id]);
+  }, [location.pathname, location.search, location.state, navigate]);
 
   const fetchPets = useCallback(async () => {
     if (!user) return;

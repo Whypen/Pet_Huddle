@@ -131,6 +131,19 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`);
+  return `{${entries.join(",")}}`;
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -372,7 +385,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Auto-expire any restriction/suspension that has passed its deadline
       void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
 
-      setProfile({ ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId });
+      const nextProfile = { ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId };
+      const nextProfileKey = stableStringify(nextProfile);
+      setProfile((prev) => {
+        if (prev && stableStringify(prev) === nextProfileKey) {
+          return prev;
+        }
+        return nextProfile;
+      });
 
       // Warm pricing cache in the background so Premium / upsell UI can
       // render the user's resolved currency without a visible flash.
