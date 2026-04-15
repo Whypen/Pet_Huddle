@@ -93,6 +93,67 @@ const findAuthUserIdByEmail = async (
   return { userId: null, error: null };
 };
 
+const fireBrevoProfileCompleted = async (
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  userId: string | null | undefined,
+) => {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: "profile_completed",
+        user_id: uid,
+      }),
+    });
+  } catch (error) {
+    console.warn("[auth-signup] brevo profile_completed sync failed", error);
+  }
+};
+
+const repairProfileEmail = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  email: string,
+) => {
+  const uid = String(userId || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!uid || !normalizedEmail) return;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data: row, error: readError } = await serviceClient
+      .from("profiles")
+      .select("id,email")
+      .eq("id", uid)
+      .maybeSingle();
+    if (readError) {
+      console.warn("[auth-signup] profile email read failed", uid, readError.message);
+      return;
+    }
+    if (!row) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (String(row.email || "").trim().toLowerCase() === normalizedEmail) return;
+    const { error: updateError } = await serviceClient
+      .from("profiles")
+      .update({ email: normalizedEmail })
+      .eq("id", uid);
+    if (updateError) {
+      console.warn("[auth-signup] profile email repair failed", uid, updateError.message);
+    }
+    return;
+  }
+
+  console.warn("[auth-signup] profile row not ready for email repair", uid);
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
@@ -270,6 +331,9 @@ Deno.serve(async (req: Request) => {
         }
       : null;
 
+    await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
+    void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, retrySignUp.data.user?.id);
+
     return json(200, {
       data: {
         session: retrySession,
@@ -291,6 +355,9 @@ Deno.serve(async (req: Request) => {
         refresh_token: signUp.data.session.refresh_token,
       }
     : null;
+
+  await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
+  void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, signUp.data.user?.id);
 
   return json(200, {
     data: {

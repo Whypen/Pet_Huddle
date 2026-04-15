@@ -18,10 +18,13 @@ import { authLogin, authSignup } from "@/lib/publicAuthApi";
 export interface Profile {
   id: string;
   user_id?: string | null;
+  email?: string | null;
   display_name: string | null;
   legal_name: string | null;
   social_id?: string | null;
   phone: string | null;
+  phone_verification_status?: "unverified" | "pending" | "verified" | null;
+  phone_verified_at?: string | null;
   prefs?: Record<string, unknown> | null;
   verification_status?: string | null;
   is_verified?: boolean | null;
@@ -152,6 +155,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const profileColumns = [
     "id",
     "user_id",
+    "email",
     "display_name",
     "legal_name",
     "social_id",
@@ -324,9 +328,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchProfile = useCallback(async (
     userId: string,
     runId: number,
-    options: { preserveExisting?: boolean } = {},
+    _options: { preserveExisting?: boolean } = {},
   ) => {
-    const preserveExisting = options.preserveExisting === true;
     try {
       const { data, error } = await supabase
         .from("profiles")
@@ -336,9 +339,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!isHydrationRunCurrent(runId)) return;
       if (error) throw error;
       if (!data) {
-        if (!preserveExisting) {
-          setProfile(null);
-        }
+        // Never preserve stale in-memory profile state when the row is missing.
+        setProfile(null);
         return;
       }
 
@@ -392,9 +394,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       if (!isHydrationRunCurrent(runId)) return;
       console.error("[AuthContext] fetchProfile failed", error);
-      if (!preserveExisting) {
-        setProfile(null);
-      }
+      setProfile(null);
     }
   }, [isHydrationRunCurrent]);
 
@@ -477,6 +477,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(data.user);
     await fetchProfile(data.user.id, runId, { preserveExisting: preserveExistingProfile });
     if (!isHydrationRunCurrent(runId)) return;
+    // Repair older rows that were created without profiles.email.
+    if (data.user.email) {
+      const currentProfileEmail = String((profile as { email?: string | null } | null)?.email || "").trim().toLowerCase();
+      const authEmail = String(data.user.email || "").trim().toLowerCase();
+      if (!currentProfileEmail && authEmail) {
+        const { error: repairError } = await supabase
+          .from("profiles")
+          .update({ email: authEmail } as Record<string, unknown>)
+          .eq("id", data.user.id);
+        if (repairError) {
+          console.warn("[AuthContext] profile email repair failed", repairError.message);
+        } else {
+          await fetchProfile(data.user.id, runId);
+          if (!isHydrationRunCurrent(runId)) return;
+        }
+      }
+    }
     void touchProfileActivity();
     setLoading(false);
     setHydrating(false);
@@ -502,7 +519,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "profiles",
           filter: `id=eq.${user.id}`,
@@ -516,6 +533,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return () => {
       void supabase.removeChannel(channel);
+    };
+  }, [beginHydrationRun, fetchProfile, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const onVerificationUpdated = () => {
+      const runId = beginHydrationRun();
+      void fetchProfile(user.id, runId);
+    };
+    window.addEventListener("huddle:verification-updated", onVerificationUpdated);
+    return () => {
+      window.removeEventListener("huddle:verification-updated", onVerificationUpdated);
     };
   }, [beginHydrationRun, fetchProfile, user?.id]);
 

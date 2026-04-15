@@ -108,6 +108,21 @@ const normalizePhoneForCompare = (phone: string): string =>
     .trim()
     .replace(/[^\d+]/g, "");
 
+const isCanonicalPhoneVerified = (
+  phoneValue: string,
+  profilePhone: string | null | undefined,
+  profilePhoneVerificationStatus: string | null | undefined,
+  profilePhoneVerifiedAt: string | null | undefined,
+) => {
+  const normalizedPhone = normalizePhoneForCompare(phoneValue);
+  if (!normalizedPhone) return false;
+  return (
+    profilePhoneVerificationStatus === "verified" &&
+    Boolean(profilePhoneVerifiedAt) &&
+    normalizePhoneForCompare(profilePhone || "") === normalizedPhone
+  );
+};
+
 const isRenderableImageSrc = (value: string): boolean => {
   const src = String(value || "").trim();
   if (!src) return false;
@@ -631,51 +646,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   };
 
   const resolvePhoneVerifiedForValue = useCallback(async (phoneValue: string, userId?: string | null) => {
-    const normalizedPhone = normalizePhoneForCompare(phoneValue);
-    if (!normalizedPhone || !userId) return false;
-
-    let authConfirmedForCurrentPhone = false;
-    try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
-      const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
-      authConfirmedForCurrentPhone =
-        Boolean(authUser?.phone_confirmed_at) &&
-        authPhoneNormalized === normalizedPhone;
-    } catch {
-      authConfirmedForCurrentPhone = false;
-    }
-
-    let approvedRequestForCurrentPhone = false;
-    try {
-      const { data: approvedRows, error } = await supabase
-        .from("verification_requests")
-        .select("submitted_data")
-        .eq("user_id", userId)
-        .eq("request_type", "phone")
-        .eq("status", "approved")
-        .limit(20);
-
-      if (!error && Array.isArray(approvedRows)) {
-        approvedRequestForCurrentPhone = approvedRows.some((row) => {
-          const submittedData = (row as { submitted_data?: unknown }).submitted_data;
-          const candidate =
-            submittedData && typeof submittedData === "object"
-              ? (submittedData as Record<string, unknown>).phone
-              : "";
-          return normalizePhoneForCompare(String(candidate || "")) === normalizedPhone;
-        });
-      }
-    } catch {
-      approvedRequestForCurrentPhone = false;
-    }
-
-    return (
-      authConfirmedForCurrentPhone ||
-      approvedRequestForCurrentPhone
+    if (!userId) return false;
+    return isCanonicalPhoneVerified(
+      phoneValue,
+      profile?.phone,
+      profile?.phone_verification_status,
+      profile?.phone_verified_at,
     );
-  }, []);
+  }, [profile?.phone, profile?.phone_verification_status, profile?.phone_verified_at]);
 
   useEffect(() => {
     setFieldErrors((prev) => {
@@ -793,8 +771,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupSeedOwner = normalizeStorageOwner(signupData.email || "");
     const authSeedOwner = normalizeStorageOwner(user?.email || user?.id || "");
     const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
-    const authMetadata = (user?.user_metadata as Record<string, unknown> | null) ?? null;
-    const authPhoneSeed = String(user?.phone || authMetadata?.phone_e164 || "").trim();
+    const authPhoneSeed = String(user?.phone || "").trim();
     const signupDob = allowSignupSeed ? signupData.dob : "";
     const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
     const signupSocialId = allowSignupSeed ? signupData.social_id : "";
@@ -1481,10 +1458,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     setPhoneOtpVerified(false);
     setPhoneOtpUnavailable(false);
     setPhoneSentMaskedHint(maskPhoneForOtpNotice(formData.phone.trim()));
-    setPhoneOtpMessage(`Code sent to ${maskPhoneForOtpNotice(formData.phone.trim())}`);
-    // Start 60-second resend countdown
+    setPhoneOtpMessage(`Verification request accepted for ${maskPhoneForOtpNotice(formData.phone.trim())}. Delivery can take up to 2 minutes.`);
     if (otpCountdownRef.current) clearInterval(otpCountdownRef.current);
-    setOtpCountdown(60);
+    setOtpCountdown(result.cooldownSeconds || 90);
     otpCountdownRef.current = setInterval(() => {
       setOtpCountdown((prev) => {
         if (prev <= 1) {
@@ -1495,7 +1471,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         return prev - 1;
       });
     }, 1000);
-    toast.success(`Code sent to ${maskPhoneForOtpNotice(formData.phone.trim())}`);
+    toast.success(`Verification request accepted for ${maskPhoneForOtpNotice(formData.phone.trim())}`);
   };
 
   const verifyPhoneOtp = async () => {
@@ -1508,16 +1484,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       toast.error(result.error || "We couldn’t verify the code right now. Please try again.");
       return;
     }
-    try {
-      await supabase.auth.updateUser({
-        data: {
-          phone_verified_local: true,
-          phone_e164: formData.phone.trim(),
-        },
-      });
-    } catch {
-      // Keep UI flow resilient if metadata write is blocked.
-    }
+    await refreshProfile();
     setPhoneOtpVerified(true);
     setSavedPhoneVerified(true);
     setPhoneOtpRequested(false);
@@ -1542,6 +1509,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
     if (phoneDuplicate) {
       setFieldErrors((prev) => ({ ...prev, phone: t("This phone number is already used by another account") }));
+      return;
+    }
+    if (normalizePhoneForCompare(normalizedPhone) !== normalizePhoneForCompare(phoneOriginalValue) && !phoneOtpVerified) {
+      setFieldErrors((prev) => ({ ...prev, phone: "Verify the new phone number before saving it." }));
+      toast.error("Verify the new phone number before saving it.");
       return;
     }
     setFieldErrors((prev) => ({ ...prev, phone: "" }));
@@ -1586,16 +1558,37 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     );
   };
 
+  const getPersistedPhoneValue = useCallback(() => {
+    const normalizedCurrentPhone = normalizePhoneForCompare(formData.phone);
+    const normalizedOriginalPhone = normalizePhoneForCompare(phoneOriginalValue);
+    const phoneChanged = normalizedCurrentPhone !== normalizedOriginalPhone;
+    if (!phoneChanged || phoneOtpVerified) {
+      return formData.phone.trim() || null;
+    }
+    return phoneOriginalValue.trim() || null;
+  }, [formData.phone, phoneOriginalValue, phoneOtpVerified]);
+
+  const getCanonicalProfileEmail = useCallback(
+    (authUser: { email?: string | null } | null | undefined) => {
+      const authEmail = String(authUser?.email || "").trim().toLowerCase();
+      if (authEmail) return authEmail;
+      return String((profile as { email?: string | null } | null)?.email || "").trim().toLowerCase() || null;
+    },
+    [profile],
+  );
+
   // ── Silent draft save (View tab) ────────────────────────────────────────────
   const silentSave = async () => {
     if (!user) return;
     try {
       const hasPets = petsProfileCount > 0 || formData.owns_pets;
+      const persistedPhone = getPersistedPhoneValue();
       await supabase.from("profiles").upsert(
         {
           id: user.id,
+          email: getCanonicalProfileEmail(user),
           display_name: formData.display_name,
-          phone: formData.phone || null,
+          phone: persistedPhone,
           social_id: formData.social_id || null,
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
@@ -1704,12 +1697,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const currentPhoneNormalized = normalizePhoneForCompare(formData.phone);
     const originalPhoneNormalized = normalizePhoneForCompare(phoneOriginalValue);
     const phoneChanged = currentPhoneNormalized !== originalPhoneNormalized;
-    const verifiedPhoneChangedWithoutOtp = phoneChanged && savedPhoneVerified && !phoneOtpVerified;
-    if (verifiedPhoneChangedWithoutOtp) {
-      const keepSaving = window.confirm(
-        "Changing your number without verifying it will remove your verified status.",
-      );
-      if (!keepSaving) return;
+    if (phoneChanged && !phoneOtpVerified) {
+      setPhoneEditMode(true);
+      setFieldErrors((prev) => ({
+        ...prev,
+        phone: "Verify the new phone number before saving it.",
+      }));
+      toast.error("Verify the new phone number before saving it.");
+      return;
     }
     if (!formData.social_id.trim()) {
       setFieldErrors((prev) => ({ ...prev, social_id: REQUIRED_CONNECT_ERROR }));
@@ -1810,10 +1805,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
       const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
       const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
+      const persistedPhone = getPersistedPhoneValue();
 
       const profilePayload = {
+          email: getCanonicalProfileEmail(activeUser),
           display_name: formData.display_name,
-          phone: formData.phone || null,
+          phone: persistedPhone,
           social_id: formData.social_id || null,
           bio: formData.bio,
           gender_genre: formData.gender_genre || null,
@@ -1902,17 +1899,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (error) throw error;
 
       if (phoneChanged) {
-        if (verifiedPhoneChangedWithoutOtp) {
-          try {
-            await supabase.auth.updateUser({
-              data: {
-                phone_verified_local: false,
-                phone_e164: formData.phone.trim(),
-              },
-            });
-          } catch {
-            // Continue and rely on DB refresh path below.
-          }
+        const { error: refreshPhoneStatusError } = await supabase.rpc(
+          "refresh_phone_verification_status",
+          { p_user_id: activeUser.id },
+        );
+        if (refreshPhoneStatusError) {
+          console.warn("[EditProfile] refresh_phone_verification_status failed:", refreshPhoneStatusError.message);
         }
 
         const { error: refreshIdentityStatusError } = await supabase.rpc(
@@ -1924,7 +1916,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         }
 
         setSavedPhoneVerified(phoneOtpVerified);
-        setPhoneOriginalValue(formData.phone.trim());
+        setPhoneOriginalValue((getPersistedPhoneValue() || "").trim());
       }
 
       if (onboardingMode) {
@@ -2018,11 +2010,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         avatarUrl = await uploadProfilePhotoFile(photoFile, activeUser.id);
       }
       const hasPets = petsProfileCount > 0 || formData.owns_pets;
+      const persistedPhone = getPersistedPhoneValue();
       await supabase
         .from("profiles")
         .upsert(
           {
             id: activeUser.id,
+            email: getCanonicalProfileEmail(activeUser),
             display_name: formData.display_name || null,
             avatar_url: avatarUrl || null,
             bio: formData.bio || null,
@@ -2032,7 +2026,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             height: formData.height ? parseInt(formData.height, 10) : null,
             weight: formData.weight ? parseFloat(formData.weight) : null,
             weight_unit: formData.weight_unit || "kg",
-            phone: formData.phone || null,
+            phone: persistedPhone,
             relationship_status: formData.relationship_status || null,
             has_car: formData.has_car,
             languages: formData.languages.length > 0 ? formData.languages : null,

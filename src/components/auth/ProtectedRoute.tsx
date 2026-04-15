@@ -20,7 +20,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     flowState !== "idle";
   const onboardingComplete = isRegisteredUserProfile(profile);
 
-  if (loading || (hydrating && !profile)) {
+  if (loading || (hydrating && !user)) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -44,19 +44,11 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!profile) {
-    // Keep route stable while profile resolution is unresolved but session is valid.
-    if (session) {
-      return (
-        <div className="min-h-svh flex items-center justify-center bg-background">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        </div>
-      );
-    }
     if (allowOnboardingRoutes) {
       return <>{children}</>;
     }
-    // No active session and no profile is a true invalid state.
-    return <Navigate to="/auth" replace />;
+    // Auth exists but app profile is missing: route into profile recovery/onboarding.
+    return <Navigate to="/set-profile" replace />;
   }
 
   if (!onboardingComplete && !allowOnboardingRoutes) {

@@ -15,6 +15,8 @@ import {
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
 
+const normalizeEmail = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
+
 const AuthCallback = () => {
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
@@ -54,7 +56,7 @@ const AuthCallback = () => {
           return;
         }
 
-        const email = String(user.email || "").trim().toLowerCase();
+        const email = normalizeEmail(user.email);
         const phone = String((user.user_metadata as { phone?: string } | null)?.phone || user.phone || "").trim();
         const { data: signupGateStatus, error: signupGateError } = await supabase.rpc("check_identifier_registered", {
           p_email: email || "",
@@ -89,7 +91,7 @@ const AuthCallback = () => {
         if (isOAuth) {
           const { data: profileRow } = await supabase
             .from("profiles")
-            .select("id")
+            .select("id, email")
             .eq("id", user.id)
             .maybeSingle();
 
@@ -105,7 +107,7 @@ const AuthCallback = () => {
               const owner = normalizeStorageOwner(email);
               localStorage.setItem(
                 buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner),
-                JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "" }),
+                JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "", email }),
               );
               // Remember email so SignupContext can find the scoped draft.
               localStorage.setItem("auth_login_identifier", email);
@@ -115,6 +117,17 @@ const AuthCallback = () => {
             setFlowState("signup");
             navigate("/signup/dob?oauth_onboarding=1");
             return;
+          }
+
+          const profileEmail = normalizeEmail(profileRow.email);
+          if (email && profileEmail !== email) {
+            const { error: repairError } = await supabase
+              .from("profiles")
+              .update({ email })
+              .eq("id", user.id);
+            if (repairError) {
+              console.warn("[AuthCallback] Failed to repair profile email for OAuth user", repairError);
+            }
           }
         }
 
