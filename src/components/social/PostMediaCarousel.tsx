@@ -23,24 +23,33 @@ const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPEC
 
 const SensitiveTapIcon = () => (
   <svg
-    width="72"
-    height="72"
-    viewBox="0 0 64 64"
+    width="48"
+    height="48"
+    viewBox="0 0 64 68"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
   >
+    {/* Single index finger — open at top, rounded fingertip at bottom */}
     <path
-      d="M29 16V35M37 26V35M45 29V41.5C45 48.4 39.4 54 32.5 54H31.8C27.7 54 23.8 52.1 21.4 48.9L14 39.2C12.4 37.1 12.8 34 14.9 32.4C17 30.9 20.1 31.2 21.7 33.3L26 38.8V22.5C26 20.6 27.6 19 29.5 19C31.4 19 33 20.6 33 22.5V35"
+      d="M27 2 L27 36 Q27 44 32 44 Q37 44 37 36 L37 2"
       stroke="white"
-      strokeWidth="3.2"
+      strokeWidth="3.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+    {/* Tap ripple — inner arc */}
     <path
-      d="M31.5 8.5V4.5M40.6 11.1L43.5 8.2M22.4 11.1L19.5 8.2M45.3 20.3H49.3M13.7 20.3H9.7"
+      d="M23 51 Q32 58 41 51"
       stroke="white"
-      strokeWidth="3.2"
+      strokeWidth="3.5"
+      strokeLinecap="round"
+    />
+    {/* Tap ripple — outer arc */}
+    <path
+      d="M17 59 Q32 68 47 59"
+      stroke="white"
+      strokeWidth="3.5"
       strokeLinecap="round"
     />
   </svg>
@@ -203,13 +212,15 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     <>
                       <span
                         className={cn(
-                          "pointer-events-none absolute inset-0 bg-black/22 transition-opacity duration-300",
+                          "pointer-events-none absolute inset-0 bg-black/10 transition-opacity duration-300",
                           sensitiveRevealed ? "opacity-0" : "opacity-100",
                         )}
                       />
                       {!sensitiveRevealed ? (
                         <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                          <SensitiveTapIcon />
+                          <span className="rounded-2xl border border-white/25 bg-white/20 p-4 backdrop-blur-md">
+                            <SensitiveTapIcon />
+                          </span>
                         </span>
                       ) : null}
                     </>
