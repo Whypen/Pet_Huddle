@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -874,27 +874,6 @@ const AdminSafety = () => {
     return rows;
   }, [usersQueue, usersSort, usersSearch]);
 
-  const refreshUserTimeline = useCallback(async (
-    userId: string | null | undefined,
-    filter: "all" | "reports_received" | "reports_filed" | "disputes" | "penalties" | "audit" = userTimelineFilter,
-  ) => {
-    if (!userId) {
-      setUserTimeline([]);
-      return;
-    }
-    let query = supabase
-      .from("view_admin_safety_user_timeline")
-      .select("*")
-      .eq("user_id", userId)
-      .order("event_date", { ascending: false })
-      .limit(400);
-    if (filter !== "all") {
-      query = query.eq("event_group", filter);
-    }
-    const { data } = await query;
-    setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
-  }, [userTimelineFilter]);
-
   const loadQueues = async () => {
     const runLoad = async () => {
       const usersSelect = supabase
@@ -1154,8 +1133,26 @@ const AdminSafety = () => {
   }, [correspondenceRecipientUserId]);
 
   useEffect(() => {
-    void refreshUserTimeline(selectedUserId, userTimelineFilter);
-  }, [refreshUserTimeline, selectedUserId, userTimelineFilter]);
+    const loadUserTimeline = async () => {
+      if (!selectedUserId) {
+        setUserTimeline([]);
+        return;
+      }
+      let query = supabase
+        .from("view_admin_safety_user_timeline")
+        .select("*")
+        .eq("user_id", selectedUserId)
+        .order("event_date", { ascending: false })
+        .limit(400);
+      if (userTimelineFilter !== "all") {
+        query = query.eq("event_group", userTimelineFilter);
+      }
+      const { data } = await query;
+      setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
+    };
+
+    void loadUserTimeline();
+  }, [selectedUserId, userTimelineFilter]);
 
   useEffect(() => {
     resetActionFeedback();
@@ -1805,7 +1802,19 @@ const AdminSafety = () => {
 
     setResetRecordSuccess("Record reset. Cumulative penalty score and moderation adjustment are now zero-based.");
     await loadQueues();
-    await refreshUserTimeline(selectedUserId, userTimelineFilter);
+    if (selectedUserId) {
+      let query = supabase
+        .from("view_admin_safety_user_timeline")
+        .select("*")
+        .eq("user_id", selectedUserId)
+        .order("event_date", { ascending: false })
+        .limit(400);
+      if (userTimelineFilter !== "all") {
+        query = query.eq("event_group", userTimelineFilter);
+      }
+      const { data } = await query;
+      setUserTimeline((data ?? []) as unknown as SafetyUserTimelineRow[]);
+    }
   };
 
   const getPendingDisputeBreakdown = () => {
