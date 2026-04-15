@@ -2,6 +2,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const STORAGE_KEY = "stripe_prices:last_snapshot:v1";
 
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          is: vi.fn(() => ({
+            order: vi.fn(() => ({
+              limit: vi.fn(() => ({
+                maybeSingle: vi.fn(async () => ({ data: null })),
+              })),
+            })),
+          })),
+        })),
+      })),
+    })),
+    functions: {
+      invoke: vi.fn(),
+    },
+    auth: {
+      getUser: vi.fn(),
+    },
+  },
+}));
 describe("stripePrices snapshot bootstrap", () => {
   beforeEach(() => {
     vi.resetModules();
