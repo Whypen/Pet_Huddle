@@ -327,7 +327,53 @@ const formatUrlLabel = (url: string) => {
   }
 };
 
+const parseYouTubeVideoId = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "youtu.be") {
+      const id = parsed.pathname.split("/").filter(Boolean)[0] || "";
+      return id.trim() || null;
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        const id = parsed.searchParams.get("v") || "";
+        return id.trim() || null;
+      }
+      if (parsed.pathname.startsWith("/shorts/") || parsed.pathname.startsWith("/embed/")) {
+        const id = parsed.pathname.split("/").filter(Boolean)[1] || "";
+        return id.trim() || null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const buildIntrinsicLinkPreview = (url: string): LinkPreview | null => {
+  const youtubeId = parseYouTubeVideoId(url);
+  if (!youtubeId) return null;
+  return {
+    url,
+    title: "YouTube video",
+    description: "Shared from YouTube",
+    image: `https://i.ytimg.com/vi/${encodeURIComponent(youtubeId)}/hqdefault.jpg`,
+    siteName: "YouTube",
+    loading: false,
+    failed: false,
+    resolved: true,
+  };
+};
+
 const buildFallbackLinkPreview = (url: string, error?: string): LinkPreview => {
+  const intrinsic = buildIntrinsicLinkPreview(url);
+  if (intrinsic) {
+    return {
+      ...intrinsic,
+      error,
+    };
+  }
   const label = formatUrlLabel(url);
   try {
     const parsed = new URL(url);
@@ -546,6 +592,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
   const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
+  const linkPreviewRemoteDisabledRef = useRef(false);
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
@@ -2891,6 +2938,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const existing = linkPreviewMapRef.current[url];
     if (existing && (existing.loading || existing.resolved)) return;
     if (linkPreviewInFlightRef.current.has(url)) return;
+    const intrinsicPreview = buildIntrinsicLinkPreview(url);
+    if (intrinsicPreview) {
+      setLinkPreviewByUrl((prev) => ({
+        ...prev,
+        [url]: intrinsicPreview,
+      }));
+      return;
+    }
+    if (linkPreviewRemoteDisabledRef.current) {
+      setLinkPreviewByUrl((prev) => ({
+        ...prev,
+        [url]: buildFallbackLinkPreview(url, "remote_preview_unavailable"),
+      }));
+      return;
+    }
     linkPreviewInFlightRef.current.add(url);
     setLinkPreviewByUrl((prev) => ({
       ...prev,
@@ -2916,7 +2978,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
       if (error || !data || typeof data !== "object") {
         const reason = error?.message || "invalid_payload";
-        console.error("[link-preview] fetch:failed", { url, reason });
+        if (
+          reason === "Failed to send a request to the Edge Function" ||
+          reason === "FunctionsFetchError" ||
+          /not found/i.test(reason)
+        ) {
+          linkPreviewRemoteDisabledRef.current = true;
+        }
+        if (import.meta.env.DEV) {
+          console.debug("[link-preview] fetch:failed", { url, reason });
+        }
         setLinkPreviewByUrl((prev) => ({
           ...prev,
           [url]: buildFallbackLinkPreview(url, reason),
@@ -2932,7 +3003,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       const hasMetadata = Boolean(title || description || image || siteName);
       if (remoteFailed || !hasMetadata) {
         const reason = remoteFailed ? "edge_marked_failed" : "empty_metadata";
-        console.error("[link-preview] fetch:empty", { url, reason, payload });
+        if (import.meta.env.DEV) {
+          console.debug("[link-preview] fetch:empty", { url, reason, payload });
+        }
         setLinkPreviewByUrl((prev) => ({
           ...prev,
           [url]: buildFallbackLinkPreview(url, reason),
@@ -2964,7 +3037,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }));
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unexpected_error";
-      console.error("[link-preview] fetch:exception", { url, reason, err });
+      if (
+        reason === "Failed to send a request to the Edge Function" ||
+        reason === "FunctionsFetchError" ||
+        /not found/i.test(reason)
+      ) {
+        linkPreviewRemoteDisabledRef.current = true;
+      }
+      if (import.meta.env.DEV) {
+        console.debug("[link-preview] fetch:exception", { url, reason, err });
+      }
       setLinkPreviewByUrl((prev) => ({
         ...prev,
         [url]: buildFallbackLinkPreview(url, reason),
