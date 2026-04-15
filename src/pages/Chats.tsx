@@ -955,7 +955,7 @@ const Chats = () => {
     setDiscoveryVisibleCount(20);
     setSwipeDir(null);
     dragY.set(0);
-  }, [profile?.id]);
+  }, [dragY, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -1274,7 +1274,7 @@ const Chats = () => {
   const canExpandSearch = effectiveDiscoveryDistanceKm < DISCOVERY_MAX_RADIUS_KM;
   const prevDiscoveryQuotaReachedRef = useRef(discoveryQuotaReached);
 
-  const bumpDiscoverySeen = async (): Promise<boolean> => {
+  const bumpDiscoverySeen = useCallback(async (): Promise<boolean> => {
     if (discoveryQuotaReached) return false;
     setDiscoverySeenToday((prev) => {
       const next = prev + 1;
@@ -1286,7 +1286,7 @@ const Chats = () => {
       return next;
     });
     return true;
-  };
+  }, [discoveryKey, discoveryQuotaReached]);
 
   useEffect(() => {
     setExpandedDistanceKm(null);
@@ -1523,7 +1523,7 @@ const Chats = () => {
     return Math.max(0, cap - used) + Math.max(0, extra);
   }, [profile?.tier]);
 
-  async function runStarAction(target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> {
+  const runStarAction = useCallback(async (target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> => {
     if (!profile?.id) return { sent: false, roomId: null };
     const tier = String(profile?.tier || "free").toLowerCase();
     if (tier === "free") {
@@ -1580,7 +1580,7 @@ const Chats = () => {
       toast.error("Unable to open chat right now.");
       return { sent: false, roomId: null };
     }
-  }
+  }, [commitDiscoverySwipe, enqueueChatNotification, getStarRemaining, openStarUpgradeSheet, profile?.id, profile?.tier]);
 
   const executeConfirmedStar = useCallback(async () => {
     if (!confirmStarTarget || starActionLoading) return;
@@ -1613,7 +1613,7 @@ const Chats = () => {
     } finally {
       setStarActionLoading(false);
     }
-  }, [bumpDiscoverySeen, confirmStarTarget, isGoldTier, navigate, profile?.id, runStarAction, starActionLoading]);
+  }, [bumpDiscoverySeen, confirmStarTarget, discoverExhaustedCopy, isGoldTier, navigate, profile?.id, runStarAction, starActionLoading]);
 
   const handleStarUpgradeCheckout = useCallback(async () => {
     if (!starUpgradeTier || starCheckoutLoading) return;
@@ -2383,7 +2383,7 @@ const Chats = () => {
     } catch {
       toast.error("Failed to load conversations");
     }
-  }, [blockedUserIds, fetchUserMatches, persistRoomSeen, profile?.id, rememberDirectPeer]);
+  }, [fetchUserMatches, persistRoomSeen, profile?.id, rememberDirectPeer]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -2748,6 +2748,7 @@ const Chats = () => {
     runDiscovery();
   }, [
     discoveryHistoryHydrated,
+    fetchUserMatches,
     profile?.id,
     filters,
     effectiveDiscoveryDistanceKm,

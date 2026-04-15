@@ -158,6 +158,7 @@ export function ReportModal({
     targetName,
     targetUserId,
     onSubmitSuccess,
+    reportSourceOrigin,
     uploads,
   ]);
 

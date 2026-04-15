@@ -268,7 +268,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const normalizedOwner = normalizeStorageOwner(signupData.email || user?.email || "");
     if (!normalizedOwner) return null;
     return buildScopedStorageKey(SETPROFILE_PREFILL_KEY, normalizedOwner);
-  }, [onboardingMode, signupData.email, user?.email, user?.id]);
+  }, [onboardingMode, signupData.email, user?.email]);
 
   const clearOnboardingDraftKeys = useCallback((ownerHint?: string | null) => {
     const owners = Array.from(
@@ -479,7 +479,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       return;
     }
     setFormData((prev) => ({ ...prev, [field]: true }));
-  }, [formData, scrollToProfileField, fieldErrors]);
+  }, [formData, scrollToProfileField]);
 
   const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
     const response = await fetch(dataUrl);
@@ -688,6 +688,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     formData.phone,
     formData.dob,
     formData.gender_genre,
+    formData.location_country,
+    formData.location_district,
     formData.location_name,
     formData.social_id,
     formData.availability_status,
@@ -895,10 +897,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.display_name,
     signupData.dob,
     signupData.email,
+    signupData.legal_name,
     signupData.phone,
     signupData.social_id,
+    refreshSocialAlbumUrls,
     resolvePhoneVerifiedForValue,
+    user?.email,
     user?.id,
+    user?.phone,
   ]);
 
   useEffect(() => {
@@ -1149,7 +1155,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     });
   }, []);
 
-  const refreshSocialAlbumUrls = async (
+  const refreshSocialAlbumUrls = useCallback(async (
     paths: string[],
     options?: { allowClear?: boolean },
   ): Promise<Record<string, string>> => {
@@ -1180,7 +1186,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       releaseSocialAlbumFallbackPreview(path);
     });
     return next;
-  };
+  }, [releaseSocialAlbumFallbackPreview]);
 
   const handleSocialAlbumUpload = async (file: File) => {
     const uploadId = crypto.randomUUID();

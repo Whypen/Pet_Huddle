@@ -840,7 +840,7 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
     } catch {
       // no-op
     }
-  }, [onboardingMode, user, petId, resolveSetPetPrefillKey]);
+  }, [onboardingMode, petId, resolveSetPetPrefillKey, signupData.email, user]);
 
   useEffect(() => {
     if (petId) {

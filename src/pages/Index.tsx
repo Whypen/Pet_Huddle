@@ -235,7 +235,7 @@ const Index = () => {
         setNextEventLabel("—");
       }
     })();
-  }, [selectedPet?.dob, selectedPet?.id, user?.id]);
+  }, [selectedPet?.dob, selectedPet?.id, selectedPet?.is_active, user?.id]);
 
   // SPRINT 2: Case-insensitive species matching for wisdom tips
   const getRandomTip = (species: string) => {

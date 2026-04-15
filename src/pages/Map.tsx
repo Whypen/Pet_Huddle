@@ -926,7 +926,7 @@ const MapPage = () => {
       map.current = null;
       setMapLoaded(false);
     };
-  }, [defaultCenter, flyToWithDebug, mapInitNonce]);
+  }, [defaultCenter, flyToWithDebug, lookupBroadcastAddress, mapInitNonce, pinAddressSnapshot, userLocation]);
 
   const handleFallbackClick = useCallback(() => {
     if (!isPickingBroadcastLocation) return;
@@ -1016,7 +1016,7 @@ const MapPage = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
       const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-        "get_visible_broadcast_alerts",
+        "get_visible_broadcast_alerts_restricted",
         {
           p_lat: lat,
           p_lng: lng,
@@ -1032,35 +1032,6 @@ const MapPage = () => {
         .concat(fallbackDots)
         .filter((row): row is MapAlert => row.marker_state !== "hidden")
         .filter((row) => !(row.creator_id && blockedUserIds.has(row.creator_id)));
-      const creatorIds = Array.from(
-        new Set(
-          visibleOnly
-            .map((row) => row.creator_id)
-            .filter((value): value is string => Boolean(value && value !== user?.id)),
-        ),
-      );
-      if (creatorIds.length > 0) {
-        const { data: hiddenRows, error: hiddenErr } = await (supabase.rpc as (
-          fn: string,
-          args?: Record<string, unknown>,
-        ) => Promise<{ data: Array<{ user_id?: string }> | null; error: unknown }>)(
-          "get_users_with_active_restriction",
-          { p_user_ids: creatorIds, p_restriction_key: "map_hidden" },
-        );
-        if (!hiddenErr) {
-          const hiddenSet = new Set(
-            (hiddenRows ?? [])
-              .map((row) => String(row?.user_id || "").trim())
-              .filter(Boolean),
-          );
-          const filtered = visibleOnly.filter((row) => {
-            if (!row.creator_id || row.creator_id === user?.id) return true;
-            return !hiddenSet.has(row.creator_id);
-          });
-          setDbAlerts(filtered);
-          return filtered;
-        }
-      }
       setDbAlerts(visibleOnly);
       return visibleOnly;
     } catch (error) {
@@ -1070,7 +1041,7 @@ const MapPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, user?.id, userLocation?.lat, userLocation?.lng]);
+  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, userLocation?.lat, userLocation?.lng]);
 
   const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
     const trimmedAlertId = String(alertId || "").trim();
@@ -1145,7 +1116,7 @@ const MapPage = () => {
       if (!user) { setFriendPins([]); return; }
       const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby", {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby_restricted", {
         p_lat: lat,
         p_lng: lng,
         p_radius_m: viewRadiusMeters,
@@ -1153,27 +1124,7 @@ const MapPage = () => {
       if (error) throw error;
       const dbPins = (Array.isArray(data) ? data : []) as FriendPin[];
       if (dbPins.length > 0) {
-        const hiddenCandidateIds = dbPins
-          .map((pin) => pin.id)
-          .filter((id): id is string => Boolean(id && id !== user?.id));
-        let visiblePins = dbPins;
-        if (hiddenCandidateIds.length > 0) {
-          const { data: hiddenRows, error: hiddenErr } = await (supabase.rpc as (
-            fn: string,
-            args?: Record<string, unknown>,
-          ) => Promise<{ data: Array<{ user_id?: string }> | null; error: unknown }>)(
-            "get_users_with_active_restriction",
-            { p_user_ids: hiddenCandidateIds, p_restriction_key: "map_hidden" },
-          );
-          if (!hiddenErr) {
-            const hiddenSet = new Set(
-              (hiddenRows ?? [])
-                .map((row) => String(row?.user_id || "").trim())
-                .filter(Boolean),
-            );
-            visiblePins = dbPins.filter((pin) => !hiddenSet.has(pin.id));
-          }
-        }
+        const visiblePins = dbPins;
         const friendIds = visiblePins.map((pin) => pin.id).filter(Boolean);
         if (friendIds.length > 0) {
           const { data: profileRows } = await supabase
