@@ -367,6 +367,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     let cancelled = false;
 
     const refreshUnread = async () => {
+      if (notifOpen) {
+        setUnreadCount((prev) => (prev === 0 ? prev : 0));
+        return;
+      }
       const res = await supabase
         .from("notifications" as "profiles")
         .select("id,message,body,title,metadata,data" as "*")
@@ -375,7 +379,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       if (cancelled) return;
       const rows = (res as { data: Array<Partial<NotificationRow>> | null }).data ?? [];
       const count = rows.filter((r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)).length;
-      setUnreadCount(count);
+      setUnreadCount((prev) => (prev === count ? prev : count));
     };
 
     const channel = supabase
@@ -410,7 +414,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [notifOpen, user]);
 
   // ── Load notifications when drawer opens ────────────────────────────────────
   useEffect(() => {
@@ -419,8 +423,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
     let cancelled = false;
     markedOnOpenRef.current = false;
 
-    const load = async () => {
-      setNotifLoading(true);
+    const load = async ({ silent }: { silent?: boolean } = {}) => {
+      if (!silent) {
+        setNotifLoading(true);
+      }
       const res = await supabase
         .from("notifications" as "profiles")
         .select("id,message,type,title,body,read,created_at,metadata,data" as "*")
@@ -429,8 +435,10 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         .limit(200);
       if ((res as { error?: unknown }).error) {
         if (!cancelled) {
-          setNotifRows([]);
-          setNotifLoading(false);
+          if (!silent) {
+            setNotifRows([]);
+            setNotifLoading(false);
+          }
           setUnreadCount(0);
         }
         return;
@@ -441,7 +449,9 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
         (r) => !r.data?.skip_history && !r.metadata?.skip_history && !isSuppressedNotification(r)
       );
       setNotifRows(rows);
-      setNotifLoading(false);
+      if (!silent) {
+        setNotifLoading(false);
+      }
 
       // Mark all unread as read on open, including skip_history rows.
       // This keeps the bell badge in sync when only push-only chat rows exist.
@@ -464,17 +474,17 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => void load()
+        () => void load({ silent: true })
       )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-          void load();
+          void load({ silent: true });
         }
       });
 
     const pollId = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      void load();
+      void load({ silent: true });
     }, 25000);
 
     void load();
