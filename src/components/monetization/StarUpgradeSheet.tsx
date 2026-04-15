@@ -90,7 +90,11 @@ export function StarUpgradeSheet({
 
   const cachedPrices = getCachedLivePrices({
     currency: savedPricingCurrency ?? undefined,
-  }) ?? getLastLivePricesSnapshot();
+    country: profile?.location_country ?? undefined,
+  }) ?? getLastLivePricesSnapshot({
+    currency: savedPricingCurrency ?? undefined,
+    country: profile?.location_country ?? undefined,
+  });
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const modalRoot = typeof document !== "undefined" ? document.body : null;
 

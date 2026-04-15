@@ -40,6 +40,11 @@ export type LivePriceMap = {
   currencyCode: string;
 };
 
+type CachedPriceSnapshot = {
+  cacheKey: string;
+  prices: LivePriceMap;
+};
+
 /** Canonical fallback from quotaConfig — shown instantly before the fetch resolves */
 export const FALLBACK_PRICES: LivePriceMap = {
   plus_monthly: quotaConfig.stripePlans.plus.monthly.amount,
@@ -76,22 +81,64 @@ const writeLastPriceSnapshot = (cacheKey: string, prices: LivePriceMap) => {
   }
 };
 
-const readLastPriceSnapshot = (): { cacheKey: string; prices: LivePriceMap } | null => {
+const isValidSharePerksInterval = (value: unknown): value is "month" | "year" | null | undefined =>
+  value == null || value === "month" || value === "year";
+
+const isFinitePrice = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+const sanitizeLivePriceMap = (value: unknown): LivePriceMap | null => {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  const currencyCode = normalizeSupportedCurrency(input.currencyCode);
+  if (!currencyCode) return null;
+  if (!isFinitePrice(input.plus_monthly)) return null;
+  if (!isFinitePrice(input.plus_annual)) return null;
+  if (!isFinitePrice(input.gold_monthly)) return null;
+  if (!isFinitePrice(input.gold_annual)) return null;
+  if (!isFinitePrice(input.superBroadcast)) return null;
+  if (!isFinitePrice(input.topProfileBooster)) return null;
+  if (!isFinitePrice(input.sharePerks)) return null;
+  if (!isValidSharePerksInterval(input.sharePerksInterval)) return null;
+  return {
+    plus_monthly: input.plus_monthly,
+    plus_annual: input.plus_annual,
+    gold_monthly: input.gold_monthly,
+    gold_annual: input.gold_annual,
+    superBroadcast: input.superBroadcast,
+    topProfileBooster: input.topProfileBooster,
+    sharePerks: input.sharePerks,
+    sharePerksInterval: input.sharePerksInterval ?? null,
+    currencyCode,
+  };
+};
+
+const readLastPriceSnapshot = (): CachedPriceSnapshot | null => {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(LAST_PRICE_SNAPSHOT_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { cacheKey?: string; prices?: LivePriceMap } | null;
-    if (!parsed?.cacheKey || !parsed?.prices) return null;
-    return { cacheKey: parsed.cacheKey, prices: parsed.prices };
+    const parsed = JSON.parse(raw) as { cacheKey?: unknown; prices?: unknown } | null;
+    const cacheKey = typeof parsed?.cacheKey === "string" ? parsed.cacheKey : "";
+    const prices = sanitizeLivePriceMap(parsed?.prices);
+    if (!cacheKey || !prices) {
+      window.localStorage.removeItem(LAST_PRICE_SNAPSHOT_KEY);
+      return null;
+    }
+    return { cacheKey, prices };
   } catch {
     return null;
   }
 };
 
-export const getLastLivePricesSnapshot = (): LivePriceMap | null => {
+export const getLastLivePricesSnapshot = (input?: { currency?: string; country?: string }): LivePriceMap | null => {
   const snapshot = readLastPriceSnapshot();
-  return snapshot?.prices ?? null;
+  if (!snapshot) return null;
+  const expectedCurrency = fallbackCurrencyFromHints(input);
+  if ((input?.currency || input?.country) && snapshot.prices.currencyCode !== expectedCurrency) {
+    return null;
+  }
+  return snapshot.prices;
 };
 
 export const getCachedLivePrices = (input?: { currency?: string; country?: string }): LivePriceMap | null => {

@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
+import { openExternalUrl } from "@/lib/nativeShell";
 import { toast } from "sonner";
 
 const BRAND_BLUE = "#2145CF";
@@ -37,7 +38,11 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
   const [pricingHints, setPricingHints] = useState<{ country?: string; currency?: string }>({});
   const cachedPrices = getCachedLivePrices({
     currency: savedPricingCurrency ?? undefined,
-  }) ?? getLastLivePricesSnapshot();
+    country: profile?.location_country ?? undefined,
+  }) ?? getLastLivePricesSnapshot({
+    currency: savedPricingCurrency ?? undefined,
+    country: profile?.location_country ?? undefined,
+  });
   const [livePrices, setLivePrices] = useState<LivePriceMap>(cachedPrices ?? FALLBACK_PRICES);
   const isGold = tier === "gold";
   const features = isGold ? [...FEATURES_BASE, ...FEATURES_GOLD] : FEATURES_BASE;
@@ -96,7 +101,7 @@ export function SharePerksModal({ isOpen, onClose, tier }: Props) {
         },
       });
       if (error || !data?.url) throw error ?? new Error("No checkout URL");
-      window.location.href = data.url;
+      openExternalUrl(data.url, "share-perks");
     } catch {
       toast.error("Could not start checkout. Please try again.");
     } finally {
