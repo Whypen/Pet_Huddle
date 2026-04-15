@@ -134,6 +134,8 @@ type SafetyUserRow = {
   false_report_count: number | null;
   penalty_count: number | null;
   cumulative_penalty_score: number | null;
+  trust_score: number | null;
+  moderation_adjustment: number | null;
   trust_weight: number | null;
   disputes_involved: number | null;
   latest_safety_activity: string | null;
@@ -2590,7 +2592,9 @@ const AdminSafety = () => {
                           <div>False reports: {userRow.false_report_count ?? 0}</div>
                           <div>Penalty count: {userRow.penalty_count ?? 0}</div>
                           <div>Cumulative penalty score: {userRow.cumulative_penalty_score ?? 0}</div>
-                          <div>Trust weight: {userRow.trust_weight ?? 0}</div>
+                          <div>Trust score (base): {userRow.trust_score ?? 0}</div>
+                          <div>Moderation adjustment: {userRow.moderation_adjustment ?? 0}</div>
+                          <div>Trust weight (effective): {userRow.trust_weight ?? 0}</div>
                           <div>Disputes involved: {userRow.disputes_involved ?? 0}</div>
                           <div>Latest safety activity: {formatDateTime(userRow.latest_safety_activity)}</div>
                         </div>
