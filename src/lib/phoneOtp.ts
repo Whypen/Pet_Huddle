@@ -289,8 +289,8 @@ export async function requestPhoneOtp(
   const deviceId = await getVisitorId(); // null if FingerprintJS fails — acceptable
   const { data: { session } } = await supabase.auth.getSession();
   const sessionToken = String(session?.access_token || "").trim();
-  const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
-  const hasSession = Boolean(sessionToken && userProbe.data.user && !userProbe.error);
+  const sessionUserId = String(session?.user?.id || "").trim() || null;
+  const hasSession = Boolean(sessionToken && sessionUserId);
 
   type SendResponse = {
     ok: boolean;
@@ -324,7 +324,7 @@ export async function requestPhoneOtp(
     statusCode = res.status;
     errorDetails = (res.error?.details as SendOtpErrorDetails | null | undefined) ?? null;
   } else {
-    // Unauthenticated path — no JWT; edge function uses signInWithOtp
+    // Unauthenticated path — retained only for explicit public callers.
     const res = await postPublicFunction<SendResponse>(
       "send-phone-otp",
       {
@@ -355,7 +355,7 @@ export async function requestPhoneOtp(
     challengeId: data.challenge_id,
     otpType: data.otp_type ?? "sms",
     phoneKey,
-    ownerId: userProbe.data.user?.id ?? null,
+    ownerId: sessionUserId,
     createdAt: new Date().toISOString(),
     expiresAt: data.expires_at ?? null,
   });
@@ -395,12 +395,15 @@ export async function verifyPhoneOtp(
   const deviceId = await getVisitorId();
   const { data: { session } } = await supabase.auth.getSession();
   const sessionToken = String(session?.access_token || "").trim();
-  const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
-  const accessToken = sessionToken && userProbe.data.user && !userProbe.error ? sessionToken : "";
-  const ownerId = userProbe.data.user?.id ?? null;
+  const ownerId = String(session?.user?.id || "").trim() || null;
+  const accessToken = sessionToken && ownerId ? sessionToken : "";
   const challenge = readStoredOtpChallenge();
 
-  if (!challenge || challenge.phoneKey !== phoneKey || challenge.ownerId !== ownerId) {
+  if (
+    !challenge ||
+    challenge.phoneKey !== phoneKey ||
+    (challenge.ownerId !== null && challenge.ownerId !== ownerId)
+  ) {
     return { ok: false, error: "Your verification session expired. Request a new code." };
   }
 

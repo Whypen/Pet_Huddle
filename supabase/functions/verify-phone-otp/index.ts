@@ -348,7 +348,7 @@ Deno.serve(async (req: Request) => {
   if (
     challengePhone !== normalizedPhone ||
     challenge.otp_type !== otpType ||
-    challenge.user_id !== userId
+    (challenge.user_id !== null && challenge.user_id !== userId)
   ) {
     await logAttempt(serviceClient, {
       phoneHash, ip: clientIp, status: "failed",
@@ -362,6 +362,33 @@ Deno.serve(async (req: Request) => {
       }),
       { status: 400, headers: CORS },
     );
+  }
+
+  if (challenge.user_id === null) {
+    const { error: adoptChallengeError } = await serviceClient
+      .from("phone_otp_challenges")
+      .update({
+        user_id: userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", challenge.id)
+      .is("user_id", null);
+    if (adoptChallengeError) {
+      console.error("[verify-phone-otp] adopt challenge error:", adoptChallengeError.message);
+      await logAttempt(serviceClient, {
+        phoneHash, ip: clientIp, status: "failed",
+        userId, deviceId, sessionId,
+        reason: "challenge_adopt_failed",
+        error: adoptChallengeError.message,
+      });
+      return new Response(
+        JSON.stringify({
+          error: "Verification session missing. Request a new code.",
+          reason_code: "challenge_missing",
+        }),
+        { status: 400, headers: CORS },
+      );
+    }
   }
 
   if (challenge.status === "verified") {
