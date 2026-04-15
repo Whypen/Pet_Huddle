@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -665,6 +665,95 @@ const AdminSafety = () => {
     setResetRecordError(null);
     setResetRecordSuccess(null);
   };
+  
+  const buildCurrentMessageRecipients = useCallback((): CaseMessageRecipientOption[] => {
+    if (caseSelection?.type === "report") {
+      const recipients: CaseMessageRecipientOption[] = [];
+      if (selectedReportTargetId) {
+        const targetRow = reportQueueByTarget.get(selectedReportTargetId);
+        const targetIdentity = resolveIdentityLabel(
+          targetRow?.target_display_name,
+          targetRow?.target_social_id,
+          selectedReportTargetId,
+        );
+        recipients.push({
+          userId: selectedReportTargetId,
+          role: "reported_user",
+          label: "Reported User",
+          displayName: targetIdentity.name,
+          socialId: targetIdentity.social,
+        });
+      }
+      const reporterMap = new Map<string, CaseMessageRecipientOption>();
+      for (const row of reportCasefile) {
+        if (!row.reporter_user_id) continue;
+        if (reporterMap.has(row.reporter_user_id)) continue;
+        const identity = resolveIdentityLabel(
+          row.reporter_display_name,
+          row.reporter_social_id,
+          row.reporter_user_id,
+        );
+        reporterMap.set(row.reporter_user_id, {
+          userId: row.reporter_user_id,
+          role: "reporter",
+          label: `Reporter ${reporterMap.size + 1}`,
+          displayName: identity.name,
+          socialId: identity.social,
+        });
+      }
+      recipients.push(...Array.from(reporterMap.values()));
+      return recipients;
+    }
+
+    if (caseSelection?.type === "dispute") {
+      const recipients: CaseMessageRecipientOption[] = [];
+      if (disputeHeader?.requester_id) {
+        const identity = resolveIdentityLabel(
+          disputeHeader.requester_display_name,
+          disputeHeader.requester_social_id,
+          disputeHeader.requester_id,
+        );
+        recipients.push({
+          userId: disputeHeader.requester_id,
+          role: "requester",
+          label: "Requester",
+          displayName: identity.name,
+          socialId: identity.social,
+        });
+      }
+      if (disputeHeader?.provider_id) {
+        const identity = resolveIdentityLabel(
+          disputeHeader.provider_display_name,
+          disputeHeader.provider_social_id,
+          disputeHeader.provider_id,
+        );
+        recipients.push({
+          userId: disputeHeader.provider_id,
+          role: "provider",
+          label: "Provider",
+          displayName: identity.name,
+          socialId: identity.social,
+        });
+      }
+      return recipients;
+    }
+
+    if (caseSelection?.type === "user" && selectedUserId) {
+      const userRow = usersQueue.find((row) => row.user_id === selectedUserId);
+      const identity = resolveIdentityLabel(userRow?.display_name, userRow?.social_id, selectedUserId);
+      return [
+        {
+          userId: selectedUserId,
+          role: "user",
+          label: "User",
+          displayName: identity.name,
+          socialId: identity.social,
+        },
+      ];
+    }
+
+    return [];
+  }, [caseSelection?.type, disputeHeader, reportCasefile, reportQueueByTarget, selectedReportTargetId, selectedUserId, usersQueue]);
 
   const hasDemoMarker = (value: string | null | undefined) =>
     typeof value === "string" && value.includes(DEMO_FIXTURE_MARKER);
@@ -1099,6 +1188,7 @@ const AdminSafety = () => {
   }, [selectedDisputeId, disputeHeader?.requester_id, disputeHeader?.provider_id]);
 
   useEffect(() => {
+    const currentMessageRecipients = buildCurrentMessageRecipients();
     const firstRecipient = currentMessageRecipients[0] ?? null;
     if (!firstRecipient) {
       setMessageRecipientUserId(null);
@@ -1117,16 +1207,17 @@ const AdminSafety = () => {
         ? prev
         : firstRecipient.userId,
     );
-  }, [currentMessageRecipients]);
+  }, [buildCurrentMessageRecipients, caseSelection?.type, disputeHeader, reportCasefile, reportQueueByTarget, selectedReportTargetId, selectedUserId, usersQueue]);
 
   useEffect(() => {
+    const currentMessageRecipients = buildCurrentMessageRecipients();
     if (!messageRecipientUserId) {
       setMessageRecipientRole(null);
       return;
     }
     const option = currentMessageRecipients.find((item) => item.userId === messageRecipientUserId) ?? null;
     setMessageRecipientRole(option?.role ?? null);
-  }, [currentMessageRecipients, messageRecipientUserId]);
+  }, [buildCurrentMessageRecipients, messageRecipientUserId, caseSelection?.type, disputeHeader, reportCasefile, reportQueueByTarget, selectedReportTargetId, selectedUserId, usersQueue]);
 
   useEffect(() => {
     void loadTeamHuddleCorrespondence(correspondenceRecipientUserId);
@@ -1348,6 +1439,7 @@ const AdminSafety = () => {
     }
     return null;
   })();
+  
   const disputePayload = disputeCasefile?.decision_payload ?? disputeHeader?.decision_payload ?? null;
   const disputeTotalPaidAmount = Math.max(
     parseAmount(disputeHeader?.total_paid_amount) ??
