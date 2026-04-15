@@ -36,7 +36,8 @@ import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
-import { handoffStripeCheckout, startStripeCheckout } from "@/lib/stripeCheckout";
+import { handoffStripeCheckout } from "@/lib/stripeCheckout";
+import { openExternalUrl } from "@/lib/nativeShell";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
@@ -1575,6 +1576,38 @@ const Chats = () => {
     setSwipeDir(direction);
     advanceDiscoveryCard(currentId, action);
   }, [advanceDiscoveryCard]);
+
+  const enqueueChatNotification = useCallback(
+    async (args: { userId: string; kind: string; title: string; body: string; href: string; data?: Record<string, unknown> }) => {
+      try {
+        let normalizedHref = args.href;
+        if (normalizedHref === "/chats") normalizedHref = "/chats?tab=discover";
+        if (!normalizedHref.startsWith("/")) normalizedHref = "/chats?tab=discover";
+        const { error } = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
+          "enqueue_notification",
+          {
+            p_user_id: args.userId,
+            p_category: "chats",
+            p_kind: args.kind,
+            p_title: args.title,
+            p_body: args.body,
+            p_href: normalizedHref,
+            p_data: args.data ?? {},
+          }
+        );
+        if (error) {
+          console.warn("[chats.notification] enqueue_notification failed", {
+            kind: args.kind,
+            href: normalizedHref,
+            message: error.message || "unknown_error",
+          });
+        }
+      } catch {
+        // Keep UX non-blocking; notification failures should not block primary action.
+      }
+    },
+    []
+  );
 
   const runStarAction = useCallback(async (target: DiscoveryProfile): Promise<{ sent: boolean; roomId: string | null }> => {
     if (!profile?.id) return { sent: false, roomId: null };
@@ -3264,38 +3297,6 @@ const Chats = () => {
     return roomId;
   }, [profile?.id, rememberDirectPeer]);
 
-  const enqueueChatNotification = useCallback(
-    async (args: { userId: string; kind: string; title: string; body: string; href: string; data?: Record<string, unknown> }) => {
-      try {
-        let normalizedHref = args.href;
-        if (normalizedHref === "/chats") normalizedHref = "/chats?tab=discover";
-        if (!normalizedHref.startsWith("/")) normalizedHref = "/chats?tab=discover";
-        const { error } = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
-          "enqueue_notification",
-          {
-            p_user_id: args.userId,
-            p_category: "chats",
-            p_kind: args.kind,
-            p_title: args.title,
-            p_body: args.body,
-            p_href: normalizedHref,
-            p_data: args.data ?? {},
-          }
-        );
-        if (error) {
-          console.warn("[chats.notification] enqueue_notification failed", {
-            kind: args.kind,
-            href: normalizedHref,
-            message: error.message || "unknown_error",
-          });
-        }
-      } catch {
-        // Keep UX non-blocking; notification failures should not block primary action.
-      }
-    },
-    []
-  );
-
   useEffect(() => {
     if (!matchModal) {
       setMatchQuickHello("");
@@ -3797,7 +3798,7 @@ const Chats = () => {
       if (error) throw error;
 
       if (data?.url) {
-        window.location.href = data.url;
+        openExternalUrl(data.url, "marketplace-booking");
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
