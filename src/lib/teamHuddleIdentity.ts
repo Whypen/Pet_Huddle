@@ -11,6 +11,16 @@ export const isTeamHuddleIdentity = (displayName: string | null | undefined, soc
   return social === "teamhuddle" || social === "team_huddle" || social === "team-huddle" || social === "huddleteam" || social === "huddle_team";
 };
 
+export const resolveTeamHuddleDisplayName = (
+  userId: string | null | undefined,
+  displayName: string | null | undefined,
+  socialId: string | null | undefined,
+) => {
+  if (String(userId || "").trim() === TEAM_HUDDLE_USER_ID) return "Huddle";
+  if (isTeamHuddleIdentity(displayName, socialId)) return "Huddle";
+  return displayName ?? null;
+};
+
 export const resolveTeamHuddleAvatar = (
   avatarUrl: string | null | undefined,
   displayName: string | null | undefined,

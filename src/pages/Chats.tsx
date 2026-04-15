@@ -42,7 +42,7 @@ import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
-import { resolveTeamHuddleAvatar } from "@/lib/teamHuddleIdentity";
+import { resolveTeamHuddleAvatar, resolveTeamHuddleDisplayName } from "@/lib/teamHuddleIdentity";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -2304,14 +2304,20 @@ const Chats = () => {
         const otherProfile = (other?.profiles || (counterpartUserId ? profileById.get(counterpartUserId) : {}) || {}) as Record<string, unknown>;
         const tier = "free";
         const fallbackName = String(room.name || "").trim() || "Conversation";
-        const counterpartName = String(otherProfile.display_name || "").trim() || fallbackName;
+        const rawCounterpartName = String(otherProfile.display_name || "").trim() || fallbackName;
+        const counterpartSocialId =
+          typeof otherProfile.social_id === "string" && otherProfile.social_id.trim().length > 0
+            ? otherProfile.social_id
+            : null;
+        const counterpartName =
+          resolveTeamHuddleDisplayName(counterpartUserId, rawCounterpartName, counterpartSocialId) || fallbackName;
         const socialAlbumFallback = Array.isArray(otherProfile.social_album)
           ? String((otherProfile.social_album as unknown[])[0] || "").trim()
           : "";
         const counterpartAvatar = resolveTeamHuddleAvatar(
           (otherProfile.avatar_url as string | null) || socialAlbumFallback || ((room.avatar_url as string | null) ?? null),
           counterpartName,
-          null,
+          counterpartSocialId,
         );
         const availabilityList = Array.isArray(otherProfile.availability_status)
           ? (otherProfile.availability_status as unknown[]).map((entry) => String(entry || "").trim()).filter(Boolean)
