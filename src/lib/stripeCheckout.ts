@@ -1,4 +1,5 @@
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
+import { openExternalUrl } from "@/lib/nativeShell";
 
 type StartStripeCheckoutParams = {
   mode: "subscription" | "payment";
@@ -23,5 +24,14 @@ export async function startStripeCheckout(params: StartStripeCheckoutParams): Pr
   if (!url) {
     throw new Error("checkout_url_missing");
   }
+  return url;
+}
+
+export async function handoffStripeCheckout(
+  params: StartStripeCheckoutParams,
+  context = "stripe-checkout",
+): Promise<string> {
+  const url = await startStripeCheckout(params);
+  openExternalUrl(url, context);
   return url;
 }
