@@ -716,6 +716,50 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     };
   }, []);
 
+  const releaseSocialAlbumFallbackPreview = useCallback((path: string) => {
+    setSocialAlbumFallbackPreviews((prev) => {
+      const current = prev[path];
+      if (!current) return prev;
+      window.setTimeout(() => URL.revokeObjectURL(current), 0);
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+  }, []);
+
+  const refreshSocialAlbumUrls = useCallback(async (
+    paths: string[],
+    options?: { allowClear?: boolean },
+  ): Promise<Record<string, string>> => {
+    const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
+    if (!normalizedPaths.length) {
+      if (options?.allowClear) {
+        setSocialAlbumUrls({});
+      }
+      return {};
+    }
+    const next = await resolveSocialAlbumUrlMap(normalizedPaths, 60 * 60);
+    if (!Object.keys(next).length) return {};
+    setSocialAlbumUrls((prev) => ({ ...prev, ...next }));
+    setSocialAlbumLoadErrors((prev) => {
+      const hasAny = Object.keys(prev).length > 0;
+      if (!hasAny) return prev;
+      const updated = { ...prev };
+      let changed = false;
+      for (const path of Object.keys(next)) {
+        if (updated[path]) {
+          delete updated[path];
+          changed = true;
+        }
+      }
+      return changed ? updated : prev;
+    });
+    Object.keys(next).forEach((path) => {
+      releaseSocialAlbumFallbackPreview(path);
+    });
+    return next;
+  }, [releaseSocialAlbumFallbackPreview]);
+
   useEffect(() => {
     const prefillKey = resolveSetProfilePrefillKey();
     // Allow reading from localStorage prefill in onboardingMode regardless of auth state,
@@ -1143,50 +1187,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }, 400);
     return () => clearTimeout(timer);
   }, [formData.phone, phoneEditMode, phoneOriginalValue]);
-
-  const releaseSocialAlbumFallbackPreview = useCallback((path: string) => {
-    setSocialAlbumFallbackPreviews((prev) => {
-      const current = prev[path];
-      if (!current) return prev;
-      window.setTimeout(() => URL.revokeObjectURL(current), 0);
-      const next = { ...prev };
-      delete next[path];
-      return next;
-    });
-  }, []);
-
-  const refreshSocialAlbumUrls = useCallback(async (
-    paths: string[],
-    options?: { allowClear?: boolean },
-  ): Promise<Record<string, string>> => {
-    const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
-    if (!normalizedPaths.length) {
-      if (options?.allowClear) {
-        setSocialAlbumUrls({});
-      }
-      return {};
-    }
-    const next = await resolveSocialAlbumUrlMap(normalizedPaths, 60 * 60);
-    if (!Object.keys(next).length) return {};
-    setSocialAlbumUrls((prev) => ({ ...prev, ...next }));
-    setSocialAlbumLoadErrors((prev) => {
-      const hasAny = Object.keys(prev).length > 0;
-      if (!hasAny) return prev;
-      const updated = { ...prev };
-      let changed = false;
-      for (const path of Object.keys(next)) {
-        if (updated[path]) {
-          delete updated[path];
-          changed = true;
-        }
-      }
-      return changed ? updated : prev;
-    });
-    Object.keys(next).forEach((path) => {
-      releaseSocialAlbumFallbackPreview(path);
-    });
-    return next;
-  }, [releaseSocialAlbumFallbackPreview]);
 
   const handleSocialAlbumUpload = async (file: File) => {
     const uploadId = crypto.randomUUID();

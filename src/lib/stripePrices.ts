@@ -49,8 +49,8 @@ export const FALLBACK_PRICES: LivePriceMap = {
   // Add-on fallbacks (cents → dollars)
   superBroadcast:    4.99,
   topProfileBooster: 2.99,
-  sharePerks:        0,
-  sharePerksInterval: null,
+  sharePerks:        4.99,
+  sharePerksInterval: "month",
   currencyCode: "USD",
 };
 
@@ -125,6 +125,33 @@ export const normalizeSupportedCurrency = (value?: string | null): string | null
   const code = String(value || "").trim().toUpperCase();
   return SUPPORTED_CURRENCIES.has(code) ? code : null;
 };
+
+const fallbackCurrencyFromHints = (input?: { currency?: string; country?: string }): string => {
+  const explicit = normalizeSupportedCurrency(input?.currency);
+  if (explicit) return explicit;
+  const country = normalizeCountryCode(input?.country || null);
+  switch (country) {
+    case "HK": return "HKD";
+    case "GB": return "GBP";
+    case "SG": return "SGD";
+    case "AU": return "AUD";
+    case "CA": return "CAD";
+    case "CH": return "CHF";
+    case "ID": return "IDR";
+    case "IN": return "INR";
+    case "JP": return "JPY";
+    case "KR": return "KRW";
+    case "SE": return "SEK";
+    case "TW": return "TWD";
+    case "CN": return "CNY";
+    default: return "USD";
+  }
+};
+
+const buildFallbackPrices = (input?: { currency?: string; country?: string }): LivePriceMap => ({
+  ...FALLBACK_PRICES,
+  currencyCode: fallbackCurrencyFromHints(input),
+});
 
 const COUNTRY_ALIASES: Record<string, string> = {
   HK: "HK",
@@ -315,24 +342,24 @@ export function fetchLivePrices(input?: { currency?: string; country?: string })
           gold_annual:       typeof p.gold_annual?.amount       === "number" ? p.gold_annual.amount       : FALLBACK_PRICES.gold_annual,
           superBroadcast:    typeof p.superBroadcast?.amount    === "number" && p.superBroadcast.amount > 0 ? p.superBroadcast.amount    : FALLBACK_PRICES.superBroadcast,
           topProfileBooster: typeof p.topProfileBooster?.amount === "number" && p.topProfileBooster.amount > 0 ? p.topProfileBooster.amount : FALLBACK_PRICES.topProfileBooster,
-          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : 0,
+          sharePerks:        typeof p.sharePerks?.amount        === "number" && p.sharePerks.amount > 0 ? p.sharePerks.amount        : FALLBACK_PRICES.sharePerks,
           sharePerksInterval:
             typeof p.sharePerks?.interval === "string" && ["month", "year"].includes(p.sharePerks.interval.toLowerCase())
               ? (p.sharePerks.interval.toLowerCase() as "month" | "year")
-              : null,
+              : FALLBACK_PRICES.sharePerksInterval,
           currencyCode: displayCurrency || "USD",
         };
         _cacheByKey.set(cacheKey, resolved);
         writeLastPriceSnapshot(cacheKey, resolved);
         return resolved;
       } else {
-        const fallback = { ...FALLBACK_PRICES };
+        const fallback = buildFallbackPrices({ currency: currencyHint, country: countryHint });
         _cacheByKey.set(cacheKey, fallback);
         writeLastPriceSnapshot(cacheKey, fallback);
         return fallback;
       }
     } catch {
-      const fallback = { ...FALLBACK_PRICES };
+      const fallback = buildFallbackPrices({ currency: currencyHint, country: countryHint });
       _cacheByKey.set(cacheKey, fallback);
       writeLastPriceSnapshot(cacheKey, fallback);
       return fallback;

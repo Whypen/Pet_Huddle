@@ -1016,7 +1016,7 @@ const MapPage = () => {
       const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
       const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-        "get_visible_broadcast_alerts_restricted",
+        "get_visible_broadcast_alerts",
         {
           p_lat: lat,
           p_lng: lng,
@@ -1116,7 +1116,7 @@ const MapPage = () => {
       if (!user) { setFriendPins([]); return; }
       const lat = userLocation?.lat ?? (profile?.last_lat ?? defaultCenter[1]);
       const lng = userLocation?.lng ?? (profile?.last_lng ?? defaultCenter[0]);
-      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby_restricted", {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)("get_friend_pins_nearby", {
         p_lat: lat,
         p_lng: lng,
         p_radius_m: viewRadiusMeters,

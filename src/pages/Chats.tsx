@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -42,7 +42,11 @@ import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
-import { resolveTeamHuddleAvatar, resolveTeamHuddleDisplayName } from "@/lib/teamHuddleIdentity";
+import {
+  resolveTeamHuddleAvatar,
+  resolveTeamHuddleAvailability,
+  resolveTeamHuddleDisplayName,
+} from "@/lib/teamHuddleIdentity";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -2322,10 +2326,14 @@ const Chats = () => {
         const availabilityList = Array.isArray(otherProfile.availability_status)
           ? (otherProfile.availability_status as unknown[]).map((entry) => String(entry || "").trim()).filter(Boolean)
           : [];
-        const socialAvailability =
+        const socialAvailability = resolveTeamHuddleAvailability(
+          counterpartUserId,
+          counterpartName,
+          counterpartSocialId,
           availabilityList.length > 0
             ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
-            : normalizeAvailabilityLabel(String(otherProfile.social_role || otherProfile.user_role || "Friend"));
+            : normalizeAvailabilityLabel(String(otherProfile.social_role || otherProfile.user_role || "Friend")),
+        );
         const parsedLastMeta = parseStarChatContent(last?.content || "");
         const preview = parseChatPreviewText(last?.content);
         const serviceMeta = isService ? serviceByChatId.get(roomId) : null;
@@ -4721,7 +4729,10 @@ const Chats = () => {
                                     </div>
                                     <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
                                       <div className="min-w-0">
-                                        <h4 className="m-0 truncate font-semibold leading-[1.2]">{chat.name}</h4>
+                                        <h4 className="m-0 flex items-center gap-1 truncate font-semibold leading-[1.2]">
+                                          <span className="truncate">{chat.name}</span>
+                                          {chat.isVerified ? <BadgeCheck className="h-4 w-4 shrink-0 text-brandBlue" aria-label="Verified" /> : null}
+                                        </h4>
                                         <p className="m-0 mt-0.5 truncate text-sm leading-[1.2] text-[#A27A2A]">
                                           {getChatPreview(chat)}
                                         </p>
@@ -4796,7 +4807,10 @@ const Chats = () => {
                             </div>
                             <div className="flex-1 min-w-0 grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 items-start">
                               <div className="min-w-0">
-                                <h4 className="m-0 truncate font-semibold leading-[1.2]">{chat.name}</h4>
+                                <h4 className="m-0 flex items-center gap-1 truncate font-semibold leading-[1.2]">
+                                  <span className="truncate">{chat.name}</span>
+                                  {chat.isVerified ? <BadgeCheck className="h-4 w-4 shrink-0 text-brandBlue" aria-label="Verified" /> : null}
+                                </h4>
                                 {getChatPreview(chat) ? (
                                   <p className="m-0 mt-0.5 truncate text-sm leading-[1.2] text-muted-foreground">
                                     {getChatPreview(chat)}

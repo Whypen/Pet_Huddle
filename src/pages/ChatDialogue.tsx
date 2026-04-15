@@ -16,7 +16,13 @@ import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
-import { TEAM_HUDDLE_USER_ID, isTeamHuddleIdentity, resolveTeamHuddleAvatar } from "@/lib/teamHuddleIdentity";
+import {
+  TEAM_HUDDLE_AVAILABILITY,
+  TEAM_HUDDLE_DISPLAY_NAME,
+  TEAM_HUDDLE_USER_ID,
+  isTeamHuddleIdentity,
+  resolveTeamHuddleAvatar,
+} from "@/lib/teamHuddleIdentity";
 
 type ChatMessage = {
   id: string;
@@ -353,15 +359,15 @@ const ChatDialogue = () => {
         ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
         : normalizeAvailabilityLabel(String(profileRow?.social_role || profileRow?.user_role || ""));
 
-    setRoomName(isOfficialTeamHuddle ? "Huddle" : displayName);
+    setRoomName(isOfficialTeamHuddle ? TEAM_HUDDLE_DISPLAY_NAME : displayName);
     setCounterpart({
       id: counterpartId,
-      displayName: isOfficialTeamHuddle ? "Huddle" : displayName,
+      displayName: isOfficialTeamHuddle ? TEAM_HUDDLE_DISPLAY_NAME : displayName,
       socialId,
       avatarUrl: isOfficialTeamHuddle
-        ? resolveTeamHuddleAvatar(null, "Team Huddle", "teamhuddle")
+        ? resolveTeamHuddleAvatar(null, TEAM_HUDDLE_DISPLAY_NAME, "teamhuddle")
         : resolveTeamHuddleAvatar((profileRow?.avatar_url as string | null) || null, displayName, socialId),
-      availability: isOfficialTeamHuddle ? "Safety Team" : (availability || null),
+      availability: isOfficialTeamHuddle ? TEAM_HUDDLE_AVAILABILITY : (availability || null),
       isVerified: isOfficialTeamHuddle ? true : profileRow?.is_verified === true,
       hasCar: Boolean(profileRow?.has_car),
       isTeamHuddle: isOfficialTeamHuddle,

@@ -38,6 +38,40 @@ type ChatShareEnvelope = {
 
 const normalizeOrigin = (origin: string) => origin.replace(/\/+$/, "");
 const isAbsoluteHttpUrl = (value: string) => /^https?:\/\//i.test(value);
+const getRuntimeOrigin = () => {
+  if (typeof window === "undefined" || !window.location?.origin) return "";
+  return normalizeOrigin(window.location.origin);
+};
+const isNonCanonicalShareHost = (value: string) => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      host.endsWith(".localhost") ||
+      host.includes("pet-huddle-share-preview") ||
+      host.endsWith(".vercel.app")
+    );
+  } catch {
+    return false;
+  }
+};
+const rebaseToRuntimeOrigin = (value: string | null | undefined) => {
+  const raw = String(value || "").trim();
+  const runtimeOrigin = getRuntimeOrigin();
+  if (!raw || !runtimeOrigin) return raw;
+  if (!isAbsoluteHttpUrl(raw)) {
+    return `${runtimeOrigin}${raw.startsWith("/") ? raw : `/${raw}`}`;
+  }
+  if (!isNonCanonicalShareHost(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    return `${runtimeOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return raw;
+  }
+};
 
 const normalizeSocialId = (value: string | null | undefined) => {
   const trimmed = String(value || "").trim();
@@ -221,13 +255,13 @@ export const parseChatShareMessage = (rawContent: string | null | undefined): Sh
       contentId: String(share.contentId),
       surface: normalizedSurface,
       shareId: String(share.shareId),
-      canonicalUrl: canonicalOrLegacyUrl,
-      appUrl: String(share.appUrl || (normalizedContentType === "thread"
+      canonicalUrl: rebaseToRuntimeOrigin(canonicalOrLegacyUrl),
+      appUrl: rebaseToRuntimeOrigin(String(share.appUrl || (normalizedContentType === "thread"
         ? `/threads?focus=${encodeURIComponent(String(share.contentId))}`
-        : `/map?alert=${encodeURIComponent(String(share.contentId))}`)),
+        : `/map?alert=${encodeURIComponent(String(share.contentId))}`))),
       title: String(share.title),
       description: String(share.description),
-      imageUrl: String(share.imageUrl),
+      imageUrl: rebaseToRuntimeOrigin(String(share.imageUrl)),
       chatHeadline: normalizeChatHeadline(share.chatHeadline, String(share.title), normalizedSurface),
       countThreadId: share.countThreadId ? String(share.countThreadId) : null,
       nativeShareText: String(share.nativeShareText || (normalizedSurface === "Map"

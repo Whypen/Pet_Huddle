@@ -274,7 +274,11 @@ serve(async (req) => {
       }
       if (!price) {
         if (key === "sharePerks") {
-          results[key] = { amount: 0, currency: targetCurrency };
+          results[key] = {
+            amount: DEFAULTS.sharePerks.amount,
+            currency: targetCurrency,
+            interval: DEFAULTS.plus_monthly.interval,
+          };
         } else {
           results[key] = DEFAULTS[key];
         }
@@ -283,13 +287,13 @@ serve(async (req) => {
       const localized = resolveLocalizedAmount(price, targetCurrency);
       const safeAmount = Number.isFinite(localized.amount) && localized.amount > 0
         ? localized.amount
-        : (key === "sharePerks" ? 0 : DEFAULTS[key].amount);
+        : DEFAULTS[key].amount;
       results[key] = {
         amount: safeAmount,
         currency: safeAmount === localized.amount
           ? localized.currency
           : (key === "sharePerks" ? targetCurrency : DEFAULTS[key].currency),
-        interval: key === "sharePerks" ? price.recurring?.interval : price.recurring?.interval,
+        interval: price.recurring?.interval || (key === "sharePerks" ? DEFAULTS.plus_monthly.interval : DEFAULTS[key].interval),
       };
     }
     const displayCurrency = String(
