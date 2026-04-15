@@ -23,35 +23,44 @@ const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPEC
 
 const SensitiveTapIcon = () => (
   <svg
-    width="48"
-    height="48"
-    viewBox="0 0 64 68"
+    width="72"
+    height="72"
+    viewBox="0 0 100 110"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     aria-hidden="true"
   >
-    {/* Single index finger — open at top, rounded fingertip at bottom */}
+    {/* ── Index finger pointing up ── */}
     <path
-      d="M27 2 L27 36 Q27 44 32 44 Q37 44 37 36 L37 2"
-      stroke="white"
-      strokeWidth="3.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      d="M40 60 L40 22 Q40 10 48 10 Q56 10 56 22 L56 60"
+      stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"
     />
-    {/* Tap ripple — inner arc */}
+    {/* ── Palm / fist body ── */}
     <path
-      d="M23 51 Q32 58 41 51"
-      stroke="white"
-      strokeWidth="3.5"
-      strokeLinecap="round"
+      d="M40 60 L26 60 Q18 60 18 70 L18 84 Q18 96 32 96 L66 96 Q82 96 82 84 L82 72 Q82 62 74 62 L56 60"
+      stroke="white" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"
     />
-    {/* Tap ripple — outer arc */}
+    {/* ── Curled finger knuckle 1 ── */}
     <path
-      d="M17 59 Q32 68 47 59"
-      stroke="white"
-      strokeWidth="3.5"
-      strokeLinecap="round"
+      d="M56 60 Q61 50 68 50 Q75 50 75 60"
+      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
     />
+    {/* ── Curled finger knuckle 2 (smaller, merges into palm) ── */}
+    <path
+      d="M75 62 Q80 56 84 58 Q88 61 84 72"
+      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
+    />
+    {/* ── Thumb curling left ── */}
+    <path
+      d="M26 76 Q14 74 12 64 Q10 54 19 52 Q26 50 26 60"
+      stroke="white" strokeWidth="5.5" strokeLinecap="round" fill="none"
+    />
+    {/* ── Tap dash 1 — NW ── */}
+    <line x1="36" y1="20" x2="28" y2="11" stroke="white" strokeWidth="5" strokeLinecap="round"/>
+    {/* ── Tap dash 2 — WNW ── */}
+    <line x1="30" y1="32" x2="19" y2="27" stroke="white" strokeWidth="5" strokeLinecap="round"/>
+    {/* ── Tap dash 3 — W ── */}
+    <line x1="27" y1="46" x2="15" y2="46" stroke="white" strokeWidth="5" strokeLinecap="round"/>
   </svg>
 );
 
@@ -217,10 +226,8 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                         )}
                       />
                       {!sensitiveRevealed ? (
-                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                          <span className="rounded-2xl border border-white/25 bg-white/20 p-4 backdrop-blur-md">
-                            <SensitiveTapIcon />
-                          </span>
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center drop-shadow-lg">
+                          <SensitiveTapIcon />
                         </span>
                       ) : null}
                     </>
