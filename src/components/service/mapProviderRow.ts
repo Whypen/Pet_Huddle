@@ -84,6 +84,12 @@ export function mapProviderRow(
   isBookmarked:  boolean,
 ): ProviderSummary {
   const profile = profileData ?? {};
+  const verificationStatus =
+    typeof profile.verification_status === "string" && profile.verification_status.trim().length > 0
+      ? profile.verification_status.trim()
+      : profile.is_verified === true
+        ? "verified"
+        : null;
   const dbRates     = (row.rates as string[]) ?? [];
   const firstPrice  = row.starting_price != null ? String(row.starting_price) : "";
   const allServices = (row.services_offered as string[]) ?? [];
@@ -144,7 +150,7 @@ export function mapProviderRow(
     petTypesOther:        String(row.pet_types_other ?? ""),
     dogSizes:             (row.dog_sizes as string[]) ?? [],
     emergencyReadiness:   (row.emergency_readiness as boolean | null) ?? null,
-    verificationStatus:   (profile.verification_status as string | null) ?? null,
+    verificationStatus,
     viewCount:            Number(row.view_count ?? 0),
     createdAt:            row.created_at ? String(row.created_at) : null,
     updatedAt:            row.updated_at ? String(row.updated_at) : null,
