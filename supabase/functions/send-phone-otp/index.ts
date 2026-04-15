@@ -2,7 +2,8 @@
 // send-phone-otp — SMS OTP send gate
 // =============================================================================
 // Single canonical path for all OTP sends in the VerifyIdentity flow.
-// Enforces rate limits (DB-side) before triggering Supabase Auth SMS.
+// Enforces rate limits (DB-side) before triggering Supabase Auth SMS and
+// creates a persisted challenge row that verify-phone-otp must later consume.
 // Phone is SHA-256 hashed before any DB call — raw number never stored.
 //
 // Auth paths:
@@ -51,6 +52,19 @@ type OtpSendReasonCode =
   | "invalid_phone"
   | "session_missing"
   | "provider_send_failed";
+
+type PhoneOtpChallengeInsert = {
+  user_id: string | null;
+  phone_hash: string;
+  phone_e164: string;
+  otp_type: "phone_change" | "sms";
+  status: "sent";
+  sent_at: string;
+  expires_at: string;
+  device_id: string | null;
+  session_id: string | null;
+  provider: "supabase";
+};
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -169,7 +183,7 @@ async function logAttempt(
     phoneHash: string;
     ip: string;
     attemptType: "request" | "resend";
-    status: "success" | "failed" | "rate_limited" | "suspicious";
+    status: "success" | "failed" | "rate_limited";
     userId?: string | null;
     deviceId?: string | null;
     sessionId?: string | null;
@@ -200,6 +214,43 @@ async function logAttempt(
     console.error("[send-phone-otp] log threw:", err);
     return 0;
   }
+}
+
+async function expireActiveChallenges(
+  serviceClient: ReturnType<typeof createClient>,
+  opts: { phoneHash: string; otpType: "phone_change" | "sms"; userId: string | null },
+) {
+  let query = serviceClient
+    .from("phone_otp_challenges")
+    .update({
+      status: "expired",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("phone_hash", opts.phoneHash)
+    .eq("otp_type", opts.otpType)
+    .eq("status", "sent");
+
+  query = opts.userId ? query.eq("user_id", opts.userId) : query.is("user_id", null);
+  const { error } = await query;
+  if (error) {
+    throw new Error(`challenge_expire_failed:${error.message}`);
+  }
+}
+
+async function createChallenge(
+  serviceClient: ReturnType<typeof createClient>,
+  payload: PhoneOtpChallengeInsert,
+): Promise<{ id: string; expires_at: string }> {
+  const { data, error } = await serviceClient
+    .from("phone_otp_challenges")
+    .insert(payload)
+    .select("id, expires_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error(`challenge_insert_failed:${error?.message || "unknown"}`);
+  }
+  return data as { id: string; expires_at: string };
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -334,6 +385,9 @@ Deno.serve(async (req: Request) => {
 
   let userId: string | null = null;
 
+  let profilePhone = "";
+  let profileVerifiedViaRequest = false;
+
   if (accessToken) {
     const { data: { user }, error: authErr } =
       await serviceClient.auth.getUser(accessToken);
@@ -349,6 +403,44 @@ Deno.serve(async (req: Request) => {
     const currentPhone = normalizePhoneForCompare(user.phone || "");
     const alreadyConfirmed = Boolean(user.phone_confirmed_at);
     if (alreadyConfirmed && targetPhone.length > 0 && targetPhone === currentPhone) {
+      return new Response(
+        JSON.stringify({
+          error: "already_verified",
+          reason_code: "already_verified",
+        }),
+        { status: 409, headers: CORS },
+      );
+    }
+
+    const { data: profileRow } = await serviceClient
+      .from("profiles")
+      .select("phone")
+      .eq("id", user.id)
+      .maybeSingle();
+    profilePhone = normalizePhoneForCompare(String((profileRow as { phone?: string | null } | null)?.phone || ""));
+
+    if (profilePhone && profilePhone === targetPhone) {
+      const { data: approvedPhoneRows } = await serviceClient
+        .from("verification_requests")
+        .select("submitted_data")
+        .eq("user_id", user.id)
+        .eq("request_type", "phone")
+        .eq("status", "approved")
+        .limit(20);
+      profileVerifiedViaRequest = Array.isArray(approvedPhoneRows) && approvedPhoneRows.some((row) => {
+        const submittedData =
+          row && typeof row === "object" && "submitted_data" in row
+            ? (row as { submitted_data?: unknown }).submitted_data
+            : null;
+        const candidate =
+          submittedData && typeof submittedData === "object"
+            ? (submittedData as Record<string, unknown>).phone
+            : "";
+        return normalizePhoneForCompare(String(candidate || "")) === targetPhone;
+      });
+    }
+
+    if (profilePhone && profilePhone === targetPhone && profileVerifiedViaRequest) {
       return new Response(
         JSON.stringify({
           error: "already_verified",
@@ -405,10 +497,10 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // ── Suspicious pattern flags ──────────────────────────────────────────────
+  // ── Near-cap telemetry flags ──────────────────────────────────────────────
   const flags: string[] = [];
-  if (limit.phone_cnt > 3) flags.push("high_request_count"); // 4th send of the day
-  if (limit.ip_cnt    > 15) flags.push("high_ip_count");      // IP nearing cap
+  if (limit.phone_cnt >= 3) flags.push("near_phone_daily_cap");
+  if (limit.ip_cnt    >= 15) flags.push("near_ip_daily_cap");
 
   // ── Send OTP via Supabase Auth ────────────────────────────────────────────
   //
@@ -511,11 +603,50 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  const otpType: "phone_change" | "sms" = (accessToken && userId) ? "phone_change" : "sms";
+  const sentAtIso = new Date().toISOString();
+  const expiresAtIso = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  let challengeId = "";
+  let challengeExpiresAt = expiresAtIso;
+
+  try {
+    await expireActiveChallenges(serviceClient, { phoneHash, otpType, userId });
+    const created = await createChallenge(serviceClient, {
+      user_id: userId,
+      phone_hash: phoneHash,
+      phone_e164: rawPhone,
+      otp_type: otpType,
+      status: "sent",
+      sent_at: sentAtIso,
+      expires_at: expiresAtIso,
+      device_id: deviceId,
+      session_id: sessionId,
+      provider: "supabase",
+    });
+    challengeId = created.id;
+    challengeExpiresAt = created.expires_at;
+  } catch (challengeError) {
+    const challengeMessage = challengeError instanceof Error ? challengeError.message : "challenge_write_failed";
+    await logAttempt(serviceClient, {
+      phoneHash, ip: clientIp,
+      attemptType: "request", status: "failed",
+      userId, deviceId, sessionId,
+      reason: "challenge_write_failed", error: challengeMessage,
+    });
+    return new Response(
+      JSON.stringify({
+        error: "provider_send_failed",
+        reason_code: "provider_send_failed",
+      }),
+      { status: 500, headers: CORS },
+    );
+  }
+
   // ── Log success ───────────────────────────────────────────────────────────
   const logId = await logAttempt(serviceClient, {
     phoneHash, ip: clientIp,
     attemptType: "request",
-    status: flags.length > 0 ? "suspicious" : "success",
+    status: "success",
     userId, deviceId, sessionId,
     reason: flags.length > 0 ? flags.join(",") : "turnstile_ok",
     flags: [
@@ -532,8 +663,10 @@ Deno.serve(async (req: Request) => {
       ok: true,
       log_id: logId,
       attempt_count: limit.phone_cnt + 1,
+      challenge_id: challengeId,
+      expires_at: challengeExpiresAt,
       // otp_type tells the client which type to use in verifyOtp()
-      otp_type: (accessToken && userId) ? "phone_change" : "sms",
+      otp_type: otpType,
     }),
     { status: 200, headers: CORS },
   );

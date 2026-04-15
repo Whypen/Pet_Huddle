@@ -2,7 +2,8 @@
 // verify-phone-otp — SMS OTP verify gate
 // =============================================================================
 // Single canonical path for all OTP verifications.
-// Enforces a hard cap of 3 verify attempts per phone per 24 h (DB-side).
+// Each verification must reference an active OTP challenge created by
+// send-phone-otp. Verify attempts are capped per challenge.
 // Phone is SHA-256 hashed before any DB call — raw number never stored.
 //
 // Verify paths:
@@ -28,6 +29,7 @@ interface RequestBody {
   phone:     string;
   token:     string;
   otp_type:  "phone_change" | "sms";
+  challenge_id: string;
   device_id?:  string;
   session_id?: string;
 }
@@ -37,9 +39,21 @@ type VerifyOtpReasonCode =
   | "expired_code"
   | "code_already_used"
   | "phone_mismatch"
+  | "challenge_missing"
+  | "challenge_expired"
   | "session_missing"
   | "too_many_incorrect_attempts"
   | "verify_failed";
+
+type PhoneOtpChallengeRow = {
+  id: string;
+  user_id: string | null;
+  phone_e164: string;
+  otp_type: "phone_change" | "sms";
+  status: "sent" | "verified" | "expired" | "failed";
+  verify_attempt_count: number;
+  expires_at: string;
+};
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 
@@ -93,6 +107,10 @@ function classifyVerifyOtpError(raw: string): VerifyOtpReasonCode {
   ) return "session_missing";
   if (message.includes("invalid") || message.includes("not found")) return "invalid_code";
   return "verify_failed";
+}
+
+function normalizePhoneForCompare(value: string | null | undefined): string {
+  return String(value || "").trim().replace(/\D/g, "");
 }
 
 // ── Logger helper ─────────────────────────────────────────────────────────────
@@ -172,6 +190,7 @@ Deno.serve(async (req: Request) => {
   const rawPhone  = (body.phone  ?? "").trim();
   const rawToken  = (body.token  ?? "").trim();
   const otpType   = body.otp_type;
+  const challengeId = String(body.challenge_id ?? "").trim();
   const deviceId  = body.device_id  ?? null;
   const sessionId = body.session_id ?? null;
 
@@ -179,6 +198,16 @@ Deno.serve(async (req: Request) => {
   if (!rawPhone || !rawToken) {
     return new Response(
       JSON.stringify({ error: "Phone and verification code are required" }),
+      { status: 400, headers: CORS },
+    );
+  }
+
+  if (!challengeId) {
+    return new Response(
+      JSON.stringify({
+        error: "Verification session missing. Request a new code.",
+        reason_code: "challenge_missing",
+      }),
       { status: 400, headers: CORS },
     );
   }
@@ -225,43 +254,114 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // ── Verify attempt cap: 3 per phone per 24 h (DB-enforced) ───────────────
-  // Uses count: "exact" — PostgREST returns the count in response.count,
-  // not in data. head: true suppresses row bodies.
-  const { count: verifyCount, error: countErr } = await serviceClient
-    .from("phone_otp_attempts")
-    .select("id", { count: "exact", head: true })
-    .eq("phone_hash", phoneHash)
-    .eq("attempt_type", "verify")
-    .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const normalizedPhone = normalizePhoneForCompare(rawPhone);
+  const { data: challengeData, error: challengeErr } = await serviceClient
+    .from("phone_otp_challenges")
+    .select("id,user_id,phone_e164,otp_type,status,verify_attempt_count,expires_at")
+    .eq("id", challengeId)
+    .maybeSingle();
+  const challenge = challengeData as PhoneOtpChallengeRow | null;
 
-  if (countErr) {
-    console.error("[verify-phone-otp] count query error:", countErr.message);
-    // Block on error — do not silently allow
+  if (challengeErr) {
+    console.error("[verify-phone-otp] challenge load error:", challengeErr.message);
     await logAttempt(serviceClient, {
       phoneHash, ip: clientIp, status: "failed",
       userId, deviceId, sessionId,
-      reason: "count_query_error", error: countErr.message,
+      reason: "challenge_query_error", error: challengeErr.message,
     });
     return new Response(JSON.stringify({ error: "Could not process request" }), {
       status: 500, headers: CORS,
     });
   }
 
-  if ((verifyCount ?? 0) >= 3) {
+  if (!challenge) {
+    await logAttempt(serviceClient, {
+      phoneHash, ip: clientIp, status: "failed",
+      userId, deviceId, sessionId,
+      reason: "challenge_missing",
+    });
+    return new Response(
+      JSON.stringify({
+        error: "Verification session missing. Request a new code.",
+        reason_code: "challenge_missing",
+      }),
+      { status: 400, headers: CORS },
+    );
+  }
+
+  const challengePhone = normalizePhoneForCompare(challenge.phone_e164);
+  if (
+    challengePhone !== normalizedPhone ||
+    challenge.otp_type !== otpType ||
+    (otpType === "phone_change" && challenge.user_id !== userId)
+  ) {
+    await logAttempt(serviceClient, {
+      phoneHash, ip: clientIp, status: "failed",
+      userId, deviceId, sessionId,
+      reason: "challenge_phone_mismatch",
+    });
+    return new Response(
+      JSON.stringify({
+        error: "Verification session missing. Request a new code.",
+        reason_code: "challenge_missing",
+      }),
+      { status: 400, headers: CORS },
+    );
+  }
+
+  if (challenge.status === "verified") {
+    await logAttempt(serviceClient, {
+      phoneHash, ip: clientIp, status: "failed",
+      userId, deviceId, sessionId,
+      reason: "challenge_already_verified",
+    });
+    return new Response(
+      JSON.stringify({
+        error: "Code already used. Request a new code.",
+        reason_code: "code_already_used",
+      }),
+      { status: 409, headers: CORS },
+    );
+  }
+
+  const expiresAtMs = Date.parse(String(challenge.expires_at || ""));
+  if (challenge.status !== "sent" || (Number.isFinite(expiresAtMs) && expiresAtMs > 0 && Date.now() > expiresAtMs)) {
+    await serviceClient
+      .from("phone_otp_challenges")
+      .update({
+        status: "expired",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", challenge.id)
+      .eq("status", "sent");
+    await logAttempt(serviceClient, {
+      phoneHash, ip: clientIp, status: "failed",
+      userId, deviceId, sessionId,
+      reason: "challenge_expired",
+    });
+    return new Response(
+      JSON.stringify({
+        error: "Code expired. Request a new code.",
+        reason_code: "challenge_expired",
+      }),
+      { status: 410, headers: CORS },
+    );
+  }
+
+  if ((challenge.verify_attempt_count ?? 0) >= 5) {
     const logId = await logAttempt(serviceClient, {
       phoneHash, ip: clientIp, status: "rate_limited",
       userId, deviceId, sessionId,
-      reason: "verify_daily_cap",
+      reason: "verify_attempt_cap",
     });
     return new Response(
       JSON.stringify({
         error: "Too many attempts. Please request a new code.",
         log_id: logId,
         reason_code: "too_many_incorrect_attempts",
-        retry_after: 86400,
+        retry_after: 0,
       }),
-      { status: 429, headers: { ...CORS, "Retry-After": "86400" } },
+      { status: 429, headers: CORS },
     );
   }
 
@@ -310,6 +410,19 @@ Deno.serve(async (req: Request) => {
   if (verifyError) {
     const reasonCode = classifyVerifyOtpError(verifyError);
     const isInvalid = reasonCode !== "verify_failed" && reasonCode !== "session_missing";
+    const nextAttemptCount = (challenge.verify_attempt_count ?? 0) + 1;
+    const nextStatus = reasonCode === "expired_code" || reasonCode === "code_already_used"
+      ? "expired"
+      : "sent";
+    await serviceClient
+      .from("phone_otp_challenges")
+      .update({
+        verify_attempt_count: nextAttemptCount,
+        status: nextStatus,
+        error_reason: verifyError,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", challenge.id);
     const logId = await logAttempt(serviceClient, {
       phoneHash, ip: clientIp,
       status: isInvalid ? "invalid_otp" : "failed",
@@ -336,6 +449,61 @@ Deno.serve(async (req: Request) => {
       }),
       { status: reasonCode === "verify_failed" ? 500 : 401, headers: CORS },
     );
+  }
+
+  const verifiedAtIso = new Date().toISOString();
+  const targetUserId =
+    userId ||
+    (
+      verifyData?.user &&
+      typeof verifyData.user === "object" &&
+      verifyData.user !== null &&
+      "id" in verifyData.user &&
+      typeof (verifyData.user as { id?: unknown }).id === "string"
+        ? (verifyData.user as { id: string }).id
+        : null
+    );
+
+  await serviceClient
+    .from("phone_otp_challenges")
+    .update({
+      status: "verified",
+      verify_attempt_count: (challenge.verify_attempt_count ?? 0) + 1,
+      verified_at: verifiedAtIso,
+      error_reason: null,
+      updated_at: verifiedAtIso,
+    })
+    .eq("id", challenge.id);
+
+  if (targetUserId) {
+    await serviceClient
+      .from("profiles")
+      .update({
+        phone: rawPhone,
+        updated_at: verifiedAtIso,
+      })
+      .eq("id", targetUserId);
+
+    const { error: verificationInsertError } = await serviceClient
+      .from("verification_requests")
+      .insert({
+        user_id: targetUserId,
+        request_type: "phone",
+        status: "approved",
+        provider: "supabase",
+        submitted_data: { phone: rawPhone, challenge_id: challenge.id, otp_type: otpType },
+        verification_result: { status: "approved", verified_at: verifiedAtIso },
+      });
+    if (verificationInsertError) {
+      console.error("[verify-phone-otp] verification request insert error:", verificationInsertError.message);
+    }
+
+    const { error: refreshError } = await serviceClient.rpc("refresh_identity_verification_status", {
+      p_user_id: targetUserId,
+    });
+    if (refreshError && !String(refreshError.message || "").includes("profile_not_found")) {
+      console.error("[verify-phone-otp] refresh_identity_verification_status error:", refreshError.message);
+    }
   }
 
   const logId = await logAttempt(serviceClient, {

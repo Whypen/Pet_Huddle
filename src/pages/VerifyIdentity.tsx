@@ -1797,19 +1797,6 @@ export function VerifyIdentity({
           console.debug("[VerifyIdentity.phone] metadata update failed", error);
         }
       }
-      const { error: verificationError } = await supabase.from("verification_requests").insert({
-        user_id: user.id,
-        request_type: "phone",
-        status: "approved",
-        provider: "supabase",
-        submitted_data: { phone: normalizedPhone },
-        verification_result: { status: "approved" },
-      });
-      if (verificationError) {
-        if (import.meta.env.DEV) {
-          console.debug("[VerifyIdentity.phone] verification_requests insert failed", verificationError);
-        }
-      }
     }
     try {
       await refreshVerificationSnapshot();

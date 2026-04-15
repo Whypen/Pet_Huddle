@@ -48,6 +48,8 @@ type VerifyOtpReasonCode =
   | "expired_code"
   | "code_already_used"
   | "phone_mismatch"
+  | "challenge_missing"
+  | "challenge_expired"
   | "session_missing"
   | "too_many_incorrect_attempts"
   | "verify_failed";
@@ -167,6 +169,9 @@ const mapVerifyOtpFailure = (
   if (reasonCode === "phone_mismatch" || raw.includes("match this phone") || raw.includes("phone mismatch")) {
     return "This code does not match this phone number.";
   }
+  if (reasonCode === "challenge_missing" || reasonCode === "challenge_expired") {
+    return "Your verification session expired. Request a new code.";
+  }
   if (reasonCode === "session_missing" || statusCode === 401 || raw.includes("unauthorized") || raw.includes("session")) {
     return "Your verification session expired. Request a new code.";
   }
@@ -179,13 +184,62 @@ const mapVerifyOtpFailure = (
   return "We couldn’t verify the code right now. Please try again.";
 };
 
-// ── Module-level OTP type ─────────────────────────────────────────────────────
-// Set by requestPhoneOtp from the send-phone-otp response.
-// Read by verifyPhoneOtp so the correct type is forwarded to verify-phone-otp.
-// Default "phone_change": all VerifyIdentity and EditProfile flows are
-// authenticated, so this default is correct if send is never called first.
+type StoredOtpChallenge = {
+  challengeId: string;
+  otpType: "phone_change" | "sms";
+  phoneKey: string;
+  ownerId: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+};
 
-let lastOtpType: "phone_change" | "sms" = "phone_change";
+const OTP_CHALLENGE_STORAGE_KEY = "huddle_phone_otp_challenge_v1";
+
+const normalizePhoneKey = (value: string): string =>
+  String(value || "").trim().replace(/[^\d+]/g, "");
+
+function readStoredOtpChallenge(): StoredOtpChallenge | null {
+  try {
+    const raw = localStorage.getItem(OTP_CHALLENGE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredOtpChallenge> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const challengeId = String(parsed.challengeId || "").trim();
+    const otpType = parsed.otpType === "sms" ? "sms" : parsed.otpType === "phone_change" ? "phone_change" : null;
+    const phoneKey = normalizePhoneKey(String(parsed.phoneKey || ""));
+    const ownerId = parsed.ownerId ? String(parsed.ownerId) : null;
+    const createdAt = String(parsed.createdAt || "");
+    const expiresAt = parsed.expiresAt ? String(parsed.expiresAt) : null;
+    if (!challengeId || !otpType || !phoneKey) return null;
+    return { challengeId, otpType, phoneKey, ownerId, createdAt, expiresAt };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredOtpChallenge(state: StoredOtpChallenge) {
+  try {
+    localStorage.setItem(OTP_CHALLENGE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // no-op
+  }
+}
+
+function clearStoredOtpChallenge(expected?: { ownerId: string | null; phoneKey: string }) {
+  try {
+    if (!expected) {
+      localStorage.removeItem(OTP_CHALLENGE_STORAGE_KEY);
+      return;
+    }
+    const current = readStoredOtpChallenge();
+    if (!current) return;
+    if (current.ownerId === expected.ownerId && current.phoneKey === expected.phoneKey) {
+      localStorage.removeItem(OTP_CHALLENGE_STORAGE_KEY);
+    }
+  } catch {
+    // no-op
+  }
+}
 
 // ── Public edge call helper ───────────────────────────────────────────────────
 // Uses the configurable public functions base so OTP send can be fronted by
@@ -210,6 +264,7 @@ export async function requestPhoneOtp(
   turnstileToken: string,
 ): Promise<{ ok: boolean; error?: string; unavailable?: boolean }> {
   const normalized = phone.trim();
+  const phoneKey = normalizePhoneKey(normalized);
   if (!normalized) return { ok: false, error: "Enter a valid phone number." };
   if (!turnstileToken.trim()) return { ok: false, error: "Please complete the verification first." };
 
@@ -220,7 +275,14 @@ export async function requestPhoneOtp(
 
   // Dev shortcut — bypasses edge function entirely
   if (TEST_OTP_SHORTCUT_ENABLED) {
-    lastOtpType = "phone_change";
+    writeStoredOtpChallenge({
+      challengeId: "test-shortcut",
+      otpType: "phone_change",
+      phoneKey,
+      ownerId: null,
+      createdAt: new Date().toISOString(),
+      expiresAt: null,
+    });
     return { ok: true };
   }
 
@@ -230,7 +292,13 @@ export async function requestPhoneOtp(
   const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
   const hasSession = Boolean(sessionToken && userProbe.data.user && !userProbe.error);
 
-  type SendResponse = { ok: boolean; otp_type: "phone_change" | "sms"; error?: string };
+  type SendResponse = {
+    ok: boolean;
+    otp_type: "phone_change" | "sms";
+    challenge_id: string;
+    expires_at?: string | null;
+    error?: string;
+  };
   let data: SendResponse | null = null;
   let errorMsg: string | null = null;
   let statusCode: number | null = null;
@@ -272,12 +340,24 @@ export async function requestPhoneOtp(
   }
 
   if (errorMsg || !data?.ok) {
+    clearStoredOtpChallenge();
     const mapped = mapSendOtpFailure(statusCode, errorMsg ?? data?.error ?? "", errorDetails);
     return { ok: false, error: mapped.message, unavailable: mapped.unavailable };
   }
 
-  // Store otp_type for the subsequent verifyPhoneOtp call
-  lastOtpType = data.otp_type ?? (hasSession ? "phone_change" : "sms");
+  if (!data.challenge_id) {
+    clearStoredOtpChallenge();
+    return { ok: false, error: "We couldn’t prepare phone verification. Request a new code." };
+  }
+
+  writeStoredOtpChallenge({
+    challengeId: data.challenge_id,
+    otpType: data.otp_type ?? (hasSession ? "phone_change" : "sms"),
+    phoneKey,
+    ownerId: userProbe.data.user?.id ?? null,
+    createdAt: new Date().toISOString(),
+    expiresAt: data.expires_at ?? null,
+  });
   return { ok: true };
 }
 
@@ -293,6 +373,7 @@ export async function verifyPhoneOtp(
 ): Promise<{ ok: boolean; error?: string }> {
   const normalizedPhone = phone.trim();
   const normalizedToken = token.trim();
+  const phoneKey = normalizePhoneKey(normalizedPhone);
   if (!normalizedPhone || !normalizedToken) {
     return { ok: false, error: "Enter the 6-digit code." };
   }
@@ -305,18 +386,24 @@ export async function verifyPhoneOtp(
     return { ok: true };
   }
 
-  const deviceId = await getVisitorId();
-  const otpType  = lastOtpType; // set by the preceding requestPhoneOtp call
-
   type VerifyResponse = { ok: boolean; error?: string };
   let errorMsg: string | null = null;
   let statusCode: number | null = null;
   let errorDetails: VerifyOtpErrorDetails | null = null;
 
+  const deviceId = await getVisitorId();
   const { data: { session } } = await supabase.auth.getSession();
   const sessionToken = String(session?.access_token || "").trim();
   const userProbe = sessionToken ? await supabase.auth.getUser() : { data: { user: null }, error: null };
   const accessToken = sessionToken && userProbe.data.user && !userProbe.error ? sessionToken : "";
+  const ownerId = userProbe.data.user?.id ?? null;
+  const challenge = readStoredOtpChallenge();
+
+  if (!challenge || challenge.phoneKey !== phoneKey || challenge.ownerId !== ownerId) {
+    return { ok: false, error: "Your verification session expired. Request a new code." };
+  }
+
+  const otpType = challenge.otpType;
 
   if (otpType === "phone_change") {
     // Authenticated path — JWT required by edge function for phone_change
@@ -326,6 +413,7 @@ export async function verifyPhoneOtp(
         phone: normalizedPhone,
         token: normalizedToken,
         otp_type: "phone_change",
+        challenge_id: challenge.challengeId,
         device_id: deviceId,
       },
       { accessToken },
@@ -341,6 +429,7 @@ export async function verifyPhoneOtp(
       phone:    normalizedPhone,
       token:    normalizedToken,
       otp_type: "sms",
+      challenge_id: challenge.challengeId,
       device_id: deviceId,
     });
     if (res.error || !res.data?.ok) {
@@ -350,6 +439,18 @@ export async function verifyPhoneOtp(
     }
   }
 
-  if (errorMsg) return { ok: false, error: mapVerifyOtpFailure(statusCode, errorMsg, errorDetails) };
+  if (errorMsg) {
+    const reasonCode = normalize(errorDetails?.reason_code);
+    if (
+      reasonCode === "challenge_missing" ||
+      reasonCode === "challenge_expired" ||
+      reasonCode === "session_missing" ||
+      reasonCode === "code_already_used"
+    ) {
+      clearStoredOtpChallenge({ ownerId, phoneKey });
+    }
+    return { ok: false, error: mapVerifyOtpFailure(statusCode, errorMsg, errorDetails) };
+  }
+  clearStoredOtpChallenge({ ownerId, phoneKey });
   return { ok: true };
 }

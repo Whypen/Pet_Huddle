@@ -635,23 +635,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     if (!normalizedPhone || !userId) return false;
 
     let authConfirmedForCurrentPhone = false;
-    let metadataVerifiedForCurrentPhone = false;
     try {
       const {
         data: { user: authUser },
       } = await supabase.auth.getUser();
-      const metadata = (authUser?.user_metadata as Record<string, unknown> | null) ?? null;
       const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
-      const metadataPhoneNormalized = normalizePhoneForCompare(String(metadata?.phone_e164 || ""));
       authConfirmedForCurrentPhone =
         Boolean(authUser?.phone_confirmed_at) &&
         authPhoneNormalized === normalizedPhone;
-      metadataVerifiedForCurrentPhone =
-        metadata?.phone_verified_local === true &&
-        (!metadataPhoneNormalized || metadataPhoneNormalized === normalizedPhone);
     } catch {
       authConfirmedForCurrentPhone = false;
-      metadataVerifiedForCurrentPhone = false;
     }
 
     let approvedRequestForCurrentPhone = false;
@@ -680,7 +673,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
     return (
       authConfirmedForCurrentPhone ||
-      metadataVerifiedForCurrentPhone ||
       approvedRequestForCurrentPhone
     );
   }, []);
