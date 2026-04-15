@@ -592,7 +592,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
   const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
-  const linkPreviewRemoteDisabledRef = useRef(false);
+  const linkPreviewRemoteDisabledRef = useRef(true);
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
@@ -1660,6 +1660,22 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
     return () => window.clearTimeout(timer);
   }, [focusedThreadId, notices, scrollContainerRef]);
+
+  useEffect(() => {
+    const scroller = scrollContainerRef.current;
+    if (!scroller) return;
+
+    const handleScroll = () => {
+      if (loading || loadingMore || !hasMore) return;
+      const remaining = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      if (remaining > 320) return;
+      void fetchNotices(false);
+    };
+
+    scroller.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => scroller.removeEventListener("scroll", handleScroll);
+  }, [fetchNotices, hasMore, loading, loadingMore, scrollContainerRef]);
 
   useEffect(() => {
     if (composeSignal > 0) {
