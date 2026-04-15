@@ -2732,6 +2732,10 @@ export type Database = {
           payment_method: string | null
           pet_experience: string[] | null
           phone: string | null
+          phone_verification_status:
+            | Database["public"]["Enums"]["verification_status_enum"]
+            | null
+          phone_verified_at: string | null
           posted_to_threads: boolean
           prefs: Json
           relationship_status: string | null
@@ -2864,6 +2868,10 @@ export type Database = {
           payment_method?: string | null
           pet_experience?: string[] | null
           phone?: string | null
+          phone_verification_status?:
+            | Database["public"]["Enums"]["verification_status_enum"]
+            | null
+          phone_verified_at?: string | null
           posted_to_threads?: boolean
           prefs?: Json
           relationship_status?: string | null
@@ -2996,6 +3004,10 @@ export type Database = {
           payment_method?: string | null
           pet_experience?: string[] | null
           phone?: string | null
+          phone_verification_status?:
+            | Database["public"]["Enums"]["verification_status_enum"]
+            | null
+          phone_verified_at?: string | null
           posted_to_threads?: boolean
           prefs?: Json
           relationship_status?: string | null
@@ -4756,6 +4768,76 @@ export type Database = {
         }
         Relationships: []
       }
+      view_admin_report_casefile: {
+        Row: {
+          attachment_urls: string[] | null
+          categories: string[] | null
+          report_created_at: string | null
+          report_id: string | null
+          reporter_display_name: string | null
+          reporter_user_id: string | null
+          score: number | null
+          details: string | null
+          support_created_at: string | null
+          support_message: string | null
+          support_request_id: string | null
+          support_subject: string | null
+          target_display_name: string | null
+          target_user_id: string | null
+        }
+        Relationships: []
+      }
+      view_admin_reports_queue: {
+        Row: {
+          category_tags: string[] | null
+          has_attachments: boolean | null
+          latest_report_at: string | null
+          latest_support_created_at: string | null
+          latest_support_message: string | null
+          latest_support_subject: string | null
+          report_count: number | null
+          target_user_id: string | null
+          total_score: number | null
+          unique_reporters: number | null
+        }
+        Relationships: []
+      }
+      view_admin_safety_audit_timeline: {
+        Row: {
+          action: string | null
+          actor_display_name: string | null
+          actor_id: string | null
+          audit_id: string | null
+          created_at: string | null
+          details: Json | null
+          notes: string | null
+          target_display_name: string | null
+          target_user_id: string | null
+        }
+        Relationships: []
+      }
+      view_admin_service_disputes_queue: {
+        Row: {
+          chat_status: string | null
+          dispute_category: string | null
+          dispute_created_at: string | null
+          dispute_id: string | null
+          dispute_status: string | null
+          dispute_updated_at: string | null
+          evidence_count: number | null
+          filed_by: string | null
+          payout_release_requested_at: string | null
+          payout_released_at: string | null
+          provider_display_name: string | null
+          provider_id: string | null
+          request_opened_at: string | null
+          requester_display_name: string | null
+          requester_id: string | null
+          service_chat_id: string | null
+          stripe_payment_intent_id: string | null
+        }
+        Relationships: []
+      }
       geography_columns: {
         Row: {
           coord_dimension: number | null
@@ -5623,6 +5705,10 @@ export type Database = {
       }
       refill_ai_vet_rate_limits: { Args: never; Returns: undefined }
       refresh_identity_verification_status: {
+        Args: { p_user_id: string }
+        Returns: Database["public"]["Enums"]["verification_status_enum"]
+      }
+      refresh_phone_verification_status: {
         Args: { p_user_id: string }
         Returns: Database["public"]["Enums"]["verification_status_enum"]
       }

@@ -262,7 +262,7 @@ async function callPublic<T>(
 export async function requestPhoneOtp(
   phone: string,
   turnstileToken: string,
-): Promise<{ ok: boolean; error?: string; unavailable?: boolean }> {
+): Promise<{ ok: boolean; error?: string; unavailable?: boolean; cooldownSeconds?: number }> {
   const normalized = phone.trim();
   const phoneKey = normalizePhoneKey(normalized);
   if (!normalized) return { ok: false, error: "Enter a valid phone number." };
@@ -283,7 +283,7 @@ export async function requestPhoneOtp(
       createdAt: new Date().toISOString(),
       expiresAt: null,
     });
-    return { ok: true };
+    return { ok: true, cooldownSeconds: 90 };
   }
 
   const deviceId = await getVisitorId(); // null if FingerprintJS fails — acceptable
@@ -297,6 +297,7 @@ export async function requestPhoneOtp(
     otp_type: "phone_change" | "sms";
     challenge_id: string;
     expires_at?: string | null;
+    cooldown_seconds?: number;
     error?: string;
   };
   let data: SendResponse | null = null;
@@ -358,7 +359,7 @@ export async function requestPhoneOtp(
     createdAt: new Date().toISOString(),
     expiresAt: data.expires_at ?? null,
   });
-  return { ok: true };
+  return { ok: true, cooldownSeconds: Math.max(0, Number(data.cooldown_seconds || 0)) || 90 };
 }
 
 // ── verifyPhoneOtp ────────────────────────────────────────────────────────────

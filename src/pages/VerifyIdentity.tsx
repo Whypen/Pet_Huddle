@@ -165,7 +165,6 @@ function CardStatusBadge({ state }: { state: CardVerificationState }) {
 }
 
 const IS_DEV = import.meta.env.PROD === false;
-const OTP_COUNTDOWN_SECONDS = 60;
 const maskPhoneForOtpNotice = (phone: string): string => {
   const trimmed = String(phone || "").trim();
   if (!trimmed.startsWith("+")) return "••••";
@@ -175,6 +174,24 @@ const maskPhoneForOtpNotice = (phone: string): string => {
   const country = digits.slice(0, countryLen);
   const last4 = digits.slice(-4).padStart(4, "•");
   return `+${country} •••• ${last4}`;
+};
+
+const normalizePhoneForCompare = (value: string) =>
+  String(value || "").trim().replace(/[^\d+]/g, "");
+
+const isCanonicalPhoneVerified = (
+  phoneValue: string,
+  profilePhone: string | null | undefined,
+  profilePhoneVerificationStatus: string | null | undefined,
+  profilePhoneVerifiedAt: string | null | undefined,
+) => {
+  const normalizedPhone = normalizePhoneForCompare(phoneValue);
+  if (!normalizedPhone) return false;
+  return (
+    profilePhoneVerificationStatus === "verified" &&
+    Boolean(profilePhoneVerifiedAt) &&
+    normalizePhoneForCompare(profilePhone || "") === normalizedPhone
+  );
 };
 
 interface PhoneVerificationCardProps {
@@ -193,6 +210,8 @@ interface PhoneVerificationCardProps {
   turnstileSlot?: React.ReactNode;
   unavailable?: boolean;
   maskedPhoneHint?: string | null;
+  cooldownSeconds?: number;
+  cooldownVersion?: number;
 }
 
 function PhoneVerificationCard({
@@ -211,6 +230,8 @@ function PhoneVerificationCard({
   turnstileSlot,
   unavailable = false,
   maskedPhoneHint = null,
+  cooldownSeconds = 90,
+  cooldownVersion = 0,
 }: PhoneVerificationCardProps) {
   const isVerified = state === "verified";
   const isUnavailable = state === "unavailable" || unavailable;
@@ -220,9 +241,9 @@ function PhoneVerificationCard({
   const [countdown, setCountdown] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const startCountdown = useCallback(() => {
+  const startCountdown = useCallback((seconds: number) => {
     if (countdownRef.current) clearInterval(countdownRef.current);
-    setCountdown(OTP_COUNTDOWN_SECONDS);
+    setCountdown(Math.max(0, Math.floor(seconds)));
     countdownRef.current = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -236,8 +257,10 @@ function PhoneVerificationCard({
   }, []);
 
   useEffect(() => {
-    if (state === "sent") startCountdown();
-  }, [state, startCountdown]);
+    if (state === "sent" && cooldownVersion > 0) {
+      startCountdown(cooldownSeconds);
+    }
+  }, [cooldownSeconds, cooldownVersion, startCountdown, state]);
 
   useEffect(() => {
     return () => {
@@ -390,7 +413,7 @@ function PhoneVerificationCard({
             ) : null}
             {otpSent && maskedPhoneHint ? (
               <p className="text-[12px] text-[var(--text-tertiary)]">
-                Code sent to {maskedPhoneHint}
+                Verification request accepted for {maskedPhoneHint}. Delivery can take up to 2 minutes.
               </p>
             ) : null}
           </div>
@@ -913,6 +936,8 @@ export function VerifyIdentity({
   const [phoneVerificationError, setPhoneVerificationError] = useState<string | null>(null);
   const [phoneVerificationLoading, setPhoneVerificationLoading] = useState(false);
   const [phoneSentMaskedHint, setPhoneSentMaskedHint] = useState<string | null>(null);
+  const [phoneOtpCooldownSeconds, setPhoneOtpCooldownSeconds] = useState(90);
+  const [phoneOtpCooldownVersion, setPhoneOtpCooldownVersion] = useState(0);
   const phoneOtpTurnstile = useTurnstile("send_pre_signup_verify");
   const readPhoneOtpTurnstileToken = () => {
     const maybeGetToken = (phoneOtpTurnstile as { getToken?: unknown }).getToken;
@@ -1084,42 +1109,50 @@ export function VerifyIdentity({
   };
 
   const resolvePhoneVerificationState = useCallback(async (currentUserId: string) => {
-    const normalizePhoneForCompare = (value: string) => String(value || "").trim().replace(/[^\d+]/g, "");
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-    const currentPhoneNormalized = normalizePhoneForCompare(phoneValue || profile?.phone || "");
-    const authPhoneNormalized = normalizePhoneForCompare(String(authUser?.phone || ""));
-    const authConfirmed = Boolean(authUser?.phone_confirmed_at) && authPhoneNormalized === currentPhoneNormalized;
-    const { data: approvedRequests, error: approvedRequestsError } = await supabase
-      .from("verification_requests")
-      .select("submitted_data")
-      .eq("user_id", currentUserId)
-      .eq("request_type", "phone")
-      .eq("status", "approved")
-      .limit(20);
-    const hasApprovedRequest =
-      !approvedRequestsError &&
-      Array.isArray(approvedRequests) &&
-      approvedRequests.some((request) => {
-        const submittedData = (request as { submitted_data?: unknown }).submitted_data;
-        const requestPhone =
-          submittedData && typeof submittedData === "object"
-            ? (submittedData as Record<string, unknown>).phone
-            : "";
-        return normalizePhoneForCompare(String(requestPhone || "")) === currentPhoneNormalized;
-      });
-    // Phone "Complete" must match backend truth:
-    // 1) auth.users phone_confirmed_at + exact phone match, OR
-    // 2) approved verification_request for the exact current phone number.
-    const verified = authConfirmed || hasApprovedRequest;
+    if (!currentUserId) return false;
+    const currentPhone = phoneValue || profile?.phone || "";
+    const verified = isCanonicalPhoneVerified(
+      currentPhone,
+      profile?.phone,
+      profile?.phone_verification_status,
+      profile?.phone_verified_at,
+    );
     setPhoneVerificationState((prev) => {
       if (verified) return "verified";
       if (prev === "sent" || prev === "failed") return prev;
       return "idle";
     });
     return verified;
-  }, [phoneValue, profile?.phone]);
+  }, [phoneValue, profile?.phone, profile?.phone_verification_status, profile?.phone_verified_at]);
+
+  const resolveHumanVerificationState = useCallback(async () => {
+    const snapshot = await fetchVerifyIdentitySnapshot();
+    const humanUi = toHumanUiState(snapshot.humanStatus);
+    setHumanVerificationState((prev) => (humanUi === "pending" && prev === "capturing" ? prev : humanUi));
+    if (humanUi === "passed") {
+      setHumanErrorMessage(null);
+    }
+    setOverallVerificationStatus(snapshot.verificationStatus);
+    return snapshot.humanStatus;
+  }, []);
+
+  const resolveCardVerificationState = useCallback(async () => {
+    const status = await fetchCardStatus();
+    setOverallVerificationStatus(status.verificationStatus);
+    syncCardUiFromResolvedStatus({
+      cardStatus: status.cardStatus,
+      cardVerified: status.cardStatus === "passed",
+      legalName: status.legalName,
+      cardBrand: status.cardBrand,
+      cardLast4: status.cardLast4,
+      cardFingerprintPresent: status.cardFingerprintPresent,
+      blockedIdentity: status.blockedIdentity,
+      setupIntentId: status.setupIntentId,
+      lastSetupError: status.cardLastError,
+      source: "resolve_card_status",
+    });
+    return status.cardStatus;
+  }, [syncCardUiFromResolvedStatus]);
 
   const toggleCard = (card: "phone" | "human" | "card") => setActiveCard((prev) => (prev === card ? null : card));
 
@@ -1361,8 +1394,21 @@ export function VerifyIdentity({
     if (user?.id) {
       await resolvePhoneVerificationState(user.id);
     }
+    await Promise.allSettled([
+      resolveHumanVerificationState(),
+      resolveCardVerificationState(),
+    ]);
+    await refreshProfile();
+    window.dispatchEvent(new CustomEvent("huddle:verification-updated"));
     return snapshot;
-  }, [refreshVerificationSnapshot, resolvePhoneVerificationState, user?.id]);
+  }, [
+    refreshProfile,
+    refreshVerificationSnapshot,
+    resolveCardVerificationState,
+    resolveHumanVerificationState,
+    resolvePhoneVerificationState,
+    user?.id,
+  ]);
 
   const pullCardStatus = useCallback(async (options?: { force?: boolean }) => {
     const now = Date.now();
@@ -1752,6 +1798,8 @@ export function VerifyIdentity({
       return;
     }
     setPhoneVerificationState("sent");
+    setPhoneOtpCooldownSeconds(result.cooldownSeconds || 90);
+    setPhoneOtpCooldownVersion((prev) => prev + 1);
     setPhoneVerificationError(null);
     setPhoneSentMaskedHint(maskPhoneForOtpNotice(normalized));
   };
@@ -1777,28 +1825,8 @@ export function VerifyIdentity({
     setPhoneVerificationError(null);
     setPhoneOtpCode("");
     updateSignupData({ phone: normalizedPhone, otp_verified: true });
-    if (user?.id) {
-      try {
-        await supabase.from("profiles").update({ phone: normalizedPhone }).eq("id", user.id);
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.debug("[VerifyIdentity.phone] profile phone update failed", error);
-        }
-      }
-      try {
-        await supabase.auth.updateUser({
-          data: {
-            phone_verified_local: true,
-            phone_e164: normalizedPhone,
-          },
-        });
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.debug("[VerifyIdentity.phone] metadata update failed", error);
-        }
-      }
-    }
     try {
+      await refreshProfile();
       await refreshVerificationSnapshot();
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -1822,6 +1850,7 @@ export function VerifyIdentity({
     setPhoneValue(value);
     setPhoneOtpCode("");
     setPhoneSentMaskedHint(null);
+    setPhoneOtpCooldownVersion(0);
     if (!normalized) {
       setPhoneVerificationState("idle");
       setPhoneVerificationError(null);
@@ -2233,14 +2262,18 @@ export function VerifyIdentity({
     if (humanVerificationState !== "pending" && cardVerificationState !== "pending") return;
     let cancelled = false;
     let pendingCardPolls = 0;
+    let timerId: number | null = null;
 
     const pollPending = async () => {
       try {
         const snapshot = await refreshVerificationSnapshot();
         if (cancelled) return;
         applySnapshot(snapshot);
+        if (snapshot.humanStatus === "pending") {
+          await resolveHumanVerificationState();
+        }
         if (snapshot.cardStatus === "pending") {
-          await pullCardStatus();
+          await resolveCardVerificationState();
         }
         if (snapshot.cardStatus === "pending") {
           pendingCardPolls += 1;
@@ -2254,19 +2287,34 @@ export function VerifyIdentity({
         }
       } catch {
         // best-effort polling only
+      } finally {
+        if (!cancelled) {
+          const nextDelay = pendingCardPolls >= 10 ? 2000 : 1000;
+          timerId = window.setTimeout(() => {
+            void pollPending();
+          }, nextDelay);
+        }
       }
     };
 
     void pollPending();
-    const intervalId = window.setInterval(() => {
-      void pollPending();
-    }, 2500);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
     };
-  }, [authLoading, user, humanVerificationState, cardVerificationState, pullCardStatus, refreshVerificationSnapshot, applySnapshot]);
+  }, [
+    authLoading,
+    user,
+    humanVerificationState,
+    cardVerificationState,
+    resolveCardVerificationState,
+    resolveHumanVerificationState,
+    refreshVerificationSnapshot,
+    applySnapshot,
+  ]);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -2341,6 +2389,8 @@ export function VerifyIdentity({
             errorMessage={phoneVerificationError}
             unavailable={phoneCountryUnavailable || phoneVerificationState === "unavailable"}
             maskedPhoneHint={phoneSentMaskedHint}
+            cooldownSeconds={phoneOtpCooldownSeconds}
+            cooldownVersion={phoneOtpCooldownVersion}
             turnstileSlot={
               <div className="space-y-3">
                 <TurnstileWidget

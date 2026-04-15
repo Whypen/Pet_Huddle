@@ -53,6 +53,7 @@ type PhoneOtpChallengeRow = {
   status: "sent" | "verified" | "expired" | "failed";
   verify_attempt_count: number;
   expires_at: string;
+  created_at: string;
 };
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -257,7 +258,7 @@ Deno.serve(async (req: Request) => {
   const normalizedPhone = normalizePhoneForCompare(rawPhone);
   const { data: challengeData, error: challengeErr } = await serviceClient
     .from("phone_otp_challenges")
-    .select("id,user_id,phone_e164,otp_type,status,verify_attempt_count,expires_at")
+    .select("id,user_id,phone_e164,otp_type,status,verify_attempt_count,expires_at,created_at")
     .eq("id", challengeId)
     .maybeSingle();
   const challenge = challengeData as PhoneOtpChallengeRow | null;
@@ -349,6 +350,15 @@ Deno.serve(async (req: Request) => {
   }
 
   if ((challenge.verify_attempt_count ?? 0) >= 5) {
+    await serviceClient
+      .from("phone_otp_challenges")
+      .update({
+        status: "failed",
+        error_reason: "verify_attempt_cap",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", challenge.id)
+      .eq("status", "sent");
     const logId = await logAttempt(serviceClient, {
       phoneHash, ip: clientIp, status: "rate_limited",
       userId, deviceId, sessionId,
@@ -413,7 +423,9 @@ Deno.serve(async (req: Request) => {
     const nextAttemptCount = (challenge.verify_attempt_count ?? 0) + 1;
     const nextStatus = reasonCode === "expired_code" || reasonCode === "code_already_used"
       ? "expired"
-      : "sent";
+      : nextAttemptCount >= 5
+        ? "failed"
+        : "sent";
     await serviceClient
       .from("phone_otp_challenges")
       .update({
@@ -480,6 +492,8 @@ Deno.serve(async (req: Request) => {
       .from("profiles")
       .update({
         phone: rawPhone,
+        phone_verification_status: "verified",
+        phone_verified_at: verifiedAtIso,
         updated_at: verifiedAtIso,
       })
       .eq("id", targetUserId);
@@ -496,6 +510,13 @@ Deno.serve(async (req: Request) => {
       });
     if (verificationInsertError) {
       console.error("[verify-phone-otp] verification request insert error:", verificationInsertError.message);
+    }
+
+    const { error: phoneRefreshError } = await serviceClient.rpc("refresh_phone_verification_status", {
+      p_user_id: targetUserId,
+    });
+    if (phoneRefreshError && !String(phoneRefreshError.message || "").includes("profile_not_found")) {
+      console.error("[verify-phone-otp] refresh_phone_verification_status error:", phoneRefreshError.message);
     }
 
     const { error: refreshError } = await serviceClient.rpc("refresh_identity_verification_status", {

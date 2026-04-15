@@ -1,0 +1,3 @@
+-- Remote history placeholder.
+-- This version already exists in the linked Supabase project and is kept here
+-- only so local migration history matches the remote ledger.

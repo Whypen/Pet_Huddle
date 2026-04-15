@@ -66,6 +66,11 @@ type PhoneOtpChallengeInsert = {
   provider: "supabase";
 };
 
+type ProfilePhoneRow = {
+  phone: string | null;
+  phone_verification_status: "unverified" | "pending" | "verified" | null;
+};
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 
 const CORS = {
@@ -161,6 +166,14 @@ function classifyOtpSendError(raw: string): OtpSendReasonCode {
     return "user_not_found";
   }
   return "provider_send_failed";
+}
+
+function getNextCooldownSeconds(requestCountAfterSuccess: number): number {
+  if (requestCountAfterSuccess <= 1) return 90;
+  if (requestCountAfterSuccess === 2) return 180;
+  if (requestCountAfterSuccess === 3) return 300;
+  if (requestCountAfterSuccess === 4) return 600;
+  return 1800;
 }
 
 function normalizePhoneForCompare(value: string | null | undefined): string {
@@ -386,7 +399,7 @@ Deno.serve(async (req: Request) => {
   let userId: string | null = null;
 
   let profilePhone = "";
-  let profileVerifiedViaRequest = false;
+  let profilePhoneVerified = false;
 
   if (accessToken) {
     const { data: { user }, error: authErr } =
@@ -414,33 +427,14 @@ Deno.serve(async (req: Request) => {
 
     const { data: profileRow } = await serviceClient
       .from("profiles")
-      .select("phone")
+      .select("phone, phone_verification_status")
       .eq("id", user.id)
       .maybeSingle();
-    profilePhone = normalizePhoneForCompare(String((profileRow as { phone?: string | null } | null)?.phone || ""));
+    const profilePhoneRow = (profileRow as ProfilePhoneRow | null);
+    profilePhone = normalizePhoneForCompare(String(profilePhoneRow?.phone || ""));
+    profilePhoneVerified = profilePhoneRow?.phone_verification_status === "verified";
 
-    if (profilePhone && profilePhone === targetPhone) {
-      const { data: approvedPhoneRows } = await serviceClient
-        .from("verification_requests")
-        .select("submitted_data")
-        .eq("user_id", user.id)
-        .eq("request_type", "phone")
-        .eq("status", "approved")
-        .limit(20);
-      profileVerifiedViaRequest = Array.isArray(approvedPhoneRows) && approvedPhoneRows.some((row) => {
-        const submittedData =
-          row && typeof row === "object" && "submitted_data" in row
-            ? (row as { submitted_data?: unknown }).submitted_data
-            : null;
-        const candidate =
-          submittedData && typeof submittedData === "object"
-            ? (submittedData as Record<string, unknown>).phone
-            : "";
-        return normalizePhoneForCompare(String(candidate || "")) === targetPhone;
-      });
-    }
-
-    if (profilePhone && profilePhone === targetPhone && profileVerifiedViaRequest) {
+    if (profilePhone && profilePhone === targetPhone && profilePhoneVerified) {
       return new Response(
         JSON.stringify({
           error: "already_verified",
@@ -499,8 +493,9 @@ Deno.serve(async (req: Request) => {
 
   // ── Near-cap telemetry flags ──────────────────────────────────────────────
   const flags: string[] = [];
-  if (limit.phone_cnt >= 3) flags.push("near_phone_daily_cap");
-  if (limit.ip_cnt    >= 15) flags.push("near_ip_daily_cap");
+  if (limit.phone_cnt >= 4) flags.push("near_phone_daily_cap");
+  if (limit.user_cnt  >= 4) flags.push("near_user_daily_cap");
+  if (limit.ip_cnt    >= 20) flags.push("near_ip_daily_cap");
 
   // ── Send OTP via Supabase Auth ────────────────────────────────────────────
   //
@@ -663,6 +658,7 @@ Deno.serve(async (req: Request) => {
       ok: true,
       log_id: logId,
       attempt_count: limit.phone_cnt + 1,
+      cooldown_seconds: getNextCooldownSeconds(limit.phone_cnt + 1),
       challenge_id: challengeId,
       expires_at: challengeExpiresAt,
       // otp_type tells the client which type to use in verifyOtp()
