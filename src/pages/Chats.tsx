@@ -4299,6 +4299,15 @@ const Chats = () => {
       : isImmediateNext
         ? { y: nextCardTranslateY, scale: nextCardScale, transformOrigin: "50% 100%" as const }
         : { transformOrigin: "50% 100%" as const };
+
+    // Non-active cards: initial = already in resting position, no enter animation.
+    // Active card: initial false so framer never overrides the live motion values.
+    const cardInitial = isActive
+      ? false as const
+      : isImmediateNext
+        ? { x: 0, y: 8, scale: 0.95, rotate: 0, opacity: 1 }
+        : { x: 0, y: stackedOffsetY, scale: stackedScale, rotate: 0, opacity: stackedOpacity };
+
     const cardAnimate = isActive
       ? { opacity: 1 }
       : isImmediateNext
@@ -4312,6 +4321,7 @@ const Chats = () => {
         dragConstraints={isActive ? { left: 0, right: 0, top: 30, bottom: 30 } : undefined}
         dragElastic={isActive ? 0.15 : undefined}
         dragMomentum={false}
+        initial={cardInitial}
         style={cardStyle}
         animate={isActive ? { x: 0, y: 0, rotate: 0, opacity: 1 } : cardAnimate}
         transition={{ type: "spring", stiffness: 260, damping: 28, mass: 0.92 }}
