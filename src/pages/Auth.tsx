@@ -157,7 +157,7 @@ const Auth = () => {
       if (loginTurnstile.error) {
         setAuthError(mapAuthFailureMessage(loginTurnstile.error));
       } else {
-        setAuthError("There's something wrong with your verification. Please try again later.");
+        setAuthError("Verification is temporarily unavailable. Please try again later.");
       }
       return;
     }

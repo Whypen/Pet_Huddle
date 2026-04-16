@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
+import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
 
 type ApiError = {
   message: string;
@@ -57,7 +58,15 @@ type SignupResponse = {
 
 async function postPublic<T>(functionName: string, body: unknown): Promise<{ data: T | null; error: ApiError | null }> {
   const res = await postPublicFunction<T>(functionName, body);
-  return { data: res.data, error: res.error };
+  return {
+    data: res.data,
+    error: res.error
+      ? {
+          ...res.error,
+          message: mapAuthFailureMessage(res.error),
+        }
+      : null,
+  };
 }
 
 async function applySession(session: SessionTokens | null | undefined): Promise<ApiError | null> {
@@ -66,15 +75,16 @@ async function applySession(session: SessionTokens | null | undefined): Promise<
     access_token: session.access_token,
     refresh_token: session.refresh_token,
   });
-  return error ? { message: error.message || "set_session_failed" } : null;
+  return error ? { message: mapAuthFailureMessage(error.message || "set_session_failed") } : null;
 }
 
-export async function authLogin(payload: LoginPayload): Promise<{ error: ApiError | null }> {
+export async function authLogin(payload: LoginPayload): Promise<{ userId: string | null; error: ApiError | null }> {
   const res = await postPublic<LoginResponse>("auth-login", payload);
-  if (res.error) return { error: res.error };
+  if (res.error) return { userId: null, error: res.error };
   const setSessionError = await applySession(res.data?.session);
-  if (setSessionError) return { error: setSessionError };
-  return { error: null };
+  if (setSessionError) return { userId: null, error: setSessionError };
+  const userId = String((res.data?.user as { id?: string | null } | null)?.id || "").trim() || null;
+  return { userId, error: null };
 }
 
 export async function authSignup(payload: SignupPayload): Promise<{ session: SessionTokens | null; user: unknown | null; error: ApiError | null }> {

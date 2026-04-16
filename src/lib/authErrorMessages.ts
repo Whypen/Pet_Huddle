@@ -34,7 +34,7 @@ export function mapAuthFailureMessage(error: ErrorLike | string | null | undefin
     normalizedCode.includes("human_verification_failed") ||
     detailsContainVerificationFailure(details)
   ) {
-    return "There's something wrong with your verification. Please try again later.";
+    return "Verification is temporarily unavailable. Please try again later.";
   }
 
   if (

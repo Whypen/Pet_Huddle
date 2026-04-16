@@ -747,8 +747,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
       }
 
-      const { data } = await supabase.auth.getUser();
-      const uid = data?.user?.id;
+      const uid = loginResult.userId;
       if (uid) {
         void supabase
           .from("profiles")
