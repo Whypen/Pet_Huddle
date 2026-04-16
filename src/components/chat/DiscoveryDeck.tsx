@@ -119,11 +119,18 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [discoveryUseSideActions, setDiscoveryUseSideActions] = useState(false);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
+  const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const discoveryCardStackRef = useRef<HTMLDivElement | null>(null);
   const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
+  const discoveryVisibleBottomActionsRef = useRef<HTMLDivElement | null>(null);
   const discoverImageInteractingRef = useRef(false);
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
+
+  const CTA_VISUAL_SHADOW_ALLOWANCE = 14;
+  const NAV_PROTECTED_PADDING = 12;
+  const SIDE_ACTION_ENTER_GAP = 0;
+  const SIDE_ACTION_EXIT_GAP = 12;
 
   useEffect(() => {
     setDiscoverImageIndex(0);
@@ -142,9 +149,11 @@ const DiscoveryDeckInner = ({
       setDiscoveryUseSideActions(false);
       return;
     }
-    const trayNode = discoveryBottomActionsRef.current;
+    const trayNode = discoveryVisibleBottomActionsRef.current ?? discoveryBottomActionsRef.current;
     const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
-    if (!trayNode || !navNode) {
+    const scrollNode = discoveryScrollContainerRef.current;
+    const stackNode = discoveryCardStackRef.current;
+    if (!trayNode || !navNode || !scrollNode || !stackNode) {
       setDiscoveryUseSideActions(false);
       return;
     }
@@ -155,8 +164,16 @@ const DiscoveryDeckInner = ({
       frameId = window.requestAnimationFrame(() => {
         const trayRect = trayNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
-        const clearance = navRect.top - trayRect.bottom;
-        setDiscoveryUseSideActions(clearance < 12);
+        const protectedNavTop = navRect.top - NAV_PROTECTED_PADDING;
+        const ctaVisualBottom = trayRect.bottom + CTA_VISUAL_SHADOW_ALLOWANCE;
+        const effectiveGap = protectedNavTop - ctaVisualBottom;
+
+        setDiscoveryUseSideActions((current) => {
+          if (current) {
+            return effectiveGap <= SIDE_ACTION_EXIT_GAP;
+          }
+          return effectiveGap < SIDE_ACTION_ENTER_GAP;
+        });
       });
     };
 
@@ -167,12 +184,19 @@ const DiscoveryDeckInner = ({
     });
     resizeObserver.observe(trayNode);
     resizeObserver.observe(navNode);
+    resizeObserver.observe(stackNode);
     window.addEventListener("resize", measure);
+    scrollNode.addEventListener("scroll", measure, { passive: true });
+    window.visualViewport?.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("scroll", measure);
 
     return () => {
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       window.removeEventListener("resize", measure);
+      scrollNode.removeEventListener("scroll", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("scroll", measure);
     };
   }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, stackedDiscoveryCards.length]);
 
@@ -529,6 +553,7 @@ const DiscoveryDeckInner = ({
   return (
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
       <div
+        ref={discoveryScrollContainerRef}
         className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300"
       >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
@@ -595,7 +620,7 @@ const DiscoveryDeckInner = ({
             </div>
           </div>
           {renderDiscoverEmpty ? <div /> : !discoveryUseSideActions && !isDiscoverDragging ? (
-            <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
+            <div ref={discoveryVisibleBottomActionsRef} className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
               {renderDiscoveryActionButtons("bottom")}
             </div>
           ) : <div />}
