@@ -101,7 +101,7 @@ const fireBrevoProfileCompleted = async (
   const uid = String(userId || "").trim();
   if (!uid) return;
   try {
-    await fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/brevo-sync`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${serviceRoleKey}`,
@@ -112,6 +112,10 @@ const fireBrevoProfileCompleted = async (
         user_id: uid,
       }),
     });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.warn("[auth-signup] brevo profile_completed sync returned non-ok", response.status, text);
+    }
   } catch (error) {
     console.warn("[auth-signup] brevo profile_completed sync failed", error);
   }

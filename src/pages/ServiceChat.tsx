@@ -47,6 +47,7 @@ const ServiceChat = () => {
     counterpart,
     role,
     loading,
+    roomResolved,
     sending,
     canMarkFinished,
     canDispute,
@@ -93,6 +94,7 @@ const ServiceChat = () => {
   const isRequester = role === "requester";
   const isProvider = role === "provider";
   const hasRequest = Boolean(serviceChat?.request_card);
+  const currentRoomResolved = roomResolved && (!roomId || !serviceChat || serviceChat.chat_id === roomId);
   const chatDisabledBySafety = isActive("chat_disabled");
   const hasQuote = Boolean(serviceChat?.quote_card);
   const noMessagesYet = messages.length === 0;
@@ -296,7 +298,7 @@ const ServiceChat = () => {
     status,
   ]);
 
-  const showLoading = authLoading || loading || (!!roomId && !userId);
+  const showLoading = authLoading || loading || (!!roomId && (!userId || !currentRoomResolved));
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-hidden">
@@ -433,7 +435,7 @@ const ServiceChat = () => {
       </div>
 
       <div ref={bottomBarRef}>
-        {composerUploads.length > 0 ? (
+        {!showLoading && serviceChat && composerUploads.length > 0 ? (
           <div className="border-t border-border/40 bg-background px-4 pt-2">
             <div className="mb-2 flex gap-2 overflow-x-auto">
               {composerUploads.map((file, idx) => (
@@ -448,13 +450,14 @@ const ServiceChat = () => {
             </div>
           </div>
         ) : null}
-        {status === "pending" && isRequester && !hasRequest ? (
+        {!showLoading && serviceChat ? (
+          status === "pending" && isRequester && !hasRequest ? (
           <StartRequestBar onClick={() => setActiveSheet("request")} />
-        ) : status === "pending" && isProvider && !hasRequest ? (
+          ) : status === "pending" && isProvider && !hasRequest ? (
           <div className="border-t border-border/40 bg-background px-4 py-3 pb-[max(8px,env(safe-area-inset-bottom))]">
             <p className="text-xs text-muted-foreground text-center">Requester hasn’t sent a service request yet.</p>
           </div>
-        ) : (
+          ) : (
           <ActionBar
             waitingForCounterparty={waitingForCounterparty}
             peerName={peerName}
@@ -465,6 +468,7 @@ const ServiceChat = () => {
             hasQuote={hasQuote}
             submittingAction={sending}
             composer={composer}
+            hasUploads={composerUploads.length > 0}
             composerLocked={Boolean(!hasRequest)}
             sendingMessage={sendingMessage || uploadingComposer}
             chatDisabled={chatDisabledBySafety}
@@ -475,6 +479,9 @@ const ServiceChat = () => {
             onOpenDispute={() => setActiveSheet("dispute")}
             onAskRevise={() => setActiveSheet("request")}
           />
+          )
+        ) : (
+          <div className="border-t border-border/40 bg-background px-4 py-3 pb-[max(8px,env(safe-area-inset-bottom))]" />
         )}
         <input
           ref={imageInputRef}

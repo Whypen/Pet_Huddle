@@ -105,6 +105,8 @@ interface FriendPin {
   last_lat: number | null;
   last_lng: number | null;
   location_pinned_until: string | null;
+  location_retention_until?: string | null;
+  marker_state?: "active" | "expired_dot";
 }
 
 interface VetClinic {
@@ -197,7 +199,17 @@ function dedupeById(items: MapAlert[]): MapAlert[] {
   return Object.values(dedup);
 }
 
+type OwnPinState = {
+  lat: number;
+  lng: number;
+  pinnedAt: string | null;
+  markerState: "active" | "expired_dot";
+  isInvisible: boolean;
+};
+
 const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const USER_PIN_ACTIVE_HOURS = 24;
+const USER_PIN_RETENTION_HOURS = 24 * 7;
 
 // ==========================================================================
 // POI Cache: Read vets + pet shops from poi_locations table (NO live Overpass)
@@ -245,6 +257,7 @@ const MapPage = () => {
   const [showVets] = useState(false);
   const [visibleEnabled, setVisibleEnabled] = useState(false);
   const [dbAlerts, setDbAlerts] = useState<MapAlert[]>([]);
+  const dbAlertsRef = useRef<MapAlert[]>([]);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [friendPins, setFriendPins] = useState<FriendPin[]>([]);
   const [vetClinics, setVetClinics] = useState<VetClinic[]>([]);
@@ -276,11 +289,13 @@ const MapPage = () => {
     if (import.meta.env.DEV) console.debug("[BROADCAST_PIN]", broadcastPreviewPin);
   }, [broadcastPreviewPin]);
   const [pinPersistedAt, setPinPersistedAt] = useState<string | null>(null);
+  const [ownMarkerState, setOwnMarkerState] = useState<"active" | "expired_dot" | null>(null);
   const [pinAddressSnapshot, setPinAddressSnapshot] = useState<string | null>(null);
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
   const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
   const hideFromMap = Boolean(profile?.hide_from_map);
   const ownMarkerCacheKey = useMemo(() => (user?.id ? `huddle:last-own-coords:${user.id}` : null), [user?.id]);
+  const alertsCacheKey = useMemo(() => (user?.id ? `huddle:map-alerts:${user.id}` : null), [user?.id]);
 
   useEffect(() => {
     if (!ownMarkerCacheKey) {
@@ -325,6 +340,81 @@ const MapPage = () => {
       // best-effort cache only
     }
   }, [ownMarkerCacheKey]);
+
+  const readCachedAlerts = useCallback((): MapAlert[] => {
+    if (!alertsCacheKey) return [];
+    try {
+      const raw = localStorage.getItem(alertsCacheKey);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((item): item is MapAlert => {
+        if (!item || typeof item !== "object") return false;
+        const row = item as Record<string, unknown>;
+        return typeof row.id === "string" && typeof row.latitude === "number" && typeof row.longitude === "number";
+      });
+    } catch {
+      return [];
+    }
+  }, [alertsCacheKey]);
+
+  const writeCachedAlerts = useCallback((alerts: MapAlert[]) => {
+    if (!alertsCacheKey) return;
+    try {
+      localStorage.setItem(alertsCacheKey, JSON.stringify(alerts));
+    } catch {
+      // best-effort cache only
+    }
+  }, [alertsCacheKey]);
+
+  const deriveOwnPinState = useCallback((profileRecord: Record<string, unknown> | null): OwnPinState | null => {
+    const lat = typeof profileRecord?.last_lat === "number" ? profileRecord.last_lat : null;
+    const lng = typeof profileRecord?.last_lng === "number" ? profileRecord.last_lng : null;
+    if (lat === null || lng === null) return null;
+    const pinnedUntil = typeof profileRecord?.location_pinned_until === "string"
+      ? String(profileRecord.location_pinned_until)
+      : null;
+    const retentionUntil = typeof profileRecord?.location_retention_until === "string"
+      ? String(profileRecord.location_retention_until)
+      : null;
+    const nowMs = Date.now();
+    const pinnedMs = pinnedUntil ? new Date(pinnedUntil).getTime() : Number.NaN;
+    const retentionMs = retentionUntil ? new Date(retentionUntil).getTime() : Number.NaN;
+    if (Number.isFinite(pinnedMs) && pinnedMs > nowMs) {
+      return {
+        lat,
+        lng,
+        pinnedAt: pinnedUntil,
+        markerState: "active",
+        isInvisible: Boolean(profileRecord?.hide_from_map),
+      };
+    }
+    if (Number.isFinite(retentionMs) && retentionMs > nowMs) {
+      return {
+        lat,
+        lng,
+        pinnedAt: pinnedUntil || retentionUntil,
+        markerState: "expired_dot",
+        isInvisible: Boolean(profileRecord?.hide_from_map),
+      };
+    }
+    return null;
+  }, []);
+
+  const getProfileRetainedPin = useCallback((): OwnPinState | null => {
+    return deriveOwnPinState((profile || null) as Record<string, unknown> | null);
+  }, [deriveOwnPinState, profile]);
+
+  useEffect(() => {
+    dbAlertsRef.current = dbAlerts;
+  }, [dbAlerts]);
+
+  useEffect(() => {
+    const cached = readCachedAlerts();
+    if (cached.length > 0) {
+      setDbAlerts(cached);
+    }
+  }, [readCachedAlerts]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -380,25 +470,17 @@ const MapPage = () => {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data, error } = await supabase
-        .from("pins")
-        .select("lat,lng,created_at")
-        .eq("user_id", user.id)
-        .is("thread_id", null)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error || !data) return;
-      if (typeof data.lat === "number" && typeof data.lng === "number") {
-        const next = { lat: data.lat, lng: data.lng };
-        setUserLocation(next);
-        persistOwnMarkerCoords(next);
-        setVisibleEnabled(true);
-        setIsInvisible(hideFromMap);
-        if (typeof data.created_at === "string") setPinPersistedAt(data.created_at);
-      }
+      const retainedPin = getProfileRetainedPin();
+      if (!retainedPin) return;
+      const next = { lat: retainedPin.lat, lng: retainedPin.lng };
+      setUserLocation(next);
+      persistOwnMarkerCoords(next);
+      setVisibleEnabled(true);
+      setIsInvisible(retainedPin.isInvisible);
+      setPinPersistedAt(retainedPin.pinnedAt);
+      setOwnMarkerState(retainedPin.markerState);
     })();
-  }, [hideFromMap, persistOwnMarkerCoords, user]);
+  }, [getProfileRetainedPin, persistOwnMarkerCoords, user]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
@@ -596,8 +678,8 @@ const MapPage = () => {
     const { error: setLocationError } = await supabase.rpc("set_user_location", {
       p_lat: lat,
       p_lng: lng,
-      p_pin_hours: 24 * 365 * 10,
-      p_retention_hours: 24 * 365 * 10,
+      p_pin_hours: USER_PIN_ACTIVE_HOURS,
+      p_retention_hours: USER_PIN_RETENTION_HOURS,
       p_address: resolvedAddress,
     });
     if (setLocationError) {
@@ -607,22 +689,9 @@ const MapPage = () => {
       return;
     }
 
-    const { data: persistedPin, error: persistedPinError } = await supabase
-      .from("pins")
-      .select("lat,lng,created_at")
-      .eq("user_id", user.id)
-      .is("thread_id", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (persistedPinError || !persistedPin) {
-      if (import.meta.env.DEV) console.error("[PIN] persisted pin readback failed", persistedPinError);
-      setPinning(false);
-      toast.error("Failed to pin location");
-      return;
-    }
-
-    const pinnedAt = typeof persistedPin.created_at === "string" ? persistedPin.created_at : new Date().toISOString();
+    const pinnedAt = new Date().toISOString();
+    setUserLocation({ lat, lng });
+    setOwnMarkerState("active");
     setPinPersistedAt(pinnedAt);
     if (import.meta.env.DEV) console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
     persistOwnMarkerCoords({ lat, lng });
@@ -702,6 +771,7 @@ const MapPage = () => {
   const confirmUnpinLocation = async () => {
     setShowUnpinConfirm(false);
     if (!user) return;
+    const { error: clearProfilePinError } = await supabase.rpc("clear_user_location_pin");
     const { error: pinDeleteError } = await supabase.from("pins").delete().eq("user_id", user.id).is("thread_id", null);
     const { error: userLocationError } = await supabase
       .from("user_locations")
@@ -710,12 +780,13 @@ const MapPage = () => {
         expires_at: new Date().toISOString(),
       } as Record<string, unknown>)
       .eq("user_id", user.id);
-    const unpinError = pinDeleteError ?? userLocationError;
+    const unpinError = clearProfilePinError ?? pinDeleteError ?? userLocationError;
     if (unpinError) {
       toast.error(t("Failed to unpin location"));
       return;
     }
     setPinPersistedAt(null);
+    setOwnMarkerState(null);
     setIsInvisible(false);
     setUserLocation(null);
     clearOwnMarkerCoordsCache();
@@ -1027,21 +1098,36 @@ const MapPage = () => {
       const nowMs = Date.now();
       const graceMs = 7 * 24 * 60 * 60 * 1000;
       const rpcIds = new Set(mapped.map((item) => item.id));
-      const fallbackDots: MapAlert[] = [];
+      const fallbackDots: MapAlert[] = readCachedAlerts()
+        .filter((row) => !rpcIds.has(row.id))
+        .filter((row) => {
+          const baseMs = row.expires_at ? new Date(row.expires_at).getTime() : new Date(row.created_at).getTime();
+          return Number.isFinite(baseMs) && baseMs + graceMs > nowMs;
+        })
+        .map((row) => ({
+          ...row,
+          marker_state: "expired_dot",
+        }));
       const visibleOnly = mapped
         .concat(fallbackDots)
+        .filter((row, index, all) => all.findIndex((entry) => entry.id === row.id) === index)
         .filter((row): row is MapAlert => row.marker_state !== "hidden")
         .filter((row) => !(row.creator_id && blockedUserIds.has(row.creator_id)));
       setDbAlerts(visibleOnly);
+      writeCachedAlerts(visibleOnly);
       return visibleOnly;
     } catch (error) {
       if (import.meta.env.DEV) console.error("Error fetching dbAlerts:", error);
-      setDbAlerts([]);
-      return [];
+      const cached = readCachedAlerts();
+      if (cached.length > 0) {
+        setDbAlerts(cached);
+        return cached;
+      }
+      return dbAlertsRef.current;
     } finally {
       setLoading(false);
     }
-  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, userLocation?.lat, userLocation?.lng]);
+  }, [blockedUserIds, defaultCenter, profile?.last_lat, profile?.last_lng, readCachedAlerts, userLocation?.lat, userLocation?.lng, writeCachedAlerts]);
 
   const fetchAlertByIdForDeepLink = useCallback(async (alertId: string): Promise<MapAlert | null> => {
     const trimmedAlertId = String(alertId || "").trim();
@@ -1150,7 +1236,7 @@ const MapPage = () => {
         setFriendPins([]);
       }
     } catch {
-      setFriendPins([]);
+      // Preserve the current overlay on transient failures.
     }
   }, [defaultCenter, profile?.last_lat, profile?.last_lng, user, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
 
@@ -1160,23 +1246,22 @@ const MapPage = () => {
       clearOwnMarkerCoordsCache();
       setVisibleEnabled(false);
       setPinPersistedAt(null);
+      setOwnMarkerState(null);
       setPinAddressSnapshot(null);
       setIsInvisible(false);
       return null;
     }
     const { data, error } = await supabase
-      .from("pins")
-      .select("lat,lng,created_at")
-      .eq("user_id", user.id)
-      .is("thread_id", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
+      .from("profiles")
+      .select("last_lat,last_lng,location_pinned_until,location_retention_until,hide_from_map")
+      .eq("id", user.id)
       .maybeSingle();
     if (error) {
       // Keep current UI pin state on transient fetch failure.
       return userLocation;
     }
-    if (!data || typeof data.lat !== "number" || typeof data.lng !== "number") {
+    const retainedPin = deriveOwnPinState((data || null) as Record<string, unknown> | null);
+    if (!retainedPin) {
       if (userLocation) {
         setVisibleEnabled(true);
         setIsInvisible(hideFromMap);
@@ -1190,18 +1275,20 @@ const MapPage = () => {
       setUserLocation(null);
       setVisibleEnabled(false);
       setPinPersistedAt(null);
+      setOwnMarkerState(null);
       setPinAddressSnapshot(null);
       setIsInvisible(false);
       return null;
     }
-    const next = { lat: data.lat, lng: data.lng };
+    const next = { lat: retainedPin.lat, lng: retainedPin.lng };
     setUserLocation(next);
     persistOwnMarkerCoords(next);
     setVisibleEnabled(true);
-    setIsInvisible(hideFromMap);
-    setPinPersistedAt(typeof data.created_at === "string" ? data.created_at : null);
+    setIsInvisible(retainedPin.isInvisible);
+    setPinPersistedAt(retainedPin.pinnedAt);
+    setOwnMarkerState(retainedPin.markerState);
     return next;
-  }, [clearOwnMarkerCoordsCache, hideFromMap, lastKnownOwnCoords, persistOwnMarkerCoords, user?.id, userLocation]);
+  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, hideFromMap, lastKnownOwnCoords, persistOwnMarkerCoords, user?.id, userLocation]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1374,6 +1461,7 @@ const MapPage = () => {
         avatarUrl: p.avatar_url,
         isVerified: Boolean(p.is_verified),
         isInvisible: Boolean(p.is_invisible),
+        markerState: p.marker_state === "expired_dot" ? "expired_dot" : "active",
       });
     });
     return pins;
@@ -1381,12 +1469,9 @@ const MapPage = () => {
 
   const ownMarkerCoords = useMemo<{ lat: number; lng: number } | null>(() => {
     if (userLocation) return userLocation;
-    if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
-      return { lat: profile.last_lat, lng: profile.last_lng };
-    }
     if (lastKnownOwnCoords) return lastKnownOwnCoords;
     return null;
-  }, [lastKnownOwnCoords, profile?.last_lat, profile?.last_lng, userLocation]);
+  }, [lastKnownOwnCoords, userLocation]);
 
   const filteredPins = useMemo(
     () =>
@@ -1614,6 +1699,7 @@ const MapPage = () => {
             avatarUrl={profile?.avatar_url || null}
             isVerified={profile?.is_verified === true}
             isInvisible={isInvisible}
+            markerState={ownMarkerState || "active"}
           />
         )}
         {map.current && broadcastPreviewPin && (

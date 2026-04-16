@@ -11,9 +11,18 @@ interface BlueDotMarkerProps {
   avatarUrl?: string | null;
   isVerified?: boolean;
   isInvisible?: boolean;
+  markerState?: "active" | "expired_dot";
 }
 
-const BlueDotMarker = ({ map, coords, displayName, avatarUrl, isVerified = false, isInvisible = false }: BlueDotMarkerProps) => {
+const BlueDotMarker = ({
+  map,
+  coords,
+  displayName,
+  avatarUrl,
+  isVerified = false,
+  isInvisible = false,
+  markerState = "active",
+}: BlueDotMarkerProps) => {
   const [screenPoint, setScreenPoint] = useState<{ x: number; y: number } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
@@ -73,7 +82,15 @@ const BlueDotMarker = ({ map, coords, displayName, avatarUrl, isVerified = false
         transform: "translate(-50%, -50%)",
       }}
     >
-      {isInvisible ? (
+      {markerState === "expired_dot" ? (
+        <div
+          className="h-4 w-4 rounded-full border border-white/80 shadow-[0_4px_12px_rgba(33,69,207,0.28)]"
+          style={{ background: "rgba(33,69,207,0.72)" }}
+          aria-label="Retained pin"
+        >
+          <div className="m-auto mt-[5px] h-1.5 w-1.5 rounded-full bg-white" />
+        </div>
+      ) : isInvisible ? (
         <div
           className="h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)] flex items-center justify-center"
           style={{ border: "2px solid #A6D539", background: "#A6D539" }}

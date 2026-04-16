@@ -10,6 +10,7 @@ export type FriendOverlayPin = {
   avatarUrl?: string | null;
   isVerified?: boolean;
   isInvisible?: boolean;
+  markerState?: "active" | "expired_dot";
 };
 
 type Props = {
@@ -110,6 +111,26 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 <User className="h-5 w-5 text-white" strokeWidth={2.4} />
               </span>
             </div>
+          );
+        }
+        if (friend.markerState === "expired_dot") {
+          return (
+            <button
+              key={friend.id}
+              type="button"
+              className="absolute z-[1150] pointer-events-auto focus:outline-none"
+              style={{
+                left: `${pt.x}px`,
+                top: `${pt.y}px`,
+                transform: "translate(-50%, -100%)",
+              }}
+              onClick={() => onSelect(friend.id)}
+              aria-label={`Open ${friend.name}`}
+            >
+              <span className="flex h-4 w-4 items-center justify-center rounded-full border border-white/80 bg-[#2145CF]/70 shadow-[0_4px_12px_rgba(33,69,207,0.28)]">
+                <span className="h-1.5 w-1.5 rounded-full bg-white" />
+              </span>
+            </button>
           );
         }
         return (

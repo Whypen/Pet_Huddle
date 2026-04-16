@@ -16,6 +16,7 @@ type UseServiceChatResult = {
   counterpart: ServiceCounterpart | null;
   role: ServiceRole | null;
   loading: boolean;
+  roomResolved: boolean;
   sending: boolean;
   canMarkFinished: boolean;
   canDispute: boolean;
@@ -43,6 +44,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   const [messages, setMessages] = useState<ChatMessageRow[]>([]);
   const [counterpart, setCounterpart] = useState<ServiceCounterpart | null>(null);
   const [loading, setLoading] = useState(true);
+  const [roomResolved, setRoomResolved] = useState(false);
   const [sending, setSending] = useState(false);
   const [hasReviewed, setHasReviewed] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -86,6 +88,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     async (silent = false) => {
       if (!roomId) {
         setLoading(false);
+        setRoomResolved(true);
         hasLoadedRef.current = false;
         setServiceChat(null);
         setMessages([]);
@@ -93,7 +96,10 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         setHasReviewed(false);
         return;
       }
-      if (!userId) return;
+      if (!userId) {
+        setRoomResolved(false);
+        return;
+      }
       if (reloadInFlightRef.current) return;
       reloadInFlightRef.current = true;
       const shouldShowLoading = !silent || !hasLoadedRef.current;
@@ -166,7 +172,9 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           setHasReviewed(false);
         }
         hasLoadedRef.current = true;
+        setRoomResolved(true);
       } catch (error) {
+        setRoomResolved(true);
         toast.error(
           String((error as { message?: string })?.message || "").includes("not_found")
             ? "Service chat not found."
@@ -182,8 +190,10 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
 
   useEffect(() => {
     hasLoadedRef.current = false;
+    reloadInFlightRef.current = false;
     if (!roomId) {
       setLoading(false);
+      setRoomResolved(true);
       setServiceChat(null);
       setMessages([]);
       setCounterpart(null);
@@ -191,9 +201,20 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       return;
     }
     if (!userId) {
+      setServiceChat(null);
+      setMessages([]);
+      setCounterpart(null);
+      setHasReviewed(false);
+      setRoomResolved(false);
       setLoading(true);
       return;
     }
+    setServiceChat(null);
+    setMessages([]);
+    setCounterpart(null);
+    setHasReviewed(false);
+    setRoomResolved(false);
+    setLoading(true);
     void reload(false);
   }, [reload, roomId, userId]);
 
@@ -336,6 +357,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     counterpart,
     role,
     loading,
+    roomResolved,
     sending,
     canMarkFinished,
     canDispute,
