@@ -42,9 +42,10 @@ export function mapAuthFailureMessage(error: ErrorLike | string | null | undefin
     normalizedMessage.includes("failed to fetch") ||
     normalizedMessage.includes("networkerror") ||
     normalizedMessage.includes("network_error") ||
+    normalizedMessage.includes("timeout") ||
     normalizedMessage.includes("fetch")
   ) {
-    return "Verification is temporarily unavailable. Please try again later.";
+    return "Sign in is taking too long. Please try again.";
   }
 
   if (normalizedMessage === "complete human verification first.") {
@@ -67,6 +68,7 @@ export function shouldResetTurnstileForAuthError(error: ErrorLike | string | nul
     normalizedMessage.includes("failed to fetch") ||
     normalizedMessage.includes("networkerror") ||
     normalizedMessage.includes("network_error") ||
+    normalizedMessage.includes("timeout") ||
     normalizedCode.includes("human_verification_failed") ||
     detailsContainVerificationFailure(details)
   );

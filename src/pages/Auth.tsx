@@ -163,7 +163,6 @@ const Auth = () => {
     }
     signInPendingRef.current = true;
     setSignInLoading(true);
-    loginTurnstile.consumeToken();
     try {
       const result = await signIn(values.email, values.password, undefined, turnstileToken);
       if (result.error) {
@@ -482,7 +481,7 @@ const Auth = () => {
                   <div>turnstile codes: {authDebugCodes.length ? authDebugCodes.join(", ") : "none"}</div>
                 </div>
               ) : null}
-              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading}>
+              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading} loading={signInLoading}>
                 Sign in
               </NeuButton>
               {authError ? (

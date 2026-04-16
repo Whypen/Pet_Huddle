@@ -14,6 +14,7 @@ import {
 import { fetchLivePrices, resolvePricingHints } from "@/lib/stripePrices";
 import { normalizeMembershipTier } from "@/lib/membership";
 import { authLogin, authSignup } from "@/lib/publicAuthApi";
+import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
 
 export interface Profile {
   id: string;
@@ -102,6 +103,29 @@ export interface Profile {
   care_circle?: string[] | null;
   last_active_at?: string | null;
 }
+
+type AuthUiError = Error & { details?: unknown };
+const AUTH_FLOW_TIMEOUT_MS = 12000;
+
+const buildAuthUiError = (message: string, details?: unknown): AuthUiError => {
+  const error = new Error(message) as AuthUiError;
+  if (details !== undefined) error.details = details;
+  return error;
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, message: string, timeoutMs = AUTH_FLOW_TIMEOUT_MS): Promise<T> => {
+  let timeoutId: number | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
+  }
+};
 
 interface AuthContextType {
   user: User | null;
@@ -450,7 +474,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // component, destroying modal state like emailModalOpen.
     // Instead, set `hydrating` to signal that user→profile is in flight.
     setHydrating(true);
-    const { data, error } = await supabase.auth.getUser(candidateSession.access_token);
+    const { data, error } = await supabase.auth.getUser();
+    if (!isHydrationRunCurrent(runId)) return;
+    const { data: refreshedSessionData } = await supabase.auth.getSession();
     if (!isHydrationRunCurrent(runId)) return;
     if (error || !data.user) {
       if (import.meta.env.DEV) {
@@ -466,11 +492,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    supabase.realtime.setAuth(candidateSession.access_token ?? null);
+    const effectiveSession = refreshedSessionData.session ?? candidateSession;
+    supabase.realtime.setAuth(effectiveSession.access_token ?? null);
     const aal = await getAuthenticatorAssurance(supabase);
     if (!isHydrationRunCurrent(runId)) return;
     const isMfaPending = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
-    setSession(candidateSession);
+    setSession(effectiveSession);
     if (isMfaPending) {
       setMfaPending(true);
       // Keep public routes visible until MFA challenge is completed.
@@ -675,30 +702,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       if (!String(turnstileToken || "").trim()) {
         return {
-          error: new Error("Complete human verification first."),
+          error: buildAuthUiError("Please complete verification first."),
           mfaRequired: false,
           mfaFactorId: null,
           mfaMethod: null,
         };
       }
-      const loginResult = await authLogin({
+      const loginResult = await withTimeout(authLogin({
         email: phone ? undefined : email,
         phone: phone || undefined,
         password,
         turnstile_token: String(turnstileToken || "").trim(),
         turnstile_action: "login",
-      });
+      }), "sign_in_timeout");
       if (loginResult.error) {
         return {
-          error: new Error(loginResult.error.message || "login_failed"),
+          error: buildAuthUiError(mapAuthFailureMessage(loginResult.error), loginResult.error.details),
           mfaRequired: false,
           mfaFactorId: null,
           mfaMethod: null,
         };
       }
 
-      const aal = await getAuthenticatorAssurance(supabase);
-      const factors = await listTotpFactors(supabase);
+      const [aal, factors] = await withTimeout(
+        Promise.all([
+          getAuthenticatorAssurance(supabase),
+          listTotpFactors(supabase),
+        ]),
+        "sign_in_timeout",
+      );
       const verifiedTotp = factors.find((factor) => factor.status === "verified") || null;
       const mfaRequired = aal.nextLevel === "aal2" && aal.currentLevel !== "aal2";
       if (mfaRequired) {
@@ -708,7 +740,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
         await supabase.auth.signOut({ scope: "local" });
         return {
-          error: new Error("Two-factor authentication is required, but no usable authenticator is available. Please use your enrolled device or recover your account."),
+          error: buildAuthUiError("Two-factor authentication is required, but no usable authenticator is available. Please use your enrolled device or recover your account."),
           mfaRequired: false,
           mfaFactorId: null,
           mfaMethod: null,
@@ -718,14 +750,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const { data } = await supabase.auth.getUser();
       const uid = data?.user?.id;
       if (uid) {
-        await supabase.from("profiles").update({ last_login: new Date().toISOString() } as Record<string, unknown>).eq("id", uid);
+        void supabase
+          .from("profiles")
+          .update({ last_login: new Date().toISOString() } as Record<string, unknown>)
+          .eq("id", uid);
         void trackDeviceFingerprint("login");
       }
 
       return { error: null, mfaRequired: false, mfaFactorId: null, mfaMethod: null };
     } catch (e: unknown) {
       console.error("[AuthContext] signIn network error", e);
-      return { error: e instanceof Error ? e : new Error(String(e)), mfaRequired: false, mfaFactorId: null, mfaMethod: null };
+      return {
+        error: buildAuthUiError(mapAuthFailureMessage(e instanceof Error ? e.message : String(e))),
+        mfaRequired: false,
+        mfaFactorId: null,
+        mfaMethod: null,
+      };
     }
   };
 
