@@ -120,12 +120,14 @@ const DiscoveryDeckInner = ({
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [isTightDiscoveryLayout, setIsTightDiscoveryLayout] = useState(false);
   const discoveryActiveFooterRef = useRef<HTMLDivElement | null>(null);
+  const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
   const discoverImageInteractingRef = useRef(false);
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const TIGHT_LAYOUT_ENTER_FOOTER_GAP = 136;
-  const TIGHT_LAYOUT_EXIT_FOOTER_GAP = 160;
+  const NAV_PROTECTED_PADDING = 10;
+  const TIGHT_LAYOUT_ENTER_GAP = 8;
+  const TIGHT_LAYOUT_EXIT_GAP = 26;
 
   useEffect(() => {
     setDiscoverImageIndex(0);
@@ -145,8 +147,7 @@ const DiscoveryDeckInner = ({
       return;
     }
     const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
-    const footerNode = discoveryActiveFooterRef.current;
-    if (!navNode || !footerNode) {
+    if (!navNode) {
       setIsTightDiscoveryLayout(false);
       return;
     }
@@ -155,15 +156,24 @@ const DiscoveryDeckInner = ({
     const measure = () => {
       window.cancelAnimationFrame(frameId);
       frameId = window.requestAnimationFrame(() => {
+        const footerNode = discoveryActiveFooterRef.current;
+        if (!footerNode) {
+          setIsTightDiscoveryLayout(false);
+          return;
+        }
+        const actionsNode = discoveryBottomActionsRef.current;
         const footerRect = footerNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
-        const footerGap = navRect.top - footerRect.bottom;
+        const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
+        const actionsBottom = actionsNode ? actionsNode.getBoundingClientRect().bottom : Number.NEGATIVE_INFINITY;
+        const contentBottom = Math.max(footerRect.bottom, actionsBottom);
+        const navGap = navProtectedTop - contentBottom;
 
         setIsTightDiscoveryLayout((current) => {
           if (current) {
-            return footerGap < TIGHT_LAYOUT_EXIT_FOOTER_GAP;
+            return navGap < TIGHT_LAYOUT_EXIT_GAP;
           }
-          return footerGap < TIGHT_LAYOUT_ENTER_FOOTER_GAP;
+          return navGap < TIGHT_LAYOUT_ENTER_GAP;
         });
       });
     };
@@ -174,7 +184,14 @@ const DiscoveryDeckInner = ({
       measure();
     });
     resizeObserver.observe(navNode);
-    resizeObserver.observe(footerNode);
+    const footerNode = discoveryActiveFooterRef.current;
+    if (footerNode) {
+      resizeObserver.observe(footerNode);
+    }
+    const actionsNode = discoveryBottomActionsRef.current;
+    if (actionsNode) {
+      resizeObserver.observe(actionsNode);
+    }
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("scroll", measure);
@@ -186,7 +203,7 @@ const DiscoveryDeckInner = ({
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, stackedDiscoveryCards.length]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, isDiscoverDragging, isTightDiscoveryLayout, renderDiscoverEmpty, stackedDiscoveryCards.length]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
@@ -616,7 +633,10 @@ const DiscoveryDeckInner = ({
         </div>
         <div className={cn("relative mt-1 px-4 flex-shrink-0", isTightDiscoveryLayout ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+18px)] min-h-[42px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]")}>
           {renderDiscoverEmpty ? <div /> : !isTightDiscoveryLayout && !isDiscoverDragging ? (
-            <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
+            <div
+              ref={discoveryBottomActionsRef}
+              className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]"
+            >
               {renderDiscoveryActionButtons("bottom")}
             </div>
           ) : <div />}
