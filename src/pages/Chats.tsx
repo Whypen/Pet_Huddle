@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
 import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -28,7 +28,6 @@ import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
-import waveHandCta from "@/assets/Wave Hand CTA.png";
 import matchPageImage from "@/assets/Match page.png";
 import discoverAgeGateImage from "@/assets/Notifications/Discover age gate.png";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
@@ -149,7 +148,29 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
 
 const DISCOVERY_EXPAND_STEP_KM = 15;
 const DISCOVERY_MAX_RADIUS_KM = 150;
+const DISCOVERY_CLIENT_RESET_USER_ID = "735e8908-6dc8-4b41-837e-d4917e93caae";
+const DISCOVERY_CLIENT_RESET_STAMP = "2026-04-16-deck-reset-v3";
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const animateMotionValue = (
+  value: MotionValue<number>,
+  target: number,
+  options: {
+    type?: "spring" | "tween";
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    duration?: number;
+    ease?: number[];
+  }
+) =>
+  new Promise<void>((resolve) => {
+    animate(value, target, {
+      ...options,
+      onComplete: () => resolve(),
+    });
+  });
 
 type FilterKey = keyof DiscoveryFilters;
 type FilterRowDef = { key: FilterKey; label: string; tier: "free" | "plus" | "gold"; type: "range" | "multi" | "toggle" | "slider" };
@@ -649,7 +670,7 @@ const Chats = () => {
     const tab = searchParams.get("tab");
     return tab === "chats" || tab === "groups" ? "chats" : "discover";
   });
-  const [swipeDir, setSwipeDir] = useState<"up" | "down" | null>(null);
+  const [swipeDir, setSwipeDir] = useState<"left" | "right" | "star" | null>(null);
   const [discoveryRefreshTick, setDiscoveryRefreshTick] = useState(0);
   const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
   const [activeFilterRow, setActiveFilterRow] = useState<FilterRowDef | null>(null);
@@ -703,7 +724,8 @@ const Chats = () => {
   const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
   const [confirmStarTarget, setConfirmStarTarget] = useState<DiscoveryProfile | null>(null);
   const [starActionLoading, setStarActionLoading] = useState(false);
-  const [starFlightVisible, setStarFlightVisible] = useState(false);
+  const [discoverySendCue, setDiscoverySendCue] = useState<null | { kind: "wave" | "star"; id: number }>(null);
+  const discoverySendCueTimeoutRef = useRef<number | null>(null);
   const [matchOnlyAvatars, setMatchOnlyAvatars] = useState<MatchOnlyAvatar[]>([]);
   const [matchesFeedTick, setMatchesFeedTick] = useState(0);
   const roomSeenRef = useRef<Record<string, string>>({});
@@ -767,17 +789,47 @@ const Chats = () => {
 
   // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
+  const [discoverySwipeBusy, setDiscoverySwipeBusy] = useState(false);
+  const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
-  const dragRotate = useTransform(dragY, [-260, 0, 260], [15, 0, 15]);
-  const dragScale = useTransform(dragY, [-260, 0, 260], [0.95, 1, 0.95]);
-  const dragUpProgress = useTransform(dragY, [-220, 0], [1, 0]);
-  const dragDownProgress = useTransform(dragY, [0, 220], [0, 1]);
-  const waveIndicatorOpacity = useTransform(dragUpProgress, [0, 0.2, 0.5, 0.7, 1], [0, 0.18, 0.9, 1, 1]);
-  const passIndicatorOpacity = useTransform(dragDownProgress, [0, 0.2, 0.5, 0.7, 1], [0, 0.18, 0.9, 1, 1]);
-  const waveIndicatorScale = useTransform(dragUpProgress, [0, 0.2, 0.5, 0.7, 1], [0.72, 0.82, 0.94, 1, 1]);
-  const passIndicatorScale = useTransform(dragDownProgress, [0, 0.2, 0.5, 0.7, 1], [0.72, 0.82, 0.94, 1, 1]);
+  const dragRotate = useTransform(dragX, [-200, 0, 200], [-10, 0, 12]);
+  const dragScale = useTransform(
+    () => 1 - clamp((Math.abs(dragX.get()) * 0.7 + Math.abs(dragY.get())) / 3600, 0, 0.065)
+  );
+  const dragProgress = useTransform(() => clamp(Math.abs(dragX.get()) / 180, 0, 1));
+  const dragRightProgress = useTransform(() => clamp(Math.max(0, dragX.get()) / 180, 0, 1));
+  const dragLeftProgress = useTransform(() => clamp(Math.max(0, -dragX.get()) / 180, 0, 1));
+  const waveIndicatorOpacity = useTransform(dragX, [20, 100], [0, 1]);
+  const passIndicatorOpacity = useTransform(dragX, [-100, -20], [1, 0]);
+  const waveIndicatorScale = useTransform(dragRightProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
+  const passIndicatorScale = useTransform(dragLeftProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
+  const waveTintOpacity = useTransform(dragRightProgress, [0, 0.35, 1], [0, 0.1, 0.2]);
+  const passTintOpacity = useTransform(dragLeftProgress, [0, 0.25, 0.55, 1], [0, 0.08, 0.16, 0.24]);
+  const nextCardScale = useTransform(dragX, [-150, 0, 150], [1, 0.95, 1]);
+  const nextCardTranslateY = useTransform(dragX, [-150, 0, 150], [0, 8, 0]);
+  const stampCounterRotate = useTransform(dragRotate, (value) => -value);
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const discoverImageInteractingRef = useRef(false);
+  const discoveryCardStackRef = useRef<HTMLDivElement | null>(null);
+  const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
+  const [waveButtonAnimating, setWaveButtonAnimating] = useState(false);
+  const clearDiscoverySendCueTimer = useCallback(() => {
+    if (discoverySendCueTimeoutRef.current !== null) {
+      window.clearTimeout(discoverySendCueTimeoutRef.current);
+      discoverySendCueTimeoutRef.current = null;
+    }
+  }, []);
+  const launchDiscoverySendCue = useCallback(
+    (kind: "wave" | "star") => {
+      clearDiscoverySendCueTimer();
+      setDiscoverySendCue({ kind, id: Date.now() });
+      discoverySendCueTimeoutRef.current = window.setTimeout(() => {
+        setDiscoverySendCue((current) => (current?.kind === kind ? null : current));
+        discoverySendCueTimeoutRef.current = null;
+      }, kind === "wave" ? 240 : 1550);
+    },
+    [clearDiscoverySendCueTimer]
+  );
   const discoveryKey = useMemo(() => {
     const d = new Date();
     const y = d.getFullYear();
@@ -810,6 +862,7 @@ const Chats = () => {
       return `volatile_${profile.id}`;
     }
   }, [profile?.id]);
+  useEffect(() => () => clearDiscoverySendCueTimer(), [clearDiscoverySendCueTimer]);
   const roomSeenKey = useMemo(
     () => `chat_room_seen_${profile?.id || "anon"}`,
     [profile?.id]
@@ -955,6 +1008,63 @@ const Chats = () => {
   }, [discoveryFiltersKey, filters, profile?.id]);
 
   useEffect(() => {
+    if (profile?.id !== DISCOVERY_CLIENT_RESET_USER_ID) return;
+    const resetFlagKey = `discovery_client_reset_${profile.id}`;
+    try {
+      if (localStorage.getItem(resetFlagKey) === DISCOVERY_CLIENT_RESET_STAMP) return;
+      const localKeys = Object.keys(localStorage);
+      localKeys.forEach((key) => {
+        if (
+          key === discoveryKey ||
+          key === handledDiscoveryKey ||
+          key === passedDiscoveryKey ||
+          key === matchedDiscoveryKey ||
+          key.startsWith(`discovery_seen_`) ||
+          key.startsWith(`discovery_handled_${profile.id}`) ||
+          key.startsWith(`discovery_passed_${profile.id}`) ||
+          key.startsWith(`discovery_matched_${profile.id}`) ||
+          key.startsWith(`discovery_session_${profile.id}`)
+        ) {
+          localStorage.removeItem(key);
+        }
+      });
+      const sessionKeys = Object.keys(sessionStorage);
+      sessionKeys.forEach((key) => {
+        if (
+          key === passedDiscoverySessionKey ||
+          key.startsWith(`discovery_passed_session_${profile.id}`) ||
+          key.startsWith(`discovery_session_${profile.id}`)
+        ) {
+          sessionStorage.removeItem(key);
+        }
+      });
+      localStorage.setItem(resetFlagKey, DISCOVERY_CLIENT_RESET_STAMP);
+    } catch {
+      // best-effort client reset only
+    }
+    setDiscoverySeenToday(0);
+    setHandledDiscoveryIds(new Set());
+    setPassedDiscoveryIds(new Set());
+    setCarryoverPassedIds(new Set());
+    setHiddenDiscoveryIds(new Set());
+    setDiscoveryHistoryHydrated(false);
+    setDiscoveryVisibleCount(20);
+    setSwipeDir(null);
+    dragX.set(0);
+    dragY.set(0);
+    setDiscoveryRefreshTick((tick) => tick + 1);
+  }, [
+    discoveryKey,
+    dragX,
+    dragY,
+    handledDiscoveryKey,
+    matchedDiscoveryKey,
+    passedDiscoveryKey,
+    passedDiscoverySessionKey,
+    profile?.id,
+  ]);
+
+  useEffect(() => {
     setHiddenDiscoveryIds(new Set());
     setHandledDiscoveryIds(new Set());
     setPassedDiscoveryIds(new Set());
@@ -962,8 +1072,9 @@ const Chats = () => {
     setDiscoveryHistoryHydrated(false);
     setDiscoveryVisibleCount(20);
     setSwipeDir(null);
+    dragX.set(0);
     dragY.set(0);
-  }, [dragY, profile?.id]);
+  }, [dragX, dragY, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -1323,11 +1434,12 @@ const Chats = () => {
     const prev = prevDiscoveryQuotaReachedRef.current;
     if (prev && !discoveryQuotaReached && topTab === "discover") {
       setSwipeDir(null);
+      dragX.set(0);
       dragY.set(0);
       setDiscoveryRefreshTick((tick) => tick + 1);
     }
     prevDiscoveryQuotaReachedRef.current = discoveryQuotaReached;
-  }, [discoveryQuotaReached, dragY, topTab]);
+  }, [discoveryQuotaReached, dragX, dragY, topTab]);
 
   const checkReciprocalWave = useCallback(
     async (targetUserId: string) => {
@@ -1531,7 +1643,59 @@ const Chats = () => {
     return Math.max(0, cap - used) + Math.max(0, extra);
   }, [profile?.tier]);
 
+  const springDiscoveryCardHome = useCallback(async () => {
+    await Promise.all([
+      animateMotionValue(dragX, 0, {
+        type: "spring",
+        stiffness: 400,
+        damping: 30,
+        mass: 0.92,
+      }),
+      animateMotionValue(dragY, 0, {
+        type: "spring",
+        stiffness: 400,
+        damping: 30,
+        mass: 0.92,
+      }),
+    ]);
+    dragX.set(0);
+    dragY.set(0);
+  }, [dragX, dragY]);
+
+  const flingDiscoveryCard = useCallback(
+    async (direction: "left" | "right", velocityX = 0) => {
+      const viewportWidth =
+        typeof window !== "undefined" ? Math.max(window.innerWidth, 430) : 430;
+      const travel = clamp(Math.abs(velocityX), 0, 1600);
+      const targetX =
+        direction === "right"
+          ? viewportWidth * 1.05
+          : -viewportWidth * 1.05;
+      const duration = clamp(0.28 + (600 - Math.min(travel, 600)) / 4000, 0.28, 0.34);
+      const exitRotate = direction === "right" ? 20 : -20;
+      await Promise.all([
+        animateMotionValue(dragX, targetX, {
+          type: "tween",
+          duration,
+          ease: [0.4, 0, 1, 1],
+        }),
+        animateMotionValue(dragY, 0, {
+          type: "tween",
+          duration,
+          ease: [0.4, 0, 1, 1],
+        }),
+        animateMotionValue(dragRotate, exitRotate, {
+          type: "tween",
+          duration,
+          ease: [0.4, 0, 1, 1],
+        }),
+      ]);
+    },
+    [dragX, dragY, dragRotate]
+  );
+
   const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
+    dragX.set(0);
     dragY.set(0);
     setSwipeDir(null);
     if (currentId) {
@@ -1576,12 +1740,43 @@ const Chats = () => {
         });
       }
     }
-  }, [discoverySessionId, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
+  }, [discoverySessionId, dragX, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
 
-  const commitDiscoverySwipe = useCallback((direction: "up" | "down", currentId?: string, action?: "wave" | "star" | "pass") => {
+  const commitDiscoverySwipe = useCallback((direction: "left" | "right" | "star", currentId?: string, action?: "wave" | "star" | "pass") => {
     setSwipeDir(direction);
     advanceDiscoveryCard(currentId, action);
   }, [advanceDiscoveryCard]);
+
+  const performDiscoverySwipe = useCallback(
+    async (
+      direction: "left" | "right",
+      currentId: string,
+      action: "wave" | "pass",
+      options?: {
+        velocityX?: number;
+        task?: () => Promise<boolean>;
+      }
+    ) => {
+      if (discoverySwipeBusy) return false;
+      setSwipeDir(direction);
+      setDiscoverySwipeBusy(true);
+
+      try {
+        await flingDiscoveryCard(direction, options?.velocityX ?? 0);
+        const ok = options?.task ? await options.task() : true;
+        if (!ok) {
+          setSwipeDir(null);
+          await springDiscoveryCardHome();
+          return false;
+        }
+        commitDiscoverySwipe(direction, currentId, action);
+        return true;
+      } finally {
+        setDiscoverySwipeBusy(false);
+      }
+    },
+    [commitDiscoverySwipe, discoverySwipeBusy, flingDiscoveryCard, springDiscoveryCardHome]
+  );
 
   const enqueueChatNotification = useCallback(
     async (args: { userId: string; kind: string; title: string; body: string; href: string; data?: Record<string, unknown> }) => {
@@ -1666,13 +1861,12 @@ const Chats = () => {
         href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
         data: { room_id: roomId, from_user_id: profile.id, type: "star" },
       });
-      commitDiscoverySwipe("up", target.id, "star");
       return { sent: true, roomId };
     } catch {
       toast.error("Unable to open chat right now.");
       return { sent: false, roomId: null };
     }
-  }, [commitDiscoverySwipe, enqueueChatNotification, getStarRemaining, openStarUpgradeSheet, profile?.id, profile?.tier]);
+  }, [enqueueChatNotification, getStarRemaining, openStarUpgradeSheet, profile?.id, profile?.tier]);
 
   const executeConfirmedStar = useCallback(async () => {
     if (!confirmStarTarget || starActionLoading) return;
@@ -1689,23 +1883,25 @@ const Chats = () => {
       }
       const result = await runStarAction(confirmStarTarget);
       if (result.sent && result.roomId) {
-        setStarFlightVisible(true);
+        launchDiscoverySendCue("star");
         const roomId = result.roomId;
         const target = confirmStarTarget;
         window.setTimeout(() => {
-          setStarFlightVisible(false);
+          commitDiscoverySwipe("star", target.id, "star");
+        }, 170);
+        window.setTimeout(() => {
           navigate(
             `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
               target.display_name || "Conversation"
             )}&with=${encodeURIComponent(target.id)}`
           );
-        }, 420);
+        }, 1480);
       }
       setConfirmStarTarget(null);
     } finally {
       setStarActionLoading(false);
     }
-  }, [bumpDiscoverySeen, confirmStarTarget, discoverExhaustedCopy, isGoldTier, navigate, profile?.id, runStarAction, starActionLoading]);
+  }, [bumpDiscoverySeen, commitDiscoverySwipe, confirmStarTarget, discoverExhaustedCopy, isGoldTier, launchDiscoverySendCue, navigate, profile?.id, runStarAction, starActionLoading]);
 
   const handleStarUpgradeCheckout = useCallback(async () => {
     if (!starUpgradeTier || starCheckoutLoading) return;
@@ -3116,13 +3312,16 @@ const Chats = () => {
   const primaryQueue = visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id));
   const discoverySource = silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue];
   const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
-  const currentDiscovery = discoveryDeck[0] ?? null;
-  const nextDiscovery = discoveryDeck[1] ?? null;
-  const thirdDiscovery = discoveryDeck[2] ?? null;
-  const fourthDiscovery = discoveryDeck[3] ?? null;
-  const fifthDiscovery = discoveryDeck[4] ?? null;
+  const stackedDiscoveryCards = discoveryDeck.slice(0, 4);
+  const currentDiscovery = stackedDiscoveryCards[0] ?? null;
   const showDiscoverEmpty = !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
-  const discoveryStackHasRealNext = Boolean(currentDiscovery && nextDiscovery);
+  const pendingDiscoverEmpty = Boolean(
+    currentDiscovery &&
+      stackedDiscoveryCards.length === 1 &&
+      discoverySwipeBusy &&
+      swipeDir
+  );
+  const renderDiscoverEmpty = showDiscoverEmpty || pendingDiscoverEmpty;
 
   useEffect(() => {
     if (discoveryLoading || discoveryLocationBlocked) return;
@@ -3153,15 +3352,56 @@ const Chats = () => {
     );
   }, [albumUrls]);
 
+  const getDiscoverySpeciesSummary = useCallback((profileRow: DiscoveryProfile) => {
+    const normalizeSpeciesKey = (raw: string) => {
+      const token = raw.trim().toLowerCase();
+      if (!token || token === "none") return "";
+      if (token.endsWith("ies") && token.length > 3) return `${token.slice(0, -3)}y`;
+      if (token.endsWith("s") && !token.endsWith("ss") && token.length > 2) return token.slice(0, -1);
+      return token;
+    };
+    const toDisplaySpecies = (normalized: string) =>
+      normalized
+        .split(/[\s_-]+/)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+    const speciesMap = new Map<string, string>();
+    for (const raw of (Array.isArray(profileRow?.pets) ? profileRow.pets.map((pet: { species?: string | null }) => String(pet.species || "").trim()) : [])
+      .concat(Array.isArray(profileRow?.pet_species) ? profileRow.pet_species.map((value) => String(value || "").trim()) : [])
+      .concat(Array.isArray(profileRow?.pet_experience) ? profileRow.pet_experience.map((value) => String(value || "").trim()) : [])) {
+      const key = normalizeSpeciesKey(raw);
+      if (!key || speciesMap.has(key)) continue;
+      speciesMap.set(key, toDisplaySpecies(key));
+    }
+    return Array.from(speciesMap.values()).join(" • ");
+  }, []);
+
+  const getDiscoveryAvailabilityPills = useCallback(
+    (profileRow: DiscoveryProfile) =>
+      Array.isArray(profileRow?.availability_status)
+        ? profileRow.availability_status
+            .map((value) => normalizeAvailabilityLabel(String(value || "").trim()))
+            .filter(Boolean)
+        : [],
+    []
+  );
+
+  useLayoutEffect(() => {
+    return;
+  }, [currentDiscovery, renderDiscoverEmpty, topTab]);
+
   useEffect(() => {
     setDiscoverImageIndex(0);
+    setDiscoverySwipeBusy(false);
   }, [currentDiscovery?.id]);
 
   const refreshDiscovery = useCallback(() => {
     setSwipeDir(null);
+    dragX.set(0);
     dragY.set(0);
     setDiscoveryRefreshTick((tick) => tick + 1);
-  }, [dragY]);
+  }, [dragX, dragY]);
 
   const handleExpandSearch = useCallback(() => {
     if (!canExpandSearch) return;
@@ -3170,9 +3410,10 @@ const Chats = () => {
       return Math.min(DISCOVERY_MAX_RADIUS_KM, base + DISCOVERY_EXPAND_STEP_KM);
     });
     setSwipeDir(null);
+    dragX.set(0);
     dragY.set(0);
     setDiscoveryRefreshTick((tick) => tick + 1);
-  }, [canExpandSearch, dragY, filters.maxDistanceKm]);
+  }, [canExpandSearch, dragX, dragY, filters.maxDistanceKm]);
 
   const resurfacePassedProfiles = useCallback(() => {
     setPassedDiscoveryIds(new Set());
@@ -3184,9 +3425,10 @@ const Chats = () => {
       // ignore cache clear failure
     }
     setSwipeDir(null);
+    dragX.set(0);
     dragY.set(0);
     setDiscoveryRefreshTick((tick) => tick + 1);
-  }, [dragY, passedDiscoveryKey, passedDiscoverySessionKey]);
+  }, [dragX, dragY, passedDiscoveryKey, passedDiscoverySessionKey]);
 
   const persistMatchedDiscoveryUser = useCallback((userId?: string | null) => {
     const normalized = String(userId || "").trim();
@@ -3429,6 +3671,128 @@ const Chats = () => {
       }
     },
     [loadConversations, markMatchSeen, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
+  );
+
+  const finalizeDiscoveryMatch = useCallback(
+    (target: DiscoveryProfile, matchCreated: boolean) => {
+      persistMatchedDiscoveryUser(target.id);
+      setHiddenDiscoveryIds((prev) => {
+        const next = new Set(prev);
+        next.add(target.id);
+        return next;
+      });
+      if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+        navigator.vibrate(18);
+      }
+      window.setTimeout(() => {
+        void (async () => {
+          const roomId = await openMatchModalFor({
+            userId: target.id,
+            name: target.display_name || "Conversation",
+            avatarUrl: target.avatar_url || null,
+          });
+          if (roomId && matchCreated) {
+            const currentName = profile?.display_name || "Someone";
+            const targetName = target.display_name || "Someone";
+            void enqueueChatNotification({
+              userId: target.id,
+              kind: "match",
+              title: `You're now friends with ${currentName}!`,
+              body: "It's a pawfect match!",
+              href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
+              data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
+            });
+            if (profile?.id) {
+              void enqueueChatNotification({
+                userId: profile.id,
+                kind: "match",
+                title: `You're now friends with ${targetName}!`,
+                body: "It's a pawfect match!",
+                href: `/chat-dialogue?room=${roomId}&with=${target.id}`,
+                data: { room_id: roomId, from_user_id: target.id, type: "match" },
+              });
+            }
+          }
+        })();
+      }, 180);
+    },
+    [enqueueChatNotification, openMatchModalFor, persistMatchedDiscoveryUser, profile?.display_name, profile?.id]
+  );
+
+  const executeDiscoveryWaveTask = useCallback(
+    async (target: DiscoveryProfile, showToast: boolean) => {
+      const ok = await bumpDiscoverySeen();
+      if (!ok) {
+        if (!isGoldTier) {
+          toast.info(discoverExhaustedCopy);
+        }
+        return false;
+      }
+      const result = await sendDiscoveryWave(target.id, { showToast });
+      if (result.status === "sent" && !result.mutual) {
+        void enqueueChatNotification({
+          userId: target.id,
+          kind: "wave",
+          title: "New wave",
+          body: "Someone just waved at you 👋",
+          href: "/chats?tab=discover",
+          data: { from_user_id: profile?.id, type: "wave" },
+        });
+      }
+      if (result.status === "sent" || result.status === "duplicate") {
+        if (result.mutual) {
+          finalizeDiscoveryMatch(target, result.matchCreated);
+        }
+        return true;
+      }
+      toast.error("Failed to send wave");
+      return false;
+    },
+    [
+      bumpDiscoverySeen,
+      discoverExhaustedCopy,
+      enqueueChatNotification,
+      finalizeDiscoveryMatch,
+      isGoldTier,
+      profile?.id,
+      sendDiscoveryWave,
+    ]
+  );
+
+  const triggerDiscoveryWave = useCallback(
+    async (target: DiscoveryProfile, options?: { velocityX?: number; showToast?: boolean }) => {
+      if (blockedUserIds.has(target.id)) return false;
+      return performDiscoverySwipe("right", target.id, "wave", {
+        velocityX: options?.velocityX ?? 0,
+        task: async () => {
+          const ok = await executeDiscoveryWaveTask(target, options?.showToast ?? true);
+          if (ok) {
+            launchDiscoverySendCue("wave");
+          }
+          return ok;
+        },
+      });
+    },
+    [blockedUserIds, executeDiscoveryWaveTask, launchDiscoverySendCue, performDiscoverySwipe]
+  );
+
+  const triggerDiscoveryPass = useCallback(
+    async (target: DiscoveryProfile, velocityX = 0) => {
+      if (blockedUserIds.has(target.id)) return false;
+      return performDiscoverySwipe("left", target.id, "pass", {
+        velocityX,
+      });
+    },
+    [blockedUserIds, performDiscoverySwipe]
+  );
+
+  const promptDiscoveryStar = useCallback(
+    (target: DiscoveryProfile) => {
+      if (!profile?.id) return;
+      if (blockedUserIds.has(target.id)) return;
+      setConfirmStarTarget(target);
+    },
+    [blockedUserIds, profile?.id]
   );
 
   useEffect(() => {
@@ -3845,6 +4209,344 @@ const Chats = () => {
     }
   };
 
+  const triggerWaveFromButton = useCallback(async () => {
+    const p = currentDiscovery;
+    if (!p || showDiscoverEmpty || showDiscoveryQuotaLock || discoverySwipeBusy) return;
+    setWaveButtonAnimating(true);
+    window.setTimeout(() => {
+      setWaveButtonAnimating(false);
+    }, 500);
+    window.setTimeout(() => {
+      void triggerDiscoveryWave(p, { showToast: true });
+    }, 110);
+  }, [currentDiscovery, discoverySwipeBusy, showDiscoverEmpty, showDiscoveryQuotaLock, triggerDiscoveryWave]);
+
+  const discoveryActionButtons = showDiscoverEmpty ? null : (
+    <div className="flex items-center">
+      <motion.button
+        className={cn(
+          "flex h-12 w-12 items-center justify-center rounded-full bg-white/92 text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          discoverySwipeBusy && "cursor-not-allowed opacity-45"
+        )}
+        aria-label="Skip"
+        disabled={discoverySwipeBusy}
+        whileTap={{ scale: 0.9 }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const p = currentDiscovery;
+          if (!p) return;
+          void triggerDiscoveryPass(p);
+        }}
+      >
+        <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
+          <X size={22} strokeWidth={2} />
+        </motion.div>
+      </motion.button>
+      <div className="w-4" />
+      <motion.button
+        className={cn(
+          "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          (showDiscoveryQuotaLock || discoverySwipeBusy) && "cursor-not-allowed opacity-45"
+        )}
+        aria-label="Wave"
+        disabled={showDiscoveryQuotaLock || discoverySwipeBusy}
+        whileTap={{ scale: 0.88 }}
+        onClick={(e) => {
+          e.stopPropagation();
+          void triggerWaveFromButton();
+        }}
+      >
+        <motion.div
+          animate={waveButtonAnimating ? { rotate: [0, -18, 12, -8, 5, 0] } : { rotate: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <WaveHandIcon size={40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
+        </motion.div>
+      </motion.button>
+      <div className="w-3" />
+      <motion.button
+        className={cn(
+          "flex h-11 w-11 items-center justify-center text-[#F5C85C] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+          (showDiscoveryQuotaLock || discoverySwipeBusy) && "cursor-not-allowed opacity-45"
+        )}
+        aria-label="Star"
+        disabled={showDiscoveryQuotaLock || discoverySwipeBusy}
+        whileTap={{ scale: 0.92 }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const p = currentDiscovery;
+          if (!p) return;
+          promptDiscoveryStar(p);
+        }}
+      >
+        <Star size={26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+      </motion.button>
+    </div>
+  );
+
+  const renderDiscoveryProfileCard = (p: DiscoveryProfile, deckIndex: number) => {
+    const isActive = deckIndex === 0;
+    const isImmediateNext = deckIndex === 1;
+    const availabilityPills = getDiscoveryAvailabilityPills(p);
+    const speciesSummary = getDiscoverySpeciesSummary(p);
+    const album = getDiscoveryAlbum(p);
+    const cover = album[0] || profilePlaceholder;
+    const stackedOffsetY = deckIndex === 1 ? 0 : deckIndex === 2 ? 8 : 14;
+    const stackedScale = deckIndex === 1 ? 1 : deckIndex === 2 ? 0.985 : 0.97;
+    const stackedOpacity = deckIndex <= 1 ? 1 : 0;
+    const cardStyle = isActive
+      ? { x: dragX, y: dragY, rotate: dragRotate, scale: dragScale, transformOrigin: "50% 20%" as const }
+      : isImmediateNext
+        ? { y: nextCardTranslateY, scale: nextCardScale, transformOrigin: "50% 100%" as const }
+        : { transformOrigin: "50% 100%" as const };
+    const cardAnimate = isActive
+      ? { opacity: 1 }
+      : isImmediateNext
+        ? { opacity: 1 }
+        : { y: stackedOffsetY, scale: stackedScale, opacity: stackedOpacity };
+
+    return (
+      <motion.div
+        key={p.id}
+        drag={isActive ? true : false}
+        dragConstraints={isActive ? { left: 0, right: 0, top: 30, bottom: 30 } : undefined}
+        dragElastic={isActive ? 0.15 : undefined}
+        dragMomentum={false}
+        style={cardStyle}
+        animate={isActive ? { x: 0, y: 0, rotate: 0, opacity: 1 } : cardAnimate}
+        transition={{ type: "spring", stiffness: 260, damping: 28, mass: 0.92 }}
+        className={cn(
+          "absolute inset-0 overflow-visible rounded-[28px] bg-white shadow-[0_26px_56px_rgba(33,71,201,0.16)]",
+          isActive ? "z-20" : isImmediateNext ? "z-[12]" : "z-[9]",
+          !isActive && "pointer-events-none",
+          isActive && discoverySwipeBusy && "pointer-events-none"
+        )}
+        onDragStart={
+          isActive
+            ? () => {
+                if (discoverySwipeBusy) return;
+                setSwipeDir(null);
+              }
+            : undefined
+        }
+        onDragEnd={
+          isActive
+            ? (_, info) => {
+                if (discoverySwipeBusy) return;
+                if (Math.abs(info.offset.x) < 5 && Math.abs(info.offset.y) < 5) {
+                  return;
+                }
+                const shouldCommitRight = info.offset.x >= 110 || info.velocity.x >= 500;
+                const shouldCommitLeft = info.offset.x <= -110 || info.velocity.x <= -500;
+
+                if (shouldCommitRight) {
+                  void triggerDiscoveryWave(p, { velocityX: info.velocity.x, showToast: false });
+                  return;
+                }
+
+                if (shouldCommitLeft) {
+                  void triggerDiscoveryPass(p, info.velocity.x);
+                  return;
+                }
+
+                void springDiscoveryCardHome();
+              }
+            : undefined
+        }
+        onClick={
+          isActive
+            ? () => {
+                if (discoverySwipeBusy) return;
+                if (Math.abs(dragY.get()) > 8 || Math.abs(dragX.get()) > 8) return;
+                if (discoverImageInteractingRef.current) return;
+                void handleProfileTap(p.id, p.display_name || "User", p.avatar_url || null);
+              }
+            : undefined
+        }
+      >
+        {isActive && showDiscoveryQuotaLock && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
+            <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
+              <p className="text-sm font-semibold text-white">{discoverExhaustedCopy}</p>
+              <button
+                type="button"
+                onClick={() => setIsPremiumOpen(true)}
+                className="mt-2 inline-flex h-9 items-center justify-center rounded-full bg-[rgba(33,71,201,0.95)] px-4 text-xs font-semibold text-white"
+              >
+                {t("See plans")}
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="h-full w-full overflow-hidden rounded-[28px] [clip-path:inset(0_round_28px)]">
+          {album.length > 0 ? (
+            <>
+              <div
+                className={cn(
+                  "absolute inset-0 flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+                  isActive ? "touch-pan-x" : ""
+                )}
+                onPointerDown={
+                  isActive
+                    ? () => {
+                        discoverImageInteractingRef.current = false;
+                      }
+                    : undefined
+                }
+                onPointerMove={
+                  isActive
+                    ? () => {
+                        discoverImageInteractingRef.current = true;
+                      }
+                    : undefined
+                }
+                onPointerUp={
+                  isActive
+                    ? () => {
+                        window.setTimeout(() => {
+                          discoverImageInteractingRef.current = false;
+                        }, 100);
+                      }
+                    : undefined
+                }
+                onPointerCancel={
+                  isActive
+                    ? () => {
+                        discoverImageInteractingRef.current = false;
+                      }
+                    : undefined
+                }
+                onScroll={
+                  isActive
+                    ? (event) => {
+                        const node = event.currentTarget;
+                        if (!node.clientWidth) return;
+                        const idx = Math.round(node.scrollLeft / node.clientWidth);
+                        setDiscoverImageIndex(Math.max(0, Math.min(album.length - 1, idx)));
+                      }
+                    : undefined
+                }
+              >
+                {album.map((src, index) => (
+                  <div key={`${p.id}-album-${index}`} className="h-full w-full shrink-0 snap-start">
+                    <img
+                      src={src}
+                      alt={isActive ? `${p.display_name || "User"} ${index + 1}` : ""}
+                      aria-hidden={isActive ? undefined : true}
+                      className="h-full w-full object-cover object-center"
+                      style={{ objectPosition: "center center" }}
+                      loading={deckIndex < 4 && index === 0 ? "eager" : deckIndex < 2 && index < 2 ? "eager" : "lazy"}
+                      decoding="async"
+                      fetchPriority={index === 0 && deckIndex < 4 ? "high" : "auto"}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src = cover;
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              {isActive && album.length > 1 && (
+                <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-center gap-1.5">
+                  {album.map((_, idx) => (
+                    <span
+                      key={`${p.id}-img-dot-${idx}`}
+                      className={cn(
+                        "h-1.5 rounded-full transition-all",
+                        idx === discoverImageIndex ? "w-4 bg-[#7D86A6]" : "w-1.5 bg-[#B8BED2]/85"
+                      )}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <img
+              src={cover}
+              alt={isActive ? p.display_name || "" : ""}
+              aria-hidden={isActive ? undefined : true}
+              className="h-full w-full object-cover object-center"
+              style={{ objectPosition: "center center" }}
+              loading={deckIndex < 4 ? "eager" : "lazy"}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = profilePlaceholder;
+              }}
+            />
+          )}
+          {isActive && (
+            <>
+              <motion.div className="absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
+              <motion.div className="absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
+            </>
+          )}
+          {isActive && (
+            <>
+              <motion.div
+                className="pointer-events-none absolute left-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
+                style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate }}
+              >
+                {/* Inline waving hand SVG — crisp at 18px, no PNG blur */}
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path d="M8.5 3.5a1.5 1.5 0 0 1 3 0v6m0-6a1.5 1.5 0 0 1 3 0v5m0-4a1.5 1.5 0 0 1 3 0v7l-1 4c-.5 2-2.2 3.5-4.5 3.5h-1c-2 0-3.8-1-4.8-2.7L4 13.5c-.6-1 0-2.3 1.1-2.5 1-.2 2 .3 2.4 1.2L8.5 14V3.5z" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M6 3C5 3.8 4.3 5 4 6.5M18.5 3c1 .8 1.7 2 2 3.5" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+                <span className="text-[13px] font-extrabold tracking-[0.18em]">WAVE</span>
+              </motion.div>
+              <motion.div
+                className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-white/92 px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)]"
+                style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale, rotate: stampCounterRotate }}
+              >
+                <span className="text-[13px] font-extrabold tracking-[0.18em]">SKIP</span>
+                <X size={18} strokeWidth={2.2} />
+              </motion.div>
+            </>
+          )}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
+          <div className="absolute left-4 top-4">
+            <ProfileBadges
+              isVerified={p.is_verified === true}
+              hasCar={!!p.has_car}
+              size="lg"
+            />
+          </div>
+          <div className="pointer-events-none absolute inset-x-4 bottom-5">
+            <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]">
+              <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
+              {availabilityPills.length > 0 && (
+                <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
+                  <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
+                    {availabilityPills.join(" • ")}
+                  </span>
+                </div>
+              )}
+              <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="truncate text-[25px] font-[700] leading-tight text-white">{p.display_name}</span>
+                  </div>
+                  {p.location_name && (
+                    <div className="mb-2 flex items-center gap-1.5 py-[1px]">
+                      <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                      <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{p.location_name}</span>
+                    </div>
+                  )}
+                  {speciesSummary && (
+                    <div className="mt-0.5 flex items-center gap-1.5 py-0">
+                      <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                      <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]">
+                  <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div className="h-full min-h-0 bg-background relative overflow-x-hidden flex flex-col">
       <GlobalHeader
@@ -3930,7 +4632,7 @@ const Chats = () => {
       {!discoverChatAgeBlocked && topTab === "discover" && (
         <div
           className={cn(
-            "flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] transition-all duration-300",
+            "flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300",
             matchModal && "scale-[0.985] blur-[2px]"
           )}
         >
@@ -3938,53 +4640,36 @@ const Chats = () => {
 
           {/* Portrait card stack */}
           <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
-            <div className="relative w-full max-w-[372px] pb-[10%] sm:pb-[16%] md:pb-[24%]">
-              <div className="relative h-[clamp(340px,50vh,480px)] w-full overflow-visible">
-                {discoveryStackHasRealNext && (() => {
-                  const nextAlbum = getDiscoveryAlbum(nextDiscovery);
-                  const nextCover = nextAlbum[0];
-                  return (
-                    <div
-                      aria-hidden="true"
-                      className="absolute inset-0 z-[5] overflow-hidden rounded-[28px] bg-[#D6DCF6] shadow-[0_10px_24px_rgba(33,71,201,0.12)]"
-                      style={{ transform: "translateY(7%) scale(0.92)" }}
-                    >
-                      {nextCover ? (
-                        <img
-                          src={nextCover}
-                          alt=""
-                          className="h-full w-full object-cover object-center"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="h-full w-full bg-[linear-gradient(180deg,#93A1F7_0%,#4765E2_54%,#09155F_100%)]" />
-                      )}
-                      <div className="absolute inset-0 bg-[rgba(17,37,126,0.34)]" />
-                    </div>
-                  );
-                })()}
-                {currentDiscovery && (
-                  <div
+            <div ref={discoveryCardStackRef} className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
+              <div className="relative h-[clamp(438px,64vh,608px)] w-full overflow-visible">
+                {currentDiscovery && !renderDiscoverEmpty && (
+                  <motion.div
                     aria-hidden="true"
-                    className="absolute z-0 left-1/2 bottom-[-9%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.10)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.73)" }}
+                    className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.74)" }}
                   />
                 )}
-                {currentDiscovery && (
-                  <div
+                {currentDiscovery && !renderDiscoverEmpty && (
+                  <motion.div
                     aria-hidden="true"
-                    className="absolute z-[1] left-1/2 bottom-[-6%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.30)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.81)" }}
+                    className="absolute z-[1] left-1/2 bottom-[-6.1%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.83)" }}
                   />
                 )}
-                {currentDiscovery && (
-                  <div
+                {currentDiscovery && !renderDiscoverEmpty && (
+                  <motion.div
                     aria-hidden="true"
-                    className="absolute z-[2] left-1/2 bottom-[-3%] h-[14%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.9)" }}
+                    className="absolute z-[2] left-1/2 bottom-[-3.6%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.91)" }}
                   />
                 )}
-
+                {currentDiscovery && !renderDiscoverEmpty && (
+                  <motion.div
+                    aria-hidden="true"
+                    className="absolute z-[3] left-1/2 bottom-[-1.1%] h-[11.5%] w-full -translate-x-1/2 rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]"
+                    style={{ transform: "translateX(-50%) scaleX(0.952)" }}
+                  />
+                )}
                 {discoveryLoading && (
                   <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
                     <HuddleVideoLoader size={32} />
@@ -4005,7 +4690,7 @@ const Chats = () => {
                   </div>
                 )}
 
-                {showDiscoverEmpty && (
+                {renderDiscoverEmpty && (
                   <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
                     <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
                       <img
@@ -4038,408 +4723,24 @@ const Chats = () => {
                   </div>
                 )}
 
-                {currentDiscovery && (
-                  <>
-                    <motion.div
-                      className="pointer-events-none absolute right-2 top-2 z-[28] flex h-14 w-14 items-center justify-center rounded-full bg-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.30)]"
-                      style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: 15 }}
-                    >
-                      <img
-                        src={waveHandCta}
-                        alt=""
-                        aria-hidden="true"
-                        width={40}
-                        height={40}
-                        className="h-10 w-10 shrink-0 select-none object-contain"
-                        draggable={false}
-                      />
-                    </motion.div>
-                    <motion.div
-                      className="pointer-events-none absolute bottom-[-30px] left-1/2 z-[28] flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full bg-[rgba(255,255,255,0.92)] shadow-[0_10px_24px_rgba(33,71,201,0.18)]"
-                      style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale }}
-                    >
-                      <X size={22} strokeWidth={1.9} className="text-[#4F5677]" />
-                    </motion.div>
-                  </>
-                )}
-
-                {currentDiscovery && (() => {
-                  const p = currentDiscovery;
-                  const normalizeSpeciesKey = (raw: string) => {
-                    const token = raw.trim().toLowerCase();
-                    if (!token || token === "none") return "";
-                    if (token.endsWith("ies") && token.length > 3) return `${token.slice(0, -3)}y`;
-                    if (token.endsWith("s") && !token.endsWith("ss") && token.length > 2) return token.slice(0, -1);
-                    return token;
-                  };
-                  const toDisplaySpecies = (normalized: string) =>
-                    normalized
-                      .split(/[\s_-]+/)
-                      .filter(Boolean)
-                      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-                      .join(" ");
-                  const availabilityPills: string[] = Array.isArray(p?.availability_status)
-                    ? p.availability_status
-                        .map((value) => normalizeAvailabilityLabel(String(value || "").trim()))
-                        .filter(Boolean)
-                    : [];
-                  const speciesMap = new Map<string, string>();
-                  for (const raw of (Array.isArray(p?.pets) ? p.pets.map((pet: { species?: string | null }) => String(pet.species || "").trim()) : [])
-                    .concat(Array.isArray(p?.pet_species) ? p.pet_species.map((value) => String(value || "").trim()) : [])
-                    .concat(Array.isArray(p?.pet_experience) ? p.pet_experience.map((value) => String(value || "").trim()) : [])) {
-                    const key = normalizeSpeciesKey(raw);
-                    if (!key || speciesMap.has(key)) continue;
-                    speciesMap.set(key, toDisplaySpecies(key));
-                  }
-                  const speciesSummary = Array.from(speciesMap.values()).join(" • ");
-                  const album = getDiscoveryAlbum(p);
-                  const cover = album[0] || profilePlaceholder;
-
-                  return (
-                    <motion.div
-                      key={p.id}
-                      drag="y"
-                      dragConstraints={{ top: 0, bottom: 0 }}
-                      dragElastic={0.2}
-                      dragMomentum={false}
-                      style={{ y: dragY, rotate: dragRotate, scale: dragScale }}
-                      className="absolute inset-0 z-20 rounded-[28px] overflow-visible bg-white shadow-[0_26px_56px_rgba(33,71,201,0.16)]"
-                      onDragEnd={(_, info) => {
-                        if (info.offset.y <= -85) {
-                          void (async () => {
-                            const ok = await bumpDiscoverySeen();
-                            if (!ok) {
-                              if (!isGoldTier) {
-                                toast.info(discoverExhaustedCopy);
-                              }
-                              return;
-                            }
-                            const result = await sendDiscoveryWave(p.id, { showToast: false });
-                            if (result.status === "sent" || result.status === "duplicate") {
-                              commitDiscoverySwipe("up", p.id, "wave");
-                              if (result.status === "sent" && !result.mutual) {
-                                void enqueueChatNotification({
-                                  userId: p.id,
-                                  kind: "wave",
-                                  title: "New wave",
-                                  body: "Someone just waved at you 👋",
-                                  href: "/chats?tab=discover",
-                                  data: { from_user_id: profile?.id, type: "wave" },
-                                });
-                              }
-                              if (result.mutual) {
-                                persistMatchedDiscoveryUser(p.id);
-                                setHiddenDiscoveryIds((prev) => {
-                                  const next = new Set(prev);
-                                  next.add(p.id);
-                                  return next;
-                                });
-                                if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-                                  navigator.vibrate(18);
-                                }
-                                window.setTimeout(() => {
-                                  void (async () => {
-                                    const roomId = await openMatchModalFor({
-                                      userId: p.id,
-                                      name: p.display_name || "Conversation",
-                                      avatarUrl: p.avatar_url || null,
-                                    });
-                                    if (roomId && result.matchCreated) {
-                                      const currentName = profile?.display_name || "Someone";
-                                      const targetName = p.display_name || "Someone";
-                                      void enqueueChatNotification({
-                                        userId: p.id,
-                                        kind: "match",
-                                        title: `You're now friends with ${currentName}!`,
-                                        body: "It's a pawfect match!",
-                                        href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
-                                        data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
-                                      });
-                                      if (profile?.id) {
-                                        void enqueueChatNotification({
-                                          userId: profile.id,
-                                          kind: "match",
-                                          title: `You're now friends with ${targetName}!`,
-                                          body: "It's a pawfect match!",
-                                          href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
-                                          data: { room_id: roomId, from_user_id: p.id, type: "match" },
-                                        });
-                                      }
-                                    }
-                                  })();
-                                }, 180);
-                              }
-                              return;
-                            }
-                            void animate(dragY, 0, {
-                              type: "spring",
-                              stiffness: 240,
-                              damping: 24,
-                            });
-                            toast.error("Failed to send wave");
-                          })();
-                          return;
-                        }
-                        if (info.offset.y >= 110) {
-                          commitDiscoverySwipe("down", p.id, "pass");
-                          return;
-                        }
-                        void animate(dragY, 0, {
-                          type: "spring",
-                          stiffness: 240,
-                          damping: 24,
-                        });
-                      }}
-                      whileDrag={{ scale: 0.95 }}
-                      onClick={() => {
-                        if (Math.abs(dragY.get()) > 8) return;
-                        if (discoverImageInteractingRef.current) return;
-                        void handleProfileTap(p.id, p.display_name || "User", p.avatar_url || null);
-                      }}
-                    >
-                      {showDiscoveryQuotaLock && (
-                        <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
-                          <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
-                            <p className="text-sm font-semibold text-white">
-                              {discoverExhaustedCopy}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => setIsPremiumOpen(true)}
-                              className="mt-2 inline-flex h-9 items-center justify-center rounded-full bg-[rgba(33,71,201,0.95)] px-4 text-xs font-semibold text-white"
-                            >
-                              {t("See plans")}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="h-full w-full overflow-hidden rounded-[28px] [clip-path:inset(0_round_28px)]">
-                        {album.length > 0 ? (
-                          <>
-                          <div
-                            className="flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-                            onPointerDown={() => {
-                              discoverImageInteractingRef.current = false;
-                            }}
-                            onPointerMove={() => {
-                              discoverImageInteractingRef.current = true;
-                            }}
-                            onPointerUp={() => {
-                              window.setTimeout(() => {
-                                discoverImageInteractingRef.current = false;
-                              }, 100);
-                            }}
-                            onPointerCancel={() => {
-                              discoverImageInteractingRef.current = false;
-                            }}
-                            onScroll={(event) => {
-                              const node = event.currentTarget;
-                              if (!node.clientWidth) return;
-                              const idx = Math.round(node.scrollLeft / node.clientWidth);
-                              setDiscoverImageIndex(Math.max(0, Math.min(album.length - 1, idx)));
-                            }}
-                          >
-                            {album.map((src, index) => (
-                              <div key={`${p.id}-album-${index}`} className="h-full w-full shrink-0 snap-start">
-                                <img
-                                  src={src}
-                                  alt={`${p.display_name || "User"} ${index + 1}`}
-                                  className="h-full w-full object-cover object-center"
-                                  style={{ objectPosition: "center center" }}
-                                  loading="lazy"
-                                />
-                              </div>
-                            ))}
-                          </div>
-                          {album.length > 1 && (
-                            <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-center gap-1.5">
-                              {album.map((_, idx) => (
-                                <span
-                                  key={`${p.id}-img-dot-${idx}`}
-                                  className={cn(
-                                    "h-1.5 rounded-full transition-all",
-                                    idx === discoverImageIndex ? "w-4 bg-[#7D86A6]" : "w-1.5 bg-[#B8BED2]/85"
-                                  )}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </>
-                        ) : (
-                          <img
-                            src={cover}
-                            alt={p.display_name || ""}
-                            className="w-full h-full object-cover object-center"
-                            style={{ objectPosition: "center center" }}
-                            loading="lazy"
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).src = profilePlaceholder; }}
-                          />
-                        )}
-                        <div className="absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)] pointer-events-none" />
-                        <div className="absolute top-4 left-4">
-                          <ProfileBadges
-                            isVerified={p.is_verified === true}
-                            hasCar={!!p.has_car}
-                            size="sm"
-                          />
-                        </div>
-                        <div className="absolute inset-x-4 bottom-5 pointer-events-none">
-                          <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] backdrop-blur-[22px] shadow-[0_14px_48px_rgba(0,0,0,0.16)]">
-                          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
-                          {availabilityPills.length > 0 && (
-                            <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
-                              <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
-                                {availabilityPills.join(" • ")}
-                              </span>
-                            </div>
-                          )}
-                          <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
-                            <div className="min-w-0 flex-1">
-                              <div className="mb-1.5 flex items-center gap-2">
-                                <span className="truncate text-[25px] font-[700] leading-tight text-white">{p.display_name}</span>
-                              </div>
-                              {p.location_name && (
-                                <div className="flex items-center gap-1.5 mb-2 py-[1px]">
-                                  <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                                  <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{p.location_name}</span>
-                                </div>
-                              )}
-                              {speciesSummary && (
-                                <div className="mt-0.5 flex items-center gap-1.5 py-0">
-                                  <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                                  <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]">
-                              <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
-                            </div>
-                          </div>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })()}
+                {stackedDiscoveryCards
+                  .slice()
+                  .reverse()
+                  .map((p, reversedIndex) => renderDiscoveryProfileCard(p, stackedDiscoveryCards.length - 1 - reversedIndex))}
               </div>
             </div>
           </div>
 
           {/* Action bar: Star | Wave | Skip */}
-          <div className="px-4 mt-6 pb-[calc(8px+env(safe-area-inset-bottom,0px))] flex-shrink-0">
-            {showDiscoverEmpty ? (
+          <div className="px-4 mt-1 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+8px)] flex-shrink-0">
+            {renderDiscoverEmpty ? (
               <div />
             ) : (
-              <div className="mx-auto flex w-fit items-center gap-4 rounded-full border border-white/55 bg-[rgba(255,255,255,0.72)] px-4 py-3 shadow-[0_16px_34px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
-            {/* Star — brandGold */}
-            <button
-              className={cn(
-                "flex h-14 w-14 items-center justify-center rounded-full bg-white/88 text-brandBlue shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                showDiscoveryQuotaLock && "cursor-not-allowed opacity-45"
-              )}
-              aria-label="Star"
-              disabled={showDiscoveryQuotaLock}
-              onClick={async (e) => {
-                e.stopPropagation();
-                const p = currentDiscovery;
-                if (!p) return;
-                if (!profile?.id) return;
-                if (blockedUserIds.has(p.id)) return;
-                setConfirmStarTarget(p);
-              }}
-            >
-              <Star size={22} strokeWidth={1.9} />
-            </button>
-
-            {/* Wave — primary (larger center) */}
-            <button
-              className={cn(
-                "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.96)] shadow-[0_12px_24px_rgba(33,71,201,0.26)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                showDiscoveryQuotaLock && "cursor-not-allowed opacity-45"
-              )}
-              aria-label="Wave"
-              disabled={showDiscoveryQuotaLock}
-              onClick={async (e) => {
-                e.stopPropagation();
-                const p = currentDiscovery;
-                if (!p) return;
-                if (blockedUserIds.has(p.id)) return;
-                const ok = await bumpDiscoverySeen();
-                if (!ok) return;
-                const result = await sendDiscoveryWave(p.id, { showToast: true });
-                if (result.status === "sent" && !result.mutual) {
-                  void enqueueChatNotification({
-                    userId: p.id,
-                    kind: "wave",
-                    title: "New wave",
-                    body: "Someone just waved at you 👋",
-                    href: "/chats?tab=discover",
-                    data: { from_user_id: profile?.id, type: "wave" },
-                  });
-                }
-                if (result.status === "sent" || result.status === "duplicate") {
-                  commitDiscoverySwipe("up", p.id, "wave");
-                  if (result.mutual) {
-                    persistMatchedDiscoveryUser(p.id);
-                    setHiddenDiscoveryIds((prev) => {
-                      const next = new Set(prev);
-                      next.add(p.id);
-                      return next;
-                    });
-                    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-                      navigator.vibrate(18);
-                    }
-                    window.setTimeout(() => {
-                      void (async () => {
-                        const roomId = await openMatchModalFor({
-                          userId: p.id,
-                          name: p.display_name || "Conversation",
-                          avatarUrl: p.avatar_url || null,
-                        });
-                        if (roomId && result.matchCreated) {
-                          const currentName = profile?.display_name || "Someone";
-                          const targetName = p.display_name || "Someone";
-                          void enqueueChatNotification({
-                            userId: p.id,
-                            kind: "match",
-                            title: `You're now friends with ${currentName}!`,
-                            body: "It's a pawfect match!",
-                            href: `/chat-dialogue?room=${roomId}&with=${profile?.id || ""}`,
-                            data: { room_id: roomId, from_user_id: profile?.id, type: "match" },
-                          });
-                          if (profile?.id) {
-                            void enqueueChatNotification({
-                              userId: profile.id,
-                              kind: "match",
-                              title: `You're now friends with ${targetName}!`,
-                              body: "It's a pawfect match!",
-                              href: `/chat-dialogue?room=${roomId}&with=${p.id}`,
-                              data: { room_id: roomId, from_user_id: p.id, type: "match" },
-                            });
-                          }
-                        }
-                      })();
-                    }, 180);
-                  }
-                }
-              }}
-            >
-              <WaveHandIcon size={40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
-            </button>
-
-            {/* Skip — muted */}
-            <button
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-white/88 text-brandBlue shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
-              aria-label="Skip"
-              onClick={(e) => {
-                e.stopPropagation();
-                const p = currentDiscovery;
-                if (!p) return;
-                commitDiscoverySwipe("down", p.id, "pass");
-              }}
-            >
-              <X size={22} strokeWidth={1.9} />
-            </button>
+              <div
+                ref={discoveryBottomActionsRef}
+                className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]"
+              >
+                {discoveryActionButtons}
               </div>
             )}
           </div>
@@ -5988,20 +6289,54 @@ const Chats = () => {
         </DialogContent>
       </Dialog>
       <AnimatePresence>
-        {starFlightVisible && (
+        {discoverySendCue && (
           <motion.div
-            className="pointer-events-none fixed inset-0 z-[9805]"
+            key={`${discoverySendCue.kind}-${discoverySendCue.id}`}
+            className="pointer-events-none fixed inset-0 z-[9805] overflow-hidden"
             initial={{ opacity: 1 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
             <motion.div
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[#F5C85C] text-[34px] drop-shadow-[0_8px_18px_rgba(245,200,92,0.45)]"
-              initial={{ scale: 1, x: 0, y: 0, opacity: 1 }}
-              animate={{ scale: 0.36, x: 160, y: -240, opacity: 0 }}
-              transition={{ duration: 0.4, ease: "easeInOut" }}
+              className={cn(
+                "absolute flex items-center justify-center rounded-full",
+                discoverySendCue.kind === "wave"
+                  ? "right-[18%] top-[28%] h-[84px] w-[84px] bg-[rgba(33,71,201,0.96)] text-white shadow-[0_18px_36px_rgba(33,71,201,0.34)]"
+                  : "left-1/2 top-1/2 h-[104px] w-[104px] -translate-x-1/2 -translate-y-1/2 bg-[rgba(245,200,92,0.98)] text-[#2C2A19] shadow-[0_18px_38px_rgba(245,200,92,0.5)]"
+              )}
+              initial={
+                discoverySendCue.kind === "wave"
+                  ? { scale: 0.58, x: -44, y: 18, opacity: 0.08, rotate: -14 }
+                  : { scale: 0.54, x: 0, y: 18, opacity: 0.04, rotate: -14 }
+              }
+              animate={
+                discoverySendCue.kind === "wave"
+                  ? {
+                      scale: [0.58, 0.86, 1.04, 0.9],
+                      x: [-44, -6, 72, 156],
+                      y: [18, 6, -28, -64],
+                      opacity: [0.08, 0.54, 1, 0],
+                      rotate: [-14, -6, 6, 10],
+                    }
+                  : {
+                      scale: [0.54, 0.86, 1.18, 1.1, 0.88, 0.72],
+                      x: [0, 10, 48, 102, 164, 224],
+                      y: [18, -6, -42, -108, -186, -276],
+                      opacity: [0.04, 0.45, 1, 1, 0.82, 0],
+                      rotate: [-14, -8, 0, 8, 12, 16],
+                    }
+              }
+              transition={{
+                duration: discoverySendCue.kind === "wave" ? 0.22 : 1.48,
+                ease: [0.22, 1, 0.36, 1],
+                times: discoverySendCue.kind === "wave" ? [0, 0.28, 0.72, 1] : [0, 0.12, 0.3, 0.58, 0.82, 1],
+              }}
             >
-              ⭐
+              {discoverySendCue.kind === "wave" ? (
+                <WaveHandIcon size={56} className="drop-shadow-[0_10px_18px_rgba(7,24,108,0.22)]" />
+              ) : (
+                <Star size={46} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+              )}
             </motion.div>
           </motion.div>
         )}
