@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { HandPointing } from "@phosphor-icons/react";
@@ -22,6 +22,18 @@ const MAX_ASPECT = 4 / 3;
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
 
+const SENSITIVE_TAP_SEEN_KEY = "huddle_sensitive_tap_seen";
+
+const TapHintIcon = () => (
+  <span className="relative inline-flex items-center justify-center">
+    {/* Ripple rings — anchored at centre, no drift on icon */}
+    <span className="absolute h-14 w-14 rounded-full border-2 border-white/60 animate-[sensitiveRipple_1.6s_ease-out_infinite]" />
+    <span className="absolute h-14 w-14 rounded-full border-2 border-white/40 animate-[sensitiveRipple_1.6s_ease-out_0.5s_infinite]" />
+    <span className="absolute h-14 w-14 rounded-full border-2 border-white/20 animate-[sensitiveRipple_1.6s_ease-out_1s_infinite]" />
+    <HandPointing size={44} weight="fill" color="#3B82F6" />
+  </span>
+);
+
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -32,6 +44,17 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const [aspectMap, setAspectMap] = useState<Record<string, number>>({});
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
+  const [tapHintDismissed, setTapHintDismissed] = useState(
+    () => localStorage.getItem(SENSITIVE_TAP_SEEN_KEY) === "1"
+  );
+
+  const revealSensitive = useCallback(() => {
+    setSensitiveRevealed((prev) => !prev);
+    if (!tapHintDismissed) {
+      setTapHintDismissed(true);
+      localStorage.setItem(SENSITIVE_TAP_SEEN_KEY, "1");
+    }
+  }, [tapHintDismissed]);
 
   useEffect(() => {
     if (!isSensitive) {
@@ -136,7 +159,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   onClick={() => {
                     if (dragMovedRef.current) return;
                     if (isSensitive) {
-                      setSensitiveRevealed((prev) => !prev);
+                      revealSensitive();
                       return;
                     }
                     setFullscreenIndex(index);
@@ -145,7 +168,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                     if (isSensitive) {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setSensitiveRevealed((prev) => !prev);
+                        revealSensitive();
                       }
                       return;
                     }
@@ -183,9 +206,9 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                           sensitiveRevealed ? "opacity-0" : "opacity-100",
                         )}
                       />
-                      {!sensitiveRevealed ? (
-                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center drop-shadow-lg">
-                          <HandPointing size={72} weight="bold" color="white" />
+                      {!sensitiveRevealed && !tapHintDismissed ? (
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center drop-shadow-xl">
+                          <TapHintIcon />
                         </span>
                       ) : null}
                     </>

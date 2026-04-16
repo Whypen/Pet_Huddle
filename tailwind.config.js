@@ -131,6 +131,10 @@ module.exports = {
           "0%, 100%": { transform: "translateY(-5%)" },
           "50%": { transform: "translateY(0)" },
         },
+        sensitiveRipple: {
+          "0%":   { transform: "scale(0.6)", opacity: "0.8" },
+          "100%": { transform: "scale(2.2)", opacity: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
