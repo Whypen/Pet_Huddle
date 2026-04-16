@@ -1836,7 +1836,7 @@ const Chats = () => {
         setDiscoverySwipeUiBusy(false);
       }
     },
-    [commitDiscoverySwipe, ensureDiscoveryProfileReady, flingDiscoveryCard, springDiscoveryCardHome]
+    [commitDiscoverySwipe, dragRotateOverride, dragX, dragY, ensureDiscoveryProfileReady, flingDiscoveryCard, springDiscoveryCardHome]
   );
 
   const enqueueChatNotification = useCallback(
