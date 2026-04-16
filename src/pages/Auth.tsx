@@ -497,7 +497,7 @@ const Auth = () => {
                   <div>turnstile codes: {authDebugCodes.length ? authDebugCodes.join(", ") : "none"}</div>
                 </div>
               ) : null}
-              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading || !loginTurnstile.isTokenUsable}>
+              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading}>
                 Sign in
               </NeuButton>
               {authError ? (
