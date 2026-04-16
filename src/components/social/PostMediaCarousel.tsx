@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { HandPointing } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -30,7 +29,14 @@ const TapHintIcon = () => (
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/60 animate-[sensitiveRipple_1.6s_ease-out_infinite]" />
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/40 animate-[sensitiveRipple_1.6s_ease-out_0.5s_infinite]" />
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/20 animate-[sensitiveRipple_1.6s_ease-out_1s_infinite]" />
-    <HandPointing size={44} weight="fill" color="white" />
+    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M20 21V19C20 16.7909 18.2091 15 16 15H15C14.4477 15 14 14.5523 14 14V9C14 7.89543 13.1046 7 12 7V7C10.8954 7 10 7.89543 10 9V18L7.6 14.8C7.22229 14.2964 6.62951 14 6 14H5.56619C4.70121 14 4 14.7012 4 15.5662V15.5662C4 15.8501 4.07715 16.1286 4.22319 16.372L7 21" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+      <path d="M12 4V3" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+      <path d="M18 10L19 10" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+      <path d="M5 10L6 10" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+      <path d="M7.34334 5.34309L6.63623 4.63599" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+      <path d="M16.6567 5.34309L17.3638 4.63599" stroke="white" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+    </svg>
   </span>
 );
 
