@@ -1695,25 +1695,12 @@ const Chats = () => {
   }, []);
 
   const springDiscoveryCardHome = useCallback(async () => {
+    // Use overdamped tween instead of spring — eliminates overshoot that caused
+    // stamp indicators to flash the wrong direction during cancel-return.
     await Promise.all([
-      animateMotionValue(dragX, 0, {
-        type: "spring",
-        stiffness: 400,
-        damping: 30,
-        mass: 0.92,
-      }),
-      animateMotionValue(dragY, 0, {
-        type: "spring",
-        stiffness: 400,
-        damping: 30,
-        mass: 0.92,
-      }),
-      animateMotionValue(dragRotateOverride, 0, {
-        type: "spring",
-        stiffness: 400,
-        damping: 30,
-        mass: 0.92,
-      }),
+      animateMotionValue(dragX, 0, { type: "tween", duration: 0.32, ease: [0.25, 1, 0.35, 1] }),
+      animateMotionValue(dragY, 0, { type: "tween", duration: 0.32, ease: [0.25, 1, 0.35, 1] }),
+      animateMotionValue(dragRotateOverride, 0, { type: "tween", duration: 0.32, ease: [0.25, 1, 0.35, 1] }),
     ]);
     dragX.set(0);
     dragY.set(0);
@@ -3863,13 +3850,16 @@ const Chats = () => {
   );
 
   const triggerDiscoveryWave = useCallback(
-    async (target: DiscoveryProfile, options?: { velocityX?: number; showToast?: boolean }) => {
+    async (target: DiscoveryProfile, velocityXOrOptions?: number | { velocityX?: number; showToast?: boolean }) => {
       if (blockedUserIds.has(target.id)) return false;
+      // Accept either a raw velocityX number (from onSwipeRight drag) or an options object (from button)
+      const velocityX = typeof velocityXOrOptions === "number" ? velocityXOrOptions : (velocityXOrOptions?.velocityX ?? 0);
+      const showToast = typeof velocityXOrOptions === "object" ? (velocityXOrOptions?.showToast ?? true) : true;
       return performDiscoverySwipe("right", target.id, "wave", {
-        velocityX: options?.velocityX ?? 0,
+        velocityX,
         nextProfileId: stackedDiscoveryCards[1]?.id ?? null,
         task: async () => {
-          const ok = await executeDiscoveryWaveTask(target, options?.showToast ?? true);
+          const ok = await executeDiscoveryWaveTask(target, showToast);
           if (ok) {
             launchDiscoverySendCue("wave");
           }
