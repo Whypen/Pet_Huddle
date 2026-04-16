@@ -125,8 +125,10 @@ const DiscoveryDeckInner = ({
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const NAV_PROTECTED_PADDING = 28;
-  const NAV_COMFORT_GAP = 18;
+  const NAV_PROTECTED_PADDING = 34;
+  const NAV_COMFORT_GAP = 24;
+  const FOOTER_VISUAL_ALLOWANCE = 28;
+  const CTA_VISUAL_ALLOWANCE = 24;
   const MAX_NAV_AVOIDANCE_LIFT = 120;
 
   useEffect(() => {
@@ -166,8 +168,11 @@ const DiscoveryDeckInner = ({
         const footerRect = footerNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
         const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
-        const actionsBottom = actionsNode ? actionsNode.getBoundingClientRect().bottom : Number.NEGATIVE_INFINITY;
-        const contentBottom = Math.max(footerRect.bottom, actionsBottom);
+        const footerVisualBottom = footerRect.bottom + FOOTER_VISUAL_ALLOWANCE;
+        const actionsBottom = actionsNode
+          ? actionsNode.getBoundingClientRect().bottom + CTA_VISUAL_ALLOWANCE
+          : Number.NEGATIVE_INFINITY;
+        const contentBottom = Math.max(footerVisualBottom, actionsBottom);
         const unliftedContentBottom = contentBottom + discoveryNavAvoidanceLift;
         const overlap = unliftedContentBottom - navProtectedTop;
         const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(overlap + NAV_COMFORT_GAP)));
@@ -206,7 +211,7 @@ const DiscoveryDeckInner = ({
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
     [stackedDiscoveryCards]
   );
-  const shouldUseSideActions = discoveryNavAvoidanceLift >= 28;
+  const shouldUseSideActions = discoveryNavAvoidanceLift >= 12;
 
   useEffect(() => {
     let cancelled = false;
