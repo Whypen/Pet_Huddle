@@ -119,6 +119,7 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [discoveryUseSideActions, setDiscoveryUseSideActions] = useState(false);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
+  const [discoveryViewportHeight, setDiscoveryViewportHeight] = useState<number | null>(null);
   const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const discoveryCardStackRef = useRef<HTMLDivElement | null>(null);
   const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
@@ -131,6 +132,29 @@ const DiscoveryDeckInner = ({
   const NAV_PROTECTED_PADDING = 20;
   const SIDE_ACTION_ENTER_GAP = 18;
   const SIDE_ACTION_EXIT_GAP = 32;
+  const COMPACT_DISCOVERY_VIEWPORT_HEIGHT = 860;
+
+  const isCompactDiscoveryLayout =
+    discoveryViewportHeight !== null && discoveryViewportHeight <= COMPACT_DISCOVERY_VIEWPORT_HEIGHT;
+  const shouldUseSideActions = isCompactDiscoveryLayout || discoveryUseSideActions;
+
+  useLayoutEffect(() => {
+    const measureViewportHeight = () => {
+      const nextHeight = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      setDiscoveryViewportHeight(nextHeight);
+    };
+
+    measureViewportHeight();
+    window.addEventListener("resize", measureViewportHeight);
+    window.visualViewport?.addEventListener("resize", measureViewportHeight);
+    window.visualViewport?.addEventListener("scroll", measureViewportHeight);
+
+    return () => {
+      window.removeEventListener("resize", measureViewportHeight);
+      window.visualViewport?.removeEventListener("resize", measureViewportHeight);
+      window.visualViewport?.removeEventListener("scroll", measureViewportHeight);
+    };
+  }, []);
 
   useEffect(() => {
     setDiscoverImageIndex(0);
@@ -147,6 +171,10 @@ const DiscoveryDeckInner = ({
   useLayoutEffect(() => {
     if (renderDiscoverEmpty || discoveryLocationBlocked) {
       setDiscoveryUseSideActions(false);
+      return;
+    }
+    if (isCompactDiscoveryLayout) {
+      setDiscoveryUseSideActions(true);
       return;
     }
     const trayNode = discoveryVisibleBottomActionsRef.current ?? discoveryBottomActionsRef.current;
@@ -198,7 +226,7 @@ const DiscoveryDeckInner = ({
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, stackedDiscoveryCards.length]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, isCompactDiscoveryLayout, renderDiscoverEmpty, stackedDiscoveryCards.length]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
@@ -314,9 +342,19 @@ const DiscoveryDeckInner = ({
     const speciesSummary = getDiscoverySpeciesSummary(profile);
     const album = getDiscoveryAlbum(profile);
     const cover = album[0] || profilePlaceholder;
-    const stackedOffsetY = deckIndex === 1 ? 0 : deckIndex === 2 ? 8 : 14;
-    const stackedScale = deckIndex === 1 ? 1 : deckIndex === 2 ? 0.985 : 0.97;
+    const stackedOffsetY = deckIndex === 1 ? 0 : deckIndex === 2 ? (isCompactDiscoveryLayout ? 6 : 8) : (isCompactDiscoveryLayout ? 10 : 14);
+    const stackedScale = deckIndex === 1 ? 1 : deckIndex === 2 ? (isCompactDiscoveryLayout ? 0.988 : 0.985) : (isCompactDiscoveryLayout ? 0.976 : 0.97);
     const stackedOpacity = deckIndex <= 1 ? 1 : 0;
+    const footerBottomClass = isCompactDiscoveryLayout ? "bottom-3" : "bottom-5";
+    const footerRadiusClass = isCompactDiscoveryLayout ? "rounded-[24px]" : "rounded-[28px]";
+    const footerTopBarHeightClass = isCompactDiscoveryLayout ? "h-[36px]" : "h-[40px]";
+    const footerTopPaddingClass = availabilityPills.length > 0
+      ? (isCompactDiscoveryLayout ? "pt-[42px]" : "pt-[46px]")
+      : (isCompactDiscoveryLayout ? "pt-2.5" : "pt-3");
+    const footerContentPaddingClass = isCompactDiscoveryLayout ? "px-4 pb-2.5" : "px-4 pb-3";
+    const footerNameClass = isCompactDiscoveryLayout ? "text-[22px]" : "text-[25px]";
+    const footerArrowClass = isCompactDiscoveryLayout ? "h-11 w-11" : "h-12 w-12";
+    const footerArrowIconClass = isCompactDiscoveryLayout ? "h-[18px] w-[18px]" : "h-5 w-5";
     const cardStyle = isActive
       ? { x: dragX, y: dragY, rotate: dragRotate, scale: dragScale, transformOrigin: "50% 20%" as const, willChange: "transform" as const }
       : isImmediateNext
@@ -506,25 +544,25 @@ const DiscoveryDeckInner = ({
           <div className="absolute left-4 top-4">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
           </div>
-          {isActive && discoveryUseSideActions && !isDiscoverDragging && !swipeUiBusy && !showDiscoveryQuotaLock && (
+          {isActive && shouldUseSideActions && !isDiscoverDragging && !swipeUiBusy && !showDiscoveryQuotaLock && (
             <div className="absolute right-4 top-4 z-[19]">
               {renderDiscoveryActionButtons("side")}
             </div>
           )}
-          <div className="pointer-events-none absolute inset-x-4 bottom-5">
-            <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]">
+          <div className={cn("pointer-events-none absolute inset-x-4", footerBottomClass)}>
+            <div className={cn("relative overflow-hidden border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]", footerRadiusClass)}>
               <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
               {availabilityPills.length > 0 && (
-                <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
+                <div className={cn("absolute inset-x-0 top-0 z-10 flex items-center bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4", footerTopBarHeightClass, isCompactDiscoveryLayout ? "rounded-t-[23px]" : "rounded-t-[27px]")}>
                   <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
                     {availabilityPills.join(" • ")}
                   </span>
                 </div>
               )}
-              <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
+              <div className={cn("relative z-10 flex items-end gap-3", footerContentPaddingClass, footerTopPaddingClass)}>
                 <div className="min-w-0 flex-1">
                   <div className="mb-1.5 flex items-center gap-2">
-                    <span className="truncate text-[25px] font-[700] leading-tight text-white">{profile.display_name}</span>
+                    <span className={cn("truncate font-[700] leading-tight text-white", footerNameClass)}>{profile.display_name}</span>
                   </div>
                   {profile.location_name && (
                     <div className="mb-2 flex items-center gap-1.5 py-[1px]">
@@ -539,8 +577,8 @@ const DiscoveryDeckInner = ({
                     </div>
                   )}
                 </div>
-                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]">
-                  <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
+                <div className={cn("flex flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]", footerArrowClass)}>
+                  <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
                 </div>
               </div>
             </div>
@@ -557,19 +595,22 @@ const DiscoveryDeckInner = ({
         className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300"
       >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
-          <div ref={discoveryCardStackRef} className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
-            <div className="relative h-[clamp(438px,64vh,608px)] w-full overflow-visible">
+          <div ref={discoveryCardStackRef} className={cn("relative w-full max-w-[388px] md:pb-[24%]", isCompactDiscoveryLayout ? "pb-[6%] sm:pb-[10%]" : "pb-[11%] sm:pb-[17%]")}>
+            <div
+              className="relative w-full overflow-visible"
+              style={{ height: isCompactDiscoveryLayout ? "clamp(392px,56svh,520px)" : "clamp(438px,64vh,608px)" }}
+            >
               {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.74)" }} />
+                <motion.div aria-hidden="true" className={cn("absolute z-0 left-1/2 h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]", isCompactDiscoveryLayout ? "bottom-[-6.3%]" : "bottom-[-8.8%]")} style={{ transform: isCompactDiscoveryLayout ? "translateX(-50%) scaleX(0.78)" : "translateX(-50%) scaleX(0.74)" }} />
               )}
               {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[1] left-1/2 bottom-[-6.1%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.83)" }} />
+                <motion.div aria-hidden="true" className={cn("absolute z-[1] left-1/2 h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]", isCompactDiscoveryLayout ? "bottom-[-4.4%]" : "bottom-[-6.1%]")} style={{ transform: isCompactDiscoveryLayout ? "translateX(-50%) scaleX(0.86)" : "translateX(-50%) scaleX(0.83)" }} />
               )}
               {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[2] left-1/2 bottom-[-3.6%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.91)" }} />
+                <motion.div aria-hidden="true" className={cn("absolute z-[2] left-1/2 h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]", isCompactDiscoveryLayout ? "bottom-[-2.6%]" : "bottom-[-3.6%]")} style={{ transform: isCompactDiscoveryLayout ? "translateX(-50%) scaleX(0.93)" : "translateX(-50%) scaleX(0.91)" }} />
               )}
               {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[3] left-1/2 bottom-[-1.1%] h-[11.5%] w-full -translate-x-1/2 rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]" style={{ transform: "translateX(-50%) scaleX(0.952)" }} />
+                <motion.div aria-hidden="true" className={cn("absolute z-[3] left-1/2 w-full -translate-x-1/2 rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]", isCompactDiscoveryLayout ? "bottom-0 h-[10%]" : "bottom-[-1.1%] h-[11.5%]")} style={{ transform: isCompactDiscoveryLayout ? "translateX(-50%) scaleX(0.964)" : "translateX(-50%) scaleX(0.952)" }} />
               )}
               {discoveryLoading && (
                 <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
@@ -613,13 +654,13 @@ const DiscoveryDeckInner = ({
             </div>
           </div>
         </div>
-        <div className="relative mt-1 px-4 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] flex-shrink-0 min-h-[104px]">
+        <div className={cn("relative mt-1 px-4 flex-shrink-0", shouldUseSideActions ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+12px)] min-h-[28px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]")}>
           <div ref={discoveryBottomActionsRef} aria-hidden="true" className="pointer-events-none invisible absolute left-1/2 top-0 -translate-x-1/2">
             <div className="flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
               {renderDiscoveryActionButtons("bottom")}
             </div>
           </div>
-          {renderDiscoverEmpty ? <div /> : !discoveryUseSideActions && !isDiscoverDragging ? (
+          {renderDiscoverEmpty ? <div /> : !shouldUseSideActions && !isDiscoverDragging ? (
             <div ref={discoveryVisibleBottomActionsRef} className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
               {renderDiscoveryActionButtons("bottom")}
             </div>
