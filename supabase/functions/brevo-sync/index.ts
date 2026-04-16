@@ -252,10 +252,15 @@ async function upsertContact(payload: BrevoContactPayload): Promise<boolean> {
   return true;
 }
 
-async function addContactToList(email: string, listId: number): Promise<void> {
-  await brevoFetch(`/contacts/lists/${listId}/contacts/add`, "POST", {
+async function addContactToList(email: string, listId: number): Promise<boolean> {
+  const res = await brevoFetch(`/contacts/lists/${listId}/contacts/add`, "POST", {
     emails: [email],
   });
+  if (!res.ok && res.status !== 204) {
+    console.error("[brevo-sync] add-to-list failed", email, listId, res.status, res.data);
+    return false;
+  }
+  return true;
 }
 
 type SyncBrevoContactOptions = {
@@ -276,6 +281,7 @@ async function syncBrevoContactToDefaultList(
     email,
     ext_id: extId,
     attributes,
+    listIds: requestedListIds,
   });
   if (!ok) return false;
 
@@ -636,18 +642,22 @@ type BackfillResult = {
 
 async function handleBackfillDefaultList(): Promise<BackfillResult> {
   const result: BackfillResult = { scanned: 0, synced: 0, failed: 0, skipped: 0 };
-  const perPage = 200;
-  const maxPages = 200;
+  const perPage = 500;
 
-  for (let page = 1; page <= maxPages; page += 1) {
-    const listed = await supabase.auth.admin.listUsers({ page, perPage });
-    if (listed.error) {
-      throw new Error(listed.error.message || "auth_user_backfill_failed");
+  for (let from = 0; from < 100_000; from += perPage) {
+    const { data: profilesPage, error } = await supabase
+      .from("profiles")
+      .select("id,email,created_at")
+      .not("email", "is", null)
+      .order("created_at", { ascending: true })
+      .range(from, from + perPage - 1);
+    if (error) {
+      throw new Error(error.message || "profile_backfill_failed");
     }
-    const users = listed.data?.users || [];
-    for (const authUser of users) {
-      const userId = String(authUser.id || "").trim();
-      const email = String(authUser.email || "").trim().toLowerCase();
+    const rows = profilesPage || [];
+    for (const profileRow of rows) {
+      const userId = String(profileRow.id || "").trim();
+      const email = String(profileRow.email || "").trim().toLowerCase();
       if (!userId || !email) {
         result.skipped += 1;
         continue;
@@ -657,7 +667,7 @@ async function handleBackfillDefaultList(): Promise<BackfillResult> {
         const crmView = await loadCrmViewRowByEmail(email);
         const ok = await syncBrevoContactToDefaultList(email, userId, {
           APP_USER_ID: userId,
-          USER_CREATED_AT: authUser.created_at ?? null,
+          USER_CREATED_AT: profileRow.created_at ?? null,
           ...crmAttrsFromView(crmView),
         });
         if (ok) {
@@ -670,7 +680,7 @@ async function handleBackfillDefaultList(): Promise<BackfillResult> {
         console.error("[brevo-sync] backfill failed", userId, email, error);
       }
     }
-    if (users.length < perPage) break;
+    if (rows.length < perPage) break;
   }
 
   console.log("[brevo-sync] backfill_default_list complete", result);
