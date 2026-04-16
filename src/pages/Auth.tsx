@@ -22,6 +22,7 @@ import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
+import { mapAuthFailureMessage, shouldResetTurnstileForAuthError } from "@/lib/authErrorMessages";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -52,6 +53,8 @@ const Auth = () => {
     [location.search],
   );
   const [authError, setAuthError] = useState("");
+  const [authDebugReason, setAuthDebugReason] = useState("");
+  const [authDebugCodes, setAuthDebugCodes] = useState<string[]>([]);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [emailModalOpen, setEmailModalOpen] = useState(showTurnstileDiag);
   const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>(showTurnstileDiag ? "signin" : "choice");
@@ -61,6 +64,8 @@ const Auth = () => {
   const [mfaOtpCode, setMfaOtpCode] = useState("");
   const [mfaError, setMfaError] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
+  const [signInLoading, setSignInLoading] = useState(false);
+  const signInPendingRef = useRef(false);
   const [videoStarted, setVideoStarted] = useState(false);
   const [useStaticLogo, setUseStaticLogo] = useState(false);
   const logoVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -142,53 +147,82 @@ const Auth = () => {
 
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
+    setAuthDebugReason("");
+    setAuthDebugCodes([]);
     if (!values.email) return;
+    if (signInPendingRef.current) return;
     const turnstileToken = readLoginTurnstileToken();
     if (!turnstileToken) {
+      loginTurnstile.reset();
       if (loginTurnstile.error) {
-        setAuthError(loginTurnstile.error);
+        setAuthError(mapAuthFailureMessage(loginTurnstile.error));
+      } else {
+        setAuthError("There's something wrong with your verification. Please try again later.");
       }
       return;
     }
-    const result = await signIn(values.email, values.password, undefined, turnstileToken);
-    loginTurnstile.reset();
-    if (result.error) {
-      setAuthError(result.error.message || "Couldn't sign you in.");
-      return;
-    }
-
-    if (values.remember) {
-      localStorage.setItem("auth_login_identifier", values.email);
-      enablePersistentSession();
-    } else {
-      localStorage.removeItem("auth_login_identifier");
-      enableSessionOnlyAuth();
-    }
-
-    if (result.mfaRequired && result.mfaFactorId) {
-      setMfaFactorId(result.mfaFactorId);
-      setMfaOtpCode("");
-      setMfaError("");
-      setEmailModalStep("mfa-challenge");
-      return;
-    }
-
-    const { data: currentUserData } = await supabase.auth.getUser();
-    const currentUserId = String(currentUserData.user?.id || "").trim();
-    if (currentUserId) {
-      const { data: profileRow, error: profileLookupError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id", currentUserId)
-        .maybeSingle();
-      if (profileLookupError || !profileRow) {
-        await supabase.auth.signOut({ scope: "local" });
-        setAuthError("This account is unavailable. Please sign up again.");
+    signInPendingRef.current = true;
+    setSignInLoading(true);
+    loginTurnstile.consumeToken();
+    try {
+      const result = await signIn(values.email, values.password, undefined, turnstileToken);
+      if (result.error) {
+        const debugDetails = (result.error as { details?: { turnstile_reason?: string; turnstile_error_codes?: unknown } }).details;
+        const debugReason = typeof debugDetails?.turnstile_reason === "string"
+          ? String(debugDetails?.turnstile_reason || "")
+          : "";
+        const debugCodes = Array.isArray(debugDetails?.turnstile_error_codes)
+          ? debugDetails.turnstile_error_codes.map((value) => String(value || "").trim()).filter(Boolean)
+          : [];
+        if (shouldResetTurnstileForAuthError(result.error.message)) {
+          loginTurnstile.reset();
+        }
+        if (showTurnstileDiag && (debugReason || debugCodes.length)) {
+          setAuthDebugReason(debugReason);
+          setAuthDebugCodes(debugCodes);
+          console.debug("[auth.turnstile]", { reason: debugReason, errorCodes: debugCodes, details: debugDetails ?? null });
+        }
+        setAuthError(mapAuthFailureMessage(result.error.message));
         return;
       }
-    }
+      loginTurnstile.reset();
 
-    navigate("/");
+      if (values.remember) {
+        localStorage.setItem("auth_login_identifier", values.email);
+        enablePersistentSession();
+      } else {
+        localStorage.removeItem("auth_login_identifier");
+        enableSessionOnlyAuth();
+      }
+
+      if (result.mfaRequired && result.mfaFactorId) {
+        setMfaFactorId(result.mfaFactorId);
+        setMfaOtpCode("");
+        setMfaError("");
+        setEmailModalStep("mfa-challenge");
+        return;
+      }
+
+      const { data: currentUserData } = await supabase.auth.getUser();
+      const currentUserId = String(currentUserData.user?.id || "").trim();
+      if (currentUserId) {
+        const { data: profileRow, error: profileLookupError } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", currentUserId)
+          .maybeSingle();
+        if (profileLookupError || !profileRow) {
+          await supabase.auth.signOut({ scope: "local" });
+          setAuthError("This account is unavailable. Please sign up again.");
+          return;
+        }
+      }
+
+      navigate("/");
+    } finally {
+      signInPendingRef.current = false;
+      setSignInLoading(false);
+    }
   };
 
   // ── MFA: verify 6-digit code ───────────────────────────────────────────────
@@ -243,13 +277,16 @@ const Auth = () => {
 
   const openEmailChoice = () => {
     setAuthError("");
+    setAuthDebugReason("");
     setEmailModalStep("choice");
     setEmailModalOpen(true);
   };
 
   const openSignInModal = () => {
     setAuthError("");
+    setAuthDebugReason("");
     setEmailModalStep("signin");
+    loginTurnstile.reset();
   };
 
   const handleOAuthLogin = async (provider: "apple" | "google") => {
@@ -391,6 +428,7 @@ const Auth = () => {
             setMfaError("");
             setMfaOtpCode("");
             setMfaFactorId(null);
+            setAuthDebugReason("");
             setEmailModalStep("choice");
           }
         }}
@@ -453,7 +491,13 @@ const Auth = () => {
                 className="min-h-[65px]"
               />
               <TurnstileDebugPanel visible={showTurnstileDiag} diag={loginTurnstile.diag} />
-              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || !loginTurnstile.isTokenUsable}>
+              {showTurnstileDiag && (authDebugReason || authDebugCodes.length) ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <div>turnstile reason: {authDebugReason || "none"}</div>
+                  <div>turnstile codes: {authDebugCodes.length ? authDebugCodes.join(", ") : "none"}</div>
+                </div>
+              ) : null}
+              <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading || !loginTurnstile.isTokenUsable}>
                 Sign in
               </NeuButton>
               {authError ? (

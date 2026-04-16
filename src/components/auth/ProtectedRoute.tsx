@@ -20,7 +20,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     flowState !== "idle";
   const onboardingComplete = isRegisteredUserProfile(profile);
 
-  if (loading || (hydrating && !user)) {
+  if (loading || (hydrating && (!user || !profile))) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -55,12 +55,12 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <Navigate to="/set-profile" replace />;
   }
 
-  // Defense-in-depth: if profile is loaded and email not verified,
-  // user cannot leave onboarding routes.
-  // OAuth users (Google/Apple) are exempt — their email is already provider-verified.
-  const isOAuthUser = user?.app_metadata?.provider !== "email";
-  const emailVerified = isOAuthUser || ((profile as { email_verified?: boolean } | null)?.email_verified ?? true);
-  if (!emailVerified && !allowOnboardingRoutes) {
+  const authEmailVerified = Boolean(
+    (user as { email_confirmed_at?: string | null; confirmed_at?: string | null } | null)?.email_confirmed_at ||
+    (user as { email_confirmed_at?: string | null; confirmed_at?: string | null } | null)?.confirmed_at,
+  );
+  const profileEmailVerified = (profile as { email_verified?: boolean | null } | null)?.email_verified === true;
+  if (!authEmailVerified && !profileEmailVerified && !allowOnboardingRoutes) {
     return <Navigate to="/set-profile" replace />;
   }
 
