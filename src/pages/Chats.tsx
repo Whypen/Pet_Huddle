@@ -815,7 +815,7 @@ const Chats = () => {
   const dragRightProgress = useTransform(() => clamp(Math.max(0, dragX.get()) / 180, 0, 1));
   const dragLeftProgress = useTransform(() => clamp(Math.max(0, -dragX.get()) / 180, 0, 1));
   const waveIndicatorOpacity = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1]);
-  const passIndicatorOpacity = useTransform(dragX, [-100, -20], [1, 0]);
+  const passIndicatorOpacity = useTransform(dragLeftProgress, [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1]);
   const waveIndicatorScale = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0.54, 0.7, 0.94, 1.03]);
   const passIndicatorScale = useTransform(dragLeftProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
   const waveIndicatorX = useTransform(dragRightProgress, [0, 0.2, 1], [-18, -6, 0]);
@@ -1718,6 +1718,16 @@ const Chats = () => {
           : -viewportWidth * 1.05;
       const duration = clamp(0.28 + (600 - Math.min(travel, 600)) / 4000, 0.28, 0.34);
       const exitRotate = direction === "right" ? 20 : -20;
+      // Hard-snap dragX to the committed side before animating.
+      // This ensures dragRightProgress / dragLeftProgress immediately reflect
+      // the correct direction from frame 1 — even on velocity-only commits
+      // where the card may have been near-centre or slightly on the wrong side.
+      // Without this, overlay stamps and tints can briefly show the wrong state.
+      const snapSeed = direction === "right" ? 40 : -40;
+      if ((direction === "right" && dragX.get() < snapSeed) ||
+          (direction === "left" && dragX.get() > snapSeed)) {
+        dragX.set(snapSeed);
+      }
       await Promise.all([
         animateMotionValue(dragX, targetX, {
           type: "tween",
