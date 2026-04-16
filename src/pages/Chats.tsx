@@ -1762,8 +1762,12 @@ const Chats = () => {
       setDiscoverySwipeBusy(true);
 
       try {
-        await flingDiscoveryCard(direction, options?.velocityX ?? 0);
-        const ok = options?.task ? await options.task() : true;
+        // Parallel: fling animation + network task fire simultaneously.
+        // Next card appears the instant exit completes, not after server.
+        const [, ok] = await Promise.all([
+          flingDiscoveryCard(direction, options?.velocityX ?? 0),
+          options?.task ? options.task() : Promise.resolve(true),
+        ]);
         if (!ok) {
           setSwipeDir(null);
           await springDiscoveryCardHome();
