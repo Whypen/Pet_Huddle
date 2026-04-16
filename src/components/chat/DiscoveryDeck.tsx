@@ -127,10 +127,10 @@ const DiscoveryDeckInner = ({
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const CTA_VISUAL_SHADOW_ALLOWANCE = 14;
-  const NAV_PROTECTED_PADDING = 12;
-  const SIDE_ACTION_ENTER_GAP = 0;
-  const SIDE_ACTION_EXIT_GAP = 12;
+  const CTA_VISUAL_SHADOW_ALLOWANCE = 18;
+  const NAV_PROTECTED_PADDING = 20;
+  const SIDE_ACTION_ENTER_GAP = 18;
+  const SIDE_ACTION_EXIT_GAP = 32;
 
   useEffect(() => {
     setDiscoverImageIndex(0);
@@ -613,7 +613,7 @@ const DiscoveryDeckInner = ({
             </div>
           </div>
         </div>
-        <div className="relative mt-1 px-4 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+8px)] flex-shrink-0 min-h-[92px]">
+        <div className="relative mt-1 px-4 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] flex-shrink-0 min-h-[104px]">
           <div ref={discoveryBottomActionsRef} aria-hidden="true" className="pointer-events-none invisible absolute left-1/2 top-0 -translate-x-1/2">
             <div className="flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
               {renderDiscoveryActionButtons("bottom")}
