@@ -119,22 +119,27 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [discoveryNavAvoidanceLift, setDiscoveryNavAvoidanceLift] = useState(0);
+  const [discoveryUseSideActions, setDiscoveryUseSideActions] = useState(false);
+  const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const discoveryActiveFooterRef = useRef<HTMLDivElement | null>(null);
+  const discoveryBottomStackRef = useRef<HTMLDivElement | null>(null);
   const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
   const discoverImageInteractingRef = useRef(false);
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const NAV_PROTECTED_PADDING = 34;
-  const NAV_COMFORT_GAP = 24;
-  const FOOTER_VISUAL_ALLOWANCE = 28;
+  const NAV_PROTECTED_PADDING = 42;
+  const NAV_COMFORT_GAP = 28;
+  const FOOTER_VISUAL_ALLOWANCE = 30;
+  const STACK_VISUAL_ALLOWANCE = 18;
   const CTA_VISUAL_ALLOWANCE = 24;
-  const MAX_NAV_AVOIDANCE_LIFT = 120;
+  const MAX_NAV_AVOIDANCE_LIFT = 168;
 
   useEffect(() => {
     setDiscoverImageIndex(0);
     setIsDiscoverDragging(false);
     setDiscoveryNavAvoidanceLift(0);
+    setDiscoveryUseSideActions(false);
   }, [currentDiscovery?.id]);
 
   useMotionValueEvent(dragX, "change", (latest) => {
@@ -146,11 +151,13 @@ const DiscoveryDeckInner = ({
 
   useLayoutEffect(() => {
     if (renderDiscoverEmpty || discoveryLocationBlocked) {
+      setDiscoveryUseSideActions(false);
       setDiscoveryNavAvoidanceLift(0);
       return;
     }
     const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
     if (!navNode) {
+      setDiscoveryUseSideActions(false);
       setDiscoveryNavAvoidanceLift(0);
       return;
     }
@@ -160,22 +167,28 @@ const DiscoveryDeckInner = ({
       window.cancelAnimationFrame(frameId);
       frameId = window.requestAnimationFrame(() => {
         const footerNode = discoveryActiveFooterRef.current;
-        if (!footerNode) {
+        const bottomStackNode = discoveryBottomStackRef.current;
+        const actionsNode = discoveryBottomActionsRef.current;
+        if (!footerNode || !bottomStackNode || !actionsNode) {
+          setDiscoveryUseSideActions(false);
           setDiscoveryNavAvoidanceLift(0);
           return;
         }
-        const actionsNode = discoveryBottomActionsRef.current;
         const footerRect = footerNode.getBoundingClientRect();
+        const bottomStackRect = bottomStackNode.getBoundingClientRect();
+        const actionsRect = actionsNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
         const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
-        const footerVisualBottom = footerRect.bottom + FOOTER_VISUAL_ALLOWANCE;
-        const actionsBottom = actionsNode
-          ? actionsNode.getBoundingClientRect().bottom + CTA_VISUAL_ALLOWANCE
-          : Number.NEGATIVE_INFINITY;
-        const contentBottom = Math.max(footerVisualBottom, actionsBottom);
-        const unliftedContentBottom = contentBottom + discoveryNavAvoidanceLift;
-        const overlap = unliftedContentBottom - navProtectedTop;
-        const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(overlap + NAV_COMFORT_GAP)));
+        const authoredFooterBottom = footerRect.bottom + discoveryNavAvoidanceLift + FOOTER_VISUAL_ALLOWANCE;
+        const authoredStackBottom = bottomStackRect.bottom + discoveryNavAvoidanceLift + STACK_VISUAL_ALLOWANCE;
+        const authoredActionsBottom = actionsRect.bottom + discoveryNavAvoidanceLift + CTA_VISUAL_ALLOWANCE;
+        const lowerDeckBottom = Math.max(authoredFooterBottom, authoredStackBottom);
+        const bottomModeBottom = Math.max(lowerDeckBottom, authoredActionsBottom);
+        const nextUseSideActions = bottomModeBottom > navProtectedTop;
+        const activeBottom = nextUseSideActions ? lowerDeckBottom : bottomModeBottom;
+        const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(activeBottom - navProtectedTop + NAV_COMFORT_GAP)));
+
+        setDiscoveryUseSideActions((current) => (current === nextUseSideActions ? current : nextUseSideActions));
         setDiscoveryNavAvoidanceLift((current) => (Math.abs(current - nextLift) <= 1 ? current : nextLift));
       });
     };
@@ -186,9 +199,18 @@ const DiscoveryDeckInner = ({
       measure();
     });
     resizeObserver.observe(navNode);
+    const scrollContainerNode = discoveryScrollContainerRef.current;
+    if (scrollContainerNode) {
+      resizeObserver.observe(scrollContainerNode);
+      scrollContainerNode.addEventListener("scroll", measure, { passive: true });
+    }
     const footerNode = discoveryActiveFooterRef.current;
     if (footerNode) {
       resizeObserver.observe(footerNode);
+    }
+    const bottomStackNode = discoveryBottomStackRef.current;
+    if (bottomStackNode) {
+      resizeObserver.observe(bottomStackNode);
     }
     const actionsNode = discoveryBottomActionsRef.current;
     if (actionsNode) {
@@ -201,17 +223,18 @@ const DiscoveryDeckInner = ({
     return () => {
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
+      scrollContainerNode?.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, discoveryNavAvoidanceLift, isDiscoverDragging, renderDiscoverEmpty, stackedDiscoveryCards.length]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, discoveryNavAvoidanceLift, discoveryUseSideActions, renderDiscoverEmpty, stackedDiscoveryCards.length]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
     [stackedDiscoveryCards]
   );
-  const shouldUseSideActions = discoveryNavAvoidanceLift >= 12;
+  const shouldUseSideActions = discoveryUseSideActions;
 
   useEffect(() => {
     let cancelled = false;
@@ -573,7 +596,10 @@ const DiscoveryDeckInner = ({
 
   return (
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
-      <div className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300">
+      <div
+        ref={discoveryScrollContainerRef}
+        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300"
+      >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
           <div
             className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%] transition-transform duration-200"
@@ -584,7 +610,12 @@ const DiscoveryDeckInner = ({
               style={{ height: "clamp(438px,64vh,608px)" }}
             >
               {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.74)" }} />
+                <motion.div
+                  ref={discoveryBottomStackRef}
+                  aria-hidden="true"
+                  className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                  style={{ transform: "translateX(-50%) scaleX(0.74)" }}
+                />
               )}
               {currentDiscovery && !renderDiscoverEmpty && (
                 <motion.div aria-hidden="true" className="absolute z-[1] left-1/2 bottom-[-6.1%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.83)" }} />
@@ -639,16 +670,20 @@ const DiscoveryDeckInner = ({
         </div>
         <div
           className={cn("relative mt-1 px-4 flex-shrink-0", shouldUseSideActions ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+18px)] min-h-[42px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]")}
-          style={{ transform: !shouldUseSideActions && discoveryNavAvoidanceLift > 0 ? `translateY(-${discoveryNavAvoidanceLift}px)` : undefined, transition: "transform 200ms ease" }}
+          style={{ transform: discoveryNavAvoidanceLift > 0 ? `translateY(-${discoveryNavAvoidanceLift}px)` : undefined, transition: "transform 200ms ease" }}
         >
-          {renderDiscoverEmpty ? <div /> : !shouldUseSideActions && !isDiscoverDragging ? (
+          {renderDiscoverEmpty ? <div /> : (
             <div
               ref={discoveryBottomActionsRef}
-              className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]"
+              aria-hidden={shouldUseSideActions || isDiscoverDragging}
+              className={cn(
+                "mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px] transition-opacity duration-200",
+                (shouldUseSideActions || isDiscoverDragging) && "pointer-events-none opacity-0"
+              )}
             >
               {renderDiscoveryActionButtons("bottom")}
             </div>
-          ) : <div />}
+          )}
         </div>
       </div>
     </Profiler>
