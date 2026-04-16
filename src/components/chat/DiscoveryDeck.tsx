@@ -1,4 +1,4 @@
-import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { motion, useMotionValueEvent, type MotionValue } from "framer-motion";
 import { ArrowUpRight, MapPin, PawPrint, Star, X } from "lucide-react";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
@@ -120,10 +120,14 @@ const DiscoveryDeckInner = ({
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [discoveryNavAvoidanceLift, setDiscoveryNavAvoidanceLift] = useState(0);
   const [footerCtaPlacement, setFooterCtaPlacement] = useState<"footer" | "promoted">("footer");
+  const [promotedFooterCtaStyle, setPromotedFooterCtaStyle] = useState<CSSProperties>({ top: 72, right: 16 });
   const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const discoveryActiveCardRef = useRef<HTMLDivElement | null>(null);
   const discoveryActiveFooterRef = useRef<HTMLDivElement | null>(null);
+  const discoveryBadgeAnchorRef = useRef<HTMLDivElement | null>(null);
   const discoveryBottomStackRef = useRef<HTMLDivElement | null>(null);
   const discoveryFooterCtaRef = useRef<HTMLButtonElement | null>(null);
+  const discoveryPromotedCtaAnchorRef = useRef<HTMLDivElement | null>(null);
   const discoverImageInteractingRef = useRef(false);
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
@@ -133,16 +137,23 @@ const DiscoveryDeckInner = ({
   const FOOTER_VISUAL_ALLOWANCE = 30;
   const STACK_VISUAL_ALLOWANCE = 18;
   const FOOTER_CTA_VISUAL_ALLOWANCE = 24;
-  const PROMOTED_CTA_RETURN_ALLOWANCE = 16;
+  const FOOTER_CTA_BOTTOM_INSET = 12;
+  const PROMOTED_CTA_VISUAL_ALLOWANCE = 20;
   const MAX_NAV_AVOIDANCE_LIFT = 168;
   const FOOTER_CTA_PROMOTE_ENTER_THRESHOLD = 12;
   const FOOTER_CTA_RETURN_EXIT_THRESHOLD = 44;
+  const FOOTER_CTA_BUTTON_SIZE = 48;
+  const PROMOTED_CTA_RIGHT_INSET = 16;
+  const PROMOTED_CTA_TOP_SAFE_INSET = 72;
+  const PROMOTED_CTA_BADGE_GAP = 14;
+  const PROMOTED_CTA_FOOTER_CLEARANCE = 16;
 
   useLayoutEffect(() => {
     setDiscoverImageIndex(0);
     setIsDiscoverDragging(false);
     setDiscoveryNavAvoidanceLift(0);
     setFooterCtaPlacement("footer");
+    setPromotedFooterCtaStyle({ top: PROMOTED_CTA_TOP_SAFE_INSET, right: PROMOTED_CTA_RIGHT_INSET });
   }, [currentDiscovery?.id]);
 
   useMotionValueEvent(dragX, "change", (latest) => {
@@ -168,13 +179,18 @@ const DiscoveryDeckInner = ({
     const measure = () => {
       window.cancelAnimationFrame(frameId);
       frameId = window.requestAnimationFrame(() => {
+        const cardNode = discoveryActiveCardRef.current;
         const footerNode = discoveryActiveFooterRef.current;
+        const badgeNode = discoveryBadgeAnchorRef.current;
         const bottomStackNode = discoveryBottomStackRef.current;
-        if (!footerNode || !bottomStackNode) {
+        if (!cardNode || !footerNode || !badgeNode || !bottomStackNode) {
           setDiscoveryNavAvoidanceLift(0);
           return;
         }
+        const currentLift = discoveryNavAvoidanceLift;
+        const cardRect = cardNode.getBoundingClientRect();
         const footerRect = footerNode.getBoundingClientRect();
+        const badgeRect = badgeNode.getBoundingClientRect();
         const bottomStackRect = bottomStackNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
         const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
@@ -182,28 +198,102 @@ const DiscoveryDeckInner = ({
           footerRect.bottom + FOOTER_VISUAL_ALLOWANCE,
           bottomStackRect.bottom + STACK_VISUAL_ALLOWANCE
         );
-        const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(deckBottom - navProtectedTop + NAV_COMFORT_GAP)));
+        const deckBottomNatural = deckBottom + currentLift;
+        const baseDeckLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(deckBottomNatural - navProtectedTop + NAV_COMFORT_GAP)));
 
-        setDiscoveryNavAvoidanceLift((current) => (Math.abs(current - nextLift) <= 1 ? current : nextLift));
+        const footerCtaNode = discoveryFooterCtaRef.current;
+        const footerCtaBottomNatural = (
+          footerCtaNode
+            ? footerCtaNode.getBoundingClientRect().bottom + FOOTER_CTA_VISUAL_ALLOWANCE
+            : footerRect.bottom - FOOTER_CTA_BOTTOM_INSET + FOOTER_CTA_VISUAL_ALLOWANCE
+        ) + currentLift;
+        const promotedAnchorNode = discoveryPromotedCtaAnchorRef.current;
+        const footerCtaLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(footerCtaBottomNatural - navProtectedTop + NAV_COMFORT_GAP)));
+
+        const naturalCardTop = cardRect.top + currentLift;
+        const naturalFooterTop = footerRect.top + currentLift;
+        const badgeBottomInCard = badgeRect.bottom - cardRect.top;
+        const computedPromotedTop = Math.max(PROMOTED_CTA_TOP_SAFE_INSET, Math.ceil(badgeBottomInCard + PROMOTED_CTA_BADGE_GAP));
+        const nextPromotedStyle = { top: computedPromotedTop, right: PROMOTED_CTA_RIGHT_INSET };
+        const promotedAnchorRect = promotedAnchorNode?.getBoundingClientRect();
+        const promotedCtaTopNatural = promotedAnchorRect && footerCtaPlacement === "promoted"
+          ? promotedAnchorRect.top + currentLift
+          : naturalCardTop + computedPromotedTop;
+        const promotedCtaBottomNatural = promotedAnchorRect && footerCtaPlacement === "promoted"
+          ? promotedAnchorRect.bottom + PROMOTED_CTA_VISUAL_ALLOWANCE + currentLift
+          : promotedCtaTopNatural + FOOTER_CTA_BUTTON_SIZE + PROMOTED_CTA_VISUAL_ALLOWANCE;
+
+        const measureForLift = (lift: number) => {
+          const predictedCardTop = naturalCardTop - lift;
+          const predictedFooterTop = naturalFooterTop - lift;
+          const footerCtaBottom = footerCtaBottomNatural - lift;
+          const footerCtaIntrusion = footerCtaBottom - navProtectedTop;
+          const footerCtaClearance = navProtectedTop - footerCtaBottom;
+          const promotedCtaTop = promotedCtaTopNatural - lift;
+          const promotedCtaBottom = promotedCtaBottomNatural - lift;
+          const promotedFits =
+            promotedCtaTop >= predictedCardTop + PROMOTED_CTA_TOP_SAFE_INSET &&
+            promotedCtaBottom <= predictedFooterTop - PROMOTED_CTA_FOOTER_CLEARANCE;
+
+          return {
+            footerCtaBottom,
+            footerCtaIntrusion,
+            footerCtaClearance,
+            promotedCtaBottom,
+            promotedFits,
+          };
+        };
+
+        let nextLift = baseDeckLift;
+        let prediction = measureForLift(nextLift);
+
         if (showDiscoveryQuotaLock) {
+          nextLift = Math.max(baseDeckLift, footerCtaLift);
+          setPromotedFooterCtaStyle((current) =>
+            current.top === nextPromotedStyle.top && current.right === nextPromotedStyle.right ? current : nextPromotedStyle
+          );
+          setDiscoveryNavAvoidanceLift((current) => (Math.abs(current - nextLift) <= 1 ? current : nextLift));
           setFooterCtaPlacement("footer");
           return;
         }
 
-        setFooterCtaPlacement((current) => {
-          const footerCtaNode = discoveryFooterCtaRef.current;
-          const footerCtaBottom = footerCtaNode
-            ? footerCtaNode.getBoundingClientRect().bottom + FOOTER_CTA_VISUAL_ALLOWANCE
-            : footerRect.bottom + PROMOTED_CTA_RETURN_ALLOWANCE;
-
-          if (current === "promoted") {
-            const footerCtaClearance = navProtectedTop - footerCtaBottom;
-            return footerCtaClearance >= FOOTER_CTA_RETURN_EXIT_THRESHOLD ? "footer" : current;
+        let nextPlacement: "footer" | "promoted" = footerCtaPlacement;
+        if (footerCtaPlacement === "promoted") {
+          if (prediction.footerCtaClearance >= FOOTER_CTA_RETURN_EXIT_THRESHOLD) {
+            nextPlacement = "footer";
+          } else if (!prediction.promotedFits) {
+            nextLift = Math.max(nextLift, footerCtaLift);
+            prediction = measureForLift(nextLift);
+            nextPlacement = "footer";
           }
+        } else if (prediction.footerCtaIntrusion >= FOOTER_CTA_PROMOTE_ENTER_THRESHOLD) {
+          if (prediction.promotedFits) {
+            nextPlacement = "promoted";
+          } else {
+            nextLift = Math.max(nextLift, footerCtaLift);
+            prediction = measureForLift(nextLift);
+            nextPlacement = "footer";
+          }
+        }
 
-          const footerCtaIntrusion = footerCtaBottom - navProtectedTop;
-          return footerCtaIntrusion >= FOOTER_CTA_PROMOTE_ENTER_THRESHOLD ? "promoted" : current;
-        });
+        setPromotedFooterCtaStyle((current) =>
+          current.top === nextPromotedStyle.top && current.right === nextPromotedStyle.right ? current : nextPromotedStyle
+        );
+        setDiscoveryNavAvoidanceLift((current) => (Math.abs(current - nextLift) <= 1 ? current : nextLift));
+        setFooterCtaPlacement((current) => (current === nextPlacement ? current : nextPlacement));
+
+        const discoveryDebug = (globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true;
+        if (discoveryDebug) {
+          console.debug("[DiscoveryDeck]", {
+            deckBottomNatural,
+            footerCtaBottomNatural,
+            navProtectedTop,
+            requiredLift: nextLift,
+            ctaPlacement: nextPlacement,
+            promotedCtaBottom: prediction.promotedCtaBottom,
+            footerCtaBottom: prediction.footerCtaBottom,
+          });
+        }
       });
     };
 
@@ -222,9 +312,21 @@ const DiscoveryDeckInner = ({
     if (footerNode) {
       resizeObserver.observe(footerNode);
     }
+    const badgeNode = discoveryBadgeAnchorRef.current;
+    if (badgeNode) {
+      resizeObserver.observe(badgeNode);
+    }
     const bottomStackNode = discoveryBottomStackRef.current;
     if (bottomStackNode) {
       resizeObserver.observe(bottomStackNode);
+    }
+    const footerCtaNode = discoveryFooterCtaRef.current;
+    if (footerCtaNode) {
+      resizeObserver.observe(footerCtaNode);
+    }
+    const promotedAnchorNode = discoveryPromotedCtaAnchorRef.current;
+    if (promotedAnchorNode) {
+      resizeObserver.observe(promotedAnchorNode);
     }
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
@@ -238,12 +340,17 @@ const DiscoveryDeckInner = ({
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, showDiscoveryQuotaLock, stackedDiscoveryCards.length]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, discoveryNavAvoidanceLift, footerCtaPlacement, renderDiscoverEmpty, showDiscoveryQuotaLock, stackedDiscoveryCards.length]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
     [stackedDiscoveryCards]
   );
+  const footerCtaMode = renderDiscoverEmpty || discoveryLocationBlocked
+    ? "hidden_empty"
+    : showDiscoveryQuotaLock
+      ? "hidden_locked"
+      : footerCtaPlacement;
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
   const ctaDisabled = swipeUiBusy || isDiscoverDragging || showDiscoveryQuotaLock;
 
@@ -398,6 +505,7 @@ const DiscoveryDeckInner = ({
     return (
       <motion.div
         key={profile.id}
+        ref={isActive ? discoveryActiveCardRef : undefined}
         drag={isActive ? true : false}
         dragConstraints={isActive ? { left: 0, right: 0, top: 30, bottom: 30 } : undefined}
         dragElastic={isActive ? 0.15 : undefined}
@@ -564,24 +672,30 @@ const DiscoveryDeckInner = ({
             </>
           )}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
-          <div className="absolute left-4 top-4">
+          <div ref={isActive ? discoveryBadgeAnchorRef : undefined} className="absolute left-4 top-4">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
           </div>
-          {isActive && !showDiscoveryQuotaLock && footerCtaPlacement === "promoted" && (
-            <div className="absolute right-4 top-[76px] z-[19]">
-              <button
-                type="button"
-                aria-label={`Open ${profile.display_name || "profile"}`}
-                className={cn(
-                  "pointer-events-auto flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                  footerArrowClass,
-                  ctaDisabled && "cursor-not-allowed opacity-55"
-                )}
-                disabled={ctaDisabled}
-                onClick={(event) => openDiscoveryProfile(event, profile)}
-              >
-                <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
-              </button>
+          {isActive && footerCtaMode !== "hidden_locked" && footerCtaMode !== "hidden_empty" && (
+            <div
+              ref={discoveryPromotedCtaAnchorRef}
+              className="absolute z-[19]"
+              style={promotedFooterCtaStyle}
+            >
+              {footerCtaMode === "promoted" ? (
+                <button
+                  type="button"
+                  aria-label={`Open ${profile.display_name || "profile"}`}
+                  className={cn(
+                    "pointer-events-auto flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+                    footerArrowClass,
+                    ctaDisabled && "cursor-not-allowed opacity-55"
+                  )}
+                  disabled={ctaDisabled}
+                  onClick={(event) => openDiscoveryProfile(event, profile)}
+                >
+                  <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
+                </button>
+              ) : null}
             </div>
           )}
           <div
@@ -615,7 +729,7 @@ const DiscoveryDeckInner = ({
                     </div>
                   )}
                 </div>
-                {(!isActive || (!showDiscoveryQuotaLock && footerCtaPlacement === "footer")) && (
+                {footerCtaMode === "footer" || !isActive ? (
                   <button
                     ref={isActive ? discoveryFooterCtaRef : undefined}
                     type="button"
@@ -630,7 +744,7 @@ const DiscoveryDeckInner = ({
                   >
                     <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
