@@ -55,6 +55,8 @@ type DiscoveryDeckProps = {
   passIndicatorY: MotionValue<number>;
   waveTintOpacity: MotionValue<number>;
   passTintOpacity: MotionValue<number>;
+  availableDiscoveryHeight: number | null;
+  safeBottomY: number | null;
   onOpenLocationSettings: () => void;
   onExpandSearch: () => void;
   onResurfacePassedProfiles: () => void;
@@ -102,6 +104,8 @@ const DiscoveryDeckInner = ({
   passIndicatorY,
   waveTintOpacity,
   passTintOpacity,
+  availableDiscoveryHeight,
+  safeBottomY,
   onOpenLocationSettings,
   onExpandSearch,
   onResurfacePassedProfiles,
@@ -131,6 +135,25 @@ const DiscoveryDeckInner = ({
   const FOOTER_CTA_BOTTOM_INSET = 12;
   const FOOTER_CTA_PROMOTE_ENTER_THRESHOLD = 0;
   const FOOTER_CTA_RETURN_EXIT_THRESHOLD = 18;
+  const DISCOVERY_CARD_MIN_HEIGHT = 360;
+  const DISCOVERY_CARD_MAX_HEIGHT = 608;
+  const DISCOVERY_CARD_TOP_GAP = 12;
+  const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
+  const DISCOVERY_BOTTOM_ACTION_RESERVE = showBottomActionBar ? 124 : 60;
+
+  const discoveryCardHeight = useMemo(() => {
+    if (!availableDiscoveryHeight || !Number.isFinite(availableDiscoveryHeight)) {
+      return "clamp(438px,64vh,608px)";
+    }
+    const fitted = Math.max(
+      DISCOVERY_CARD_MIN_HEIGHT,
+      Math.min(
+        DISCOVERY_CARD_MAX_HEIGHT,
+        Math.floor(availableDiscoveryHeight - DISCOVERY_BOTTOM_ACTION_RESERVE - DISCOVERY_CARD_TOP_GAP)
+      )
+    );
+    return `${fitted}px`;
+  }, [availableDiscoveryHeight, DISCOVERY_BOTTOM_ACTION_RESERVE]);
 
   useLayoutEffect(() => {
     setDiscoverImageIndex(0);
@@ -150,8 +173,7 @@ const DiscoveryDeckInner = ({
       setFooterCtaPlacement("footer");
       return;
     }
-    const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
-    if (!navNode) {
+    if (safeBottomY == null) {
       return;
     }
 
@@ -164,8 +186,7 @@ const DiscoveryDeckInner = ({
           return;
         }
         const footerRect = footerNode.getBoundingClientRect();
-        const navRect = navNode.getBoundingClientRect();
-        const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
+        const navProtectedTop = safeBottomY - NAV_PROTECTED_PADDING;
         const footerCtaNode = discoveryFooterCtaRef.current;
         const footerCtaBottom = (
           footerCtaNode
@@ -204,12 +225,6 @@ const DiscoveryDeckInner = ({
     const resizeObserver = new ResizeObserver(() => {
       measure();
     });
-    resizeObserver.observe(navNode);
-    const scrollContainerNode = discoveryScrollContainerRef.current;
-    if (scrollContainerNode) {
-      resizeObserver.observe(scrollContainerNode);
-      scrollContainerNode.addEventListener("scroll", measure, { passive: true });
-    }
     const footerNode = discoveryActiveFooterRef.current;
     if (footerNode) {
       resizeObserver.observe(footerNode);
@@ -225,12 +240,11 @@ const DiscoveryDeckInner = ({
     return () => {
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
-      scrollContainerNode?.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, footerCtaPlacement, renderDiscoverEmpty, showDiscoveryQuotaLock]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, footerCtaPlacement, renderDiscoverEmpty, safeBottomY, showDiscoveryQuotaLock]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
@@ -241,7 +255,6 @@ const DiscoveryDeckInner = ({
     : showDiscoveryQuotaLock
       ? "hidden_locked"
       : footerCtaPlacement;
-  const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
   const ctaDisabled = swipeUiBusy || isDiscoverDragging || showDiscoveryQuotaLock;
 
   useEffect(() => {
@@ -638,13 +651,13 @@ const DiscoveryDeckInner = ({
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
       <div
         ref={discoveryScrollContainerRef}
-        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300"
+        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)]"
       >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
           <div className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
             <div
               className="relative w-full overflow-visible"
-              style={{ height: "clamp(438px,64vh,608px)" }}
+              style={{ height: discoveryCardHeight }}
             >
               {currentDiscovery && !renderDiscoverEmpty && (
                 <motion.div
