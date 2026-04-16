@@ -59,6 +59,55 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
 
   const providerStripeReady = Boolean(counterpart?.stripePayoutStatus === "complete" && counterpart?.stripeAccountId);
 
+  const markMessagesRead = useCallback(
+    async (roomMessages: ChatMessageRow[]) => {
+      if (!userId || roomMessages.length === 0) return;
+
+      const incomingIds = roomMessages
+        .filter((message) => message.sender_id && message.sender_id !== userId)
+        .map((message) => message.id)
+        .filter(Boolean);
+
+      if (incomingIds.length === 0) return;
+
+      const { data: existingReads, error: readsError } = await supabase
+        .from("message_reads")
+        .select("message_id")
+        .eq("user_id", userId)
+        .in("message_id", incomingIds);
+
+      if (readsError) {
+        console.warn("[service_chat.mark_read.load_failed]", readsError.message);
+        return;
+      }
+
+      const existingSet = new Set(
+        ((existingReads || []) as Array<{ message_id?: string | null }>)
+          .map((row) => String(row?.message_id || ""))
+          .filter(Boolean)
+      );
+
+      const missingRows = incomingIds
+        .filter((messageId) => !existingSet.has(messageId))
+        .map((messageId) => ({
+          message_id: messageId,
+          user_id: userId,
+          read_at: new Date().toISOString(),
+        }));
+
+      if (missingRows.length === 0) return;
+
+      const { error: upsertError } = await supabase
+        .from("message_reads")
+        .upsert(missingRows, { onConflict: "message_id,user_id" });
+
+      if (upsertError) {
+        console.warn("[service_chat.mark_read.upsert_failed]", upsertError.message);
+      }
+    },
+    [userId]
+  );
+
   const canDispute = useMemo(() => {
     if (!serviceChat) return false;
     if (serviceChat.status === "booked" || serviceChat.status === "in_progress") return true;
@@ -126,7 +175,9 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
 
         const row = serviceData as unknown as ServiceChatRow;
         setServiceChat(row);
-        setMessages(((messageRows || []) as ChatMessageRow[]).filter(Boolean));
+        const nextMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
+        setMessages(nextMessages);
+        void markMessagesRead(nextMessages);
 
         const counterpartId = row.requester_id === userId ? row.provider_id : row.requester_id;
         if (counterpartId) {
@@ -185,7 +236,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         if (shouldShowLoading) setLoading(false);
       }
     },
-    [roomId, userId]
+    [markMessagesRead, roomId, userId]
   );
 
   useEffect(() => {

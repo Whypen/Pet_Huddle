@@ -108,6 +108,21 @@ const normalizeRelationshipStatus = (value: string | null | undefined) => {
   return exact || raw;
 };
 
+const interpolateStops = (progress: number, inputs: number[], outputs: number[]) => {
+  if (inputs.length !== outputs.length || inputs.length === 0) return 0;
+  const clamped = clamp(progress, inputs[0], inputs[inputs.length - 1]);
+  for (let index = 1; index < inputs.length; index += 1) {
+    const start = inputs[index - 1];
+    const end = inputs[index];
+    if (clamped <= end) {
+      const span = end - start || 1;
+      const ratio = (clamped - start) / span;
+      return outputs[index - 1] + (outputs[index] - outputs[index - 1]) * ratio;
+    }
+  }
+  return outputs[outputs.length - 1];
+};
+
 type DiscoveryFilters = {
   ageMin: number;
   ageMax: number;
@@ -733,9 +748,12 @@ const Chats = () => {
   const [starActionLoading, setStarActionLoading] = useState(false);
   const [discoverySendCue, setDiscoverySendCue] = useState<null | { kind: "wave" | "star"; id: number }>(null);
   const discoverySendCueTimeoutRef = useRef<number | null>(null);
+  const discoverySendCueAnimationRef = useRef<{ stop: () => void } | null>(null);
+  const discoverySendCueKindRef = useRef<"wave" | "star" | null>(null);
+  const discoverySendCueCommitPendingRef = useRef(false);
+  const discoverySendCueProgress = useMotionValue(0);
   const [matchOnlyAvatars, setMatchOnlyAvatars] = useState<MatchOnlyAvatar[]>([]);
   const [matchesFeedTick, setMatchesFeedTick] = useState(0);
-  const roomSeenRef = useRef<Record<string, string>>({});
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const pendingSeenMatchWritesRef = useRef<Set<string>>(new Set());
@@ -814,16 +832,57 @@ const Chats = () => {
   );
   const dragRightProgress = useTransform(() => clamp(Math.max(0, dragX.get()) / 180, 0, 1));
   const dragLeftProgress = useTransform(() => clamp(Math.max(0, -dragX.get()) / 180, 0, 1));
-  const waveIndicatorOpacity = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1]);
-  const passIndicatorOpacity = useTransform(dragLeftProgress, [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1]);
-  const waveIndicatorScale = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0.54, 0.7, 0.94, 1.03]);
-  const passIndicatorScale = useTransform(dragLeftProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
-  const waveIndicatorX = useTransform(dragRightProgress, [0, 0.2, 1], [-18, -6, 0]);
-  const waveIndicatorY = useTransform(dragRightProgress, [0, 0.2, 1], [12, 4, 0]);
-  const passIndicatorX = useTransform(dragLeftProgress, [0, 0.2, 1], [18, 6, 0]);
-  const passIndicatorY = useTransform(dragLeftProgress, [0, 0.2, 1], [12, 4, 0]);
-  const waveTintOpacity = useTransform(dragRightProgress, [0, 0.35, 1], [0, 0.1, 0.2]);
-  const passTintOpacity = useTransform(dragLeftProgress, [0, 0.25, 0.55, 1], [0, 0.08, 0.16, 0.24]);
+  const committedDiscoveryDirection = swipeDir === "left" || swipeDir === "right" ? swipeDir : null;
+  const waveIndicatorOpacity = useTransform(() =>
+    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
+      ? 1
+      : interpolateStops(dragRightProgress.get(), [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1])
+  );
+  const passIndicatorOpacity = useTransform(() =>
+    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
+      ? 1
+      : interpolateStops(dragLeftProgress.get(), [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1])
+  );
+  const waveIndicatorScale = useTransform(() =>
+    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
+      ? 1.03
+      : interpolateStops(dragRightProgress.get(), [0, 0.08, 0.45, 1], [0.54, 0.7, 0.94, 1.03])
+  );
+  const passIndicatorScale = useTransform(() =>
+    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
+      ? 1
+      : interpolateStops(dragLeftProgress.get(), [0, 0.28, 1], [0.7, 0.9, 1])
+  );
+  const waveIndicatorX = useTransform(() =>
+    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
+      ? 0
+      : interpolateStops(dragRightProgress.get(), [0, 0.2, 1], [-18, -6, 0])
+  );
+  const waveIndicatorY = useTransform(() =>
+    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
+      ? 0
+      : interpolateStops(dragRightProgress.get(), [0, 0.2, 1], [12, 4, 0])
+  );
+  const passIndicatorX = useTransform(() =>
+    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
+      ? 0
+      : interpolateStops(dragLeftProgress.get(), [0, 0.2, 1], [18, 6, 0])
+  );
+  const passIndicatorY = useTransform(() =>
+    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
+      ? 0
+      : interpolateStops(dragLeftProgress.get(), [0, 0.2, 1], [12, 4, 0])
+  );
+  const waveTintOpacity = useTransform(() =>
+    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
+      ? 0.2
+      : interpolateStops(dragRightProgress.get(), [0, 0.35, 1], [0, 0.1, 0.2])
+  );
+  const passTintOpacity = useTransform(() =>
+    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
+      ? 0.24
+      : interpolateStops(dragLeftProgress.get(), [0, 0.25, 0.55, 1], [0, 0.08, 0.16, 0.24])
+  );
   const nextCardScale = useTransform(dragX, [-150, 0, 150], [1, 0.95, 1]);
   const nextCardTranslateY = useTransform(dragX, [-150, 0, 150], [0, 8, 0]);
   const stampCounterRotate = useTransform(dragRotate, (value) => -value);
@@ -834,16 +893,81 @@ const Chats = () => {
       discoverySendCueTimeoutRef.current = null;
     }
   }, []);
+  const clearDiscoverySendCue = useCallback(() => {
+    clearDiscoverySendCueTimer();
+    discoverySendCueAnimationRef.current?.stop();
+    discoverySendCueAnimationRef.current = null;
+    discoverySendCueKindRef.current = null;
+    discoverySendCueCommitPendingRef.current = false;
+    discoverySendCueProgress.set(0);
+    setDiscoverySendCue(null);
+  }, [clearDiscoverySendCueTimer, discoverySendCueProgress]);
   const launchDiscoverySendCue = useCallback(
-    (kind: "wave" | "star") => {
+    (
+      kind: "wave" | "star",
+      options?: {
+        onCommit?: () => void;
+        onComplete?: () => void;
+      }
+    ) => {
       clearDiscoverySendCueTimer();
+      discoverySendCueAnimationRef.current?.stop();
+      discoverySendCueKindRef.current = kind;
+      discoverySendCueCommitPendingRef.current = kind === "star" && typeof options?.onCommit === "function";
+      discoverySendCueProgress.set(0);
       setDiscoverySendCue({ kind, id: Date.now() });
-      discoverySendCueTimeoutRef.current = window.setTimeout(() => {
-        setDiscoverySendCue((current) => (current?.kind === kind ? null : current));
-        discoverySendCueTimeoutRef.current = null;
-      }, kind === "wave" ? 240 : 1550);
+
+      const duration = kind === "wave" ? 0.24 : 1.18;
+      const commitAt = kind === "star" ? 0.2 : 1;
+      discoverySendCueAnimationRef.current = animate(discoverySendCueProgress, 1, {
+        duration,
+        ease: [0.22, 1, 0.36, 1],
+        onUpdate: (latest) => {
+          if (
+            kind === "star" &&
+            discoverySendCueCommitPendingRef.current &&
+            latest >= commitAt
+          ) {
+            discoverySendCueCommitPendingRef.current = false;
+            options?.onCommit?.();
+          }
+        },
+        onComplete: () => {
+          discoverySendCueAnimationRef.current = null;
+          discoverySendCueKindRef.current = null;
+          discoverySendCueCommitPendingRef.current = false;
+          discoverySendCueProgress.set(0);
+          setDiscoverySendCue(null);
+          options?.onComplete?.();
+        },
+      });
     },
-    [clearDiscoverySendCueTimer]
+    [clearDiscoverySendCueTimer, discoverySendCueProgress]
+  );
+  const discoverySendCueScale = useTransform(discoverySendCueProgress, (progress) =>
+    discoverySendCueKindRef.current === "wave"
+      ? interpolateStops(progress, [0, 0.3, 0.72, 1], [0.58, 0.86, 1.04, 0.9])
+      : interpolateStops(progress, [0, 0.22, 0.52, 0.82, 1], [0.54, 0.98, 1.16, 0.94, 0.74])
+  );
+  const discoverySendCueX = useTransform(discoverySendCueProgress, (progress) =>
+    discoverySendCueKindRef.current === "wave"
+      ? interpolateStops(progress, [0, 0.28, 0.74, 1], [-44, -6, 86, 156])
+      : 224 * (1 - Math.pow(1 - progress, 2.1))
+  );
+  const discoverySendCueY = useTransform(discoverySendCueProgress, (progress) =>
+    discoverySendCueKindRef.current === "wave"
+      ? interpolateStops(progress, [0, 0.28, 0.74, 1], [18, 6, -32, -64])
+      : 18 - 294 * progress - 72 * Math.sin(Math.PI * progress)
+  );
+  const discoverySendCueOpacity = useTransform(discoverySendCueProgress, (progress) =>
+    discoverySendCueKindRef.current === "wave"
+      ? interpolateStops(progress, [0, 0.28, 0.72, 1], [0.08, 0.54, 1, 0])
+      : interpolateStops(progress, [0, 0.16, 0.45, 0.84, 1], [0.04, 0.52, 1, 0.82, 0])
+  );
+  const discoverySendCueRotate = useTransform(discoverySendCueProgress, (progress) =>
+    discoverySendCueKindRef.current === "wave"
+      ? interpolateStops(progress, [0, 0.28, 0.72, 1], [-14, -6, 6, 10])
+      : interpolateStops(progress, [0, 0.22, 0.64, 1], [-14, -4, 10, 16])
   );
   const discoveryKey = useMemo(() => {
     const d = new Date();
@@ -877,11 +1001,7 @@ const Chats = () => {
       return `volatile_${profile.id}`;
     }
   }, [profile?.id]);
-  useEffect(() => () => clearDiscoverySendCueTimer(), [clearDiscoverySendCueTimer]);
-  const roomSeenKey = useMemo(
-    () => `chat_room_seen_${profile?.id || "anon"}`,
-    [profile?.id]
-  );
+  useEffect(() => () => clearDiscoverySendCue(), [clearDiscoverySendCue]);
   const seenMatchesKey = useMemo(
     () => `seen_match_modal_${profile?.id || "anon"}`,
     [profile?.id]
@@ -1156,31 +1276,6 @@ const Chats = () => {
     const next = { ...directPeerByRoomRef.current, [nextRoomId]: nextPeerId };
     directPeerByRoomRef.current = next;
   }, []);
-
-  const persistRoomSeen = useCallback((next: Record<string, string>) => {
-    roomSeenRef.current = next;
-    try {
-      localStorage.setItem(roomSeenKey, JSON.stringify(next));
-    } catch {
-      // ignore cache write failures
-    }
-  }, [roomSeenKey]);
-
-  const markRoomSeen = useCallback((roomId: string) => {
-    if (!roomId) return;
-    persistRoomSeen({ ...roomSeenRef.current, [roomId]: new Date().toISOString() });
-  }, [persistRoomSeen]);
-
-  useEffect(() => {
-    if (!profile?.id) return;
-    try {
-      const raw = localStorage.getItem(roomSeenKey);
-      const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      roomSeenRef.current = parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      roomSeenRef.current = {};
-    }
-  }, [profile?.id, roomSeenKey]);
 
   const persistSeenMatches = useCallback((next: Set<string>) => {
     seenMatchUserIdsRef.current = next;
@@ -1718,16 +1813,6 @@ const Chats = () => {
           : -viewportWidth * 1.05;
       const duration = clamp(0.28 + (600 - Math.min(travel, 600)) / 4000, 0.28, 0.34);
       const exitRotate = direction === "right" ? 20 : -20;
-      // Hard-snap dragX to the committed side before animating.
-      // This ensures dragRightProgress / dragLeftProgress immediately reflect
-      // the correct direction from frame 1 — even on velocity-only commits
-      // where the card may have been near-centre or slightly on the wrong side.
-      // Without this, overlay stamps and tints can briefly show the wrong state.
-      const snapSeed = direction === "right" ? 40 : -40;
-      if ((direction === "right" && dragX.get() < snapSeed) ||
-          (direction === "left" && dragX.get() > snapSeed)) {
-        dragX.set(snapSeed);
-      }
       await Promise.all([
         animateMotionValue(dragX, targetX, {
           type: "tween",
@@ -1739,7 +1824,7 @@ const Chats = () => {
           duration,
           ease: [0.4, 0, 1, 1],
         }),
-        animateMotionValue(dragRotateOverride, direction === "right" ? 8 : -10, {
+        animateMotionValue(dragRotateOverride, exitRotate, {
           type: "tween",
           duration,
           ease: [0.4, 0, 1, 1],
@@ -1954,19 +2039,20 @@ const Chats = () => {
       }
       const result = await runStarAction(confirmStarTarget);
       if (result.sent && result.roomId) {
-        launchDiscoverySendCue("star");
         const roomId = result.roomId;
         const target = confirmStarTarget;
-        window.setTimeout(() => {
-          commitDiscoverySwipe("star", target.id, "star");
-        }, 170);
-        window.setTimeout(() => {
-          navigate(
-            `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
-              target.display_name || "Conversation"
-            )}&with=${encodeURIComponent(target.id)}`
-          );
-        }, 1480);
+        launchDiscoverySendCue("star", {
+          onCommit: () => {
+            commitDiscoverySwipe("star", target.id, "star");
+          },
+          onComplete: () => {
+            navigate(
+              `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(
+                target.display_name || "Conversation"
+              )}&with=${encodeURIComponent(target.id)}`
+            );
+          },
+        });
       }
       setConfirmStarTarget(null);
     } finally {
@@ -2440,26 +2526,36 @@ const Chats = () => {
         }
       }
 
-      const lastByRoom = new Map<string, { id: string; sender_id: string; content: string; created_at: string }>();
-      const unreadByRoom = new Map<string, number>();
-      const seenSnapshot = roomSeenRef.current;
-      const seededSeen: Record<string, string> = { ...seenSnapshot };
-      for (const msg of (messages || []) as { id: string; chat_id: string; sender_id: string; content: string; created_at: string }[]) {
-        if (!lastByRoom.has(msg.chat_id)) lastByRoom.set(msg.chat_id, msg);
-        if (!seededSeen[msg.chat_id] && msg.created_at) {
-          seededSeen[msg.chat_id] = msg.created_at;
-        }
-        if (msg.sender_id === profile.id) continue;
-        const seenAtRaw = seenSnapshot[msg.chat_id];
-        const seenAtMs = seenAtRaw ? new Date(seenAtRaw).getTime() : Number.NaN;
-        const msgMs = msg.created_at ? new Date(msg.created_at).getTime() : Number.NaN;
-        if (!Number.isFinite(msgMs)) continue;
-        if (!Number.isFinite(seenAtMs) || msgMs > seenAtMs) {
-          unreadByRoom.set(msg.chat_id, (unreadByRoom.get(msg.chat_id) || 0) + 1);
+      const messageRows = (messages || []) as { id: string; chat_id: string; sender_id: string; content: string; created_at: string }[];
+      const incomingMessageIds = Array.from(
+        new Set(
+          messageRows
+            .filter((msg) => msg.sender_id && msg.sender_id !== profile.id)
+            .map((msg) => msg.id)
+            .filter(Boolean)
+        )
+      );
+      const readByMe = new Set<string>();
+      if (incomingMessageIds.length > 0) {
+        const { data: myReadRows } = await supabase
+          .from("message_reads")
+          .select("message_id")
+          .eq("user_id", profile.id)
+          .in("message_id", incomingMessageIds);
+        for (const row of (myReadRows || []) as Array<{ message_id?: string | null }>) {
+          const messageId = String(row?.message_id || "").trim();
+          if (messageId) readByMe.add(messageId);
         }
       }
-      if (Object.keys(seededSeen).length !== Object.keys(seenSnapshot).length) {
-        persistRoomSeen(seededSeen);
+
+      const lastByRoom = new Map<string, { id: string; sender_id: string; content: string; created_at: string }>();
+      const unreadByRoom = new Map<string, number>();
+      for (const msg of messageRows) {
+        if (!lastByRoom.has(msg.chat_id)) lastByRoom.set(msg.chat_id, msg);
+        if (msg.sender_id === profile.id) continue;
+        if (!readByMe.has(msg.id)) {
+          unreadByRoom.set(msg.chat_id, (unreadByRoom.get(msg.chat_id) || 0) + 1);
+        }
       }
       const lastMessageIds = Array.from(new Set(Array.from(lastByRoom.values()).map((message) => message.id).filter(Boolean)));
       const lastMessageReadByOther = new Map<string, boolean>();
@@ -2780,7 +2876,7 @@ const Chats = () => {
       }
       toast.error("Failed to load conversations");
     }
-  }, [fetchUserMatches, persistRoomSeen, profile?.id, rememberDirectPeer]);
+  }, [fetchUserMatches, profile?.id, rememberDirectPeer]);
 
   // Load conversations from backend
   useEffect(() => {
@@ -3221,6 +3317,71 @@ const Chats = () => {
     void loadAlbums();
   }, [discoveryProfiles, markDiscoveryMediaReady]);
 
+  const markChatMessagesRead = useCallback(
+    async (
+      roomId: string,
+      roomMessages?: Array<{ id: string; sender_id: string; content: string; created_at: string }>
+    ) => {
+      if (!profile?.id || !roomId) return;
+
+      const sourceMessages =
+        roomMessages ||
+        (((await supabase
+          .from("chat_messages")
+          .select("id, sender_id, content, created_at")
+          .eq("chat_id", roomId)
+          .order("created_at", { ascending: true }))?.data || []) as Array<{
+          id: string;
+          sender_id: string;
+          content: string;
+          created_at: string;
+        }>);
+
+      const incomingIds = sourceMessages
+        .filter((message) => message.sender_id && message.sender_id !== profile.id)
+        .map((message) => message.id)
+        .filter(Boolean);
+
+      if (incomingIds.length === 0) return;
+
+      const { data: existingReads, error: readsError } = await supabase
+        .from("message_reads")
+        .select("message_id")
+        .eq("user_id", profile.id)
+        .in("message_id", incomingIds);
+
+      if (readsError) {
+        console.warn("[chats.mark_read.load_failed]", readsError.message);
+        return;
+      }
+
+      const existingSet = new Set(
+        ((existingReads || []) as Array<{ message_id?: string | null }>)
+          .map((row) => String(row?.message_id || ""))
+          .filter(Boolean)
+      );
+
+      const missingRows = incomingIds
+        .filter((messageId) => !existingSet.has(messageId))
+        .map((messageId) => ({
+          message_id: messageId,
+          user_id: profile.id,
+          read_at: new Date().toISOString(),
+        }));
+
+      if (missingRows.length === 0) return;
+
+      const { error: upsertError } = await supabase
+        .from("message_reads")
+        .upsert(missingRows, { onConflict: "message_id,user_id" });
+
+      if (upsertError) {
+        console.warn("[chats.mark_read.upsert_failed]", upsertError.message);
+      }
+    },
+    [profile?.id]
+  );
+
   const loadRoomMessages = useCallback(async (roomId: string) => {
     const { data, error } = await supabase
       .from("chat_messages")
@@ -3232,8 +3393,10 @@ const Chats = () => {
       toast.error("Failed to load chat messages");
       return;
     }
-    setActiveRoomMessages((data || []) as { id: string; sender_id: string; content: string; created_at: string }[]);
-  }, []);
+    const nextMessages = (data || []) as { id: string; sender_id: string; content: string; created_at: string }[];
+    setActiveRoomMessages(nextMessages);
+    void markChatMessagesRead(roomId, nextMessages);
+  }, [markChatMessagesRead]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -3695,7 +3858,7 @@ const Chats = () => {
       }
       setMatchModal(null);
       setMatchQuickHello("");
-      markRoomSeen(roomId);
+      void markChatMessagesRead(roomId);
       markMatchSeen(matchModal.userId);
       navigate(
       `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(
@@ -3712,7 +3875,7 @@ const Chats = () => {
     } finally {
       setOpeningMatchChat(false);
     }
-  }, [markMatchSeen, markRoomSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.id, rememberDirectPeer]);
+  }, [markChatMessagesRead, markMatchSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.id, rememberDirectPeer]);
 
   const closeMatchModal = useCallback(() => {
     if (matchModal?.userId) {
@@ -4005,7 +4168,7 @@ const Chats = () => {
     const openRoomId = searchParams.get("room");
 
     if (openRoomId) {
-      markRoomSeen(openRoomId);
+      void markChatMessagesRead(openRoomId);
       navigate(
         `/chat-dialogue?room=${encodeURIComponent(openRoomId)}&name=${encodeURIComponent(openUserName)}${
           openUserId ? `&with=${encodeURIComponent(openUserId)}` : ""
@@ -4020,7 +4183,7 @@ const Chats = () => {
       try {
         const roomId = await ensureDirectRoom(openUserId, openUserName);
         if (!roomId) return;
-        markRoomSeen(roomId);
+        void markChatMessagesRead(roomId);
         navigate(
           `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(openUserName)}&with=${encodeURIComponent(
             openUserId
@@ -4031,7 +4194,7 @@ const Chats = () => {
         toast.error("Unable to open chat right now.");
       }
     })();
-  }, [ensureDirectRoom, isVerified, markRoomSeen, navigate, profile?.id, searchParams]);
+  }, [ensureDirectRoom, isVerified, markChatMessagesRead, navigate, profile?.id, searchParams]);
 
   const sendInlineMessage = useCallback(async () => {
     if (!activeRoomId || !profile?.id || !chatInput.trim() || chatSending) return;
@@ -4166,7 +4329,7 @@ const Chats = () => {
     if (chat.peerUserId) {
       setMatchOnlyAvatars((prev) => prev.filter((entry) => entry.userId !== chat.peerUserId));
     }
-    markRoomSeen(chat.id);
+    void markChatMessagesRead(chat.id);
     if (chat.type === "service") {
       navigate(`/service-chat?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
       return;
@@ -4185,14 +4348,14 @@ const Chats = () => {
       if (!roomId) return;
       setMatchOnlyAvatars((prev) => prev.filter((item) => item.userId !== entry.userId));
       markMatchSeen(entry.userId);
-      markRoomSeen(roomId);
+      void markChatMessagesRead(roomId);
       navigate(
         `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(entry.name || "Conversation")}&with=${encodeURIComponent(
           entry.userId
         )}`
       );
     })();
-  }, [ensureDirectRoom, markMatchSeen, markRoomSeen, navigate]);
+  }, [ensureDirectRoom, markChatMessagesRead, markMatchSeen, navigate]);
 
   const handleRemoveChat = (chat: ChatUser) => {
     if (chat.hasTransaction) {
@@ -4217,7 +4380,7 @@ const Chats = () => {
     setGroups(prev => prev.map(g =>
       g.id === group.id ? { ...g, unread: 0 } : g
     ));
-    markRoomSeen(group.id);
+    void markChatMessagesRead(group.id);
     navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
   };
 
@@ -6018,32 +6181,12 @@ const Chats = () => {
                   ? "right-[18%] top-[28%] h-[84px] w-[84px] bg-[rgba(33,71,201,0.96)] text-white shadow-[0_18px_36px_rgba(33,71,201,0.34)]"
                   : "left-1/2 top-1/2 h-[104px] w-[104px] -translate-x-1/2 -translate-y-1/2 bg-[rgba(245,200,92,0.98)] text-[#2C2A19] shadow-[0_18px_38px_rgba(245,200,92,0.5)]"
               )}
-              initial={
-                discoverySendCue.kind === "wave"
-                  ? { scale: 0.58, x: -44, y: 18, opacity: 0.08, rotate: -14 }
-                  : { scale: 0.54, x: 0, y: 18, opacity: 0.04, rotate: -14 }
-              }
-              animate={
-                discoverySendCue.kind === "wave"
-                  ? {
-                      scale: [0.58, 0.86, 1.04, 0.9],
-                      x: [-44, -6, 72, 156],
-                      y: [18, 6, -28, -64],
-                      opacity: [0.08, 0.54, 1, 0],
-                      rotate: [-14, -6, 6, 10],
-                    }
-                  : {
-                      scale: [0.54, 0.86, 1.18, 1.1, 0.88, 0.72],
-                      x: [0, 10, 48, 102, 164, 224],
-                      y: [18, -6, -42, -108, -186, -276],
-                      opacity: [0.04, 0.45, 1, 1, 0.82, 0],
-                      rotate: [-14, -8, 0, 8, 12, 16],
-                    }
-              }
-              transition={{
-                duration: discoverySendCue.kind === "wave" ? 0.22 : 1.48,
-                ease: [0.22, 1, 0.36, 1],
-                times: discoverySendCue.kind === "wave" ? [0, 0.28, 0.72, 1] : [0, 0.12, 0.3, 0.58, 0.82, 1],
+              style={{
+                scale: discoverySendCueScale,
+                x: discoverySendCueX,
+                y: discoverySendCueY,
+                opacity: discoverySendCueOpacity,
+                rotate: discoverySendCueRotate,
               }}
             >
               {discoverySendCue.kind === "wave" ? (

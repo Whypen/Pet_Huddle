@@ -351,11 +351,11 @@ const DiscoveryDeckInner = ({
                   setIsDiscoverDragging(false);
                   return;
                 }
-                if (info.offset.x >= 110 || info.velocity.x >= 500) {
+                if (info.offset.x >= 110 || (info.velocity.x >= 500 && info.offset.x > -24)) {
                   void onSwipeRight(profile, info.velocity.x).finally(() => setIsDiscoverDragging(false));
                   return;
                 }
-                if (info.offset.x <= -110 || info.velocity.x <= -500) {
+                if (info.offset.x <= -110 || (info.velocity.x <= -500 && info.offset.x < 24)) {
                   void onSwipeLeft(profile, info.velocity.x).finally(() => setIsDiscoverDragging(false));
                   return;
                 }
@@ -482,7 +482,7 @@ const DiscoveryDeckInner = ({
           <div className="absolute left-4 top-4">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
           </div>
-          {isActive && discoveryUseSideActions && !isDiscoverDragging && !showDiscoveryQuotaLock && (
+          {isActive && discoveryUseSideActions && !isDiscoverDragging && !swipeUiBusy && !showDiscoveryQuotaLock && (
             <div className="absolute right-4 top-4 z-[19]">
               {renderDiscoveryActionButtons("side")}
             </div>
