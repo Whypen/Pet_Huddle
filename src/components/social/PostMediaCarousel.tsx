@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { HandPointing } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
@@ -29,15 +30,7 @@ const TapHintIcon = () => (
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/60 animate-[sensitiveRipple_1.6s_ease-out_infinite]" />
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/40 animate-[sensitiveRipple_1.6s_ease-out_0.5s_infinite]" />
     <span className="absolute h-14 w-14 rounded-full border-2 border-white/20 animate-[sensitiveRipple_1.6s_ease-out_1s_infinite]" />
-    {/* White hand with 4 fingers: thumb + index extended, middle/ring/pinky grouped */}
-    <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Thumb */}
-      <path d="M 12 28 Q 10 24 12 18 Q 13 15 15 16 Q 14 22 15 28 Q 14 30 12 28" fill="white" />
-      {/* Index finger (pointing) */}
-      <path d="M 18 40 L 18 8 Q 18 4 21 4 Q 24 4 24 8 L 24 40 Q 24 42 21 42 Q 18 42 18 40" fill="white" />
-      {/* Middle/Ring/Pinky grouped fist */}
-      <ellipse cx="28" cy="32" rx="7" ry="10" fill="white" />
-    </svg>
+    <HandPointing size={44} weight="fill" color="white" />
   </span>
 );
 
