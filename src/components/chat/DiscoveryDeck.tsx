@@ -70,6 +70,8 @@ type DiscoveryDeckProps = {
   getDiscoveryAvailabilityPills: (profileRow: DiscoveryDeckProfile) => string[];
 };
 
+type DiscoveryCtaMode = "bottom" | "side" | "locked" | "empty";
+
 const DiscoveryDeckInner = ({
   stackedDiscoveryCards,
   currentDiscovery,
@@ -119,7 +121,7 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [discoveryNavAvoidanceLift, setDiscoveryNavAvoidanceLift] = useState(0);
-  const [discoveryUseSideActions, setDiscoveryUseSideActions] = useState(false);
+  const [discoveryActionPlacement, setDiscoveryActionPlacement] = useState<"bottom" | "side">("bottom");
   const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const discoveryActiveFooterRef = useRef<HTMLDivElement | null>(null);
   const discoveryBottomStackRef = useRef<HTMLDivElement | null>(null);
@@ -134,12 +136,14 @@ const DiscoveryDeckInner = ({
   const STACK_VISUAL_ALLOWANCE = 18;
   const CTA_VISUAL_ALLOWANCE = 24;
   const MAX_NAV_AVOIDANCE_LIFT = 168;
+  const CTA_PROMOTE_ENTER_THRESHOLD = 8;
+  const CTA_RETURN_EXIT_THRESHOLD = 40;
 
   useEffect(() => {
     setDiscoverImageIndex(0);
     setIsDiscoverDragging(false);
     setDiscoveryNavAvoidanceLift(0);
-    setDiscoveryUseSideActions(false);
+    setDiscoveryActionPlacement("bottom");
   }, [currentDiscovery?.id]);
 
   useMotionValueEvent(dragX, "change", (latest) => {
@@ -151,13 +155,11 @@ const DiscoveryDeckInner = ({
 
   useLayoutEffect(() => {
     if (renderDiscoverEmpty || discoveryLocationBlocked) {
-      setDiscoveryUseSideActions(false);
       setDiscoveryNavAvoidanceLift(0);
       return;
     }
     const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
     if (!navNode) {
-      setDiscoveryUseSideActions(false);
       setDiscoveryNavAvoidanceLift(0);
       return;
     }
@@ -168,28 +170,34 @@ const DiscoveryDeckInner = ({
       frameId = window.requestAnimationFrame(() => {
         const footerNode = discoveryActiveFooterRef.current;
         const bottomStackNode = discoveryBottomStackRef.current;
-        const actionsNode = discoveryBottomActionsRef.current;
-        if (!footerNode || !bottomStackNode || !actionsNode) {
-          setDiscoveryUseSideActions(false);
+        if (!footerNode || !bottomStackNode) {
           setDiscoveryNavAvoidanceLift(0);
           return;
         }
         const footerRect = footerNode.getBoundingClientRect();
         const bottomStackRect = bottomStackNode.getBoundingClientRect();
-        const actionsRect = actionsNode.getBoundingClientRect();
         const navRect = navNode.getBoundingClientRect();
         const navProtectedTop = navRect.top - NAV_PROTECTED_PADDING;
-        const authoredFooterBottom = footerRect.bottom + discoveryNavAvoidanceLift + FOOTER_VISUAL_ALLOWANCE;
-        const authoredStackBottom = bottomStackRect.bottom + discoveryNavAvoidanceLift + STACK_VISUAL_ALLOWANCE;
-        const authoredActionsBottom = actionsRect.bottom + discoveryNavAvoidanceLift + CTA_VISUAL_ALLOWANCE;
-        const lowerDeckBottom = Math.max(authoredFooterBottom, authoredStackBottom);
-        const bottomModeBottom = Math.max(lowerDeckBottom, authoredActionsBottom);
-        const nextUseSideActions = bottomModeBottom > navProtectedTop;
-        const activeBottom = nextUseSideActions ? lowerDeckBottom : bottomModeBottom;
-        const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(activeBottom - navProtectedTop + NAV_COMFORT_GAP)));
+        const deckBottom = Math.max(
+          footerRect.bottom + FOOTER_VISUAL_ALLOWANCE,
+          bottomStackRect.bottom + STACK_VISUAL_ALLOWANCE
+        );
+        const nextLift = Math.max(0, Math.min(MAX_NAV_AVOIDANCE_LIFT, Math.ceil(deckBottom - navProtectedTop + NAV_COMFORT_GAP)));
 
-        setDiscoveryUseSideActions((current) => (current === nextUseSideActions ? current : nextUseSideActions));
         setDiscoveryNavAvoidanceLift((current) => (Math.abs(current - nextLift) <= 1 ? current : nextLift));
+
+        setDiscoveryActionPlacement((current) => {
+          if (current === "side") {
+            const deckClearance = navProtectedTop - deckBottom;
+            return deckClearance >= CTA_RETURN_EXIT_THRESHOLD ? "bottom" : current;
+          }
+          const actionsNode = discoveryBottomActionsRef.current;
+          if (!actionsNode) return current;
+          const actionsRect = actionsNode.getBoundingClientRect();
+          const bottomModeBottom = Math.max(deckBottom, actionsRect.bottom + CTA_VISUAL_ALLOWANCE);
+          const bottomModeIntrusion = bottomModeBottom - navProtectedTop;
+          return bottomModeIntrusion >= CTA_PROMOTE_ENTER_THRESHOLD ? "side" : current;
+        });
       });
     };
 
@@ -212,10 +220,6 @@ const DiscoveryDeckInner = ({
     if (bottomStackNode) {
       resizeObserver.observe(bottomStackNode);
     }
-    const actionsNode = discoveryBottomActionsRef.current;
-    if (actionsNode) {
-      resizeObserver.observe(actionsNode);
-    }
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("scroll", measure);
@@ -228,13 +232,18 @@ const DiscoveryDeckInner = ({
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, discoveryNavAvoidanceLift, discoveryUseSideActions, renderDiscoverEmpty, stackedDiscoveryCards.length]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, stackedDiscoveryCards.length]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
     [stackedDiscoveryCards]
   );
-  const shouldUseSideActions = discoveryUseSideActions;
+  const ctaMode: DiscoveryCtaMode = renderDiscoverEmpty || discoveryLocationBlocked
+    ? "empty"
+    : showDiscoveryQuotaLock
+      ? "locked"
+      : discoveryActionPlacement;
+  const ctaDisabled = swipeUiBusy || isDiscoverDragging || ctaMode === "locked";
 
   useEffect(() => {
     let cancelled = false;
@@ -281,13 +290,14 @@ const DiscoveryDeckInner = ({
       <motion.button
         className={cn(
           "flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          swipeUiBusy && "cursor-not-allowed opacity-45"
+          ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Skip"
-        disabled={swipeUiBusy}
+        disabled={ctaDisabled}
         whileTap={{ scale: 0.9 }}
         onClick={(event) => {
           event.stopPropagation();
+          if (ctaDisabled) return;
           if (!currentDiscovery) return;
           void onSwipeLeft(currentDiscovery, 0);
         }}
@@ -300,13 +310,14 @@ const DiscoveryDeckInner = ({
       <motion.button
         className={cn(
           "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          (showDiscoveryQuotaLock || swipeUiBusy) && "cursor-not-allowed opacity-45"
+          ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Wave"
-        disabled={showDiscoveryQuotaLock || swipeUiBusy}
+        disabled={ctaDisabled}
         whileTap={{ scale: 0.88 }}
         onClick={(event) => {
           event.stopPropagation();
+          if (ctaDisabled) return;
           void onWaveFromButton();
         }}
       >
@@ -321,13 +332,14 @@ const DiscoveryDeckInner = ({
       <motion.button
         className={cn(
           "flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-          (showDiscoveryQuotaLock || swipeUiBusy) && "cursor-not-allowed opacity-45"
+          ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Star"
-        disabled={showDiscoveryQuotaLock || swipeUiBusy}
+        disabled={ctaDisabled}
         whileTap={{ scale: 0.92 }}
         onClick={(event) => {
           event.stopPropagation();
+          if (ctaDisabled) return;
           if (!currentDiscovery) return;
           onPromptStar(currentDiscovery);
         }}
@@ -547,7 +559,7 @@ const DiscoveryDeckInner = ({
           <div className="absolute left-4 top-4">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
           </div>
-          {isActive && shouldUseSideActions && !isDiscoverDragging && !swipeUiBusy && !showDiscoveryQuotaLock && (
+          {isActive && ctaMode === "side" && (
             <div className="absolute right-4 top-4 z-[19]">
               {renderDiscoveryActionButtons("side")}
             </div>
@@ -669,21 +681,26 @@ const DiscoveryDeckInner = ({
           </div>
         </div>
         <div
-          className={cn("relative mt-1 px-4 flex-shrink-0", shouldUseSideActions ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+18px)] min-h-[42px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]")}
-          style={{ transform: discoveryNavAvoidanceLift > 0 ? `translateY(-${discoveryNavAvoidanceLift}px)` : undefined, transition: "transform 200ms ease" }}
+          className={cn("relative mt-1 px-4 flex-shrink-0", ctaMode === "bottom" ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+18px)] min-h-[42px]")}
         >
-          {renderDiscoverEmpty ? <div /> : (
+          {ctaMode === "bottom" ? (
             <div
               ref={discoveryBottomActionsRef}
-              aria-hidden={shouldUseSideActions || isDiscoverDragging}
-              className={cn(
-                "mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px] transition-opacity duration-200",
-                (shouldUseSideActions || isDiscoverDragging) && "pointer-events-none opacity-0"
-              )}
+              className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]"
             >
               {renderDiscoveryActionButtons("bottom")}
             </div>
-          )}
+          ) : ctaMode === "locked" ? (
+            <div className="mx-auto flex w-fit items-center rounded-full border border-white/45 bg-[rgba(255,255,255,0.78)] px-4 py-2.5 text-center shadow-[0_16px_32px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
+              <span className="text-[12px] font-semibold text-[#4F5677]">{discoverExhaustedCopy}</span>
+            </div>
+          ) : ctaMode === "side" ? (
+            <div aria-hidden="true" className="pointer-events-none invisible absolute left-1/2 top-0 -translate-x-1/2">
+              <div className="flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
+                {renderDiscoveryActionButtons("bottom")}
+              </div>
+            </div>
+          ) : <div />}
         </div>
       </div>
     </Profiler>
