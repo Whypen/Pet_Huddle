@@ -4572,7 +4572,7 @@ const Chats = () => {
 
       {/* ── DISCOVER view ────────────────────────────────────────────────────── */}
       {!discoverChatAgeBlocked && topTab === "discover" && (
-        <div className={cn(matchModal && "scale-[0.985] blur-[2px]")}>
+        <div className={cn("flex-1 min-h-0 flex flex-col overflow-hidden", matchModal && "scale-[0.985] blur-[2px]")}>
           <DiscoveryDeck
             stackedDiscoveryCards={stackedDiscoveryCards}
             currentDiscovery={currentDiscovery}
