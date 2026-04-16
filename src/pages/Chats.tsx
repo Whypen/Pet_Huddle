@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, PawPrint, ArrowUpRight, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -24,7 +24,6 @@ import {
   CANONICAL_SOCIAL_ROLE_OPTIONS,
 } from "@/lib/profileOptions";
 import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
-import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
@@ -40,7 +39,12 @@ import { openExternalUrl } from "@/lib/nativeShell";
 import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
-import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
+import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
+import {
+  noteDiscoveryCommit,
+  noteDiscoveryDragEnd,
+  noteDiscoveryFlingResolved,
+} from "@/lib/discoveryPerf";
 import {
   TEAM_HUDDLE_USER_ID,
   isTeamHuddleIdentity,
@@ -630,7 +634,7 @@ const isGroupMembershipHint = (text: string | null | undefined) => {
 const Chats = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, profile } = useAuth();
+  const { user, profile, loading: authLoading } = useAuth();
   const { t } = useLanguage();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -697,6 +701,7 @@ const Chats = () => {
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryLoadSettled, setDiscoveryLoadSettled] = useState(false);
   const [discoveryAnchor, setDiscoveryAnchor] = useState<DiscoveryAnchor | null>(null);
   const [discoveryLocationBlocked, setDiscoveryLocationBlocked] = useState(false);
   const [groupContactPool, setGroupContactPool] = useState<GroupContactOption[]>([]);
@@ -706,6 +711,8 @@ const Chats = () => {
   const [carryoverPassedIds, setCarryoverPassedIds] = useState<Set<string>>(new Set());
   const [discoveryHistoryHydrated, setDiscoveryHistoryHydrated] = useState(false);
   const [albumUrls, setAlbumUrls] = useState<Record<string, string[]>>({});
+  const discoveryMediaReadyRef = useRef<Map<string, { urlsReady: boolean; imagesDecoded: boolean }>>(new Map());
+  const discoveryMediaWaitersRef = useRef<Map<string, Set<() => void>>>(new Map());
   const [matchModal, setMatchModal] = useState<MatchModalState | null>(null);
   const [openingMatchChat, setOpeningMatchChat] = useState(false);
   const [matchQuickHello, setMatchQuickHello] = useState("");
@@ -736,6 +743,8 @@ const Chats = () => {
   const [seenMatchesHydrated, setSeenMatchesHydrated] = useState(false);
   const [seenMatchesServerState, setSeenMatchesServerState] = useState<"idle" | "ready" | "failed">("idle");
   const directPeerByRoomRef = useRef<Record<string, string>>({});
+  const conversationsHydratedRef = useRef(false);
+  const conversationsRetryTimerRef = useRef<number | null>(null);
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -789,29 +798,35 @@ const Chats = () => {
 
   // UAT: Free users max 40 profiles/day. After limit: blur overlay and upsell.
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
-  const [discoverySwipeBusy, setDiscoverySwipeBusy] = useState(false);
+  const discoverySwipeBusyRef = useRef(false);
+  const [discoverySwipeUiBusy, setDiscoverySwipeUiBusy] = useState(false);
   const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
-  const dragRotate = useTransform(dragX, [-200, 0, 200], [-10, 0, 12]);
+  const dragRotateBase = useTransform(dragX, [-200, 0, 200], [-10, 0, 12]);
+  // Separate writable motion value for exit rotation so fling doesn't fight useTransform
+  const dragRotateOverride = useMotionValue(0);
+  const dragRotate = useTransform(
+    [dragRotateBase, dragRotateOverride] as const,
+    ([base, override]: [number, number]) => base + override
+  );
   const dragScale = useTransform(
     () => 1 - clamp((Math.abs(dragX.get()) * 0.7 + Math.abs(dragY.get())) / 3600, 0, 0.065)
   );
-  const dragProgress = useTransform(() => clamp(Math.abs(dragX.get()) / 180, 0, 1));
   const dragRightProgress = useTransform(() => clamp(Math.max(0, dragX.get()) / 180, 0, 1));
   const dragLeftProgress = useTransform(() => clamp(Math.max(0, -dragX.get()) / 180, 0, 1));
-  const waveIndicatorOpacity = useTransform(dragX, [20, 100], [0, 1]);
+  const waveIndicatorOpacity = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1]);
   const passIndicatorOpacity = useTransform(dragX, [-100, -20], [1, 0]);
-  const waveIndicatorScale = useTransform(dragRightProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
+  const waveIndicatorScale = useTransform(dragRightProgress, [0, 0.08, 0.45, 1], [0.54, 0.7, 0.94, 1.03]);
   const passIndicatorScale = useTransform(dragLeftProgress, [0, 0.28, 1], [0.7, 0.9, 1]);
+  const waveIndicatorX = useTransform(dragRightProgress, [0, 0.2, 1], [-18, -6, 0]);
+  const waveIndicatorY = useTransform(dragRightProgress, [0, 0.2, 1], [12, 4, 0]);
+  const passIndicatorX = useTransform(dragLeftProgress, [0, 0.2, 1], [18, 6, 0]);
+  const passIndicatorY = useTransform(dragLeftProgress, [0, 0.2, 1], [12, 4, 0]);
   const waveTintOpacity = useTransform(dragRightProgress, [0, 0.35, 1], [0, 0.1, 0.2]);
   const passTintOpacity = useTransform(dragLeftProgress, [0, 0.25, 0.55, 1], [0, 0.08, 0.16, 0.24]);
   const nextCardScale = useTransform(dragX, [-150, 0, 150], [1, 0.95, 1]);
   const nextCardTranslateY = useTransform(dragX, [-150, 0, 150], [0, 8, 0]);
   const stampCounterRotate = useTransform(dragRotate, (value) => -value);
-  const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
-  const discoverImageInteractingRef = useRef(false);
-  const discoveryCardStackRef = useRef<HTMLDivElement | null>(null);
-  const discoveryBottomActionsRef = useRef<HTMLDivElement | null>(null);
   const [waveButtonAnimating, setWaveButtonAnimating] = useState(false);
   const clearDiscoverySendCueTimer = useCallback(() => {
     if (discoverySendCueTimeoutRef.current !== null) {
@@ -1643,6 +1658,42 @@ const Chats = () => {
     return Math.max(0, cap - used) + Math.max(0, extra);
   }, [profile?.tier]);
 
+  const markDiscoveryMediaReady = useCallback(
+    (profileId: string, patch: Partial<{ urlsReady: boolean; imagesDecoded: boolean }>) => {
+      const normalized = String(profileId || "").trim();
+      if (!normalized) return;
+      const current = discoveryMediaReadyRef.current.get(normalized) || { urlsReady: false, imagesDecoded: false };
+      const next = { ...current, ...patch };
+      discoveryMediaReadyRef.current.set(normalized, next);
+      if (!next.urlsReady || !next.imagesDecoded) return;
+      const waiters = discoveryMediaWaitersRef.current.get(normalized);
+      if (!waiters) return;
+      waiters.forEach((resolve) => resolve());
+      discoveryMediaWaitersRef.current.delete(normalized);
+    },
+    []
+  );
+
+  const ensureDiscoveryProfileReady = useCallback(async (profileId?: string | null) => {
+    const normalized = String(profileId || "").trim();
+    if (!normalized) return;
+    const current = discoveryMediaReadyRef.current.get(normalized);
+    if (current?.urlsReady && current?.imagesDecoded) return;
+    await new Promise<void>((resolve) => {
+      const waiters = discoveryMediaWaitersRef.current.get(normalized) || new Set<() => void>();
+      waiters.add(resolve);
+      discoveryMediaWaitersRef.current.set(normalized, waiters);
+      window.setTimeout(() => {
+        if (!waiters.has(resolve)) return;
+        waiters.delete(resolve);
+        if (waiters.size === 0) {
+          discoveryMediaWaitersRef.current.delete(normalized);
+        }
+        resolve();
+      }, 220);
+    });
+  }, []);
+
   const springDiscoveryCardHome = useCallback(async () => {
     await Promise.all([
       animateMotionValue(dragX, 0, {
@@ -1657,10 +1708,17 @@ const Chats = () => {
         damping: 30,
         mass: 0.92,
       }),
+      animateMotionValue(dragRotateOverride, 0, {
+        type: "spring",
+        stiffness: 400,
+        damping: 30,
+        mass: 0.92,
+      }),
     ]);
     dragX.set(0);
     dragY.set(0);
-  }, [dragX, dragY]);
+    dragRotateOverride.set(0);
+  }, [dragRotateOverride, dragX, dragY]);
 
   const flingDiscoveryCard = useCallback(
     async (direction: "left" | "right", velocityX = 0) => {
@@ -1684,19 +1742,18 @@ const Chats = () => {
           duration,
           ease: [0.4, 0, 1, 1],
         }),
-        animateMotionValue(dragRotate, exitRotate, {
+        animateMotionValue(dragRotateOverride, direction === "right" ? 8 : -10, {
           type: "tween",
           duration,
           ease: [0.4, 0, 1, 1],
         }),
       ]);
+      noteDiscoveryFlingResolved();
     },
-    [dragX, dragY, dragRotate]
+    [dragRotateOverride, dragX, dragY]
   );
 
   const advanceDiscoveryCard = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
-    dragX.set(0);
-    dragY.set(0);
     setSwipeDir(null);
     if (currentId) {
       if (action === "pass") {
@@ -1740,9 +1797,10 @@ const Chats = () => {
         });
       }
     }
-  }, [discoverySessionId, dragX, dragY, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
+  }, [discoverySessionId, handledDiscoveryKey, passedDiscoveryKey, passedDiscoverySessionKey]);
 
   const commitDiscoverySwipe = useCallback((direction: "left" | "right" | "star", currentId?: string, action?: "wave" | "star" | "pass") => {
+    noteDiscoveryCommit();
     setSwipeDir(direction);
     advanceDiscoveryCard(currentId, action);
   }, [advanceDiscoveryCard]);
@@ -1755,15 +1813,18 @@ const Chats = () => {
       options?: {
         velocityX?: number;
         task?: () => Promise<boolean>;
+        nextProfileId?: string | null;
       }
     ) => {
-      if (discoverySwipeBusy) return false;
+      if (discoverySwipeBusyRef.current) return false;
       setSwipeDir(direction);
-      setDiscoverySwipeBusy(true);
+      discoverySwipeBusyRef.current = true;
+      setDiscoverySwipeUiBusy(true);
 
       try {
         // Parallel: fling animation + network task fire simultaneously.
         // Next card appears the instant exit completes, not after server.
+        noteDiscoveryDragEnd();
         const [, ok] = await Promise.all([
           flingDiscoveryCard(direction, options?.velocityX ?? 0),
           options?.task ? options.task() : Promise.resolve(true),
@@ -1773,13 +1834,22 @@ const Chats = () => {
           await springDiscoveryCardHome();
           return false;
         }
+        await ensureDiscoveryProfileReady(options?.nextProfileId ?? null);
+        // Reset motion values to 0 BEFORE committing so the incoming card mounts at (0,0).
+        // If we reset after (in useEffect), the new card mounts at dragX=±450 and Framer's
+        // dragConstraints elastic recovery springs it back — overshooting into negative X
+        // and briefly triggering the SKIP stamp on a Wave. This one-liner prevents that.
+        dragX.set(0);
+        dragY.set(0);
+        dragRotateOverride.set(0);
         commitDiscoverySwipe(direction, currentId, action);
         return true;
       } finally {
-        setDiscoverySwipeBusy(false);
+        discoverySwipeBusyRef.current = false;
+        setDiscoverySwipeUiBusy(false);
       }
     },
-    [commitDiscoverySwipe, discoverySwipeBusy, flingDiscoveryCard, springDiscoveryCardHome]
+    [commitDiscoverySwipe, ensureDiscoveryProfileReady, flingDiscoveryCard, springDiscoveryCardHome]
   );
 
   const enqueueChatNotification = useCallback(
@@ -2700,15 +2770,32 @@ const Chats = () => {
         }
         return Array.from(merged.values()).slice(0, 12);
       });
+      conversationsHydratedRef.current = true;
     } catch {
+      if (!conversationsHydratedRef.current) {
+        if (conversationsRetryTimerRef.current == null) {
+          conversationsRetryTimerRef.current = window.setTimeout(() => {
+            conversationsRetryTimerRef.current = null;
+            void loadConversations();
+          }, 650);
+        }
+        return;
+      }
       toast.error("Failed to load conversations");
     }
   }, [fetchUserMatches, persistRoomSeen, profile?.id, rememberDirectPeer]);
 
   // Load conversations from backend
   useEffect(() => {
+    if (authLoading || !profile?.id) return;
     void loadConversations();
-  }, [loadConversations]);
+    return () => {
+      if (conversationsRetryTimerRef.current != null) {
+        window.clearTimeout(conversationsRetryTimerRef.current);
+        conversationsRetryTimerRef.current = null;
+      }
+    };
+  }, [authLoading, loadConversations, profile?.id]);
 
   // Check for pending group invites when opening Groups tab
   useEffect(() => {
@@ -2768,15 +2855,18 @@ const Chats = () => {
   useEffect(() => {
     const runDiscovery = async () => {
       if (!profile?.id || !discoveryHistoryHydrated) return;
+      setDiscoveryLoadSettled(false);
+      setDiscoveryLoading(true);
       const anchor = await resolveDiscoveryAnchor();
       setDiscoveryAnchor(anchor);
       if (!anchor) {
         setDiscoveryProfiles([]);
         setDiscoveryLocationBlocked(true);
+        setDiscoveryLoading(false);
+        setDiscoveryLoadSettled(true);
         return;
       }
       setDiscoveryLocationBlocked(false);
-      setDiscoveryLoading(true);
       try {
         setDiscoveryVisibleCount(20);
         const wavedByUserIds = new Set<string>();
@@ -3063,6 +3153,7 @@ const Chats = () => {
         setDiscoveryProfiles([]);
       } finally {
         setDiscoveryLoading(false);
+        setDiscoveryLoadSettled(true);
       }
     };
     runDiscovery();
@@ -3111,18 +3202,27 @@ const Chats = () => {
   useEffect(() => {
     const loadAlbums = async () => {
       if (discoveryProfiles.length === 0) return;
-      const next: Record<string, string[]> = {};
-      for (const p of discoveryProfiles) {
-        const album = canonicalizeSocialAlbumEntries(Array.isArray(p?.social_album) ? p.social_album : []);
-        if (!album.length) continue;
-        next[p.id] = await resolveSocialAlbumUrlList(album, 60 * 60);
-      }
+      const resolved = await Promise.all(
+        discoveryProfiles.map(async (profile) => {
+          const album = canonicalizeSocialAlbumEntries(Array.isArray(profile?.social_album) ? profile.social_album : []);
+          if (!album.length) {
+            markDiscoveryMediaReady(profile.id, { urlsReady: true });
+            return [profile.id, []] as const;
+          }
+          const urls = await resolveSocialAlbumUrlList(album, 60 * 60);
+          markDiscoveryMediaReady(profile.id, { urlsReady: true });
+          return [profile.id, urls] as const;
+        })
+      );
+      const next: Record<string, string[]> = Object.fromEntries(
+        resolved.filter(([, urls]) => Array.isArray(urls) && urls.length > 0)
+      );
       if (Object.keys(next).length > 0) {
         setAlbumUrls((prev) => ({ ...prev, ...next }));
       }
     };
-    loadAlbums();
-  }, [discoveryProfiles]);
+    void loadAlbums();
+  }, [discoveryProfiles, markDiscoveryMediaReady]);
 
   const loadRoomMessages = useCallback(async (roomId: string) => {
     const { data, error } = await supabase
@@ -3318,11 +3418,11 @@ const Chats = () => {
   const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
   const stackedDiscoveryCards = discoveryDeck.slice(0, 4);
   const currentDiscovery = stackedDiscoveryCards[0] ?? null;
-  const showDiscoverEmpty = !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
+  const showDiscoverEmpty = discoveryLoadSettled && !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
   const pendingDiscoverEmpty = Boolean(
     currentDiscovery &&
       stackedDiscoveryCards.length === 1 &&
-      discoverySwipeBusy &&
+      discoverySwipeUiBusy &&
       swipeDir
   );
   const renderDiscoverEmpty = showDiscoverEmpty || pendingDiscoverEmpty;
@@ -3391,14 +3491,13 @@ const Chats = () => {
     []
   );
 
-  useLayoutEffect(() => {
-    return;
-  }, [currentDiscovery, renderDiscoverEmpty, topTab]);
-
   useEffect(() => {
-    setDiscoverImageIndex(0);
-    setDiscoverySwipeBusy(false);
-  }, [currentDiscovery?.id]);
+    dragX.set(0);
+    dragY.set(0);
+    dragRotateOverride.set(0);
+    discoverySwipeBusyRef.current = false;
+    setDiscoverySwipeUiBusy(false);
+  }, [currentDiscovery?.id, dragRotateOverride, dragX, dragY]);
 
   const refreshDiscovery = useCallback(() => {
     setSwipeDir(null);
@@ -3768,6 +3867,7 @@ const Chats = () => {
       if (blockedUserIds.has(target.id)) return false;
       return performDiscoverySwipe("right", target.id, "wave", {
         velocityX: options?.velocityX ?? 0,
+        nextProfileId: stackedDiscoveryCards[1]?.id ?? null,
         task: async () => {
           const ok = await executeDiscoveryWaveTask(target, options?.showToast ?? true);
           if (ok) {
@@ -3777,7 +3877,7 @@ const Chats = () => {
         },
       });
     },
-    [blockedUserIds, executeDiscoveryWaveTask, launchDiscoverySendCue, performDiscoverySwipe]
+    [blockedUserIds, executeDiscoveryWaveTask, launchDiscoverySendCue, performDiscoverySwipe, stackedDiscoveryCards]
   );
 
   const triggerDiscoveryPass = useCallback(
@@ -3785,9 +3885,10 @@ const Chats = () => {
       if (blockedUserIds.has(target.id)) return false;
       return performDiscoverySwipe("left", target.id, "pass", {
         velocityX,
+        nextProfileId: stackedDiscoveryCards[1]?.id ?? null,
       });
     },
-    [blockedUserIds, performDiscoverySwipe]
+    [blockedUserIds, performDiscoverySwipe, stackedDiscoveryCards]
   );
 
   const promptDiscoveryStar = useCallback(
@@ -4215,7 +4316,7 @@ const Chats = () => {
 
   const triggerWaveFromButton = useCallback(async () => {
     const p = currentDiscovery;
-    if (!p || showDiscoverEmpty || showDiscoveryQuotaLock || discoverySwipeBusy) return;
+    if (!p || showDiscoverEmpty || showDiscoveryQuotaLock || discoverySwipeBusyRef.current) return;
     setWaveButtonAnimating(true);
     window.setTimeout(() => {
       setWaveButtonAnimating(false);
@@ -4223,343 +4324,7 @@ const Chats = () => {
     window.setTimeout(() => {
       void triggerDiscoveryWave(p, { showToast: true });
     }, 110);
-  }, [currentDiscovery, discoverySwipeBusy, showDiscoverEmpty, showDiscoveryQuotaLock, triggerDiscoveryWave]);
-
-  const discoveryActionButtons = showDiscoverEmpty ? null : (
-    <div className="flex items-center">
-      <motion.button
-        className={cn(
-          "flex h-12 w-12 items-center justify-center rounded-full bg-white/92 text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(33,71,201,0.08)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          discoverySwipeBusy && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Skip"
-        disabled={discoverySwipeBusy}
-        whileTap={{ scale: 0.9 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          const p = currentDiscovery;
-          if (!p) return;
-          void triggerDiscoveryPass(p);
-        }}
-      >
-        <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
-          <X size={22} strokeWidth={2} />
-        </motion.div>
-      </motion.button>
-      <div className="w-4" />
-      <motion.button
-        className={cn(
-          "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          (showDiscoveryQuotaLock || discoverySwipeBusy) && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Wave"
-        disabled={showDiscoveryQuotaLock || discoverySwipeBusy}
-        whileTap={{ scale: 0.88 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          void triggerWaveFromButton();
-        }}
-      >
-        <motion.div
-          animate={waveButtonAnimating ? { rotate: [0, -18, 12, -8, 5, 0] } : { rotate: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        >
-          <WaveHandIcon size={40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
-        </motion.div>
-      </motion.button>
-      <div className="w-3" />
-      <motion.button
-        className={cn(
-          "flex h-11 w-11 items-center justify-center text-[#F5C85C] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-          (showDiscoveryQuotaLock || discoverySwipeBusy) && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Star"
-        disabled={showDiscoveryQuotaLock || discoverySwipeBusy}
-        whileTap={{ scale: 0.92 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          const p = currentDiscovery;
-          if (!p) return;
-          promptDiscoveryStar(p);
-        }}
-      >
-        <Star size={26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-      </motion.button>
-    </div>
-  );
-
-  const renderDiscoveryProfileCard = (p: DiscoveryProfile, deckIndex: number) => {
-    const isActive = deckIndex === 0;
-    const isImmediateNext = deckIndex === 1;
-    const availabilityPills = getDiscoveryAvailabilityPills(p);
-    const speciesSummary = getDiscoverySpeciesSummary(p);
-    const album = getDiscoveryAlbum(p);
-    const cover = album[0] || profilePlaceholder;
-    const stackedOffsetY = deckIndex === 1 ? 0 : deckIndex === 2 ? 8 : 14;
-    const stackedScale = deckIndex === 1 ? 1 : deckIndex === 2 ? 0.985 : 0.97;
-    const stackedOpacity = deckIndex <= 1 ? 1 : 0;
-    const cardStyle = isActive
-      ? { x: dragX, y: dragY, rotate: dragRotate, scale: dragScale, transformOrigin: "50% 20%" as const }
-      : isImmediateNext
-        ? { y: nextCardTranslateY, scale: nextCardScale, transformOrigin: "50% 100%" as const }
-        : { transformOrigin: "50% 100%" as const };
-
-    // Non-active cards: initial = already in resting position, no enter animation.
-    // Active card: initial false so framer never overrides the live motion values.
-    const cardInitial = isActive
-      ? false as const
-      : isImmediateNext
-        ? { x: 0, y: 8, scale: 0.95, rotate: 0, opacity: 1 }
-        : { x: 0, y: stackedOffsetY, scale: stackedScale, rotate: 0, opacity: stackedOpacity };
-
-    const cardAnimate = isActive
-      ? { opacity: 1 }
-      : isImmediateNext
-        ? { opacity: 1 }
-        : { y: stackedOffsetY, scale: stackedScale, opacity: stackedOpacity };
-
-    return (
-      <motion.div
-        key={p.id}
-        drag={isActive ? true : false}
-        dragConstraints={isActive ? { left: 0, right: 0, top: 30, bottom: 30 } : undefined}
-        dragElastic={isActive ? 0.15 : undefined}
-        dragMomentum={false}
-        initial={cardInitial}
-        style={cardStyle}
-        animate={isActive ? { x: 0, y: 0, rotate: 0, opacity: 1 } : cardAnimate}
-        transition={{ type: "spring", stiffness: 260, damping: 28, mass: 0.92 }}
-        className={cn(
-          "absolute inset-0 overflow-visible rounded-[28px] bg-white shadow-[0_26px_56px_rgba(33,71,201,0.16)]",
-          isActive ? "z-20" : isImmediateNext ? "z-[12]" : "z-[9]",
-          !isActive && "pointer-events-none",
-          isActive && discoverySwipeBusy && "pointer-events-none"
-        )}
-        onDragStart={
-          isActive
-            ? () => {
-                if (discoverySwipeBusy) return;
-                setSwipeDir(null);
-              }
-            : undefined
-        }
-        onDragEnd={
-          isActive
-            ? (_, info) => {
-                if (discoverySwipeBusy) return;
-                if (Math.abs(info.offset.x) < 5 && Math.abs(info.offset.y) < 5) {
-                  return;
-                }
-                const shouldCommitRight = info.offset.x >= 110 || info.velocity.x >= 500;
-                const shouldCommitLeft = info.offset.x <= -110 || info.velocity.x <= -500;
-
-                if (shouldCommitRight) {
-                  void triggerDiscoveryWave(p, { velocityX: info.velocity.x, showToast: false });
-                  return;
-                }
-
-                if (shouldCommitLeft) {
-                  void triggerDiscoveryPass(p, info.velocity.x);
-                  return;
-                }
-
-                void springDiscoveryCardHome();
-              }
-            : undefined
-        }
-        onClick={
-          isActive
-            ? () => {
-                if (discoverySwipeBusy) return;
-                if (Math.abs(dragY.get()) > 8 || Math.abs(dragX.get()) > 8) return;
-                if (discoverImageInteractingRef.current) return;
-                void handleProfileTap(p.id, p.display_name || "User", p.avatar_url || null);
-              }
-            : undefined
-        }
-      >
-        {isActive && showDiscoveryQuotaLock && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center px-6">
-            <div className="w-full rounded-[26px] border border-white/35 bg-white/20 px-5 py-4 text-center shadow-[0_14px_40px_rgba(7,24,108,0.2)] backdrop-blur-[18px]">
-              <p className="text-sm font-semibold text-white">{discoverExhaustedCopy}</p>
-              <button
-                type="button"
-                onClick={() => setIsPremiumOpen(true)}
-                className="mt-2 inline-flex h-9 items-center justify-center rounded-full bg-[rgba(33,71,201,0.95)] px-4 text-xs font-semibold text-white"
-              >
-                {t("See plans")}
-              </button>
-            </div>
-          </div>
-        )}
-        <div className="h-full w-full overflow-hidden rounded-[28px] [clip-path:inset(0_round_28px)]">
-          {album.length > 0 ? (
-            <>
-              <div
-                className={cn(
-                  "absolute inset-0 flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
-                  isActive ? "touch-pan-x" : ""
-                )}
-                onPointerDown={
-                  isActive
-                    ? () => {
-                        discoverImageInteractingRef.current = false;
-                      }
-                    : undefined
-                }
-                onPointerMove={
-                  isActive
-                    ? () => {
-                        discoverImageInteractingRef.current = true;
-                      }
-                    : undefined
-                }
-                onPointerUp={
-                  isActive
-                    ? () => {
-                        window.setTimeout(() => {
-                          discoverImageInteractingRef.current = false;
-                        }, 100);
-                      }
-                    : undefined
-                }
-                onPointerCancel={
-                  isActive
-                    ? () => {
-                        discoverImageInteractingRef.current = false;
-                      }
-                    : undefined
-                }
-                onScroll={
-                  isActive
-                    ? (event) => {
-                        const node = event.currentTarget;
-                        if (!node.clientWidth) return;
-                        const idx = Math.round(node.scrollLeft / node.clientWidth);
-                        setDiscoverImageIndex(Math.max(0, Math.min(album.length - 1, idx)));
-                      }
-                    : undefined
-                }
-              >
-                {album.map((src, index) => (
-                  <div key={`${p.id}-album-${index}`} className="h-full w-full shrink-0 snap-start">
-                    <img
-                      src={src}
-                      alt={isActive ? `${p.display_name || "User"} ${index + 1}` : ""}
-                      aria-hidden={isActive ? undefined : true}
-                      className="h-full w-full object-cover object-center"
-                      style={{ objectPosition: "center center" }}
-                      loading={deckIndex < 4 && index === 0 ? "eager" : deckIndex < 2 && index < 2 ? "eager" : "lazy"}
-                      decoding="async"
-                      fetchPriority={index === 0 && deckIndex < 4 ? "high" : "auto"}
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src = cover;
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-              {isActive && album.length > 1 && (
-                <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-center gap-1.5">
-                  {album.map((_, idx) => (
-                    <span
-                      key={`${p.id}-img-dot-${idx}`}
-                      className={cn(
-                        "h-1.5 rounded-full transition-all",
-                        idx === discoverImageIndex ? "w-4 bg-[#7D86A6]" : "w-1.5 bg-[#B8BED2]/85"
-                      )}
-                    />
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <img
-              src={cover}
-              alt={isActive ? p.display_name || "" : ""}
-              aria-hidden={isActive ? undefined : true}
-              className="h-full w-full object-cover object-center"
-              style={{ objectPosition: "center center" }}
-              loading={deckIndex < 4 ? "eager" : "lazy"}
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).src = profilePlaceholder;
-              }}
-            />
-          )}
-          {isActive && (
-            <>
-              <motion.div className="absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
-              <motion.div className="absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
-            </>
-          )}
-          {isActive && (
-            <>
-              <motion.div
-                className="pointer-events-none absolute left-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
-                style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate }}
-              >
-                {/* Inline waving hand SVG — crisp at 18px, no PNG blur */}
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M8.5 3.5a1.5 1.5 0 0 1 3 0v6m0-6a1.5 1.5 0 0 1 3 0v5m0-4a1.5 1.5 0 0 1 3 0v7l-1 4c-.5 2-2.2 3.5-4.5 3.5h-1c-2 0-3.8-1-4.8-2.7L4 13.5c-.6-1 0-2.3 1.1-2.5 1-.2 2 .3 2.4 1.2L8.5 14V3.5z" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M6 3C5 3.8 4.3 5 4 6.5M18.5 3c1 .8 1.7 2 2 3.5" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round"/>
-                </svg>
-                <span className="text-[13px] font-extrabold tracking-[0.18em]">WAVE</span>
-              </motion.div>
-              <motion.div
-                className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-white/92 px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)]"
-                style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale, rotate: stampCounterRotate }}
-              >
-                <span className="text-[13px] font-extrabold tracking-[0.18em]">SKIP</span>
-                <X size={18} strokeWidth={2.2} />
-              </motion.div>
-            </>
-          )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
-          <div className="absolute left-4 top-4">
-            <ProfileBadges
-              isVerified={p.is_verified === true}
-              hasCar={!!p.has_car}
-              size="lg"
-            />
-          </div>
-          <div className="pointer-events-none absolute inset-x-4 bottom-5">
-            <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]">
-              <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
-              {availabilityPills.length > 0 && (
-                <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
-                  <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
-                    {availabilityPills.join(" • ")}
-                  </span>
-                </div>
-              )}
-              <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="truncate text-[25px] font-[700] leading-tight text-white">{p.display_name}</span>
-                  </div>
-                  {p.location_name && (
-                    <div className="mb-2 flex items-center gap-1.5 py-[1px]">
-                      <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                      <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{p.location_name}</span>
-                    </div>
-                  )}
-                  {speciesSummary && (
-                    <div className="mt-0.5 flex items-center gap-1.5 py-0">
-                      <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                      <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)]">
-                  <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-    );
-  };
+  }, [currentDiscovery, showDiscoverEmpty, showDiscoveryQuotaLock, triggerDiscoveryWave]);
 
   return (
     <div className="h-full min-h-0 bg-background relative overflow-x-hidden flex flex-col">
@@ -4644,120 +4409,55 @@ const Chats = () => {
 
       {/* ── DISCOVER view ────────────────────────────────────────────────────── */}
       {!discoverChatAgeBlocked && topTab === "discover" && (
-        <div
-          className={cn(
-            "flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)] transition-all duration-300",
-            matchModal && "scale-[0.985] blur-[2px]"
-          )}
-        >
-
-
-          {/* Portrait card stack */}
-          <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
-            <div ref={discoveryCardStackRef} className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
-              <div className="relative h-[clamp(438px,64vh,608px)] w-full overflow-visible">
-                {currentDiscovery && !renderDiscoverEmpty && (
-                  <motion.div
-                    aria-hidden="true"
-                    className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.74)" }}
-                  />
-                )}
-                {currentDiscovery && !renderDiscoverEmpty && (
-                  <motion.div
-                    aria-hidden="true"
-                    className="absolute z-[1] left-1/2 bottom-[-6.1%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.83)" }}
-                  />
-                )}
-                {currentDiscovery && !renderDiscoverEmpty && (
-                  <motion.div
-                    aria-hidden="true"
-                    className="absolute z-[2] left-1/2 bottom-[-3.6%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.91)" }}
-                  />
-                )}
-                {currentDiscovery && !renderDiscoverEmpty && (
-                  <motion.div
-                    aria-hidden="true"
-                    className="absolute z-[3] left-1/2 bottom-[-1.1%] h-[11.5%] w-full -translate-x-1/2 rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]"
-                    style={{ transform: "translateX(-50%) scaleX(0.952)" }}
-                  />
-                )}
-                {discoveryLoading && (
-                  <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
-                    <HuddleVideoLoader size={32} />
-                  </div>
-                )}
-
-                {discoveryLocationBlocked && (
-                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                    <div className="glass-nav w-full rounded-[28px] border border-white/55 bg-white/24 px-6 py-6 shadow-[0_16px_32px_rgba(33,71,201,0.12)]">
-                      <p className="text-sm text-muted-foreground">{t("Enable location to discover people nearby.")}</p>
-                      <button
-                        onClick={openLocationSettings}
-                        className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(33,71,201,0.24)]"
-                      >
-                        {t("Open Location Settings")}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {renderDiscoverEmpty && (
-                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                    <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
-                      <img
-                        src={emptyChatImage}
-                        alt=""
-                        aria-hidden="true"
-                        className="mx-auto mb-4 w-full max-w-[320px] object-contain opacity-95"
-                        loading="lazy"
-                      />
-                      <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
-                      <div className="mt-4 flex flex-col gap-2">
-                        {canExpandSearch && (
-                          <button
-                            className="inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]"
-                            onClick={handleExpandSearch}
-                          >
-                            {`Expand Search +${DISCOVERY_EXPAND_STEP_KM}km`}
-                          </button>
-                        )}
-                        {passedDiscoveryIds.size > 0 && (
-                          <button
-                            className="inline-flex h-11 items-center justify-center rounded-full bg-white/75 px-5 text-sm font-semibold text-[#4F5677] shadow-[0_8px_20px_rgba(33,71,201,0.12)]"
-                            onClick={resurfacePassedProfiles}
-                          >
-                            Resurface Skipped Profiles
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {stackedDiscoveryCards
-                  .slice()
-                  .reverse()
-                  .map((p, reversedIndex) => renderDiscoveryProfileCard(p, stackedDiscoveryCards.length - 1 - reversedIndex))}
-              </div>
-            </div>
-          </div>
-
-          {/* Action bar: Star | Wave | Skip */}
-          <div className="px-4 mt-1 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+8px)] flex-shrink-0">
-            {renderDiscoverEmpty ? (
-              <div />
-            ) : (
-              <div
-                ref={discoveryBottomActionsRef}
-                className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]"
-              >
-                {discoveryActionButtons}
-              </div>
-            )}
-          </div>
+        <div className={cn(matchModal && "scale-[0.985] blur-[2px]")}>
+          <DiscoveryDeck
+            stackedDiscoveryCards={stackedDiscoveryCards}
+            currentDiscovery={currentDiscovery}
+            discoveryLoading={discoveryLoading}
+            discoveryLocationBlocked={discoveryLocationBlocked}
+            renderDiscoverEmpty={renderDiscoverEmpty}
+            canExpandSearch={canExpandSearch}
+            discoveryExpandStepKm={DISCOVERY_EXPAND_STEP_KM}
+            passedDiscoveryCount={passedDiscoveryIds.size}
+            showDiscoveryQuotaLock={showDiscoveryQuotaLock}
+            discoverExhaustedCopy={discoverExhaustedCopy}
+            emptyChatImage={emptyChatImage}
+            profilePlaceholder={profilePlaceholder}
+            swipeUiBusy={discoverySwipeUiBusy}
+            waveButtonAnimating={waveButtonAnimating}
+            dragX={dragX}
+            dragY={dragY}
+            dragRotate={dragRotate}
+            dragScale={dragScale}
+            nextCardScale={nextCardScale}
+            nextCardTranslateY={nextCardTranslateY}
+            stampCounterRotate={stampCounterRotate}
+            waveIndicatorOpacity={waveIndicatorOpacity}
+            passIndicatorOpacity={passIndicatorOpacity}
+            waveIndicatorScale={waveIndicatorScale}
+            passIndicatorScale={passIndicatorScale}
+            waveIndicatorX={waveIndicatorX}
+            waveIndicatorY={waveIndicatorY}
+            passIndicatorX={passIndicatorX}
+            passIndicatorY={passIndicatorY}
+            waveTintOpacity={waveTintOpacity}
+            passTintOpacity={passTintOpacity}
+            onOpenLocationSettings={openLocationSettings}
+            onExpandSearch={handleExpandSearch}
+            onResurfacePassedProfiles={resurfacePassedProfiles}
+            onWaveFromButton={triggerWaveFromButton}
+            onSwipeRight={triggerDiscoveryWave}
+            onSwipeLeft={triggerDiscoveryPass}
+            onPromptStar={promptDiscoveryStar}
+            onProfileTap={handleProfileTap}
+            onSpringCardHome={springDiscoveryCardHome}
+            onDecodeProfileReady={(profileId) =>
+              markDiscoveryMediaReady(profileId, { imagesDecoded: true })
+            }
+            getDiscoveryAlbum={getDiscoveryAlbum}
+            getDiscoverySpeciesSummary={getDiscoverySpeciesSummary}
+            getDiscoveryAvailabilityPills={getDiscoveryAvailabilityPills}
+          />
         </div>
       )}
 
