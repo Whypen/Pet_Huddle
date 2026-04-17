@@ -667,7 +667,7 @@ const DiscoveryDeckInner = ({
           style={{ paddingBottom: `calc(var(--nav-height) + env(safe-area-inset-bottom,0px) + ${ACTION_BAR_BOTTOM_CLEARANCE}px)` }}
         >
           {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
-            <div className="mx-auto flex w-fit items-center justify-center">
+            <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
               {renderDiscoveryActionButtons("bottom")}
             </div>
           ) : showDiscoveryQuotaLock ? (
