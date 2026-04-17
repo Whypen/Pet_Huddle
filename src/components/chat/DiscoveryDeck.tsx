@@ -55,7 +55,6 @@ type DiscoveryDeckProps = {
   passIndicatorY: MotionValue<number>;
   waveTintOpacity: MotionValue<number>;
   passTintOpacity: MotionValue<number>;
-  safeBottomY: number | null;
   onOpenLocationSettings: () => void;
   onExpandSearch: () => void;
   onResurfacePassedProfiles: () => void;
@@ -103,7 +102,6 @@ const DiscoveryDeckInner = ({
   passIndicatorY,
   waveTintOpacity,
   passTintOpacity,
-  safeBottomY,
   onOpenLocationSettings,
   onExpandSearch,
   onResurfacePassedProfiles,
@@ -121,25 +119,23 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [footerCtaPlacement, setFooterCtaPlacement] = useState<"footer" | "promoted">("footer");
-  const discoveryScrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const discoveryActiveFooterRef = useRef<HTMLDivElement | null>(null);
-  const discoveryFooterCtaRef = useRef<HTMLButtonElement | null>(null);
+  // Three refs for adaptive CTA: container (available height), card wrapper
+  // (needed height), action bar (needed height). If card + action bar don't
+  // fit in container → CTA would overlap nav → promote.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const cardWrapperRef = useRef<HTMLDivElement | null>(null);
+  const actionBarRef = useRef<HTMLDivElement | null>(null);
   const discoverImageInteractingRef = useRef(false);
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const FOOTER_CTA_VISUAL_ALLOWANCE = 12;
-  const FOOTER_CTA_BOTTOM_INSET = 12;
-  const FOOTER_CTA_PROMOTE_ENTER_THRESHOLD = 0;
-  const FOOTER_CTA_RETURN_EXIT_THRESHOLD = 18;
-  // Card always uses Bumble-style height — promotion handles overlap
   const DISCOVERY_CARD_HEIGHT = "clamp(438px,64vh,608px)";
+  const PROMOTE_GAP = 8; // require at least 8px gap between card and action bar
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
 
   useLayoutEffect(() => {
     setDiscoverImageIndex(0);
     setIsDiscoverDragging(false);
-    setFooterCtaPlacement("footer");
   }, [currentDiscovery?.id]);
 
   useMotionValueEvent(dragX, "change", (latest) => {
@@ -149,88 +145,47 @@ const DiscoveryDeckInner = ({
     noteDiscoveryFirstDragFrame();
   });
 
+  // Adaptive CTA detection: promote when the card + action bar + required gap
+  // exceed the container's available height. Pure dimension math, no scroll,
+  // no viewport/nav tracking. One source of truth: three offsetHeights.
   useLayoutEffect(() => {
     if (renderDiscoverEmpty || discoveryLocationBlocked || showDiscoveryQuotaLock) {
       setFooterCtaPlacement("footer");
       return;
     }
-    let frameId = 0;
-    const measure = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const footerNode = discoveryActiveFooterRef.current;
-        if (!footerNode) {
-          return;
-        }
-        const footerRect = footerNode.getBoundingClientRect();
-        // Always resolve nav position from live DOM — safeBottomY prop can be stale.
-        const navNode = document.querySelector('[data-bottom-nav="true"]');
-        const navTop = navNode
-          ? navNode.getBoundingClientRect().top
-          : (safeBottomY != null ? safeBottomY + 12 : window.innerHeight);
-        const navProtectedTop = navTop - 12; // 12px safety gap
-
-        const footerCtaNode = discoveryFooterCtaRef.current;
-        const footerCtaBottom = (
-          footerCtaNode
-            ? footerCtaNode.getBoundingClientRect().bottom + FOOTER_CTA_VISUAL_ALLOWANCE
-            : footerRect.bottom - FOOTER_CTA_BOTTOM_INSET + FOOTER_CTA_VISUAL_ALLOWANCE
-        );
-
-        const footerCtaIntrusion = footerCtaBottom - navProtectedTop;
-        const footerCtaClearance = navProtectedTop - footerCtaBottom;
-        let nextPlacement: "footer" | "promoted" = footerCtaPlacement;
-        if (footerCtaPlacement === "promoted") {
-          if (footerCtaClearance >= FOOTER_CTA_RETURN_EXIT_THRESHOLD) {
-            nextPlacement = "footer";
-          }
-        } else if (footerCtaIntrusion >= FOOTER_CTA_PROMOTE_ENTER_THRESHOLD) {
-          nextPlacement = "promoted";
-        }
-
-        setFooterCtaPlacement((current) => (current === nextPlacement ? current : nextPlacement));
-
-        const discoveryDebug = (globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true;
-        if (discoveryDebug) {
-          console.debug("[DiscoveryDeck]", {
-            footerCtaBottom,
-            navProtectedTop,
-            ctaPlacement: nextPlacement,
-            footerCtaIntrusion,
-            footerCtaClearance,
-          });
-        }
+    const evaluate = () => {
+      const container = containerRef.current;
+      const cardWrapper = cardWrapperRef.current;
+      const actionBar = actionBarRef.current;
+      if (!container || !cardWrapper || !actionBar) return;
+      const available = container.clientHeight;
+      const needed = cardWrapper.offsetHeight + actionBar.offsetHeight + PROMOTE_GAP;
+      const shouldPromote = needed > available;
+      setFooterCtaPlacement((prev) => {
+        const next = shouldPromote ? "promoted" : "footer";
+        return prev === next ? prev : next;
       });
+      if ((globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true) {
+        console.debug("[DiscoveryDeck]", { available, needed, shouldPromote });
+      }
     };
 
-    // Run measure immediately + one rAF + one 80ms settle pass so we catch
-    // the 64vh resolving on iOS visualViewport and any late image layout.
-    measure();
-    const firstPassId = window.requestAnimationFrame(() => measure());
-    const secondPassId = window.setTimeout(() => measure(), 80);
+    evaluate();
+    // Re-evaluate next frame and after a short settle (iOS 64vh resolves late).
+    const rafId = window.requestAnimationFrame(evaluate);
+    const settleId = window.setTimeout(evaluate, 100);
 
-    // Observe container (its height = viewport - header - tabs - nav - safe
-    // margin) so any flex-chain size change re-triggers detection.
-    const resizeObserver = new ResizeObserver(() => measure());
-    const container = discoveryScrollContainerRef.current;
-    if (container) resizeObserver.observe(container);
-    const footerNode = discoveryActiveFooterRef.current;
-    if (footerNode) resizeObserver.observe(footerNode);
-    const footerCtaNode = discoveryFooterCtaRef.current;
-    if (footerCtaNode) resizeObserver.observe(footerCtaNode);
-
-    window.addEventListener("resize", measure);
-    window.visualViewport?.addEventListener("resize", measure);
+    const observer = new ResizeObserver(evaluate);
+    if (containerRef.current) observer.observe(containerRef.current);
+    if (cardWrapperRef.current) observer.observe(cardWrapperRef.current);
+    if (actionBarRef.current) observer.observe(actionBarRef.current);
 
     return () => {
-      window.cancelAnimationFrame(frameId);
-      window.cancelAnimationFrame(firstPassId);
-      window.clearTimeout(secondPassId);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", measure);
-      window.visualViewport?.removeEventListener("resize", measure);
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(settleId);
+      observer.disconnect();
     };
-  }, [currentDiscovery?.id, discoveryLocationBlocked, footerCtaPlacement, renderDiscoverEmpty, safeBottomY, showDiscoveryQuotaLock]);
+  }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, showDiscoveryQuotaLock]);
 
   const stackedProfileKey = useMemo(
     () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
@@ -578,10 +533,7 @@ const DiscoveryDeckInner = ({
               </button>
             ) : null}
           </div>
-          <div
-            ref={isActive ? discoveryActiveFooterRef : undefined}
-            className={cn("pointer-events-none absolute inset-x-4", footerBottomClass)}
-          >
+          <div className={cn("pointer-events-none absolute inset-x-4", footerBottomClass)}>
             <div className={cn("relative overflow-hidden border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]", footerRadiusClass)}>
               <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
               {availabilityPills.length > 0 && (
@@ -611,7 +563,6 @@ const DiscoveryDeckInner = ({
                 </div>
                 {footerCtaMode === "footer" || !isActive ? (
                   <button
-                    ref={isActive ? discoveryFooterCtaRef : undefined}
                     type="button"
                     aria-label={`Open ${profile.display_name || "profile"}`}
                     className={cn(
@@ -636,10 +587,10 @@ const DiscoveryDeckInner = ({
   return (
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
       <div
-        ref={discoveryScrollContainerRef}
+        ref={containerRef}
         className="flex-1 min-h-0 flex flex-col overflow-visible"
       >
-        <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
+        <div ref={cardWrapperRef} className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
           <div className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
             <div
               className="relative w-full overflow-visible"
@@ -704,6 +655,7 @@ const DiscoveryDeckInner = ({
           </div>
         </div>
         <div
+          ref={actionBarRef}
           className={cn("relative mt-auto px-4 flex-shrink-0 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)]", showBottomActionBar ? "min-h-[84px]" : "min-h-[40px]")}
         >
           {showBottomActionBar ? (

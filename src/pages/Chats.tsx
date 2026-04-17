@@ -689,11 +689,6 @@ const Chats = () => {
     const tab = searchParams.get("tab");
     return tab === "chats" || tab === "groups" ? "chats" : "discover";
   });
-  const chatsHeaderRef = useRef<HTMLDivElement | null>(null);
-  const discoverTabsRowRef = useRef<HTMLDivElement | null>(null);
-  const discoverPaneRef = useRef<HTMLDivElement | null>(null);
-  const [availableDiscoveryHeight, setAvailableDiscoveryHeight] = useState<number | null>(null);
-  const [discoverySafeBottomY, setDiscoverySafeBottomY] = useState<number | null>(null);
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | "star" | null>(null);
   const [discoveryRefreshTick, setDiscoveryRefreshTick] = useState(0);
   const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
@@ -4494,79 +4489,9 @@ const Chats = () => {
     }, 110);
   }, [currentDiscovery, showDiscoverEmpty, showDiscoveryQuotaLock, triggerDiscoveryWave]);
 
-  useLayoutEffect(() => {
-    if (discoverChatAgeBlocked || topTab !== "discover") {
-      setAvailableDiscoveryHeight(null);
-      setDiscoverySafeBottomY(null);
-      return;
-    }
-
-    const navNode = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
-    const headerNode = chatsHeaderRef.current;
-    const tabsNode = discoverTabsRowRef.current;
-    const paneNode = discoverPaneRef.current;
-    if (!navNode || !headerNode || !tabsNode || !paneNode) {
-      return;
-    }
-
-    const SAFE_MARGIN = 12;
-    let frameId = 0;
-
-    const measure = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const currentNav = document.querySelector('[data-bottom-nav="true"]') as HTMLElement | null;
-        if (!currentNav || !headerNode || !tabsNode || !paneNode) return;
-
-        const tabsRect = tabsNode.getBoundingClientRect();
-        const paneRect = paneNode.getBoundingClientRect();
-        const navRect = currentNav.getBoundingClientRect();
-        const safeBottom = navRect.top - SAFE_MARGIN;
-        const nextHeight = Math.max(0, Math.floor(safeBottom - tabsRect.bottom));
-
-        setDiscoverySafeBottomY((current) => (current != null && Math.abs(current - safeBottom) <= 1 ? current : safeBottom));
-        setAvailableDiscoveryHeight((current) => (current != null && Math.abs(current - nextHeight) <= 1 ? current : nextHeight));
-
-        const discoveryDebug = (globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true;
-        if (discoveryDebug) {
-          console.debug("[Chats/DiscoverLayout]", {
-            headerBottom: headerNode.getBoundingClientRect().bottom,
-            tabsBottom: tabsRect.bottom,
-            paneTop: paneRect.top,
-            paneBottom: paneRect.bottom,
-            navTop: navRect.top,
-            safeBottom,
-            availableDiscoveryHeight: nextHeight,
-          });
-        }
-      });
-    };
-
-    measure();
-
-    const resizeObserver = new ResizeObserver(() => {
-      measure();
-    });
-    resizeObserver.observe(navNode);
-    resizeObserver.observe(headerNode);
-    resizeObserver.observe(tabsNode);
-    resizeObserver.observe(paneNode);
-    window.addEventListener("resize", measure);
-    window.visualViewport?.addEventListener("resize", measure);
-    window.visualViewport?.addEventListener("scroll", measure);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", measure);
-      window.visualViewport?.removeEventListener("resize", measure);
-      window.visualViewport?.removeEventListener("scroll", measure);
-    };
-  }, [discoverChatAgeBlocked, topTab]);
-
   return (
     <div className="h-full min-h-0 bg-background relative overflow-hidden flex flex-col">
-      <div ref={chatsHeaderRef}>
+      <div>
         <GlobalHeader
           onUpgradeClick={() => setIsPremiumOpen(true)}
         />
@@ -4583,7 +4508,7 @@ const Chats = () => {
       <div className={cn("flex-1 min-h-0 flex flex-col", isMinor && "pointer-events-none opacity-70")}>
 
       {/* ── Discover | Chats top-tab toggle + filter icon ──────────────────── */}
-      <div ref={discoverTabsRowRef} className="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
+      <div className="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
         {/* Left spacer — mirrors filter button for visual balance */}
         <div className="w-9 flex-shrink-0" />
         {/* Toggle pill — centered */}
@@ -4649,7 +4574,7 @@ const Chats = () => {
 
       {/* ── DISCOVER view ────────────────────────────────────────────────────── */}
       {!discoverChatAgeBlocked && topTab === "discover" && (
-        <div ref={discoverPaneRef} className={cn("flex-1 min-h-0 flex flex-col", matchModal && "scale-[0.985] blur-[2px]")}>
+        <div className={cn("flex-1 min-h-0 flex flex-col", matchModal && "scale-[0.985] blur-[2px]")}>
           <DiscoveryDeck
             stackedDiscoveryCards={stackedDiscoveryCards}
             currentDiscovery={currentDiscovery}
@@ -4682,7 +4607,6 @@ const Chats = () => {
             passIndicatorY={passIndicatorY}
             waveTintOpacity={waveTintOpacity}
             passTintOpacity={passTintOpacity}
-            safeBottomY={discoverySafeBottomY}
             onOpenLocationSettings={openLocationSettings}
             onExpandSearch={handleExpandSearch}
             onResurfacePassedProfiles={resurfacePassedProfiles}
