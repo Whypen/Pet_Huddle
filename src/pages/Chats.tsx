@@ -1817,7 +1817,8 @@ const Chats = () => {
         direction === "right"
           ? viewportWidth * 1.05
           : -viewportWidth * 1.05;
-      const duration = clamp(0.28 + (600 - Math.min(travel, 600)) / 4000, 0.28, 0.34);
+      // 0.34s at max velocity, 0.42s at zero — visible but not sluggish
+      const duration = clamp(0.34 + (600 - Math.min(travel, 600)) / 4000, 0.34, 0.42);
       const exitRotate = direction === "right" ? 20 : -20;
       await Promise.all([
         animateMotionValue(dragX, targetX, {
@@ -1922,12 +1923,9 @@ const Chats = () => {
           await springDiscoveryCardHome();
           return false;
         }
-        await ensureDiscoveryProfileReady(options?.nextProfileId ?? null);
-        // Commit first (removes old card from deck), wait one frame for React to
-        // process the removal, THEN reset motion values. This prevents the outgoing
-        // card from snapping back to x=0 for a frame on top of the incoming card.
-        // The incoming card's key is `${id}-${deckIndex}` so it remounts cleanly
-        // with motion values at 0 — no spring-back from ±viewport either.
+        // Commit immediately — no media-ready stall. The next card's <img> uses
+        // fetchPriority="high" so it loads naturally; a brief placeholder flash is
+        // better UX than a hard pause after the fling resolves.
         commitDiscoverySwipe(direction, currentId, action);
         await new Promise<void>((resolve) => {
           if (typeof window === "undefined") {

@@ -286,8 +286,7 @@ const DiscoveryDeckInner = ({
         // key includes deckIndex so Framer remounts on promotion — no spring-bounce from next→active
         key={`${profile.id}-${deckIndex}`}
         drag={isActive ? true : false}
-        dragDirectionLock
-        dragConstraints={isActive ? { left: -2000, right: 2000, top: 0, bottom: 0 } : undefined}
+        dragConstraints={isActive ? { left: -2000, right: 2000, top: -80, bottom: 80 } : undefined}
         dragElastic={isActive ? 0 : undefined}
         dragMomentum={false}
         initial={isActive ? false : { x: 0, y: 8, scale: 0.95, opacity: 1 }}
