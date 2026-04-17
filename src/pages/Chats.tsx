@@ -833,54 +833,58 @@ const Chats = () => {
   const dragRightProgress = useTransform(() => clamp(Math.max(0, dragX.get()) / 180, 0, 1));
   const dragLeftProgress = useTransform(() => clamp(Math.max(0, -dragX.get()) / 180, 0, 1));
   const committedDiscoveryDirection = swipeDir === "left" || swipeDir === "right" ? swipeDir : null;
+  // During the commit window (discoverySwipeUiBusy=true) we NEVER fall back to
+  // raw drag progress — the outgoing card is already off-screen but dragX is
+  // still ±viewport until the rAF-gated reset, which would flash the stamp on
+  // the newly promoted card for one frame. Force an explicit value instead.
   const waveIndicatorOpacity = useTransform(() =>
-    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
-      ? 1
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "right" ? 1 : 0
       : interpolateStops(dragRightProgress.get(), [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1])
   );
   const passIndicatorOpacity = useTransform(() =>
-    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
-      ? 1
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "left" ? 1 : 0
       : interpolateStops(dragLeftProgress.get(), [0, 0.08, 0.45, 1], [0, 0.16, 0.8, 1])
   );
   const waveIndicatorScale = useTransform(() =>
-    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
-      ? 1.03
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "right" ? 1.03 : 0.54
       : interpolateStops(dragRightProgress.get(), [0, 0.08, 0.45, 1], [0.54, 0.7, 0.94, 1.03])
   );
   const passIndicatorScale = useTransform(() =>
-    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
-      ? 1
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "left" ? 1 : 0.7
       : interpolateStops(dragLeftProgress.get(), [0, 0.28, 1], [0.7, 0.9, 1])
   );
   const waveIndicatorX = useTransform(() =>
-    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
-      ? 0
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "right" ? 0 : -18
       : interpolateStops(dragRightProgress.get(), [0, 0.2, 1], [-18, -6, 0])
   );
   const waveIndicatorY = useTransform(() =>
-    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
-      ? 0
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "right" ? 0 : 12
       : interpolateStops(dragRightProgress.get(), [0, 0.2, 1], [12, 4, 0])
   );
   const passIndicatorX = useTransform(() =>
-    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
-      ? 0
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "left" ? 0 : 18
       : interpolateStops(dragLeftProgress.get(), [0, 0.2, 1], [18, 6, 0])
   );
   const passIndicatorY = useTransform(() =>
-    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
-      ? 0
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "left" ? 0 : 12
       : interpolateStops(dragLeftProgress.get(), [0, 0.2, 1], [12, 4, 0])
   );
   const waveTintOpacity = useTransform(() =>
-    committedDiscoveryDirection === "right" && discoverySwipeUiBusy
-      ? 0.2
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "right" ? 0.2 : 0
       : interpolateStops(dragRightProgress.get(), [0, 0.35, 1], [0, 0.1, 0.2])
   );
   const passTintOpacity = useTransform(() =>
-    committedDiscoveryDirection === "left" && discoverySwipeUiBusy
-      ? 0.24
+    discoverySwipeUiBusy
+      ? committedDiscoveryDirection === "left" ? 0.24 : 0
       : interpolateStops(dragLeftProgress.get(), [0, 0.25, 0.55, 1], [0, 0.08, 0.16, 0.24])
   );
   const nextCardScale = useTransform(dragX, [-150, 0, 150], [1, 0.95, 1]);
@@ -1705,8 +1709,8 @@ const Chats = () => {
         if (mutual) {
           matchCreated = await finalizeMutualWave(targetUserId);
         }
-        if (showToast) {
-          toast.success(mutual ? "It’s a pawfect match!" : t("Wave sent"));
+        if (showToast && mutual) {
+          toast.success("It’s a pawfect match!");
         }
         return { status: "sent", mutual, matchCreated };
       } catch (err: unknown) {
@@ -1716,8 +1720,8 @@ const Chats = () => {
           if (mutual) {
             matchCreated = await finalizeMutualWave(targetUserId);
           }
-          if (showToast) {
-            toast.info(mutual ? "It’s a pawfect match!" : t("Wave already sent"));
+          if (showToast && mutual) {
+            toast.success("It’s a pawfect match!");
           }
           return { status: "duplicate", mutual, matchCreated };
         }
