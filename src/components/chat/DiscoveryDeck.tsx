@@ -203,48 +203,32 @@ const DiscoveryDeckInner = ({
       });
     };
 
-    // Initial measurement — defer one frame so layout settles after paint.
+    // Run measure immediately + one rAF + one 80ms settle pass so we catch
+    // the 64vh resolving on iOS visualViewport and any late image layout.
     measure();
     const firstPassId = window.requestAnimationFrame(() => measure());
     const secondPassId = window.setTimeout(() => measure(), 80);
 
-    const resizeObserver = new ResizeObserver(() => {
-      measure();
-    });
+    // Observe container (its height = viewport - header - tabs - nav - safe
+    // margin) so any flex-chain size change re-triggers detection.
+    const resizeObserver = new ResizeObserver(() => measure());
+    const container = discoveryScrollContainerRef.current;
+    if (container) resizeObserver.observe(container);
     const footerNode = discoveryActiveFooterRef.current;
-    if (footerNode) {
-      resizeObserver.observe(footerNode);
-    }
+    if (footerNode) resizeObserver.observe(footerNode);
     const footerCtaNode = discoveryFooterCtaRef.current;
-    if (footerCtaNode) {
-      resizeObserver.observe(footerCtaNode);
-    }
-    // Also observe the scroll container & its parent so layout shifts (images
-    // loading, card height resolve, parent flex resize) re-trigger measurement.
-    const scrollContainer = discoveryScrollContainerRef.current;
-    if (scrollContainer) {
-      resizeObserver.observe(scrollContainer);
-    }
+    if (footerCtaNode) resizeObserver.observe(footerCtaNode);
 
-    // Scroll on the internal container is the MAIN driver of CTA viewport
-    // position changes — without this listener, detection freezes after mount.
-    const handleScroll = () => measure();
-    scrollContainer?.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
-    window.visualViewport?.addEventListener("scroll", measure);
 
     return () => {
       window.cancelAnimationFrame(frameId);
       window.cancelAnimationFrame(firstPassId);
       window.clearTimeout(secondPassId);
       resizeObserver.disconnect();
-      scrollContainer?.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
-      window.visualViewport?.removeEventListener("scroll", measure);
     };
   }, [currentDiscovery?.id, discoveryLocationBlocked, footerCtaPlacement, renderDiscoverEmpty, safeBottomY, showDiscoveryQuotaLock]);
 
@@ -653,7 +637,7 @@ const DiscoveryDeckInner = ({
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
       <div
         ref={discoveryScrollContainerRef}
-        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+118px)]"
+        className="flex-1 min-h-0 flex flex-col overflow-visible"
       >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
           <div className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
@@ -720,7 +704,7 @@ const DiscoveryDeckInner = ({
           </div>
         </div>
         <div
-          className={cn("relative mt-1 px-4 flex-shrink-0", showBottomActionBar ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+28px)] min-h-[104px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+26px)] min-h-[42px]")}
+          className={cn("relative mt-auto px-4 flex-shrink-0 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)]", showBottomActionBar ? "min-h-[84px]" : "min-h-[40px]")}
         >
           {showBottomActionBar ? (
             <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
