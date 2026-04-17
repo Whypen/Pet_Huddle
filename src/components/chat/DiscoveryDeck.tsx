@@ -163,13 +163,13 @@ const DiscoveryDeckInner = ({
           return;
         }
         const footerRect = footerNode.getBoundingClientRect();
-        // Use safeBottomY prop if available; fall back to querying the nav directly
-        const resolvedSafeBottomY = safeBottomY ?? (() => {
-          const navNode = document.querySelector('[data-bottom-nav="true"]');
-          if (!navNode) return window.innerHeight - 12;
-          return navNode.getBoundingClientRect().top - 12;
-        })();
-        const navProtectedTop = resolvedSafeBottomY;
+        // Always resolve nav position from live DOM — safeBottomY prop can be stale.
+        const navNode = document.querySelector('[data-bottom-nav="true"]');
+        const navTop = navNode
+          ? navNode.getBoundingClientRect().top
+          : (safeBottomY != null ? safeBottomY + 12 : window.innerHeight);
+        const navProtectedTop = navTop - 12; // 12px safety gap
+
         const footerCtaNode = discoveryFooterCtaRef.current;
         const footerCtaBottom = (
           footerCtaNode
@@ -203,7 +203,10 @@ const DiscoveryDeckInner = ({
       });
     };
 
+    // Initial measurement — defer one frame so layout settles after paint.
     measure();
+    const firstPassId = window.requestAnimationFrame(() => measure());
+    const secondPassId = window.setTimeout(() => measure(), 80);
 
     const resizeObserver = new ResizeObserver(() => {
       measure();
@@ -216,13 +219,29 @@ const DiscoveryDeckInner = ({
     if (footerCtaNode) {
       resizeObserver.observe(footerCtaNode);
     }
+    // Also observe the scroll container & its parent so layout shifts (images
+    // loading, card height resolve, parent flex resize) re-trigger measurement.
+    const scrollContainer = discoveryScrollContainerRef.current;
+    if (scrollContainer) {
+      resizeObserver.observe(scrollContainer);
+    }
+
+    // Scroll on the internal container is the MAIN driver of CTA viewport
+    // position changes — without this listener, detection freezes after mount.
+    const handleScroll = () => measure();
+    scrollContainer?.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("scroll", measure);
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      window.cancelAnimationFrame(firstPassId);
+      window.clearTimeout(secondPassId);
       resizeObserver.disconnect();
+      scrollContainer?.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("scroll", measure);
