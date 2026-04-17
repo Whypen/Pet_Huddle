@@ -130,7 +130,10 @@ const DiscoveryDeckInner = ({
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
   const DISCOVERY_CARD_HEIGHT = "clamp(438px,64vh,608px)";
-  const PROMOTE_GAP = 8; // require at least 8px gap between card and action bar
+  const PROMOTE_GAP = 16; // keep extra breathing room between card stack and CTA row
+  const ACTION_BAR_BOTTOM_CLEARANCE = 30;
+  const PROMOTE_ENTER_THRESHOLD = 8;
+  const PROMOTE_EXIT_THRESHOLD = 24;
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
 
   useLayoutEffect(() => {
@@ -160,13 +163,22 @@ const DiscoveryDeckInner = ({
       if (!container || !cardWrapper || !actionBar) return;
       const available = container.clientHeight;
       const needed = cardWrapper.offsetHeight + actionBar.offsetHeight + PROMOTE_GAP;
-      const shouldPromote = needed > available;
       setFooterCtaPlacement((prev) => {
-        const next = shouldPromote ? "promoted" : "footer";
+        const overflow = needed - available;
+        const next =
+          prev === "promoted"
+            ? overflow > -PROMOTE_EXIT_THRESHOLD ? "promoted" : "footer"
+            : overflow >= PROMOTE_ENTER_THRESHOLD ? "promoted" : "footer";
         return prev === next ? prev : next;
       });
       if ((globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true) {
-        console.debug("[DiscoveryDeck]", { available, needed, shouldPromote });
+        console.debug("[DiscoveryDeck]", {
+          available,
+          needed,
+          overflow: needed - available,
+          enterThreshold: PROMOTE_ENTER_THRESHOLD,
+          exitThreshold: PROMOTE_EXIT_THRESHOLD,
+        });
       }
     };
 
@@ -242,7 +254,7 @@ const DiscoveryDeckInner = ({
     const isPromoted = variant === "promoted";
 
     return (
-    <div className={cn("flex items-center", isPromoted ? "gap-2.5" : "")}>
+    <div className={cn("flex items-center", isPromoted ? "gap-2.5" : "gap-3")}>
       <motion.button
         className={cn(
           "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
@@ -263,7 +275,6 @@ const DiscoveryDeckInner = ({
           <X size={isPromoted ? 18 : 22} strokeWidth={2} />
         </motion.div>
       </motion.button>
-      {!isPromoted ? <div className="w-4" /> : null}
       <motion.button
         className={cn(
           "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
@@ -286,7 +297,6 @@ const DiscoveryDeckInner = ({
           <WaveHandIcon size={isPromoted ? 30 : 40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
         </motion.div>
       </motion.button>
-      {!isPromoted ? <div className="w-3" /> : null}
       <motion.button
         className={cn(
           "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
@@ -524,8 +534,8 @@ const DiscoveryDeckInner = ({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
           <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
-            {isActive && footerCtaMode === "promoted" ? (
-              <div className="pointer-events-auto rounded-[22px] border border-white/70 bg-[rgba(255,255,255,0.86)] px-3 py-2 shadow-[0_16px_32px_rgba(33,71,201,0.18)] backdrop-blur-[18px]">
+            {isActive && footerCtaMode === "promoted" && !isDiscoverDragging ? (
+              <div className="pointer-events-auto">
                 {renderDiscoveryActionButtons("promoted")}
               </div>
             ) : null}
@@ -653,10 +663,11 @@ const DiscoveryDeckInner = ({
         </div>
         <div
           ref={actionBarRef}
-          className={cn("relative mt-auto px-4 flex-shrink-0 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)]", showBottomActionBar ? "min-h-[84px]" : "min-h-[40px]")}
+          className={cn("relative mt-auto px-4 flex-shrink-0", showBottomActionBar ? "min-h-[96px]" : "min-h-[52px]")}
+          style={{ paddingBottom: `calc(var(--nav-height) + env(safe-area-inset-bottom,0px) + ${ACTION_BAR_BOTTOM_CLEARANCE}px)` }}
         >
-          {showBottomActionBar && footerCtaMode !== "promoted" ? (
-            <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
+          {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
+            <div className="mx-auto flex w-fit items-center justify-center">
               {renderDiscoveryActionButtons("bottom")}
             </div>
           ) : showDiscoveryQuotaLock ? (
