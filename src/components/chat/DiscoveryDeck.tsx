@@ -133,7 +133,7 @@ const DiscoveryDeckInner = ({
   const PROMOTE_GAP = 18; // keep extra breathing room between card stack and CTA row
   const ACTION_BAR_BOTTOM_CLEARANCE = 36;
   const PROMOTE_ALLOWED_MAX_WIDTH = 560;
-  const PROMOTE_ENTER_THRESHOLD = 40;
+  const PROMOTE_ENTER_THRESHOLD = 52;
   const PROMOTE_EXIT_THRESHOLD = 64;
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
 
