@@ -254,31 +254,29 @@ const DiscoveryDeckInner = ({
     const isPromoted = variant === "promoted";
 
     return (
-    <div className={cn("flex items-center", isPromoted ? "gap-2.5" : "gap-3")}>
+    <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
       <motion.button
         className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-10 w-10" : "h-12 w-12",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.80)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+          isPromoted ? "h-10 w-10" : "h-11 w-11 bg-[rgba(255,255,255,0.97)]",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
-        aria-label="Skip"
+        aria-label="Star"
         disabled={ctaDisabled}
-        whileTap={{ scale: 0.9 }}
+        whileTap={{ scale: 0.92 }}
         onClick={(event) => {
           event.stopPropagation();
           if (ctaDisabled) return;
           if (!currentDiscovery) return;
-          void onSwipeLeft(currentDiscovery, 0);
+          onPromptStar(currentDiscovery);
         }}
       >
-        <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
-          <X size={isPromoted ? 18 : 22} strokeWidth={2} />
-        </motion.div>
+        <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
       </motion.button>
       <motion.button
         className={cn(
-          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-11 w-11" : "h-14 w-14",
+          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.80)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-11 w-11" : "h-14 w-14 bg-[rgba(33,71,201,0.98)]",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Wave"
@@ -299,21 +297,23 @@ const DiscoveryDeckInner = ({
       </motion.button>
       <motion.button
         className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-          isPromoted ? "h-10 w-10" : "h-11 w-11",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.80)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-10 w-10" : "h-12 w-12 bg-[rgba(255,255,255,0.97)]",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
-        aria-label="Star"
+        aria-label="Skip"
         disabled={ctaDisabled}
-        whileTap={{ scale: 0.92 }}
+        whileTap={{ scale: 0.9 }}
         onClick={(event) => {
           event.stopPropagation();
           if (ctaDisabled) return;
           if (!currentDiscovery) return;
-          onPromptStar(currentDiscovery);
+          void onSwipeLeft(currentDiscovery, 0);
         }}
       >
-        <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+        <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
+          <X size={isPromoted ? 18 : 22} strokeWidth={2} />
+        </motion.div>
       </motion.button>
     </div>
     );
