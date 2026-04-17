@@ -1,16 +1,10 @@
-import { memo, Profiler, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { motion, useMotionValueEvent, type MotionValue } from "framer-motion";
+import { memo, useCallback, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { motion, type MotionValue } from "framer-motion";
 import { ArrowUpRight, MapPin, PawPrint, Star, X } from "lucide-react";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
 import { cn } from "@/lib/utils";
-import {
-  noteDiscoveryDeckRender,
-  noteDiscoveryFirstDragFrame,
-  noteDiscoveryPointerDown,
-  noteDiscoveryPromotionPaint,
-} from "@/lib/discoveryPerf";
 
 type DiscoveryDeckProfile = {
   id: string;
@@ -64,11 +58,23 @@ type DiscoveryDeckProps = {
   onPromptStar: (target: DiscoveryDeckProfile) => void;
   onProfileTap: (userId: string, displayName: string, avatarUrl?: string | null) => Promise<void> | void;
   onSpringCardHome: () => Promise<void>;
-  onDecodeProfileReady: (profileId: string) => void;
   getDiscoveryAlbum: (profileRow?: DiscoveryDeckProfile | null) => string[];
   getDiscoverySpeciesSummary: (profileRow: DiscoveryDeckProfile) => string;
   getDiscoveryAvailabilityPills: (profileRow: DiscoveryDeckProfile) => string[];
 };
+
+// Bumble/Tinder-tuned swipe constants
+const SWIPE_COMMIT_OFFSET = 110;
+const SWIPE_COMMIT_VELOCITY = 500;
+const SWIPE_VELOCITY_MIN_OFFSET = 40; // sign-agreement guard so a flick-during-return can't commit wrong direction
+const CARD_HEIGHT = "clamp(408px,62vh,580px)";
+
+// Adaptive CTA — kept for small-screen devices, stripped of dev noise
+const PROMOTE_GAP = 18;
+const ACTION_BAR_BOTTOM_CLEARANCE = 36;
+const PROMOTE_ALLOWED_MAX_WIDTH = 560;
+const PROMOTE_ENTER_THRESHOLD = 52;
+const PROMOTE_EXIT_THRESHOLD = 64;
 
 const DiscoveryDeckInner = ({
   stackedDiscoveryCards,
@@ -111,7 +117,6 @@ const DiscoveryDeckInner = ({
   onPromptStar,
   onProfileTap,
   onSpringCardHome,
-  onDecodeProfileReady,
   getDiscoveryAlbum,
   getDiscoverySpeciesSummary,
   getDiscoveryAvailabilityPills,
@@ -119,39 +124,17 @@ const DiscoveryDeckInner = ({
   const [discoverImageIndex, setDiscoverImageIndex] = useState(0);
   const [isDiscoverDragging, setIsDiscoverDragging] = useState(false);
   const [footerCtaPlacement, setFooterCtaPlacement] = useState<"footer" | "promoted">("footer");
-  // Three refs for adaptive CTA: container (available height), card wrapper
-  // (needed height), action bar (needed height). If card + action bar don't
-  // fit in container → CTA would overlap nav → promote.
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cardWrapperRef = useRef<HTMLDivElement | null>(null);
   const actionBarRef = useRef<HTMLDivElement | null>(null);
-  const discoverImageInteractingRef = useRef(false);
-  const awaitingFirstDragFrameRef = useRef(false);
-  const decodedProfileIdsRef = useRef<Set<string>>(new Set());
-
-  const DISCOVERY_CARD_HEIGHT = "clamp(438px,64vh,608px)";
-  const PROMOTE_GAP = 18; // keep extra breathing room between card stack and CTA row
-  const ACTION_BAR_BOTTOM_CLEARANCE = 36;
-  const PROMOTE_ALLOWED_MAX_WIDTH = 560;
-  const PROMOTE_ENTER_THRESHOLD = 52;
-  const PROMOTE_EXIT_THRESHOLD = 64;
-  const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
 
   useLayoutEffect(() => {
     setDiscoverImageIndex(0);
     setIsDiscoverDragging(false);
   }, [currentDiscovery?.id]);
 
-  useMotionValueEvent(dragX, "change", (latest) => {
-    if (!awaitingFirstDragFrameRef.current) return;
-    if (Math.abs(latest) < 1) return;
-    awaitingFirstDragFrameRef.current = false;
-    noteDiscoveryFirstDragFrame();
-  });
-
-  // Adaptive CTA detection: promote when the card + action bar + required gap
-  // exceed the container's available height. Pure dimension math, no scroll,
-  // no viewport/nav tracking. One source of truth: three offsetHeights.
+  // Adaptive CTA: promote action bar into the card top-right when the card+bar
+  // won't fit above the nav on short viewports. Kept minimal — no debug noise.
   useLayoutEffect(() => {
     if (renderDiscoverEmpty || discoveryLocationBlocked || showDiscoveryQuotaLock) {
       setFooterCtaPlacement("footer");
@@ -166,7 +149,7 @@ const DiscoveryDeckInner = ({
       const compactViewport = container.clientWidth <= PROMOTE_ALLOWED_MAX_WIDTH;
       const needed = cardWrapper.offsetHeight + actionBar.offsetHeight + PROMOTE_GAP;
       setFooterCtaPlacement((prev) => {
-        if (!compactViewport) return prev === "footer" ? prev : "footer";
+        if (!compactViewport) return "footer";
         const overflow = needed - available;
         const next =
           prev === "promoted"
@@ -174,40 +157,16 @@ const DiscoveryDeckInner = ({
             : overflow >= PROMOTE_ENTER_THRESHOLD ? "promoted" : "footer";
         return prev === next ? prev : next;
       });
-      if ((globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true) {
-        console.debug("[DiscoveryDeck]", {
-          available,
-          compactViewport,
-          needed,
-          overflow: needed - available,
-          promoteAllowedMaxWidth: PROMOTE_ALLOWED_MAX_WIDTH,
-          enterThreshold: PROMOTE_ENTER_THRESHOLD,
-          exitThreshold: PROMOTE_EXIT_THRESHOLD,
-        });
-      }
     };
-
     evaluate();
-    // Re-evaluate next frame and after a short settle (iOS 64vh resolves late).
-    const rafId = window.requestAnimationFrame(evaluate);
-    const settleId = window.setTimeout(evaluate, 100);
-
     const observer = new ResizeObserver(evaluate);
     if (containerRef.current) observer.observe(containerRef.current);
     if (cardWrapperRef.current) observer.observe(cardWrapperRef.current);
     if (actionBarRef.current) observer.observe(actionBarRef.current);
-
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.clearTimeout(settleId);
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, [currentDiscovery?.id, discoveryLocationBlocked, renderDiscoverEmpty, showDiscoveryQuotaLock]);
 
-  const stackedProfileKey = useMemo(
-    () => stackedDiscoveryCards.map((profile) => profile.id).join("|"),
-    [stackedDiscoveryCards]
-  );
+  const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
   const footerCtaMode = renderDiscoverEmpty || discoveryLocationBlocked
     ? "hidden_empty"
     : showDiscoveryQuotaLock
@@ -215,112 +174,79 @@ const DiscoveryDeckInner = ({
       : footerCtaPlacement;
   const ctaDisabled = swipeUiBusy || isDiscoverDragging || showDiscoveryQuotaLock;
 
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      stackedDiscoveryCards.slice(0, 2).map(async (profile) => {
-        if (decodedProfileIdsRef.current.has(profile.id)) return;
-        const album = getDiscoveryAlbum(profile);
-        const src = album[0] || profile.avatar_url || profilePlaceholder;
-        if (!src) return;
-        try {
-          const image = new Image();
-          image.src = src;
-          if (typeof image.decode === "function") {
-            await image.decode();
-          } else {
-            await new Promise<void>((resolve) => {
-              image.onload = () => resolve();
-              image.onerror = () => resolve();
-            });
-          }
-        } finally {
-          if (!cancelled) {
-            decodedProfileIdsRef.current.add(profile.id);
-            onDecodeProfileReady(profile.id);
-          }
-        }
-      })
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [getDiscoveryAlbum, onDecodeProfileReady, profilePlaceholder, stackedProfileKey, stackedDiscoveryCards]);
-
-  useLayoutEffect(() => {
-    const nextProfileId = currentDiscovery?.id ?? null;
-    if (!nextProfileId) return;
-    window.requestAnimationFrame(() => {
-      noteDiscoveryPromotionPaint(nextProfileId);
+  const stepAlbum = useCallback((direction: -1 | 1, length: number) => {
+    setDiscoverImageIndex((idx) => {
+      const next = idx + direction;
+      if (next < 0 || next >= length) return idx;
+      return next;
     });
-  }, [currentDiscovery?.id]);
+  }, []);
 
   const renderDiscoveryActionButtons = (variant: "bottom" | "promoted" = "bottom") => {
     const isPromoted = variant === "promoted";
-
     return (
-    <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
-      <motion.button
-        className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-          isPromoted ? "h-10 w-10" : "h-11 w-11",
-          ctaDisabled && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Star"
-        disabled={ctaDisabled}
-        whileTap={{ scale: 0.92 }}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (ctaDisabled) return;
-          if (!currentDiscovery) return;
-          onPromptStar(currentDiscovery);
-        }}
-      >
-        <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-      </motion.button>
-      <motion.button
-        className={cn(
-          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-11 w-11" : "h-14 w-14",
-          ctaDisabled && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Wave"
-        disabled={ctaDisabled}
-        whileTap={{ scale: 0.88 }}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (ctaDisabled) return;
-          void onWaveFromButton();
-        }}
-      >
-        <motion.div
-          animate={waveButtonAnimating ? { rotate: [0, -18, 12, -8, 5, 0] } : { rotate: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+      <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
+        <motion.button
+          className={cn(
+            "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+            isPromoted ? "h-10 w-10" : "h-11 w-11",
+            ctaDisabled && "cursor-not-allowed opacity-45"
+          )}
+          aria-label="Star"
+          disabled={ctaDisabled}
+          whileTap={{ scale: 0.92 }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (ctaDisabled) return;
+            if (!currentDiscovery) return;
+            onPromptStar(currentDiscovery);
+          }}
         >
-          <WaveHandIcon size={isPromoted ? 30 : 40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
-        </motion.div>
-      </motion.button>
-      <motion.button
-        className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-10 w-10" : "h-12 w-12",
-          ctaDisabled && "cursor-not-allowed opacity-45"
-        )}
-        aria-label="Skip"
-        disabled={ctaDisabled}
-        whileTap={{ scale: 0.9 }}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (ctaDisabled) return;
-          if (!currentDiscovery) return;
-          void onSwipeLeft(currentDiscovery, 0);
-        }}
-      >
-        <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
-          <X size={isPromoted ? 18 : 22} strokeWidth={2} />
-        </motion.div>
-      </motion.button>
-    </div>
+          <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+        </motion.button>
+        <motion.button
+          className={cn(
+            "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+            isPromoted ? "h-11 w-11" : "h-14 w-14",
+            ctaDisabled && "cursor-not-allowed opacity-45"
+          )}
+          aria-label="Wave"
+          disabled={ctaDisabled}
+          whileTap={{ scale: 0.88 }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (ctaDisabled) return;
+            void onWaveFromButton();
+          }}
+        >
+          <motion.div
+            animate={waveButtonAnimating ? { rotate: [0, -18, 12, -8, 5, 0] } : { rotate: 0 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <WaveHandIcon size={isPromoted ? 30 : 40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
+          </motion.div>
+        </motion.button>
+        <motion.button
+          className={cn(
+            "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+            isPromoted ? "h-10 w-10" : "h-12 w-12",
+            ctaDisabled && "cursor-not-allowed opacity-45"
+          )}
+          aria-label="Skip"
+          disabled={ctaDisabled}
+          whileTap={{ scale: 0.9 }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (ctaDisabled) return;
+            if (!currentDiscovery) return;
+            void onSwipeLeft(currentDiscovery, 0);
+          }}
+        >
+          <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
+            <X size={isPromoted ? 18 : 22} strokeWidth={2} />
+          </motion.div>
+        </motion.button>
+      </div>
     );
   };
 
@@ -332,67 +258,48 @@ const DiscoveryDeckInner = ({
 
   const renderDiscoveryProfileCard = (profile: DiscoveryDeckProfile, deckIndex: number) => {
     const isActive = deckIndex === 0;
-    const isImmediateNext = deckIndex === 1;
-    const isDeferredCard = deckIndex >= 2;
     const availabilityPills = getDiscoveryAvailabilityPills(profile);
     const speciesSummary = getDiscoverySpeciesSummary(profile);
     const album = getDiscoveryAlbum(profile);
     const cover = album[0] || profilePlaceholder;
-    const stackedOffsetY = deckIndex === 1 ? 0 : deckIndex === 2 ? 8 : 14;
-    const stackedScale = deckIndex === 1 ? 1 : deckIndex === 2 ? 0.985 : 0.97;
-    const stackedOpacity = deckIndex <= 1 ? 1 : 0;
-    const footerBottomClass = "bottom-5";
-    const footerRadiusClass = "rounded-[28px]";
-    const footerTopBarHeightClass = "h-[40px]";
-    const footerTopPaddingClass = availabilityPills.length > 0
-      ? "pt-[46px]"
-      : "pt-3";
-    const footerContentPaddingClass = "px-4 pb-3";
-    const footerNameClass = "text-[25px]";
-    const footerArrowClass = "h-12 w-12";
-    const footerArrowIconClass = "h-5 w-5";
+    const mediaSources = album.length > 0 ? album : [cover];
+    const activeIndex = isActive ? Math.min(discoverImageIndex, mediaSources.length - 1) : 0;
+    const currentMedia = mediaSources[activeIndex] || cover;
+
     const cardStyle = isActive
-      ? { x: dragX, y: dragY, rotate: dragRotate, scale: dragScale, transformOrigin: "50% 20%" as const, willChange: "transform" as const }
-      : isImmediateNext
-        ? { y: nextCardTranslateY, scale: nextCardScale, transformOrigin: "50% 100%" as const }
-        : { transformOrigin: "50% 100%" as const };
-    const cardInitial = isActive
-      ? false as const
-      : isImmediateNext
-        ? { x: 0, y: 8, scale: 0.95, rotate: 0, opacity: 1 }
-        : { x: 0, y: stackedOffsetY, scale: stackedScale, rotate: 0, opacity: stackedOpacity };
-    const cardAnimate = isActive
-      ? { opacity: 1 }
-      : isImmediateNext
-        ? { opacity: 1 }
-        : { y: stackedOffsetY, scale: stackedScale, opacity: stackedOpacity };
-    const mediaSources = isActive || isImmediateNext ? (album.length > 0 ? album : [cover]) : [cover];
+      ? {
+          x: dragX,
+          y: dragY,
+          rotate: dragRotate,
+          scale: dragScale,
+          transformOrigin: "50% 100%" as const, // Tinder-style: bottom-pivot, top tilts
+          willChange: "transform" as const,
+        }
+      : {
+          y: nextCardTranslateY,
+          scale: nextCardScale,
+          transformOrigin: "50% 100%" as const,
+        };
 
     return (
       <motion.div
-        key={profile.id}
+        // key includes deckIndex so Framer remounts on promotion — no spring-bounce from next→active
+        key={`${profile.id}-${deckIndex}`}
         drag={isActive ? true : false}
-        dragConstraints={isActive ? { left: 0, right: 0, top: 30, bottom: 30 } : undefined}
-        dragElastic={isActive ? 0.15 : undefined}
+        dragDirectionLock
+        dragConstraints={isActive ? { left: -2000, right: 2000, top: 0, bottom: 0 } : undefined}
+        dragElastic={isActive ? 0 : undefined}
         dragMomentum={false}
-        initial={cardInitial}
+        initial={isActive ? false : { x: 0, y: 8, scale: 0.95, opacity: 1 }}
         style={cardStyle}
-        animate={isActive ? { opacity: 1 } : cardAnimate}
+        animate={{ opacity: 1 }}
         transition={{ type: "spring", stiffness: 260, damping: 28, mass: 0.92 }}
         className={cn(
-          "absolute inset-0 overflow-visible rounded-[28px] bg-white shadow-[0_26px_56px_rgba(33,71,201,0.16)]",
-          isActive ? "z-20" : isImmediateNext ? "z-[12]" : "z-[9]",
+          "absolute inset-0 overflow-hidden rounded-[28px] shadow-[0_26px_56px_rgba(33,71,201,0.16)]",
+          isActive ? "z-20" : "z-[12]",
           !isActive && "pointer-events-none",
           isActive && swipeUiBusy && "pointer-events-none"
         )}
-        onPointerDown={
-          isActive
-            ? () => {
-                awaitingFirstDragFrameRef.current = true;
-                noteDiscoveryPointerDown();
-              }
-            : undefined
-        }
         onDragStart={
           isActive
             ? () => {
@@ -405,16 +312,18 @@ const DiscoveryDeckInner = ({
           isActive
             ? (_, info) => {
                 if (swipeUiBusy) return;
-                if (Math.abs(info.offset.x) < 5 && Math.abs(info.offset.y) < 5) {
+                const { offset, velocity } = info;
+                if (Math.abs(offset.x) < 5 && Math.abs(offset.y) < 5) {
                   setIsDiscoverDragging(false);
                   return;
                 }
-                if (info.offset.x >= 110 || (info.velocity.x >= 500 && info.offset.x > -24)) {
-                  void onSwipeRight(profile, info.velocity.x).finally(() => setIsDiscoverDragging(false));
+                // Commit right (WAVE): offset past threshold OR velocity flick with sign-agreeing offset
+                if (offset.x >= SWIPE_COMMIT_OFFSET || (velocity.x >= SWIPE_COMMIT_VELOCITY && offset.x > SWIPE_VELOCITY_MIN_OFFSET)) {
+                  void onSwipeRight(profile, velocity.x).finally(() => setIsDiscoverDragging(false));
                   return;
                 }
-                if (info.offset.x <= -110 || (info.velocity.x <= -500 && info.offset.x < 24)) {
-                  void onSwipeLeft(profile, info.velocity.x).finally(() => setIsDiscoverDragging(false));
+                if (offset.x <= -SWIPE_COMMIT_OFFSET || (velocity.x <= -SWIPE_COMMIT_VELOCITY && offset.x < -SWIPE_VELOCITY_MIN_OFFSET)) {
+                  void onSwipeLeft(profile, velocity.x).finally(() => setIsDiscoverDragging(false));
                   return;
                 }
                 void onSpringCardHome().finally(() => setIsDiscoverDragging(false));
@@ -426,7 +335,6 @@ const DiscoveryDeckInner = ({
             ? () => {
                 if (swipeUiBusy) return;
                 if (Math.abs(dragY.get()) > 8 || Math.abs(dragX.get()) > 8) return;
-                if (discoverImageInteractingRef.current) return;
                 void onProfileTap(profile.id, profile.display_name || "User", profile.avatar_url || null);
               }
             : undefined
@@ -439,156 +347,129 @@ const DiscoveryDeckInner = ({
             </div>
           </div>
         )}
-        <div className="h-full w-full overflow-hidden rounded-[28px] [clip-path:inset(0_round_28px)]">
-          {mediaSources.length > 1 && isActive ? (
-            <>
-              <div
-                className="absolute inset-0 flex h-full w-full snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden touch-pan-x"
-                onPointerDown={() => {
-                  discoverImageInteractingRef.current = false;
-                }}
-                onPointerMove={() => {
-                  discoverImageInteractingRef.current = true;
-                }}
-                onPointerUp={() => {
-                  window.setTimeout(() => {
-                    discoverImageInteractingRef.current = false;
-                  }, 100);
-                }}
-                onPointerCancel={() => {
-                  discoverImageInteractingRef.current = false;
-                }}
-                onScroll={(event) => {
-                  const node = event.currentTarget;
-                  if (!node.clientWidth) return;
-                  const idx = Math.round(node.scrollLeft / node.clientWidth);
-                  setDiscoverImageIndex(Math.max(0, Math.min(mediaSources.length - 1, idx)));
-                }}
-              >
-                {mediaSources.map((src, index) => (
-                  <div key={`${profile.id}-album-${index}`} className="h-full w-full shrink-0 snap-start">
-                    <img
-                      src={src}
-                      alt={`${profile.display_name || "User"} ${index + 1}`}
-                      className="h-full w-full object-cover object-center"
-                      style={{ objectPosition: "center center" }}
-                      loading={index === 0 ? "eager" : "lazy"}
-                      decoding="async"
-                      fetchPriority={index === 0 ? "high" : "auto"}
-                      onError={(event) => {
-                        (event.currentTarget as HTMLImageElement).src = cover;
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-center gap-1.5">
-                {mediaSources.map((_, idx) => (
-                  <span
-                    key={`${profile.id}-img-dot-${idx}`}
-                    className={cn(
-                      "h-1.5 rounded-full transition-all",
-                      idx === discoverImageIndex ? "w-4 bg-[#7D86A6]" : "w-1.5 bg-[#B8BED2]/85"
-                    )}
-                  />
-                ))}
-              </div>
-            </>
-          ) : (
-            <img
-              src={mediaSources[0] || cover}
-              alt={isActive ? profile.display_name || "" : ""}
-              aria-hidden={isActive ? undefined : true}
-              className="h-full w-full object-cover object-center"
-              style={{ objectPosition: "center center" }}
-              loading={deckIndex < 2 ? "eager" : "lazy"}
-              decoding="async"
-              fetchPriority={deckIndex < 2 ? "high" : "auto"}
-              onError={(event) => {
-                (event.currentTarget as HTMLImageElement).src = profilePlaceholder;
+        <img
+          src={currentMedia}
+          alt={isActive ? profile.display_name || "" : ""}
+          aria-hidden={isActive ? undefined : true}
+          className="absolute inset-0 h-full w-full object-cover object-center"
+          loading={isActive ? "eager" : "lazy"}
+          decoding="async"
+          fetchPriority={isActive ? "high" : "auto"}
+          draggable={false}
+          onError={(event) => {
+            (event.currentTarget as HTMLImageElement).src = profilePlaceholder;
+          }}
+        />
+        {/* Album tap-zones — Tinder-style. No horizontal scroll, so card drag is untouched. */}
+        {isActive && mediaSources.length > 1 && (
+          <>
+            <button
+              type="button"
+              aria-label="Previous photo"
+              className="absolute left-0 top-0 z-[14] h-[70%] w-1/3 cursor-default focus:outline-none"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                stepAlbum(-1, mediaSources.length);
               }}
             />
-          )}
-          {isActive && (
-            <>
-              <motion.div className="absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
-              <motion.div className="absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
-            </>
-          )}
-          {isActive && (
-            <>
-              <motion.div
-                className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
-                style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate, x: waveIndicatorX, y: waveIndicatorY }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path d="M8.5 3.5a1.5 1.5 0 0 1 3 0v6m0-6a1.5 1.5 0 0 1 3 0v5m0-4a1.5 1.5 0 0 1 3 0v7l-1 4c-.5 2-2.2 3.5-4.5 3.5h-1c-2 0-3.8-1-4.8-2.7L4 13.5c-.6-1 0-2.3 1.1-2.5 1-.2 2 .3 2.4 1.2L8.5 14V3.5z" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M6 3C5 3.8 4.3 5 4 6.5M18.5 3c1 .8 1.7 2 2 3.5" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round"/>
-                </svg>
-                <span className="text-[13px] font-extrabold tracking-[0.18em]">WAVE</span>
-              </motion.div>
-              <motion.div
-                className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-white/92 px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)]"
-                style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale, rotate: stampCounterRotate, x: passIndicatorX, y: passIndicatorY }}
-              >
-                <span className="text-[13px] font-extrabold tracking-[0.18em]">SKIP</span>
-                <X size={18} strokeWidth={2.2} />
-              </motion.div>
-            </>
-          )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
-          <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
-            <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
-            {isActive && footerCtaMode === "promoted" && !isDiscoverDragging ? (
-              <div className="pointer-events-auto">
-                {renderDiscoveryActionButtons("promoted")}
+            <button
+              type="button"
+              aria-label="Next photo"
+              className="absolute right-0 top-0 z-[14] h-[70%] w-1/3 cursor-default focus:outline-none"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                stepAlbum(1, mediaSources.length);
+              }}
+            />
+            <div className="pointer-events-none absolute inset-x-0 top-3 z-[15] flex items-center justify-center gap-1.5">
+              {mediaSources.map((_, idx) => (
+                <span
+                  key={`${profile.id}-img-dot-${idx}`}
+                  className={cn(
+                    "h-1.5 rounded-full transition-all",
+                    idx === activeIndex ? "w-4 bg-white" : "w-1.5 bg-white/60"
+                  )}
+                />
+              ))}
+            </div>
+          </>
+        )}
+        {isActive && (
+          <>
+            <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
+            <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
+            <motion.div
+              className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
+              style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate, x: waveIndicatorX, y: waveIndicatorY }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M8.5 3.5a1.5 1.5 0 0 1 3 0v6m0-6a1.5 1.5 0 0 1 3 0v5m0-4a1.5 1.5 0 0 1 3 0v7l-1 4c-.5 2-2.2 3.5-4.5 3.5h-1c-2 0-3.8-1-4.8-2.7L4 13.5c-.6-1 0-2.3 1.1-2.5 1-.2 2 .3 2.4 1.2L8.5 14V3.5z" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M6 3C5 3.8 4.3 5 4 6.5M18.5 3c1 .8 1.7 2 2 3.5" stroke="#2147C9" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+              <span className="text-[13px] font-extrabold tracking-[0.18em]">WAVE</span>
+            </motion.div>
+            <motion.div
+              className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-white/92 px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)]"
+              style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale, rotate: stampCounterRotate, x: passIndicatorX, y: passIndicatorY }}
+            >
+              <span className="text-[13px] font-extrabold tracking-[0.18em]">SKIP</span>
+              <X size={18} strokeWidth={2.2} />
+            </motion.div>
+          </>
+        )}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
+        <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
+          <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
+          {isActive && footerCtaMode === "promoted" && !isDiscoverDragging ? (
+            <div className="pointer-events-auto">
+              {renderDiscoveryActionButtons("promoted")}
+            </div>
+          ) : null}
+        </div>
+        <div className="pointer-events-none absolute inset-x-4 bottom-5">
+          <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]">
+            <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
+            {availabilityPills.length > 0 && (
+              <div className="absolute inset-x-0 top-0 z-10 flex h-[40px] items-center rounded-t-[27px] bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4">
+                <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
+                  {availabilityPills.join(" • ")}
+                </span>
               </div>
-            ) : null}
-          </div>
-          <div className={cn("pointer-events-none absolute inset-x-4", footerBottomClass)}>
-            <div className={cn("relative overflow-hidden border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]", footerRadiusClass)}>
-              <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_22%,rgba(33,69,207,0.48)_38%,rgba(33,69,207,0.42)_100%)]" />
-              {availabilityPills.length > 0 && (
-                <div className={cn("absolute inset-x-0 top-0 z-10 flex items-center bg-[linear-gradient(to_bottom,rgba(255,255,255,0.58)_0%,rgba(255,255,255,0.48)_100%)] px-4", footerTopBarHeightClass, "rounded-t-[27px]")}>
-                  <span className="block min-w-0 truncate text-[12px] font-semibold leading-[1] text-[#1F1F1F]">
-                    {availabilityPills.join(" • ")}
-                  </span>
+            )}
+            <div className={cn("relative z-10 flex items-end gap-3 px-4 pb-3", availabilityPills.length > 0 ? "pt-[46px]" : "pt-3")}>
+              <div className="min-w-0 flex-1">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="truncate text-[25px] font-[700] leading-tight text-white">{profile.display_name}</span>
                 </div>
-              )}
-              <div className={cn("relative z-10 flex items-end gap-3", footerContentPaddingClass, footerTopPaddingClass)}>
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className={cn("truncate font-[700] leading-tight text-white", footerNameClass)}>{profile.display_name}</span>
+                {profile.location_name && (
+                  <div className="mb-2 flex items-center gap-1.5 py-[1px]">
+                    <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                    <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{profile.location_name}</span>
                   </div>
-                  {profile.location_name && (
-                    <div className="mb-2 flex items-center gap-1.5 py-[1px]">
-                      <MapPin className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                      <span className="truncate text-[12px] font-medium leading-[1.2] text-white/90">{profile.location_name}</span>
-                    </div>
-                  )}
-                  {speciesSummary && (
-                    <div className="mt-0.5 flex items-center gap-1.5 py-0">
-                      <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
-                      <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
-                    </div>
-                  )}
-                </div>
-                {footerCtaMode === "footer" || !isActive ? (
-                  <button
-                    type="button"
-                    aria-label={`Open ${profile.display_name || "profile"}`}
-                    className={cn(
-                      "pointer-events-auto flex flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                      footerArrowClass,
-                      isActive && ctaDisabled && "cursor-not-allowed opacity-55"
-                    )}
-                    disabled={isActive ? ctaDisabled : false}
-                    onClick={(event) => openDiscoveryProfile(event, profile)}
-                  >
-                    <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
-                  </button>
-                ) : null}
+                )}
+                {speciesSummary && (
+                  <div className="mt-0.5 flex items-center gap-1.5 py-0">
+                    <PawPrint className="h-3.5 w-3.5 flex-shrink-0 text-white/90" strokeWidth={1.9} />
+                    <span className="truncate text-[12px] font-medium leading-[1.1] text-white/90">{speciesSummary}</span>
+                  </div>
+                )}
               </div>
+              {footerCtaMode === "footer" || !isActive ? (
+                <button
+                  type="button"
+                  aria-label={`Open ${profile.display_name || "profile"}`}
+                  className={cn(
+                    "pointer-events-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+                    isActive && ctaDisabled && "cursor-not-allowed opacity-55"
+                  )}
+                  disabled={isActive ? ctaDisabled : false}
+                  onClick={(event) => openDiscoveryProfile(event, profile)}
+                >
+                  <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -597,92 +478,100 @@ const DiscoveryDeckInner = ({
   };
 
   return (
-    <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
-      <div
-        ref={containerRef}
-        className="flex-1 min-h-0 flex flex-col overflow-visible"
-      >
-        <div ref={cardWrapperRef} className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
-          <div className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
-            <div
-              className="relative w-full overflow-visible"
-              style={{ height: DISCOVERY_CARD_HEIGHT }}
-            >
-              {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div
+    <div
+      ref={containerRef}
+      className="flex-1 min-h-0 flex flex-col overflow-visible"
+    >
+      <div ref={cardWrapperRef} className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
+        <div className="relative w-full max-w-[388px] pb-[12%] sm:pb-[19%] md:pb-[26%]">
+          <div
+            className="relative w-full overflow-visible"
+            style={{ height: CARD_HEIGHT }}
+          >
+            {/* Decorative stacked bars — even ~11px peeking strips, bottom-pivot stable */}
+            {currentDiscovery && !renderDiscoverEmpty && (
+              <>
+                <div
                   aria-hidden="true"
-                  className="absolute z-0 left-1/2 bottom-[-8.8%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
-                  style={{ transform: "translateX(-50%) scaleX(0.74)" }}
+                  className="absolute z-0 left-1/2 bottom-[-10%] h-[14.5%] w-full rounded-[22px] bg-[rgba(79,86,119,0.14)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                  style={{ transform: "translateX(-50%) scaleX(0.76)" }}
                 />
-              )}
-              {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[1] left-1/2 bottom-[-6.1%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.83)" }} />
-              )}
-              {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[2] left-1/2 bottom-[-3.6%] h-[14.5%] w-full -translate-x-1/2 rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]" style={{ transform: "translateX(-50%) scaleX(0.91)" }} />
-              )}
-              {currentDiscovery && !renderDiscoverEmpty && (
-                <motion.div aria-hidden="true" className="absolute z-[3] left-1/2 bottom-[-1.1%] h-[11.5%] w-full -translate-x-1/2 rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]" style={{ transform: "translateX(-50%) scaleX(0.952)" }} />
-              )}
-              {discoveryLoading && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
-                  <HuddleVideoLoader size={32} />
+                <div
+                  aria-hidden="true"
+                  className="absolute z-[1] left-1/2 bottom-[-7.5%] h-[14.5%] w-full rounded-[22px] bg-[rgba(33,71,201,0.34)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                  style={{ transform: "translateX(-50%) scaleX(0.84)" }}
+                />
+                <div
+                  aria-hidden="true"
+                  className="absolute z-[2] left-1/2 bottom-[-5.0%] h-[14.5%] w-full rounded-[22px] bg-[rgba(33,71,201,0.60)] shadow-[0_4px_8px_rgba(0,0,255,0.10)]"
+                  style={{ transform: "translateX(-50%) scaleX(0.92)" }}
+                />
+                <div
+                  aria-hidden="true"
+                  className="absolute z-[3] left-1/2 bottom-[-2.5%] h-[11.5%] w-full rounded-[20px] bg-[rgba(17,37,126,0.84)] shadow-[0_6px_14px_rgba(7,24,108,0.16)]"
+                  style={{ transform: "translateX(-50%) scaleX(0.96)" }}
+                />
+              </>
+            )}
+            {discoveryLoading && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-[28px] bg-slate-100/60">
+                <HuddleVideoLoader size={32} />
+              </div>
+            )}
+            {discoveryLocationBlocked && (
+              <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                <div className="glass-nav w-full rounded-[28px] border border-white/55 bg-white/24 px-6 py-6 shadow-[0_16px_32px_rgba(33,71,201,0.12)]">
+                  <p className="text-sm text-muted-foreground">Enable location to discover people nearby.</p>
+                  <button onClick={onOpenLocationSettings} className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(33,71,201,0.24)]">
+                    Open Location Settings
+                  </button>
                 </div>
-              )}
-              {discoveryLocationBlocked && (
-                <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                  <div className="glass-nav w-full rounded-[28px] border border-white/55 bg-white/24 px-6 py-6 shadow-[0_16px_32px_rgba(33,71,201,0.12)]">
-                    <p className="text-sm text-muted-foreground">Enable location to discover people nearby.</p>
-                    <button onClick={onOpenLocationSettings} className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(33,71,201,0.24)]">
-                      Open Location Settings
-                    </button>
+              </div>
+            )}
+            {renderDiscoverEmpty && (
+              <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
+                  <img src={emptyChatImage} alt="" aria-hidden="true" className="mx-auto mb-4 w-full max-w-[320px] object-contain opacity-95" loading="lazy" />
+                  <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
+                  <div className="mt-4 flex flex-col gap-2">
+                    {canExpandSearch && (
+                      <button className="inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]" onClick={onExpandSearch}>
+                        {`Expand Search +${discoveryExpandStepKm}km`}
+                      </button>
+                    )}
+                    {passedDiscoveryCount > 0 && (
+                      <button className="inline-flex h-11 items-center justify-center rounded-full bg-white/75 px-5 text-sm font-semibold text-[#4F5677] shadow-[0_8px_20px_rgba(33,71,201,0.12)]" onClick={onResurfacePassedProfiles}>
+                        Resurface Skipped Profiles
+                      </button>
+                    )}
                   </div>
                 </div>
-              )}
-              {renderDiscoverEmpty && (
-                <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                  <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
-                    <img src={emptyChatImage} alt="" aria-hidden="true" className="mx-auto mb-4 w-full max-w-[320px] object-contain opacity-95" loading="lazy" />
-                    <p className="text-base font-semibold text-[#4F5677]">All caught up!</p>
-                    <div className="mt-4 flex flex-col gap-2">
-                      {canExpandSearch && (
-                        <button className="inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]" onClick={onExpandSearch}>
-                          {`Expand Search +${discoveryExpandStepKm}km`}
-                        </button>
-                      )}
-                      {passedDiscoveryCount > 0 && (
-                        <button className="inline-flex h-11 items-center justify-center rounded-full bg-white/75 px-5 text-sm font-semibold text-[#4F5677] shadow-[0_8px_20px_rgba(33,71,201,0.12)]" onClick={onResurfacePassedProfiles}>
-                          Resurface Skipped Profiles
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {stackedDiscoveryCards
-                .slice()
-                .reverse()
-                .map((profile, reversedIndex) => renderDiscoveryProfileCard(profile, stackedDiscoveryCards.length - 1 - reversedIndex))}
-            </div>
+              </div>
+            )}
+            {/* Only render active + next. Extra cards were decorative waste (opacity:0). */}
+            {stackedDiscoveryCards
+              .slice()
+              .reverse()
+              .map((profile, reversedIndex) => renderDiscoveryProfileCard(profile, stackedDiscoveryCards.length - 1 - reversedIndex))}
           </div>
         </div>
-        <div
-          ref={actionBarRef}
-          className={cn("relative px-4 pt-4 md:pt-5 flex-shrink-0", showBottomActionBar ? "min-h-[96px]" : "min-h-[52px]")}
-          style={{ paddingBottom: `calc(var(--nav-height) + env(safe-area-inset-bottom,0px) + ${ACTION_BAR_BOTTOM_CLEARANCE}px)` }}
-        >
-          {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
-            <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
-              {renderDiscoveryActionButtons("bottom")}
-            </div>
-          ) : showDiscoveryQuotaLock ? (
-            <div className="mx-auto flex w-fit items-center rounded-full border border-white/45 bg-[rgba(255,255,255,0.78)] px-4 py-2.5 text-center shadow-[0_16px_32px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
-              <span className="text-[12px] font-semibold text-[#4F5677]">{discoverExhaustedCopy}</span>
-            </div>
-          ) : <div />}
-        </div>
       </div>
-    </Profiler>
+      <div
+        ref={actionBarRef}
+        className={cn("relative px-4 pt-4 md:pt-5 flex-shrink-0", showBottomActionBar ? "min-h-[96px]" : "min-h-[52px]")}
+        style={{ paddingBottom: `calc(var(--nav-height) + env(safe-area-inset-bottom,0px) + ${ACTION_BAR_BOTTOM_CLEARANCE}px)` }}
+      >
+        {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
+          <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
+            {renderDiscoveryActionButtons("bottom")}
+          </div>
+        ) : showDiscoveryQuotaLock ? (
+          <div className="mx-auto flex w-fit items-center rounded-full border border-white/45 bg-[rgba(255,255,255,0.78)] px-4 py-2.5 text-center shadow-[0_16px_32px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
+            <span className="text-[12px] font-semibold text-[#4F5677]">{discoverExhaustedCopy}</span>
+          </div>
+        ) : <div />}
+      </div>
+    </div>
   );
 };
 

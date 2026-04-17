@@ -1760,7 +1760,7 @@ const Chats = () => {
       const current = discoveryMediaReadyRef.current.get(normalized) || { urlsReady: false, imagesDecoded: false };
       const next = { ...current, ...patch };
       discoveryMediaReadyRef.current.set(normalized, next);
-      if (!next.urlsReady || !next.imagesDecoded) return;
+      if (!next.urlsReady) return;
       const waiters = discoveryMediaWaitersRef.current.get(normalized);
       if (!waiters) return;
       waiters.forEach((resolve) => resolve());
@@ -1773,7 +1773,9 @@ const Chats = () => {
     const normalized = String(profileId || "").trim();
     if (!normalized) return;
     const current = discoveryMediaReadyRef.current.get(normalized);
-    if (current?.urlsReady && current?.imagesDecoded) return;
+    // Only gate on urlsReady (Supabase URL resolution). The DOM <img> handles
+    // decode via fetchPriority+decoding=async; no manual decode preload needed.
+    if (current?.urlsReady) return;
     await new Promise<void>((resolve) => {
       const waiters = discoveryMediaWaitersRef.current.get(normalized) || new Set<() => void>();
       waiters.add(resolve);
@@ -1917,14 +1919,22 @@ const Chats = () => {
           return false;
         }
         await ensureDiscoveryProfileReady(options?.nextProfileId ?? null);
-        // Reset motion values to 0 BEFORE committing so the incoming card mounts at (0,0).
-        // If we reset after (in useEffect), the new card mounts at dragX=±450 and Framer's
-        // dragConstraints elastic recovery springs it back — overshooting into negative X
-        // and briefly triggering the SKIP stamp on a Wave. This one-liner prevents that.
+        // Commit first (removes old card from deck), wait one frame for React to
+        // process the removal, THEN reset motion values. This prevents the outgoing
+        // card from snapping back to x=0 for a frame on top of the incoming card.
+        // The incoming card's key is `${id}-${deckIndex}` so it remounts cleanly
+        // with motion values at 0 — no spring-back from ±viewport either.
+        commitDiscoverySwipe(direction, currentId, action);
+        await new Promise<void>((resolve) => {
+          if (typeof window === "undefined") {
+            resolve();
+            return;
+          }
+          window.requestAnimationFrame(() => resolve());
+        });
         dragX.set(0);
         dragY.set(0);
         dragRotateOverride.set(0);
-        commitDiscoverySwipe(direction, currentId, action);
         return true;
       } finally {
         discoverySwipeBusyRef.current = false;
@@ -3576,7 +3586,7 @@ const Chats = () => {
   const primaryQueue = visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id));
   const discoverySource = silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue];
   const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
-  const stackedDiscoveryCards = discoveryDeck.slice(0, 4);
+  const stackedDiscoveryCards = discoveryDeck.slice(0, 2);
   const currentDiscovery = stackedDiscoveryCards[0] ?? null;
   const showDiscoverEmpty = discoveryLoadSettled && !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
   const pendingDiscoverEmpty = Boolean(
@@ -4616,9 +4626,6 @@ const Chats = () => {
             onPromptStar={promptDiscoveryStar}
             onProfileTap={handleProfileTap}
             onSpringCardHome={springDiscoveryCardHome}
-            onDecodeProfileReady={(profileId) =>
-              markDiscoveryMediaReady(profileId, { imagesDecoded: true })
-            }
             getDiscoveryAlbum={getDiscoveryAlbum}
             getDiscoverySpeciesSummary={getDiscoverySpeciesSummary}
             getDiscoveryAvailabilityPills={getDiscoveryAvailabilityPills}
