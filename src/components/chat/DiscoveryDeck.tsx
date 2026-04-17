@@ -238,11 +238,15 @@ const DiscoveryDeckInner = ({
     });
   }, [currentDiscovery?.id]);
 
-  const renderDiscoveryActionButtons = () => (
-    <div className="flex items-center">
+  const renderDiscoveryActionButtons = (variant: "bottom" | "promoted" = "bottom") => {
+    const isPromoted = variant === "promoted";
+
+    return (
+    <div className={cn("flex items-center", isPromoted ? "gap-2.5" : "")}>
       <motion.button
         className={cn(
-          "flex h-12 w-12 items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-10 w-10" : "h-12 w-12",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Skip"
@@ -256,13 +260,14 @@ const DiscoveryDeckInner = ({
         }}
       >
         <motion.div whileTap={{ scale: 0.84 }} transition={{ duration: 0.2 }}>
-          <X size={22} strokeWidth={2} />
+          <X size={isPromoted ? 18 : 22} strokeWidth={2} />
         </motion.div>
       </motion.button>
-      <div className="w-4" />
+      {!isPromoted ? <div className="w-4" /> : null}
       <motion.button
         className={cn(
-          "group flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-11 w-11" : "h-14 w-14",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Wave"
@@ -278,13 +283,14 @@ const DiscoveryDeckInner = ({
           animate={waveButtonAnimating ? { rotate: [0, -18, 12, -8, 5, 0] } : { rotate: 0 }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
-          <WaveHandIcon size={40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
+          <WaveHandIcon size={isPromoted ? 30 : 40} className="drop-shadow-[0_8px_18px_rgba(7,24,108,0.22)]" />
         </motion.div>
       </motion.button>
-      <div className="w-3" />
+      {!isPromoted ? <div className="w-3" /> : null}
       <motion.button
         className={cn(
-          "flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+          isPromoted ? "h-10 w-10" : "h-11 w-11",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Star"
@@ -297,10 +303,11 @@ const DiscoveryDeckInner = ({
           onPromptStar(currentDiscovery);
         }}
       >
-        <Star size={26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+        <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
       </motion.button>
     </div>
-  );
+    );
+  };
 
   const openDiscoveryProfile = (event: MouseEvent<HTMLButtonElement>, profile: DiscoveryDeckProfile) => {
     event.stopPropagation();
@@ -518,19 +525,9 @@ const DiscoveryDeckInner = ({
           <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
             <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
             {isActive && footerCtaMode === "promoted" ? (
-              <button
-                type="button"
-                aria-label={`Open ${profile.display_name || "profile"}`}
-                className={cn(
-                  "pointer-events-auto flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                  footerArrowClass,
-                  ctaDisabled && "cursor-not-allowed opacity-55"
-                )}
-                disabled={ctaDisabled}
-                onClick={(event) => openDiscoveryProfile(event, profile)}
-              >
-                <ArrowUpRight className={footerArrowIconClass} strokeWidth={2} />
-              </button>
+              <div className="pointer-events-auto rounded-[22px] border border-white/70 bg-[rgba(255,255,255,0.86)] px-3 py-2 shadow-[0_16px_32px_rgba(33,71,201,0.18)] backdrop-blur-[18px]">
+                {renderDiscoveryActionButtons("promoted")}
+              </div>
             ) : null}
           </div>
           <div className={cn("pointer-events-none absolute inset-x-4", footerBottomClass)}>
@@ -658,9 +655,9 @@ const DiscoveryDeckInner = ({
           ref={actionBarRef}
           className={cn("relative mt-auto px-4 flex-shrink-0 pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)]", showBottomActionBar ? "min-h-[84px]" : "min-h-[40px]")}
         >
-          {showBottomActionBar ? (
+          {showBottomActionBar && footerCtaMode !== "promoted" ? (
             <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
-              {renderDiscoveryActionButtons()}
+              {renderDiscoveryActionButtons("bottom")}
             </div>
           ) : showDiscoveryQuotaLock ? (
             <div className="mx-auto flex w-fit items-center rounded-full border border-white/45 bg-[rgba(255,255,255,0.78)] px-4 py-2.5 text-center shadow-[0_16px_32px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
