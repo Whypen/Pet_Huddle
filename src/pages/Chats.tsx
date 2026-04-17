@@ -4565,7 +4565,7 @@ const Chats = () => {
   }, [discoverChatAgeBlocked, topTab]);
 
   return (
-    <div className="h-full min-h-0 bg-background relative overflow-x-hidden flex flex-col">
+    <div className="h-full min-h-0 bg-background relative overflow-hidden flex flex-col">
       <div ref={chatsHeaderRef}>
         <GlobalHeader
           onUpgradeClick={() => setIsPremiumOpen(true)}
