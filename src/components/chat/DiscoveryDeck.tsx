@@ -130,10 +130,11 @@ const DiscoveryDeckInner = ({
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
   const DISCOVERY_CARD_HEIGHT = "clamp(438px,64vh,608px)";
-  const PROMOTE_GAP = 16; // keep extra breathing room between card stack and CTA row
-  const ACTION_BAR_BOTTOM_CLEARANCE = 30;
-  const PROMOTE_ENTER_THRESHOLD = 8;
-  const PROMOTE_EXIT_THRESHOLD = 24;
+  const PROMOTE_GAP = 18; // keep extra breathing room between card stack and CTA row
+  const ACTION_BAR_BOTTOM_CLEARANCE = 36;
+  const PROMOTE_ALLOWED_MAX_WIDTH = 560;
+  const PROMOTE_ENTER_THRESHOLD = 28;
+  const PROMOTE_EXIT_THRESHOLD = 64;
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
 
   useLayoutEffect(() => {
@@ -162,8 +163,10 @@ const DiscoveryDeckInner = ({
       const actionBar = actionBarRef.current;
       if (!container || !cardWrapper || !actionBar) return;
       const available = container.clientHeight;
+      const compactViewport = container.clientWidth <= PROMOTE_ALLOWED_MAX_WIDTH;
       const needed = cardWrapper.offsetHeight + actionBar.offsetHeight + PROMOTE_GAP;
       setFooterCtaPlacement((prev) => {
+        if (!compactViewport) return prev === "footer" ? prev : "footer";
         const overflow = needed - available;
         const next =
           prev === "promoted"
@@ -174,8 +177,10 @@ const DiscoveryDeckInner = ({
       if ((globalThis as { __HUDDLE_DISCOVERY_DEBUG?: boolean }).__HUDDLE_DISCOVERY_DEBUG === true) {
         console.debug("[DiscoveryDeck]", {
           available,
+          compactViewport,
           needed,
           overflow: needed - available,
+          promoteAllowedMaxWidth: PROMOTE_ALLOWED_MAX_WIDTH,
           enterThreshold: PROMOTE_ENTER_THRESHOLD,
           exitThreshold: PROMOTE_EXIT_THRESHOLD,
         });
@@ -257,8 +262,8 @@ const DiscoveryDeckInner = ({
     <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
       <motion.button
         className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.80)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-          isPromoted ? "h-10 w-10" : "h-11 w-11 bg-[rgba(255,255,255,0.97)]",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
+          isPromoted ? "h-10 w-10" : "h-11 w-11",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Star"
@@ -275,8 +280,8 @@ const DiscoveryDeckInner = ({
       </motion.button>
       <motion.button
         className={cn(
-          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.80)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-11 w-11" : "h-14 w-14 bg-[rgba(33,71,201,0.98)]",
+          "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-11 w-11" : "h-14 w-14",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Wave"
@@ -297,8 +302,8 @@ const DiscoveryDeckInner = ({
       </motion.button>
       <motion.button
         className={cn(
-          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.80)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-          isPromoted ? "h-10 w-10" : "h-12 w-12 bg-[rgba(255,255,255,0.97)]",
+          "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#D94B5A] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+          isPromoted ? "h-10 w-10" : "h-12 w-12",
           ctaDisabled && "cursor-not-allowed opacity-45"
         )}
         aria-label="Skip"
@@ -663,7 +668,7 @@ const DiscoveryDeckInner = ({
         </div>
         <div
           ref={actionBarRef}
-          className={cn("relative mt-auto px-4 flex-shrink-0", showBottomActionBar ? "min-h-[96px]" : "min-h-[52px]")}
+          className={cn("relative px-4 pt-4 md:pt-5 flex-shrink-0", showBottomActionBar ? "min-h-[96px]" : "min-h-[52px]")}
           style={{ paddingBottom: `calc(var(--nav-height) + env(safe-area-inset-bottom,0px) + ${ACTION_BAR_BOTTOM_CLEARANCE}px)` }}
         >
           {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
