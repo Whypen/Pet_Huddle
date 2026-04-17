@@ -4682,7 +4682,6 @@ const Chats = () => {
             passIndicatorY={passIndicatorY}
             waveTintOpacity={waveTintOpacity}
             passTintOpacity={passTintOpacity}
-            availableDiscoveryHeight={availableDiscoveryHeight}
             safeBottomY={discoverySafeBottomY}
             onOpenLocationSettings={openLocationSettings}
             onExpandSearch={handleExpandSearch}

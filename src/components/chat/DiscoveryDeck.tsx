@@ -55,7 +55,6 @@ type DiscoveryDeckProps = {
   passIndicatorY: MotionValue<number>;
   waveTintOpacity: MotionValue<number>;
   passTintOpacity: MotionValue<number>;
-  availableDiscoveryHeight: number | null;
   safeBottomY: number | null;
   onOpenLocationSettings: () => void;
   onExpandSearch: () => void;
@@ -104,7 +103,6 @@ const DiscoveryDeckInner = ({
   passIndicatorY,
   waveTintOpacity,
   passTintOpacity,
-  availableDiscoveryHeight,
   safeBottomY,
   onOpenLocationSettings,
   onExpandSearch,
@@ -130,30 +128,13 @@ const DiscoveryDeckInner = ({
   const awaitingFirstDragFrameRef = useRef(false);
   const decodedProfileIdsRef = useRef<Set<string>>(new Set());
 
-  const NAV_PROTECTED_PADDING = 0;
   const FOOTER_CTA_VISUAL_ALLOWANCE = 12;
   const FOOTER_CTA_BOTTOM_INSET = 12;
   const FOOTER_CTA_PROMOTE_ENTER_THRESHOLD = 0;
   const FOOTER_CTA_RETURN_EXIT_THRESHOLD = 18;
-  const DISCOVERY_CARD_MIN_HEIGHT = 360;
-  const DISCOVERY_CARD_MAX_HEIGHT = 608;
-  const DISCOVERY_CARD_TOP_GAP = 12;
+  // Card always uses Bumble-style height — promotion handles overlap
+  const DISCOVERY_CARD_HEIGHT = "clamp(438px,64vh,608px)";
   const showBottomActionBar = !renderDiscoverEmpty && !discoveryLocationBlocked && !showDiscoveryQuotaLock;
-  const DISCOVERY_BOTTOM_ACTION_RESERVE = showBottomActionBar ? 124 : 60;
-
-  const discoveryCardHeight = useMemo(() => {
-    if (!availableDiscoveryHeight || !Number.isFinite(availableDiscoveryHeight)) {
-      return "clamp(438px,64vh,608px)";
-    }
-    const fitted = Math.max(
-      DISCOVERY_CARD_MIN_HEIGHT,
-      Math.min(
-        DISCOVERY_CARD_MAX_HEIGHT,
-        Math.floor(availableDiscoveryHeight - DISCOVERY_BOTTOM_ACTION_RESERVE - DISCOVERY_CARD_TOP_GAP)
-      )
-    );
-    return `${fitted}px`;
-  }, [availableDiscoveryHeight, DISCOVERY_BOTTOM_ACTION_RESERVE]);
 
   useLayoutEffect(() => {
     setDiscoverImageIndex(0);
@@ -173,10 +154,6 @@ const DiscoveryDeckInner = ({
       setFooterCtaPlacement("footer");
       return;
     }
-    if (safeBottomY == null) {
-      return;
-    }
-
     let frameId = 0;
     const measure = () => {
       window.cancelAnimationFrame(frameId);
@@ -186,7 +163,13 @@ const DiscoveryDeckInner = ({
           return;
         }
         const footerRect = footerNode.getBoundingClientRect();
-        const navProtectedTop = safeBottomY - NAV_PROTECTED_PADDING;
+        // Use safeBottomY prop if available; fall back to querying the nav directly
+        const resolvedSafeBottomY = safeBottomY ?? (() => {
+          const navNode = document.querySelector('[data-bottom-nav="true"]');
+          if (!navNode) return window.innerHeight - 12;
+          return navNode.getBoundingClientRect().top - 12;
+        })();
+        const navProtectedTop = resolvedSafeBottomY;
         const footerCtaNode = discoveryFooterCtaRef.current;
         const footerCtaBottom = (
           footerCtaNode
@@ -651,13 +634,13 @@ const DiscoveryDeckInner = ({
     <Profiler id="DiscoveryDeck" onRender={noteDiscoveryDeckRender}>
       <div
         ref={discoveryScrollContainerRef}
-        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+110px)]"
+        className="flex-1 min-h-0 flex flex-col overflow-y-auto touch-pan-y pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+118px)]"
       >
         <div className="px-4 pt-2 pb-0 flex items-start justify-center flex-none">
           <div className="relative w-full max-w-[388px] pb-[11%] sm:pb-[17%] md:pb-[24%]">
             <div
               className="relative w-full overflow-visible"
-              style={{ height: discoveryCardHeight }}
+              style={{ height: DISCOVERY_CARD_HEIGHT }}
             >
               {currentDiscovery && !renderDiscoverEmpty && (
                 <motion.div
@@ -718,7 +701,7 @@ const DiscoveryDeckInner = ({
           </div>
         </div>
         <div
-          className={cn("relative mt-1 px-4 flex-shrink-0", showBottomActionBar ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+20px)] min-h-[104px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+18px)] min-h-[42px]")}
+          className={cn("relative mt-1 px-4 flex-shrink-0", showBottomActionBar ? "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+28px)] min-h-[104px]" : "pb-[calc(var(--nav-height)+env(safe-area-inset-bottom,0px)+26px)] min-h-[42px]")}
         >
           {showBottomActionBar ? (
             <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
