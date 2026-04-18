@@ -260,6 +260,7 @@ type DiscoveryProfile = {
   dob?: string | null;
   location_name?: string | null;
   location_district?: string | null;
+  location_country?: string | null;
   occupation?: string | null;
   school?: string | null;
   major?: string | null;
@@ -340,7 +341,13 @@ const applyExperienceYearsFilter = (profiles: DiscoveryProfile[], filters: Disco
 const applyDiscoveryClientFilters = (
   profiles: DiscoveryProfile[],
   filters: DiscoveryFilters,
-  options?: { enforceVerifiedOnly?: boolean; enforceActiveOnly?: boolean; wavedByUserIds?: Set<string>; anchor?: DiscoveryAnchor | null }
+  options?: {
+    enforceVerifiedOnly?: boolean;
+    enforceActiveOnly?: boolean;
+    wavedByUserIds?: Set<string>;
+    anchor?: DiscoveryAnchor | null;
+    viewerCountry?: string | null;
+  }
 ) => {
   const minAge = Math.max(16, filters.ageMin);
   const maxAge = Math.max(minAge, filters.ageMax);
@@ -468,7 +475,10 @@ const applyDiscoveryClientFilters = (
 
     if (options?.anchor && Number.isFinite(profile.last_lat) && Number.isFinite(profile.last_lng)) {
       const dKm = distanceKm(options.anchor.lat, options.anchor.lng, Number(profile.last_lat), Number(profile.last_lng));
-      if (Number.isFinite(dKm) && dKm > filters.maxDistanceKm) return false;
+      const viewerCountry = normalizeCountryKey(options.viewerCountry ?? null);
+      const profileCountry = normalizeCountryKey(profile.location_country ?? null);
+      const sameCountry = Boolean(viewerCountry && profileCountry && viewerCountry === profileCountry);
+      if (!sameCountry && Number.isFinite(dKm) && dKm > filters.maxDistanceKm) return false;
     }
 
     return true;
@@ -3216,7 +3226,7 @@ const Chats = () => {
 
             const { data: profileEnrichment } = await supabase
               .from("profiles")
-              .select("id, pet_experience, degree, languages, height, has_car, verification_status, is_verified, relationship_status, orientation, gender_genre, availability_status, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district")
+              .select("id, pet_experience, degree, languages, height, has_car, verification_status, is_verified, relationship_status, orientation, gender_genre, availability_status, last_active_at, updated_at, created_at, last_lat, last_lng, location_name, location_district, location_country")
               .in("id", mergedIds);
             for (const row of (profileEnrichment || []) as DiscoveryProfile[]) {
               const existing = mergedProfiles.get(row.id);
@@ -3250,6 +3260,7 @@ const Chats = () => {
           enforceActiveOnly: filters.activeOnly,
           wavedByUserIds,
           anchor,
+          viewerCountry: profile.location_country ?? null,
         }).filter((row) => row.id !== profile.id && !handledIds.has(row.id));
         if (mergedList.length > 0) {
           setDiscoveryProfiles(mergedList);
@@ -3269,6 +3280,7 @@ const Chats = () => {
     discoveryHistoryHydrated,
     fetchUserMatches,
     profile?.id,
+    profile?.location_country,
     filters,
     effectiveDiscoveryDistanceKm,
     isPremium,

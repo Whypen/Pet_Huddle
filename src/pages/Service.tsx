@@ -38,7 +38,10 @@ const Service = () => {
   const { profile } = useAuth();
   const { isActive } = useSafetyRestrictions();
   const [proximityAnchor, setProximityAnchor] = useState<{ lat: number; lng: number } | null>(null);
-  const { providers, loading, error, toggleBookmark, refresh } = useServiceProviders(proximityAnchor);
+  const { providers, loading, error, toggleBookmark, refresh } = useServiceProviders(
+    proximityAnchor,
+    profile?.location_country ?? null,
+  );
   const [filters, setFilters] = useState<ServiceFilterState>(DEFAULT_FILTERS);
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(false);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlList } from "@/lib/socialAlbum";
+import { normalizeCountryKey } from "@/lib/locationLabels";
 import { mapProviderRow } from "@/components/service/mapProviderRow";
 import type { ProviderSummary } from "@/components/service/types";
 
@@ -14,7 +15,7 @@ interface UseServiceProvidersResult {
 
 type Anchor = { lat: number; lng: number } | null;
 
-export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult {
+export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | null): UseServiceProvidersResult {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +108,7 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
           .in("id", providerIds),
         supabase
           .from("profiles")
-          .select("id, social_album, verification_status")
+          .select("id, social_album, verification_status, location_country")
           .in("id", providerIds),
         user?.id
           ? supabase
@@ -181,11 +182,23 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
         }),
       );
 
+      const viewerCountryKey = normalizeCountryKey(viewerCountry);
+      const geoFiltered = mapped.filter((entry) => {
+        const distanceKm = typeof entry.distanceKm === "number" && Number.isFinite(entry.distanceKm) ? entry.distanceKm : null;
+        const within50km = distanceKm !== null && distanceKm <= 50;
+        if (distanceKm !== null && !within50km) return false;
+        const providerCountryKey = normalizeCountryKey(entry.locationCountry ?? null);
+        if (viewerCountryKey && providerCountryKey) {
+          return providerCountryKey === viewerCountryKey && (within50km || distanceKm === null);
+        }
+        return within50km || distanceKm === null;
+      });
+
       // Defense-in-depth: only surface verified providers in the public feed.
       // The listing gate in CarerProfile prevents unverified users from setting
       // listed=true going forward, but this filter protects against legacy rows.
       setProviders(
-        mapped.filter(
+        geoFiltered.filter(
           (entry): entry is ProviderSummary =>
             entry !== null && entry.verificationStatus === "verified",
         ),
@@ -196,7 +209,7 @@ export function useServiceProviders(anchor?: Anchor): UseServiceProvidersResult 
     } finally {
       setLoading(false);
     }
-  }, [anchor]);
+  }, [anchor, viewerCountry]);
 
   useEffect(() => {
     void fetchProviders();

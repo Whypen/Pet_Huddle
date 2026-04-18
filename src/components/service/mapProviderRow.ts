@@ -128,6 +128,7 @@ export function mapProviderRow(
     userId:               String(row.user_id ?? ""),
     displayName:          String(profile.display_name ?? "Pet Carer"),
     avatarUrl:            (profile.avatar_url as string | null) ?? null,
+    locationCountry:      (profile.location_country as string | null) ?? null,
     socialAlbumUrls:      albumUrls,
     servicesOffered:      allServices,
     servicesOther:        String(row.services_other ?? ""),

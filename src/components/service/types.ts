@@ -12,6 +12,7 @@ export interface ProviderSummary {
   userId: string;
   displayName: string;
   avatarUrl: string | null;
+  locationCountry?: string | null;
   socialAlbumUrls: string[];        // already resolved to public URLs
   servicesOffered: string[];
   servicesOther: string;
