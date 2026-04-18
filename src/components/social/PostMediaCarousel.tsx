@@ -17,6 +17,7 @@ type PostMediaCarouselProps = {
 
 const MIN_ASPECT = 3 / 4;
 const MAX_ASPECT = 4 / 3;
+const DEFAULT_CAROUSEL_ASPECT = 1;
 const mediaAspectCache = new Map<string, number>();
 
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
@@ -46,18 +47,12 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
   const dragStartXRef = useRef<number | null>(null);
   const dragMovedRef = useRef(false);
+  const primarySrc = items[0]?.src || "";
   const [activeIndex, setActiveIndex] = useState(0);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState(0);
-  const [aspectMap, setAspectMap] = useState<Record<string, number>>(() =>
-    Object.fromEntries(
-      items
-        .map((item) => {
-          const cached = mediaAspectCache.get(item.src);
-          return cached ? [item.src, cached] : null;
-        })
-        .filter(Boolean) as Array<[string, number]>
-    )
+  const [stableAspect] = useState(() =>
+    clampAspect(mediaAspectCache.get(primarySrc) || DEFAULT_CAROUSEL_ASPECT)
   );
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
   const [tapHintDismissed, setTapHintDismissed] = useState(
@@ -88,39 +83,14 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    const cachedEntries = items
-      .map((item) => {
-        const cached = mediaAspectCache.get(item.src);
-        return cached ? [item.src, cached] : null;
-      })
-      .filter(Boolean) as Array<[string, number]>;
-    if (cachedEntries.length === 0) return;
-    setAspectMap((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      cachedEntries.forEach(([src, aspect]) => {
-        if (next[src] === aspect) return;
-        next[src] = aspect;
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
-  }, [items]);
-
   const slideWidth = useMemo(() => {
     if (mode === "full") return measuredWidth;
     return Math.max(measuredWidth - 56, measuredWidth * 0.82);
   }, [measuredWidth, mode]);
 
-  const activeAspect = clampAspect(aspectMap[items[activeIndex]?.src] || aspectMap[items[0]?.src] || MIN_ASPECT);
-  const carouselHeight = slideWidth > 0 ? slideWidth / activeAspect : undefined;
-
   const updateAspect = (src: string, width: number, height: number) => {
     if (!width || !height) return;
-    const nextAspect = width / height;
-    mediaAspectCache.set(src, nextAspect);
-    setAspectMap((prev) => (prev[src] === nextAspect ? prev : { ...prev, [src]: nextAspect }));
+    mediaAspectCache.set(src, width / height);
   };
 
   const scrollToIndex = (index: number) => {
@@ -171,24 +141,22 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   return (
     <>
       <div className={cn("space-y-2", className)}>
-        <div className="overflow-hidden" style={carouselHeight ? { height: `${carouselHeight}px` } : undefined}>
+        <div className="overflow-hidden" style={{ aspectRatio: `${stableAspect}` }}>
           <div
             ref={scrollRef}
             className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             onScroll={handleScroll}
           >
             {items.map((item, index) => {
-              const aspect = clampAspect(aspectMap[item.src] || 1);
               const isVideo = isVideoSrc(item.src);
               return (
                 <div
                   key={`${item.src}-${index}`}
                   role="button"
                   tabIndex={0}
-                  className="relative shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 cursor-pointer"
+                  className="relative h-full shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 cursor-pointer"
                   style={{
                     width: slideWidth ? `${slideWidth}px` : undefined,
-                    aspectRatio: `${aspect}`,
                   }}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
