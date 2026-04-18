@@ -161,15 +161,6 @@ const ChatDialogue = () => {
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
   const chatDisabledBySafety = isActive("chat_disabled");
-  const firstHelloStarters = useMemo(
-    () => [
-      "Hey there—what drew your pack to Huddle?",
-      "Hello! Loving your pics—any fun walks lately?",
-      "Hey how're you doing?",
-    ],
-    []
-  );
-
   const parseMessageContent = useCallback((content: string): ParsedMessage => {
     const share = parseChatShareMessage(content);
     if (share) {
@@ -1209,24 +1200,7 @@ const ChatDialogue = () => {
           </div>
         )}
         <div className="space-y-2">
-        {messages.length === 0 && !isGroup ? (
-          <div className="mt-auto rounded-[18px] border border-white/45 bg-white/55 p-3 shadow-[0_10px_24px_rgba(33,71,201,0.10)] backdrop-blur-[18px]">
-            <p className="text-sm font-semibold text-[#4F5677]">Paw-Vibe Check?</p>
-            <div className="mt-2 flex flex-col gap-2">
-              {firstHelloStarters.map((starter) => (
-                <button
-                  key={starter}
-                  type="button"
-                  className="w-full rounded-[12px] border border-white/55 bg-white/65 px-3 py-2 text-left text-xs text-[#4F5677] transition-colors hover:bg-white/80"
-                  onClick={() => setChatInput(starter)}
-                >
-                  {starter}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          messages.map((message, index) => {
+        {messages.map((message, index) => {
             const mine = message.sender_id === profile?.id;
             const parsed = parseMessageContent(message.content);
             const attachments = parsed.attachments;
@@ -1336,8 +1310,7 @@ const ChatDialogue = () => {
                 )}
               </div>
             );
-          })
-        )}
+          })}
         </div>
       </div>
 
