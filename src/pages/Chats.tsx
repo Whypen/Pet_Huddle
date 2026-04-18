@@ -36,10 +36,11 @@ import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/q
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { openExternalUrl } from "@/lib/nativeShell";
-import { buildStarIntroPayload, isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
+import { isStarIntroKind, parseStarChatContent, sendStarChat } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
+import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import {
   noteDiscoveryCommit,
   noteDiscoveryDragEnd,
@@ -2037,41 +2038,30 @@ const Chats = () => {
       }
       return { sent: false, roomId: null };
     }
-    try {
-      const roomId = await ensureDirectChatRoom(supabase, profile.id, target.id, target.display_name || "Conversation");
-      if (!roomId) throw new Error("room_not_created");
-      const quotaResult = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
-        "check_and_increment_quota",
-        { action_type: "star" }
-      );
-      if (quotaResult.error) {
-        if (tier === "plus") {
-          openStarUpgradeSheet("gold");
-        } else {
-          toast.info(quotaConfig.copy.stars.exhausted);
-        }
-        return { sent: false, roomId: null };
+    const result = await sendStarChat({
+      senderId: profile.id,
+      senderTier: profile?.tier,
+      targetUserId: target.id,
+      targetName: target.display_name || "Conversation",
+    });
+    if (result.status === "sent") {
+      return { sent: true, roomId: result.roomId };
+    }
+    if (result.status === "exhausted") {
+      if (result.upgradeTier === "gold") {
+        openStarUpgradeSheet("gold");
+      } else {
+        toast.info(quotaConfig.copy.stars.exhausted);
       }
-      const { error: starMessageError } = await supabase.from("chat_messages").insert({
-        chat_id: roomId,
-        sender_id: profile.id,
-        content: buildStarIntroPayload(profile.id, target.id),
-      });
-      if (starMessageError) throw starMessageError;
-      void enqueueChatNotification({
-        userId: target.id,
-        kind: "star",
-        title: "New star",
-        body: "Someone sent you a Star ⭐ Tap to find out who.",
-        href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
-        data: { room_id: roomId, from_user_id: profile.id, type: "star" },
-      });
-      return { sent: true, roomId };
-    } catch {
-      toast.error("Unable to open chat right now.");
       return { sent: false, roomId: null };
     }
-  }, [enqueueChatNotification, getStarRemaining, openStarUpgradeSheet, profile?.id, profile?.tier]);
+    if (result.status === "blocked") {
+      toast.error("Cannot start chat with this user.");
+      return { sent: false, roomId: null };
+    }
+    toast.error("Unable to open chat right now.");
+    return { sent: false, roomId: null };
+  }, [getStarRemaining, openStarUpgradeSheet, profile?.id, profile?.tier]);
 
   const executeConfirmedStar = useCallback(async () => {
     if (!confirmStarTarget || starActionLoading) return;
@@ -5724,79 +5714,42 @@ const Chats = () => {
 
       <Dialog open={Boolean(activeGroupDetails)} onOpenChange={(open) => { if (!open) setGroupDetailsId(null); }}>
         <DialogContent className="max-w-sm max-h-[88vh] overflow-y-auto">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card">
-                {activeGroupDetails?.avatarUrl || activeGroupDetails?.avatar_url ? (
-                  <img
-                    src={activeGroupDetails.avatarUrl || activeGroupDetails.avatar_url || ""}
-                    alt={activeGroupDetails?.name || "Group"}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <Users className="h-6 w-6 text-primary" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <DialogTitle className="truncate">{activeGroupDetails?.name || "Group"}</DialogTitle>
-                <DialogDescription>{`${activeGroupDetails?.memberCount || 0} members`}</DialogDescription>
-              </div>
-            </div>
+          <DialogHeader className="sr-only">
+            <DialogTitle>{activeGroupDetails?.name || "Group"}</DialogTitle>
+            <DialogDescription>{`${activeGroupDetails?.memberCount || 0} members`}</DialogDescription>
           </DialogHeader>
-          {activeGroupDetails?.description ? (
-            <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">Description</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-brandText">{activeGroupDetails.description}</p>
-            </div>
-          ) : null}
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">
-              Media{groupDetailsMediaUrls.length > 0 ? ` (${groupDetailsMediaUrls.length})` : ""}
-            </p>
-            {groupDetailsMediaUrls.length > 0 ? (
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {groupDetailsMediaUrls.map((url, index) => (
-                  <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer" className="h-24 w-24 shrink-0 overflow-hidden rounded-xl">
-                    <img src={url} alt="" className="h-full w-full object-cover" />
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ImageIcon className="h-4 w-4" />
-                <span>No media shared yet</span>
-              </div>
-            )}
-          </div>
-          <div className="space-y-2">
-            {activeGroupDetails?.isAdmin ? (
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-muted/60"
-                onClick={() => {
-                  setGroupDetailsId(null);
-                  if (!isVerified) { setGroupVerifyGateOpen(true); return; }
-                  setGroupManageId(activeGroupDetails.id);
-                }}
-              >
-                <Settings className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm font-medium">Manage Group</span>
-              </button>
-            ) : null}
-            {activeGroupDetails?.id && groups.some((group) => group.id === activeGroupDetails.id) ? (
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-muted/60"
-                onClick={() => {
-                  setGroupDetailsId(null);
-                  handleGroupClick(activeGroupDetails);
-                }}
-              >
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm font-medium">Open group</span>
-              </button>
-            ) : null}
-          </div>
+          <GroupDetailsPanel
+            name={activeGroupDetails?.name || "Group"}
+            avatarUrl={activeGroupDetails?.avatarUrl || activeGroupDetails?.avatar_url || null}
+            memberCount={activeGroupDetails?.memberCount || 0}
+            description={activeGroupDetails?.description || null}
+            mediaUrls={groupDetailsMediaUrls}
+            actions={[
+              ...(activeGroupDetails?.isAdmin
+                ? [{
+                    key: "manage",
+                    label: "Manage Group",
+                    icon: <Settings className="h-5 w-5 text-muted-foreground" />,
+                    onClick: () => {
+                      setGroupDetailsId(null);
+                      if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                      setGroupManageId(activeGroupDetails.id);
+                    },
+                  }]
+                : []),
+              ...(activeGroupDetails?.id && groups.some((group) => group.id === activeGroupDetails.id)
+                ? [{
+                    key: "open",
+                    label: "Open group",
+                    icon: <ChevronRight className="h-5 w-5 text-muted-foreground" />,
+                    onClick: () => {
+                      setGroupDetailsId(null);
+                      handleGroupClick(activeGroupDetails);
+                    },
+                  }]
+                : []),
+            ]}
+          />
         </DialogContent>
       </Dialog>
 

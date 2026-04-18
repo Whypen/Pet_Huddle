@@ -4,17 +4,14 @@ import { CakeSlice, Heart, Loader2, PawPrint, Ruler, Star, User, X } from "lucid
 import { useNavigate } from "react-router-dom";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
-import { areUsersBlocked } from "@/lib/blocking";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import { toast } from "sonner";
-import { ensureDirectChatRoom } from "@/lib/chatRooms";
 import { quotaConfig } from "@/config/quotaConfig";
-import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
+import { resolveStarQuotaTier } from "@/lib/starQuota";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { buildStarIntroPayload } from "@/lib/starChat";
+import { sendStarChat } from "@/lib/starChat";
 
 type PublicProfileSheetData = {
   display_name?: string | null;
@@ -202,65 +199,34 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
       return;
     }
     try {
-      const snapshot = await (supabase.rpc as (fn: string) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_quota_snapshot");
-      if (snapshot.error) throw snapshot.error;
-      const row = Array.isArray(snapshot.data) ? snapshot.data[0] : snapshot.data;
-      const typed = (row || {}) as { tier?: string; stars_used_cycle?: number; extra_stars?: number };
-      const userTier = resolveStarQuotaTier(profile?.tier, typed.tier);
-      const remaining = getRemainingStarsFromSnapshot(profile?.tier, typed);
-      if (remaining <= 0) {
-        if (userTier === "plus") {
+      const result = await sendStarChat({
+        senderId: profile.id,
+        senderTier: profile?.tier,
+        targetUserId: viewedUserId,
+        targetName: resolvedData?.display_name || fallbackName || "Conversation",
+      });
+      if (result.status === "free_tier") {
+        openStarUpsell("plus");
+        return;
+      }
+      if (result.status === "exhausted") {
+        if (result.upgradeTier === "gold") {
           openStarUpsell("gold");
         } else {
           toast.info(quotaConfig.copy.stars.exhausted);
         }
         return;
       }
-      const blocked = await areUsersBlocked(profile.id, viewedUserId);
-      if (blocked) {
+      if (result.status === "blocked") {
         toast.error("Cannot start chat with this user.");
         return;
       }
-      const roomId = await ensureDirectChatRoom(
-        supabase,
-        profile.id,
-        viewedUserId,
-        resolvedData?.display_name || fallbackName || "Conversation"
-      );
-      if (!roomId) throw new Error("room_not_created");
-      const quotaResult = await (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
-        "check_and_increment_quota",
-        { action_type: "star" }
-      );
-      if (quotaResult.error) {
-        if (tier === "plus") {
-          openStarUpsell("gold");
-        } else {
-          toast.info(quotaConfig.copy.stars.exhausted);
-        }
-        return;
+      if (result.status !== "sent") {
+        throw new Error("star_failed");
       }
-      const { error: starMessageError } = await supabase.from("chat_messages").insert({
-        chat_id: roomId,
-        sender_id: profile.id,
-        content: buildStarIntroPayload(profile.id, viewedUserId),
-      });
-      if (starMessageError) throw starMessageError;
-      void (supabase.rpc as (fn: string, params?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
-        "enqueue_notification",
-        {
-          p_user_id: viewedUserId,
-          p_category: "chats",
-          p_kind: "star",
-          p_title: "New star",
-          p_body: "Someone sent you a Star ⭐ Tap to find out who.",
-          p_href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
-          p_data: { room_id: roomId, from_user_id: profile.id, type: "star" },
-        }
-      );
       setStarFlightVisible(true);
       window.requestAnimationFrame(() => {
-        navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}&with=${encodeURIComponent(viewedUserId)}`);
+        navigate(`/chat-dialogue?room=${encodeURIComponent(result.roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}&with=${encodeURIComponent(viewedUserId)}`);
         onClose();
         setStarFlightVisible(false);
       });

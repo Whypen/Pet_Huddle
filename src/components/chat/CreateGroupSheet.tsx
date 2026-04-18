@@ -10,6 +10,7 @@ import { FormField, FormTextArea } from "@/components/ui/FormField";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { countWords } from "@/lib/locationLabels";
 import { toast } from "sonner";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +38,9 @@ const PET_FOCUS_OPTIONS = [
 ] as const;
 
 const roomCodePlaceholder = "— —";
+const DESCRIPTION_WORD_LIMIT = 100;
+const optionCardClass =
+  "rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors";
 
 // ── Collapse animation preset ─────────────────────────────────────────────────
 
@@ -124,6 +128,10 @@ export function CreateGroupSheet({
       toast.error("Sign in to create a group.");
       return;
     }
+    if (countWords(description) > DESCRIPTION_WORD_LIMIT) {
+      toast.error(`Description must be ${DESCRIPTION_WORD_LIMIT} words or fewer.`);
+      return;
+    }
     setIsCreating(true);
     try {
       // 1. Insert chat
@@ -147,15 +155,18 @@ export function CreateGroupSheet({
       // 1b. Upload group photo if provided
       if (photoFile) {
         const ext = photoFile.name.split(".").pop() ?? "jpg";
-        const path = `groups/${chat.id}/${Date.now()}.${ext}`;
+        const path = `${user.id}/groups/${chat.id}/${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("avatars")
           .upload(path, photoFile, { upsert: true });
-        if (!uploadErr) {
-          const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
-          if (pub?.publicUrl) {
-            await supabase.from("chats").update({ avatar_url: pub.publicUrl }).eq("id", chat.id);
-          }
+        if (uploadErr) throw uploadErr;
+        const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+        if (pub?.publicUrl) {
+          const { error: avatarPersistError } = await supabase
+            .from("chats")
+            .update({ avatar_url: pub.publicUrl })
+            .eq("id", chat.id);
+          if (avatarPersistError) throw avatarPersistError;
         }
       }
 
@@ -175,7 +186,7 @@ export function CreateGroupSheet({
       const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;
       const systemText =
         visibility === "private"
-          ? `Room Code: ${roomCode ?? roomCodePlaceholder} — Share this with people you trust`
+          ? `Room Code: ${roomCode ?? roomCodePlaceholder}`
           : joinMethod === "request"
           ? "This is a public group. People can request to join and you approve them."
           : "This is a public group. Anyone can join instantly.";
@@ -252,7 +263,7 @@ export function CreateGroupSheet({
         {/* Field 2: Location — no hint text */}
         <FormField
           label="Location"
-          placeholder="Neighbourhood or area, e.g. Kadıköy"
+          placeholder="Neighbourhood or area"
           value={locationLabel}
           onChange={e => setLocationLabel(e.target.value)}
         />
@@ -262,7 +273,8 @@ export function CreateGroupSheet({
           <p className="text-[13px] font-semibold text-[var(--text-primary)] pl-1 mb-[6px]">
             Pet focus
           </p>
-          <div className="flex flex-wrap gap-2 mt-2">
+          <div className="rounded-[14px] border border-[rgba(66,73,101,0.12)] bg-white/66 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.12),inset_-1px_-1px_4px_rgba(255,255,255,0.78)]">
+            <div className="flex flex-wrap gap-2">
             {PET_FOCUS_OPTIONS.map(option => (
               <button
                 key={option}
@@ -274,6 +286,7 @@ export function CreateGroupSheet({
                 {option}
               </button>
             ))}
+            </div>
           </div>
         </div>
 
@@ -282,7 +295,13 @@ export function CreateGroupSheet({
           label="Description"
           placeholder="Tell people what this group is about and how you usually meet."
           value={description}
-          onChange={e => setDescription(e.target.value)}
+          onChange={e => {
+            const nextValue = e.target.value;
+            const words = countWords(nextValue);
+            if (words > DESCRIPTION_WORD_LIMIT) return;
+            setDescription(nextValue);
+          }}
+          hint={`${countWords(description)}/${DESCRIPTION_WORD_LIMIT} words`}
         />
 
         {/* Section: Visibility */}
@@ -295,7 +314,7 @@ export function CreateGroupSheet({
             <div
               role="button"
               tabIndex={0}
-              className="neu-chip px-3 py-3 flex flex-row items-start gap-2 cursor-pointer text-left"
+              className={`${optionCardClass} flex flex-row items-start gap-2 cursor-pointer text-left`}
               data-active={visibility === "public" ? "true" : undefined}
               onClick={() => setVisibility("public")}
               onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("public")}
@@ -320,7 +339,7 @@ export function CreateGroupSheet({
             <div
               role="button"
               tabIndex={0}
-              className="neu-chip px-3 py-3 flex flex-row items-start gap-2 cursor-pointer text-left"
+              className={`${optionCardClass} flex flex-row items-start gap-2 cursor-pointer text-left`}
               data-active={visibility === "private" ? "true" : undefined}
               onClick={() => setVisibility("private")}
               onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("private")}
@@ -364,7 +383,7 @@ export function CreateGroupSheet({
                   {/* Request to join */}
                   <button
                     type="button"
-                    className="neu-chip w-full px-3 py-3 flex flex-row items-start gap-3 text-left"
+                    className={`${optionCardClass} w-full flex flex-row items-start gap-3 text-left`}
                     data-active={joinMethod === "request" ? "true" : undefined}
                     onClick={() => setJoinMethod("request")}
                   >
@@ -390,7 +409,7 @@ export function CreateGroupSheet({
                   {/* Join instantly */}
                   <button
                     type="button"
-                    className="neu-chip w-full px-3 py-3 flex flex-row items-start gap-3 text-left"
+                    className={`${optionCardClass} w-full flex flex-row items-start gap-3 text-left`}
                     data-active={joinMethod === "instant" ? "true" : undefined}
                     onClick={() => setJoinMethod("instant")}
                   >

@@ -1,6 +1,6 @@
 import { memo, useCallback, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { motion, type MotionValue } from "framer-motion";
-import { ArrowUpRight, MapPin, PawPrint, Star, X } from "lucide-react";
+import { MapPin, PawPrint, Star, X } from "lucide-react";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { HuddleVideoLoader } from "@/components/ui/HuddleVideoLoader";
 import { WaveHandIcon } from "@/components/icons/WaveHandIcon";
@@ -188,24 +188,6 @@ const DiscoveryDeckInner = ({
       <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
         <motion.button
           className={cn(
-            "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#F5C85C] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.05] active:scale-[0.96]",
-            isPromoted ? "h-10 w-10" : "h-11 w-11",
-            ctaDisabled && "cursor-not-allowed opacity-45"
-          )}
-          aria-label="Star"
-          disabled={ctaDisabled}
-          whileTap={{ scale: 0.92 }}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (ctaDisabled) return;
-            if (!currentDiscovery) return;
-            onPromptStar(currentDiscovery);
-          }}
-        >
-          <Star size={isPromoted ? 22 : 26} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-        </motion.button>
-        <motion.button
-          className={cn(
             "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
             isPromoted ? "h-11 w-11" : "h-14 w-14",
             ctaDisabled && "cursor-not-allowed opacity-45"
@@ -250,10 +232,10 @@ const DiscoveryDeckInner = ({
     );
   };
 
-  const openDiscoveryProfile = (event: MouseEvent<HTMLButtonElement>, profile: DiscoveryDeckProfile) => {
+  const promptStarFromCorner = (event: MouseEvent<HTMLButtonElement>, profile: DiscoveryDeckProfile) => {
     event.stopPropagation();
     if (ctaDisabled) return;
-    void onProfileTap(profile.id, profile.display_name || "User", profile.avatar_url || null);
+    onPromptStar(profile);
   };
 
   const renderDiscoveryProfileCard = (profile: DiscoveryDeckProfile, deckIndex: number) => {
@@ -421,11 +403,26 @@ const DiscoveryDeckInner = ({
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
         <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
           <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
-          {isActive && footerCtaMode === "promoted" && !isDiscoverDragging ? (
-            <div className="pointer-events-auto">
-              {renderDiscoveryActionButtons("promoted")}
+          {isActive ? (
+            <div className="pointer-events-auto flex items-start gap-2">
+              <motion.button
+                type="button"
+                aria-label={`Star ${profile.display_name || "profile"}`}
+                className={cn(
+                  "flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-[rgba(255,255,255,0.18)] text-white shadow-[0_12px_28px_rgba(7,24,108,0.26)] backdrop-blur-[20px] transition-transform duration-150 hover:scale-[1.03] active:scale-[0.96]",
+                  ctaDisabled && "cursor-not-allowed opacity-45"
+                )}
+                disabled={ctaDisabled}
+                whileTap={{ scale: 0.92 }}
+                onClick={(event) => promptStarFromCorner(event, profile)}
+              >
+                <Star size={22} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+              </motion.button>
+              {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted") : null}
             </div>
-          ) : null}
+          ) : (
+            <div />
+          )}
         </div>
         <div className="pointer-events-none absolute inset-x-4 bottom-5">
           <div className="relative overflow-hidden rounded-[28px] border border-[rgba(255,255,255,0.38)] shadow-[0_14px_48px_rgba(0,0,0,0.16)] backdrop-blur-[22px]">
@@ -455,20 +452,7 @@ const DiscoveryDeckInner = ({
                   </div>
                 )}
               </div>
-              {footerCtaMode === "footer" || !isActive ? (
-                <button
-                  type="button"
-                  aria-label={`Open ${profile.display_name || "profile"}`}
-                  className={cn(
-                    "pointer-events-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] text-white shadow-[0_10px_24px_rgba(33,71,201,0.35)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
-                    isActive && ctaDisabled && "cursor-not-allowed opacity-55"
-                  )}
-                  disabled={isActive ? ctaDisabled : false}
-                  onClick={(event) => openDiscoveryProfile(event, profile)}
-                >
-                  <ArrowUpRight className="h-5 w-5" strokeWidth={2} />
-                </button>
-              ) : null}
+              <div className="w-2 shrink-0" />
             </div>
           </div>
         </div>

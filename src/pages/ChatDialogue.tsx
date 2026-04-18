@@ -14,6 +14,7 @@ import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { isStarIntroKind, parseStarChatContent } from "@/lib/starChat";
 import { parseChatShareMessage, type ShareModel } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
+import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import {
@@ -1339,101 +1340,59 @@ const ChatDialogue = () => {
       {/* ── Group Info Sheet (WhatsApp-style) ── */}
       <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>
         <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
-          <SheetHeader className="pb-4 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center">
-                {groupAvatarUrl
-                  ? <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
-                  : <Users className="h-5 w-5 text-primary" />}
-              </div>
-              <div className="min-w-0">
-                <SheetTitle className="text-left">{roomName}</SheetTitle>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {groupLocationLabel ? `${groupMemberCount} members · ${groupLocationLabel}` : `${groupMemberCount} members`}
-                </p>
-              </div>
-            </div>
+          <SheetHeader className="sr-only">
+            <SheetTitle>{roomName}</SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
-          {groupDescription ? (
-            <div className="mb-5 rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">Description</p>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-brandText">{groupDescription}</p>
-            </div>
-          ) : null}
-
-          {/* Media — horizontal swipeable album */}
-          <div className="mb-5">
-            <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
-              Media{groupMediaUrls.length > 0 ? ` (${groupMediaUrls.length})` : ""}
-            </p>
-            {groupMediaUrls.length > 0 ? (
-              <div className="flex gap-2 overflow-x-auto pb-1 snap-x snap-mandatory">
-                {groupMediaUrls.map((url, idx) => (
-                  <a
-                    key={idx}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-none w-24 h-24 snap-start overflow-hidden rounded-xl"
-                  >
-                    <img src={url} alt="" className="h-full w-full object-cover" />
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <ImageIcon className="h-4 w-4" />
-                <span className="text-sm">No media shared yet</span>
-              </div>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="space-y-1">
-            {/* Mute notifications */}
-            <button
-              onClick={() => void toggleGroupMute()}
-              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
-            >
-              {groupMuted
-                ? <BellOff className="h-5 w-5 text-muted-foreground" />
-                : <Bell className="h-5 w-5 text-muted-foreground" />}
-              <span className="text-sm font-medium">{groupMuted ? "Unmute notifications" : "Mute notifications"}</span>
-            </button>
-
-            {groupIsAdmin ? (
-              <button
-                onClick={() => {
-                  setGroupInfoOpen(false);
-                  void loadGroupManageData();
-                  setGroupManageOpen(true);
-                }}
-                className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
-              >
-                <Settings className="h-5 w-5 text-muted-foreground" />
-                <span className="text-sm font-medium">Manage Group</span>
-              </button>
-            ) : null}
-
-            {/* Report group */}
-            <button
-              onClick={() => { setGroupInfoOpen(false); setReportOpen(true); }}
-              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
-            >
-              <ShieldAlert className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm font-medium">Report group</span>
-            </button>
-
-            {/* Leave group */}
-            <button
-              onClick={() => { setGroupInfoOpen(false); setConfirmLeaveOpen(true); }}
-              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-red-50 transition-colors text-left"
-            >
-              <LogOut className="h-5 w-5 text-red-500" />
-              <span className="text-sm font-medium text-red-500">Leave group</span>
-            </button>
-          </div>
+            <GroupDetailsPanel
+              name={roomName}
+              avatarUrl={groupAvatarUrl}
+              memberCount={groupMemberCount}
+              subtitle={groupLocationLabel ? `${groupMemberCount} members · ${groupLocationLabel}` : `${groupMemberCount} members`}
+              description={groupDescription}
+              mediaUrls={groupMediaUrls}
+              actions={[
+                {
+                  key: "mute",
+                  label: groupMuted ? "Unmute notifications" : "Mute notifications",
+                  icon: groupMuted
+                    ? <BellOff className="h-5 w-5 text-muted-foreground" />
+                    : <Bell className="h-5 w-5 text-muted-foreground" />,
+                  onClick: () => { void toggleGroupMute(); },
+                },
+                ...(groupIsAdmin
+                  ? [{
+                      key: "manage",
+                      label: "Manage Group",
+                      icon: <Settings className="h-5 w-5 text-muted-foreground" />,
+                      onClick: () => {
+                        setGroupInfoOpen(false);
+                        void loadGroupManageData();
+                        setGroupManageOpen(true);
+                      },
+                    }]
+                  : []),
+                {
+                  key: "report",
+                  label: "Report group",
+                  icon: <ShieldAlert className="h-5 w-5 text-muted-foreground" />,
+                  onClick: () => {
+                    setGroupInfoOpen(false);
+                    setReportOpen(true);
+                  },
+                },
+                {
+                  key: "leave",
+                  label: "Leave group",
+                  icon: <LogOut className="h-5 w-5 text-red-500" />,
+                  destructive: true,
+                  onClick: () => {
+                    setGroupInfoOpen(false);
+                    setConfirmLeaveOpen(true);
+                  },
+                },
+              ]}
+            />
           </div>{/* end scrollable body */}
         </SheetContent>
       </Sheet>
