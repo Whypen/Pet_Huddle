@@ -199,7 +199,21 @@ interface NoticeBoardProps {
 type FeedCursor = {
   created_at: string;
   id: string;
+  score?: number | null;
 };
+
+type SocialFeedEventType =
+  | "impression"
+  | "dwell_10s"
+  | "expand_post"
+  | "open_comments"
+  | "profile_view"
+  | "like"
+  | "comment"
+  | "save"
+  | "share"
+  | "hide"
+  | "block";
 
 type ComposerMedia = {
   file: File;
@@ -500,7 +514,7 @@ const sameMentionQuery = (a: ActiveMentionQuery | null, b: ActiveMentionQuery | 
 
 const buildFeedCursor = (thread?: Thread | null): FeedCursor | null => {
   if (!thread?.created_at || !thread?.id) return null;
-  return { created_at: thread.created_at, id: thread.id };
+  return { created_at: thread.created_at, id: thread.id, score: thread.score ?? null };
 };
 
 export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef }: NoticeBoardProps) => {
@@ -522,7 +536,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [pullOffset, setPullOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const lastCursorRef = useRef<{ created_at: string; id: string } | null>(null);
+  const lastCursorRef = useRef<FeedCursor | null>(null);
   const mentionTablesAvailableRef = useRef(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [socialRestrictionModalOpen, setSocialRestrictionModalOpen] = useState(false);
@@ -574,6 +588,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const filtersRowRef = useRef<HTMLDivElement | null>(null);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const feedSessionIdRef = useRef<string>(typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `feed-${Date.now()}`);
+  const trackedImpressionsRef = useRef<Set<string>>(new Set());
+  const trackedDwellRef = useRef<Set<string>>(new Set());
+  const dwellTimeoutsRef = useRef<Map<string, number>>(new Map());
   const lastAutoFocusedThreadRef = useRef<string | null>(null);
   const focusFallbackShownRef = useRef<string | null>(null);
   const focusThreadId = params.threadId || searchParams.get("focus") || searchParams.get("thread");
@@ -621,6 +639,31 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     mentionDirectoryRef.current = mentionDirectory;
   }, [mentionDirectory]);
 
+  const recordSocialFeedEvent = useCallback(async (
+    threadId: string,
+    eventType: SocialFeedEventType,
+    metadata?: Record<string, unknown>,
+  ) => {
+    if (!user?.id || !threadId) return false;
+    const sessionId = feedSessionIdRef.current;
+    const payload = {
+      p_thread_id: threadId,
+      p_event_type: eventType,
+      p_session_id: sessionId,
+      p_metadata: metadata ?? {},
+    };
+    try {
+      const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "record_social_feed_event",
+        payload,
+      );
+      if (error) return false;
+      return data === true;
+    } catch {
+      return false;
+    }
+  }, [user?.id]);
+
   const clearComposerUploadTicker = useCallback(() => {
     if (composerUploadTickerRef.current) {
       window.clearInterval(composerUploadTickerRef.current);
@@ -641,12 +684,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   useEffect(() => () => clearComposerUploadTicker(), [clearComposerUploadTicker]);
 
-  const openProfile = useCallback((userId: string, fallbackName: string) => {
+  const openProfile = useCallback((userId: string, fallbackName: string, threadId?: string) => {
     if (!userId) return;
+    if (threadId) {
+      void recordSocialFeedEvent(threadId, "profile_view");
+    }
     setProfileUserId(userId);
     setProfileFallbackName(fallbackName);
     setProfileOpen(true);
-  }, []);
+  }, [recordSocialFeedEvent]);
 
   const markMentionTablesUnavailable = useCallback((error: { code?: string; message?: string } | null | undefined) => {
     if (!error) return false;
@@ -2184,8 +2230,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         });
       }
 
-      if (createdReply?.id) {
-        const optimisticReply: ThreadComment = {
+	      if (createdReply?.id) {
+        void recordSocialFeedEvent(thread.id, "comment");
+	        const optimisticReply: ThreadComment = {
           id: String(createdReply.id),
           thread_id: thread.id,
           content: replyText,
@@ -2610,8 +2657,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           .eq("thread_id", noticeId);
         const resolvedCount = Number(count ?? 0);
         setNotices((prev) => prev.map((item) => (item.id === noticeId ? { ...item, likes: resolvedCount } : item)));
-        if (!isRemoving && target.user_id !== user.id) {
-          await upsertNotificationWindow({
+	        if (!isRemoving && target.user_id !== user.id) {
+	          await upsertNotificationWindow({
             ownerUserId: target.user_id,
             subjectId: noticeId,
             subjectType: "thread",
@@ -2621,10 +2668,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             actorId: user.id,
             actorName: profile?.display_name || "Someone",
           });
+	        }
+        if (!isRemoving) {
+          void recordSocialFeedEvent(noticeId, "like");
         }
-        toast.success(isRemoving ? t("Support removed") : t("Thanks for your support!"));
-      })();
-      return;
+	        toast.success(isRemoving ? t("Support removed") : t("Thanks for your support!"));
+	      })();
+	      return;
     }
     setLikedNotices(prev => {
       const newLiked = new Set(prev);
@@ -2660,6 +2710,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const handleHide = (noticeId: string) => {
     setHiddenNotices(prev => new Set([...prev, noticeId]));
+    void recordSocialFeedEvent(noticeId, "hide");
     toast.success(t("Thread hidden"));
   };
 
@@ -2731,6 +2782,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const handleBlockUser = async (authorId: string) => {
+    const relatedNotice = notices.find((notice) => notice.user_id === authorId);
     const { error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)(
       "block_user",
       { p_blocked_id: authorId }
@@ -2748,6 +2800,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
       return next;
     });
+    if (relatedNotice?.id) {
+      void recordSocialFeedEvent(relatedNotice.id, "block");
+    }
     void fetchNotices(true);
     toast.success(t("You won't see posts from this user"));
   };
@@ -2866,6 +2921,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         { p_thread_id: threadId }
       );
       if (error) return;
+      void recordSocialFeedEvent(threadId, "share");
       if (typeof data === "number") {
         setNotices((prev) =>
           prev.map((notice) =>
@@ -2876,9 +2932,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         );
       }
     } catch {
+      void recordSocialFeedEvent(threadId, "share");
       // Keep optimistic count if RPC is unavailable.
     }
-  }, []);
+  }, [recordSocialFeedEvent]);
+
+  const toggleSavedNotice = useCallback((noticeId: string) => {
+    setSavedNotices((prev) => {
+      const next = new Set(prev);
+      const willSave = !next.has(noticeId);
+      if (willSave) next.add(noticeId);
+      else next.delete(noticeId);
+      if (willSave) {
+        void recordSocialFeedEvent(noticeId, "save");
+      }
+      return next;
+    });
+  }, [recordSocialFeedEvent]);
 
   useEffect(() => {
     try {
@@ -2998,6 +3068,56 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     });
     return () => cancelAnimationFrame(frame);
   }, [visibleNotices, threadMentionsById]);
+
+  useEffect(() => {
+    if (visibleNotices.length === 0) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const dwellTimeouts = dwellTimeoutsRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const node = entry.target as HTMLDivElement;
+          const threadId = node.dataset.threadId;
+          if (!threadId) return;
+
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+            if (!trackedImpressionsRef.current.has(threadId)) {
+              trackedImpressionsRef.current.add(threadId);
+              void recordSocialFeedEvent(threadId, "impression");
+            }
+            if (!trackedDwellRef.current.has(threadId) && !dwellTimeouts.has(threadId)) {
+              const timeoutId = window.setTimeout(() => {
+                dwellTimeouts.delete(threadId);
+                if (trackedDwellRef.current.has(threadId)) return;
+                trackedDwellRef.current.add(threadId);
+                void recordSocialFeedEvent(threadId, "dwell_10s");
+              }, 10000);
+              dwellTimeouts.set(threadId, timeoutId);
+            }
+            return;
+          }
+
+          const timeoutId = dwellTimeouts.get(threadId);
+          if (timeoutId) {
+            window.clearTimeout(timeoutId);
+            dwellTimeouts.delete(threadId);
+          }
+        });
+      },
+      { threshold: [0.6] },
+    );
+
+    visibleNotices.forEach((notice) => {
+      const node = threadRefs.current[notice.id];
+      if (node) observer.observe(node);
+    });
+
+    return () => {
+      observer.disconnect();
+      dwellTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+      dwellTimeouts.clear();
+    };
+  }, [recordSocialFeedEvent, visibleNotices]);
 
   const ensureLinkPreview = useCallback(async (url: string) => {
     if (!url) return;
@@ -3384,19 +3504,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                   >
                     <div className="relative flex items-start gap-3">
                       <div className="absolute right-0 top-0 z-10 flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSavedNotices((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(notice.id)) next.delete(notice.id);
-                              else next.add(notice.id);
-                              return next;
-                            })
-                          }
-                          className={cn(
-                            "h-8 w-8 rounded-full p-1.5 transition-colors flex items-center justify-center",
-                            savedNotices.has(notice.id) ? "text-brandBlue" : "text-brandText/60 hover:text-brandText"
+	                        <button
+	                          type="button"
+	                          onClick={() => toggleSavedNotice(notice.id)}
+	                          className={cn(
+	                            "h-8 w-8 rounded-full p-1.5 transition-colors flex items-center justify-center",
+	                            savedNotices.has(notice.id) ? "text-brandBlue" : "text-brandText/60 hover:text-brandText"
                           )}
                           aria-label="Save post"
                         >
@@ -3429,8 +3542,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             ? "border-[rgba(33,69,207,1)]"
                             : "border-[rgba(74,73,101,0.28)]"
                         )}
-                        onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User")}
-                      >
+	                        onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User", notice.id)}
+	                      >
                         <span className="absolute inset-[1px] rounded-full bg-muted/20" />
                         {notice.author?.avatar_url ? (
                           <img 
@@ -3450,8 +3563,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           <button
                             type="button"
                             className="min-w-0 underline-offset-2 hover:underline"
-                            onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User")}
-                          >
+	                            onClick={() => openProfile(notice.user_id, notice.author?.display_name || "User", notice.id)}
+	                          >
                             <AuthorHandle
                               displayName={notice.author?.display_name || t("Anonymous")}
                               socialId={notice.author?.social_id || null}
@@ -3492,14 +3605,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         {expandableContentById[notice.id] ? (
                           <button
                             type="button"
-                            onClick={() =>
-                              setExpandedContentIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(notice.id)) next.delete(notice.id);
-                                else next.add(notice.id);
-                                return next;
-                              })
-                            }
+	                            onClick={() =>
+	                              setExpandedContentIds((prev) => {
+	                                const next = new Set(prev);
+	                                if (next.has(notice.id)) {
+	                                  next.delete(notice.id);
+	                                } else {
+	                                  next.add(notice.id);
+	                                  void recordSocialFeedEvent(notice.id, "expand_post");
+	                                }
+	                                return next;
+	                              })
+	                            }
                             className="mt-1 text-xs font-bold text-[rgba(74,73,101,0.72)]"
                           >
                             {expandedContentIds.has(notice.id) ? "See Less" : "Read More"}
@@ -3595,10 +3712,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                setExpandedReplies((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(notice.id)) {
+	                              onClick={() => {
+	                                setExpandedReplies((prev) => {
+	                                  const next = new Set(prev);
+	                                  if (next.has(notice.id)) {
                                     next.delete(notice.id);
                                     if (replyFor === notice.id) {
                                       setReplyFor(null);
@@ -3611,10 +3728,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                       setReplyMediaFiles([]);
                                       setReplyError("");
                                     }
-                                  } else {
-                                    next.add(notice.id);
-                                    if (isSocialPostingBlocked) {
-                                      setSocialRestrictionModalOpen(true);
+	                                  } else {
+	                                    next.add(notice.id);
+                                      void recordSocialFeedEvent(notice.id, "open_comments");
+	                                    if (isSocialPostingBlocked) {
+	                                      setSocialRestrictionModalOpen(true);
                                       return next;
                                     }
                                     setReplyFor(notice.id);
