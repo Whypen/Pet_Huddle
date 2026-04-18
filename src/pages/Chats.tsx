@@ -5552,9 +5552,6 @@ const Chats = () => {
                       <>
                         {invitedExploreGroups.length > 0 && (
                           <div className="space-y-2">
-                            <p className="px-1 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">
-                              You&apos;re invited
-                            </p>
                             {invitedExploreGroups.map((group, index) => {
                               const handleExploreCardCTA = async (e: React.MouseEvent) => {
                                 e.stopPropagation();
@@ -5628,7 +5625,7 @@ const Chats = () => {
                                             className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
                                             style={{ backgroundColor: "var(--blue, #3B82F6)" }}
                                           >
-                                            Join
+                                            You&apos;re invited
                                           </button>
                                         </div>
                                         <button
@@ -5654,11 +5651,6 @@ const Chats = () => {
                                           ))}
                                         </div>
                                       )}
-                                      <div className="mt-1">
-                                        <span className="inline-flex rounded-full bg-[#2147C9]/10 px-2.5 py-1 text-[11px] font-semibold text-[#2147C9]">
-                                          You&apos;re invited
-                                        </span>
-                                      </div>
                                       {group.description && (
                                         <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
                                           {group.description}
