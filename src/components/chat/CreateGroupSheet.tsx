@@ -10,6 +10,7 @@ import { FormField, FormTextArea } from "@/components/ui/FormField";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { updateGroupChatMetadata } from "@/lib/groupChats";
 import { countWords, resolveCountryByPrecedence } from "@/lib/locationLabels";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -41,7 +42,7 @@ const PET_FOCUS_OPTIONS = [
 const roomCodePlaceholder = "— —";
 const DESCRIPTION_WORD_LIMIT = 100;
 const optionCardClass =
-  "min-w-0 overflow-hidden rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors";
+  "min-w-0 overflow-hidden rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors min-h-[92px]";
 const activeOptionCardClass =
   "border-[#2147C9] bg-[#2147C9] text-white shadow-[0_16px_34px_rgba(33,71,201,0.24)]";
 
@@ -192,24 +193,6 @@ export function CreateGroupSheet({
 
       if (chatError || !chat) throw chatError ?? new Error("No chat returned");
 
-      // 1b. Upload group photo if provided
-      if (photoFile) {
-        const ext = photoFile.name.split(".").pop() ?? "jpg";
-        const path = `${user.id}/groups/${chat.id}/${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage
-          .from("avatars")
-          .upload(path, photoFile, { upsert: true });
-        if (uploadErr) throw uploadErr;
-        const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
-        if (pub?.publicUrl) {
-          const { error: avatarPersistError } = await supabase
-            .from("chats")
-            .update({ avatar_url: pub.publicUrl })
-            .eq("id", chat.id);
-          if (avatarPersistError) throw avatarPersistError;
-        }
-      }
-
       // 2. Add creator to chat_participants (role = admin, drives admin RLS checks)
       const { error: participantError } = await supabase
         .from("chat_participants")
@@ -221,6 +204,23 @@ export function CreateGroupSheet({
         .from("chat_room_members")
         .insert({ chat_id: chat.id, user_id: user.id });
       if (memberError) throw memberError;
+
+      if (photoFile) {
+        const ext = photoFile.name.split(".").pop() ?? "jpg";
+        const path = `${user.id}/groups/${chat.id}/${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("avatars")
+          .upload(path, photoFile, { upsert: true });
+        if (uploadErr) throw uploadErr;
+        const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+        if (pub?.publicUrl) {
+          await updateGroupChatMetadata({
+            chatId: chat.id,
+            avatarUrl: pub.publicUrl,
+            updateAvatar: true,
+          });
+        }
+      }
 
       // 3. Insert system message into chat_messages (the active message table)
       const roomCode = (chat as { id: string; room_code?: string | null }).room_code ?? null;
@@ -260,11 +260,11 @@ export function CreateGroupSheet({
       isOpen={isOpen}
       onClose={onClose}
       title="Create a group"
-      contentClassName="!pr-0 pb-2"
-      className="!p-4 !pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]"
+      contentClassName="!pr-0 !pl-0 pb-2"
+      className="!px-3 !pt-4 !pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]"
     >
       {/* Scrollable body */}
-      <div className="flex flex-col space-y-5">
+      <div className="flex flex-col space-y-5 px-1">
 
         {/* Row 1: Photo + Group name */}
         <div className="flex flex-row items-start gap-3">
@@ -295,7 +295,7 @@ export function CreateGroupSheet({
               label="Group name"
               placeholder="Sunday Small Dog Walks"
               value={groupName}
-              className="[&_.field-input-core]:pl-2.5 [&_.field-input-core]:pr-2.5"
+              className="[&_.form-field-rest]:px-3 [&_.field-input-core]:pl-0 [&_.field-input-core]:pr-0"
               onChange={e => setGroupName(e.target.value)}
             />
           </div>
@@ -306,7 +306,7 @@ export function CreateGroupSheet({
           label="Location"
           placeholder="Neighbourhood or area"
           value={locationLabel}
-          className="[&_.field-input-core]:pl-2.5 [&_.field-input-core]:pr-2.5"
+          className="[&_.form-field-rest]:px-3 [&_.field-input-core]:pl-0 [&_.field-input-core]:pr-0"
           onChange={e => setLocationLabel(e.target.value)}
         />
 
@@ -337,7 +337,7 @@ export function CreateGroupSheet({
           label="Description"
           placeholder="Tell people what this group is about and how you usually meet."
           value={description}
-          className="[&_textarea.field-input-core]:px-2.5"
+          className="[&_.form-field-rest]:px-3 [&_textarea.field-input-core]:px-0"
           onChange={e => {
             const nextValue = e.target.value;
             const words = countWords(nextValue);
@@ -374,7 +374,7 @@ export function CreateGroupSheet({
                     style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
-              <span className="flex min-w-0 flex-col">
+              <span className="flex min-w-0 flex-1 flex-col">
                 <span className="text-[13px] font-semibold">Public</span>
                 <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "public" && "text-white/90")}>
                   Visible in Explore. Pet lovers nearby can find it.
@@ -411,7 +411,7 @@ export function CreateGroupSheet({
                     style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
-              <span className="flex min-w-0 flex-col">
+              <span className="flex min-w-0 flex-1 flex-col">
                 <span className="text-[13px] font-semibold">Private</span>
                 <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "private" && "text-white/90")}>
                   Hidden. People join with a code.
@@ -458,7 +458,7 @@ export function CreateGroupSheet({
                           style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
-                    <span className="flex min-w-0 flex-col">
+                    <span className="flex min-w-0 flex-1 flex-col">
                       <span className="text-[13px] font-semibold">
                         Send a join request{" "}
                         <span className={cn("text-[11px] font-normal opacity-70", joinMethod === "request" && "text-white/80")}>
@@ -490,7 +490,7 @@ export function CreateGroupSheet({
                           style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
-                    <span className="flex min-w-0 flex-col">
+                    <span className="flex min-w-0 flex-1 flex-col">
                       <span className="text-[13px] font-semibold">Join instantly</span>
                       <span className={cn("text-[11px] mt-0.5 opacity-70", joinMethod === "instant" && "text-white/90")}>
                         Anyone can join right away.

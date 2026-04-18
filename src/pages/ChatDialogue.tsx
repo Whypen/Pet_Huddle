@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +17,7 @@ import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { updateGroupChatMetadata } from "@/lib/groupChats";
 import {
   TEAM_HUDDLE_AVAILABILITY,
   TEAM_HUDDLE_DISPLAY_NAME,
@@ -138,6 +139,9 @@ const ChatDialogue = () => {
   const [groupManageMembers, setGroupManageMembers] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
   const [groupManageFriends, setGroupManageFriends] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
   const [groupManageSearch, setGroupManageSearch] = useState("");
+  const [groupManageDescriptionDraft, setGroupManageDescriptionDraft] = useState("");
+  const [groupManageDescriptionEditing, setGroupManageDescriptionEditing] = useState(false);
+  const [groupManageDescriptionSaving, setGroupManageDescriptionSaving] = useState(false);
   const [groupManageLoading, setGroupManageLoading] = useState(false);
   const [groupManageReturnToInfo, setGroupManageReturnToInfo] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
@@ -936,6 +940,35 @@ const ChatDialogue = () => {
     }
   }, [roomId, profile?.id]);
 
+  useEffect(() => {
+    if (!groupManageOpen) {
+      setGroupManageDescriptionEditing(false);
+      setGroupManageDescriptionDraft("");
+      return;
+    }
+    setGroupManageDescriptionEditing(false);
+    setGroupManageDescriptionDraft(groupDescription || "");
+  }, [groupDescription, groupManageOpen]);
+
+  useEffect(() => {
+    if (!groupManageOpen || !roomId) return;
+    const channel = supabase
+      .channel(`chat-dialogue-manage-${roomId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${roomId}` }, () => {
+        void loadGroupManageData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${roomId}` }, () => {
+        void loadGroupManageData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${roomId}` }, () => {
+        void loadGroupManageData();
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [groupManageOpen, loadGroupManageData, roomId]);
+
   const openGroupInfoPanel = useCallback(() => {
     const media: string[] = [];
     for (const msg of messages) {
@@ -1481,6 +1514,64 @@ const ChatDialogue = () => {
               </div>
             ) : (
               <>
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</p>
+                    <button
+                      type="button"
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8C93AA] transition-colors hover:bg-muted/50"
+                      disabled={groupManageDescriptionSaving}
+                      onClick={async () => {
+                        if (!groupManageDescriptionEditing) {
+                          setGroupManageDescriptionEditing(true);
+                          return;
+                        }
+                        if (!roomId) return;
+                        setGroupManageDescriptionSaving(true);
+                        try {
+                          const row = await updateGroupChatMetadata({
+                            chatId: roomId,
+                            description: groupManageDescriptionDraft.trim() || null,
+                            updateDescription: true,
+                          });
+                          setGroupDescription(row.description || "");
+                          setGroupManageDescriptionDraft(row.description || "");
+                          setGroupManageDescriptionEditing(false);
+                          toast.success("Group description updated");
+                        } catch {
+                          toast.error("Couldn't save group description.");
+                        } finally {
+                          setGroupManageDescriptionSaving(false);
+                        }
+                      }}
+                      aria-label={groupManageDescriptionEditing ? "Save description" : "Edit description"}
+                    >
+                      {groupManageDescriptionSaving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : groupManageDescriptionEditing ? (
+                        <Save className="h-4 w-4" />
+                      ) : (
+                        <Pencil className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {groupManageDescriptionEditing ? (
+                    <div className="form-field-rest min-h-[92px] py-3">
+                      <textarea
+                        value={groupManageDescriptionDraft}
+                        onChange={(event) => setGroupManageDescriptionDraft(event.target.value)}
+                        className="field-input-core resize-none px-0 text-sm leading-relaxed"
+                        rows={4}
+                        placeholder="Tell members what this group is about."
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-[16px] border border-white/60 bg-white px-4 py-3 text-sm leading-relaxed text-brandText shadow-[0_10px_24px_rgba(66,73,101,0.08)]">
+                      {groupManageDescriptionDraft.trim() || "No description yet."}
+                    </div>
+                  )}
+                </div>
+
                 {/* Current members */}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Members ({groupManageMembers.length})</p>

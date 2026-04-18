@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck, Settings } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck, Settings, Pencil, Save } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -41,6 +41,7 @@ import { parseChatShareMessage } from "@/lib/shareModel";
 import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
 import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
+import { groupActivityRankValue, updateGroupChatMetadata, type GroupMetadataRow } from "@/lib/groupChats";
 import {
   noteDiscoveryCommit,
   noteDiscoveryDragEnd,
@@ -54,7 +55,6 @@ import {
   resolveTeamHuddleDisplayName,
 } from "@/lib/teamHuddleIdentity";
 import {
-  extractCountryToken,
   extractDistrictToken,
   normalizeCountryKey,
   resolveCountryByPrecedence,
@@ -527,6 +527,7 @@ interface Group {
   visibility?: "public" | "private" | null;
   roomCode?: string | null;
   createdAt?: string | null;
+  _score?: number;
 }
 
 interface GroupContactOption {
@@ -655,18 +656,8 @@ const Chats = () => {
   const [chatVisibleCount, setChatVisibleCount] = useState(10);
   const [groupVisibleCount, setGroupVisibleCount] = useState(10);
   const [groupSubTab, setGroupSubTab] = useState<"my" | "explore">("my");
-  const [exploreGroups, setExploreGroups] = useState<Array<{
-    id: string;
-    name: string;
-    avatar_url: string | null;
-    location_label: string | null;
-    pet_focus: string[] | null;
-    join_method: string;
-    last_message_at: string | null;
-    created_at: string;
-    description: string | null;
-    _score?: number;
-  }>>([]);
+  const [exploreGroups, setExploreGroups] = useState<Group[]>([]);
+  const [invitedExploreGroups, setInvitedExploreGroups] = useState<Group[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
   // IDs of groups where current user has a pending join request
   const [sentJoinRequests, setSentJoinRequests] = useState<Set<string>>(new Set());
@@ -697,6 +688,9 @@ const Chats = () => {
   const [deleteGroupConfirmId, setDeleteGroupConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [groupImageUploading, setGroupImageUploading] = useState(false);
+  const [groupDescriptionDraft, setGroupDescriptionDraft] = useState("");
+  const [groupDescriptionSaving, setGroupDescriptionSaving] = useState(false);
+  const [groupDescriptionEditing, setGroupDescriptionEditing] = useState(false);
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupPendingInvites, setGroupPendingInvites] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupJoinRequests, setGroupJoinRequests] = useState<{ requestId: string; userId: string; name: string; avatarUrl?: string | null }[]>([]);
@@ -2194,111 +2188,121 @@ const Chats = () => {
     }
   }, [serviceDate, serviceEndDate]);
 
-  // Load group members + mutual waves when group manage modal opens
-  useEffect(() => {
+  const loadChatsGroupManageData = useCallback(async () => {
     if (!groupManageId || !profile?.id) return;
-    const load = async () => {
-      // Fetch members for this group
-      try {
-        const { data: members } = await supabase
-          .from("chat_room_members")
-          .select("user_id, profiles!inner(id, display_name, avatar_url)")
-          .eq("chat_id", groupManageId);
-        if (members) {
-          setGroupMembers(
-            members.map((m: { user_id: string; profiles: { id: string; display_name: string | null; avatar_url: string | null } }) => ({
-              id: m.user_id,
-              name: m.profiles?.display_name || "User",
-              avatarUrl: m.profiles?.avatar_url || null,
-            }))
-          );
-        }
-      } catch {
-        // Fallback — show owner only
-        setGroupMembers([{ id: profile.id, name: profile.display_name || "You", avatarUrl: profile.avatar_url || null }]);
+    try {
+      const { data: members } = await supabase
+        .from("chat_room_members")
+        .select("user_id, profiles!inner(id, display_name, avatar_url)")
+        .eq("chat_id", groupManageId);
+      if (members) {
+        setGroupMembers(
+          members.map((m: { user_id: string; profiles: { id: string; display_name: string | null; avatar_url: string | null } }) => ({
+            id: m.user_id,
+            name: m.profiles?.display_name || "User",
+            avatarUrl: m.profiles?.avatar_url || null,
+          }))
+        );
       }
-      // Fetch pending invites for this group
-      try {
-        const { data: inviteRows } = await supabase
-          .from("group_chat_invites")
-          .select("invitee_user_id, profiles!group_chat_invites_invitee_user_id_fkey(id, display_name, avatar_url)")
-          .eq("chat_id", groupManageId)
-          .eq("status", "pending");
-        if (Array.isArray(inviteRows)) {
-          setGroupPendingInvites(
-            inviteRows
-              .map((row: {
-                invitee_user_id?: string | null;
-                profiles?: { id?: string; display_name?: string | null; avatar_url?: string | null } | null;
-              }) => ({
-                id: String(row.invitee_user_id || row.profiles?.id || ""),
-                name: String(row.profiles?.display_name || "User"),
-                avatarUrl: row.profiles?.avatar_url || null,
-              }))
-              .filter((row) => Boolean(row.id))
-          );
-        } else {
-          setGroupPendingInvites([]);
-        }
-      } catch {
+    } catch {
+      setGroupMembers([{ id: profile.id, name: profile.display_name || "You", avatarUrl: profile.avatar_url || null }]);
+    }
+    try {
+      const { data: inviteRows } = await supabase
+        .from("group_chat_invites")
+        .select("invitee_user_id, profiles!group_chat_invites_invitee_user_id_fkey(id, display_name, avatar_url)")
+        .eq("chat_id", groupManageId)
+        .eq("status", "pending");
+      if (Array.isArray(inviteRows)) {
+        setGroupPendingInvites(
+          inviteRows
+            .map((row: {
+              invitee_user_id?: string | null;
+              profiles?: { id?: string; display_name?: string | null; avatar_url?: string | null } | null;
+            }) => ({
+              id: String(row.invitee_user_id || row.profiles?.id || ""),
+              name: String(row.profiles?.display_name || "User"),
+              avatarUrl: row.profiles?.avatar_url || null,
+            }))
+            .filter((row) => Boolean(row.id))
+        );
+      } else {
         setGroupPendingInvites([]);
       }
-      // Fetch pending join requests (for public groups with join_method=request)
-      try {
-        const { data: requestRows } = await supabase
-          .from("group_join_requests")
-          .select("id, user_id, profiles!group_join_requests_user_id_fkey(display_name, avatar_url)")
-          .eq("chat_id", groupManageId)
-          .eq("status", "pending");
-        if (Array.isArray(requestRows)) {
-          setGroupJoinRequests(
-            requestRows
-              .map((row: {
-                id: string;
-                user_id: string;
-                profiles?: { display_name?: string | null; avatar_url?: string | null } | null;
-              }) => ({
-                requestId: row.id,
-                userId: row.user_id,
-                name: row.profiles?.display_name || "Someone",
-                avatarUrl: row.profiles?.avatar_url || null,
-              }))
-          );
-        } else {
-          setGroupJoinRequests([]);
-        }
-      } catch {
+    } catch {
+      setGroupPendingInvites([]);
+    }
+    try {
+      const { data: requestRows } = await supabase
+        .from("group_join_requests")
+        .select("id, user_id, profiles!group_join_requests_user_id_fkey(display_name, avatar_url)")
+        .eq("chat_id", groupManageId)
+        .eq("status", "pending");
+      if (Array.isArray(requestRows)) {
+        setGroupJoinRequests(
+          requestRows
+            .map((row: {
+              id: string;
+              user_id: string;
+              profiles?: { display_name?: string | null; avatar_url?: string | null } | null;
+            }) => ({
+              requestId: row.id,
+              userId: row.user_id,
+              name: row.profiles?.display_name || "Someone",
+              avatarUrl: row.profiles?.avatar_url || null,
+            }))
+        );
+      } else {
         setGroupJoinRequests([]);
       }
-      // Fetch mutual waves for invite
-      try {
-        const { data: waves } = await supabase
-          .from("waves")
-          .select("from_user_id, to_user_id")
-          .or(`from_user_id.eq.${profile.id},to_user_id.eq.${profile.id}`);
-        if (waves) {
-          // Mutual: both directions exist
-          const sent = new Set(waves.filter((w: { from_user_id: string }) => w.from_user_id === profile.id).map((w: { to_user_id: string }) => w.to_user_id));
-          const received = waves.filter((w: { to_user_id: string; from_user_id: string }) => w.to_user_id === profile.id && sent.has(w.from_user_id)).map((w: { from_user_id: string }) => w.from_user_id);
-          if (received.length > 0) {
-            const { data: profiles } = await supabase.from("profiles").select("id, display_name, avatar_url").in("id", received);
-            if (profiles) {
-              setMutualWaves(profiles.map((p: { id: string; display_name: string | null; avatar_url: string | null }) => ({
-                id: p.id,
-                name: p.display_name || "User",
-                avatarUrl: p.avatar_url || null,
-              })));
-            }
-          } else {
-            setMutualWaves([]);
+    } catch {
+      setGroupJoinRequests([]);
+    }
+    try {
+      const { data: waves } = await supabase
+        .from("waves")
+        .select("from_user_id, to_user_id")
+        .or(`from_user_id.eq.${profile.id},to_user_id.eq.${profile.id}`);
+      if (waves) {
+        const sent = new Set(waves.filter((w: { from_user_id: string }) => w.from_user_id === profile.id).map((w: { to_user_id: string }) => w.to_user_id));
+        const received = waves.filter((w: { to_user_id: string; from_user_id: string }) => w.to_user_id === profile.id && sent.has(w.from_user_id)).map((w: { from_user_id: string }) => w.from_user_id);
+        if (received.length > 0) {
+          const { data: profiles } = await supabase.from("profiles").select("id, display_name, avatar_url").in("id", received);
+          if (profiles) {
+            setMutualWaves(profiles.map((p: { id: string; display_name: string | null; avatar_url: string | null }) => ({
+              id: p.id,
+              name: p.display_name || "User",
+              avatarUrl: p.avatar_url || null,
+            })));
           }
+        } else {
+          setMutualWaves([]);
         }
-      } catch {
-        setMutualWaves([]);
       }
+    } catch {
+      setMutualWaves([]);
+    }
+  }, [groupManageId, profile?.avatar_url, profile?.display_name, profile?.id]);
+
+  useEffect(() => {
+    if (!groupManageId || !profile?.id) return;
+    void loadChatsGroupManageData();
+    const channel = supabase
+      .channel(`group-manage-${groupManageId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${groupManageId}` }, () => {
+        void loadChatsGroupManageData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${groupManageId}` }, () => {
+        void loadChatsGroupManageData();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${groupManageId}` }, () => {
+        void loadChatsGroupManageData();
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
     };
-    load();
-  }, [groupManageId, profile?.id, profile?.display_name, profile?.avatar_url]);
+  }, [groupManageId, loadChatsGroupManageData, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) {
@@ -2314,32 +2318,6 @@ const Chats = () => {
   const loadConversations = useCallback(async () => {
     if (!profile?.id) return;
     try {
-      const pendingInvitesByChat = new Map<string, PendingGroupInvite>();
-      try {
-        const { data: inviteRows } = await supabase
-          .from("group_chat_invites")
-          .select("id, chat_id, chat_name, inviter_user_id, created_at, profiles!group_chat_invites_inviter_user_id_fkey(display_name)")
-          .eq("invitee_user_id", profile.id)
-          .eq("status", "pending");
-        if (Array.isArray(inviteRows)) {
-          for (const row of inviteRows as Array<Record<string, unknown>>) {
-            const chatId = String(row.chat_id || "");
-            if (!chatId) continue;
-            const chatName = String(row.chat_name || "Group");
-            const inviterName = String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone");
-            pendingInvitesByChat.set(chatId, {
-              inviteId: String(row.id || ""),
-              chatId,
-              chatName,
-              inviterName,
-              createdAt: typeof row.created_at === "string" ? row.created_at : null,
-            });
-          }
-        }
-      } catch {
-        // non-blocking
-      }
-
       const { data: memberships, error: membershipsError } = await supabase
         .from("chat_room_members")
         .select("chat_id")
@@ -2347,7 +2325,6 @@ const Chats = () => {
       if (membershipsError) throw membershipsError;
 
       let roomIds = [...new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
-      roomIds = [...new Set([...roomIds, ...Array.from(pendingInvitesByChat.keys())])];
       if (!roomIds.length) {
         const { data: ownedChats } = await supabase
           .from("chats")
@@ -2682,10 +2659,8 @@ const Chats = () => {
           const senderName = last?.sender_id === profile.id
             ? "You"
             : (String(senderProfile?.display_name || "").trim() || null);
-          const pendingInvite = pendingInvitesByChat.get(roomId) || null;
           nextGroups.push({
             id: roomId,
-            inviteId: pendingInvite?.inviteId || null,
             name: String(room.name || "Group"),
             avatarUrl: (room.avatar_url as string | null) ?? null,
             avatar_url: (room.avatar_url as string | null) ?? null,
@@ -2694,8 +2669,6 @@ const Chats = () => {
             lastMessageSender: senderName || "",
             time: formatChatTimestamp(last?.created_at),
             unread: unreadByRoom.get(roomId) || 0,
-            invitePending: Boolean(pendingInvite),
-            inviterName: pendingInvite?.inviterName || null,
             petFocus: Array.isArray(room.pet_focus) ? (room.pet_focus as string[]) : null,
             locationLabel: (room.location_label as string | null) ?? null,
             lastMessageAt: (last?.created_at as string | null) ?? null,
@@ -2803,24 +2776,6 @@ const Chats = () => {
           serviceDateLabel: isService
             ? formatServiceDateRange(serviceRequestCard)
             : null,
-        });
-      }
-
-      // Ensure invite-only groups are visible even before membership is accepted.
-      for (const pendingInvite of pendingInvitesByChat.values()) {
-        if (nextGroups.some((group) => group.id === pendingInvite.chatId)) continue;
-        nextGroups.push({
-          id: pendingInvite.chatId,
-          inviteId: pendingInvite.inviteId,
-          name: pendingInvite.chatName,
-          avatarUrl: null,
-          memberCount: 0,
-          lastMessage: `Added by ${pendingInvite.inviterName}`,
-          lastMessageSender: "",
-          time: formatChatTimestamp(pendingInvite.createdAt || null),
-          unread: 0,
-          invitePending: true,
-          inviterName: pendingInvite.inviterName,
         });
       }
 
@@ -3577,17 +3532,62 @@ const Chats = () => {
     });
   }, [handledDiscoveryKey, strictMatchedDiscoveryIds]);
 
-  // Filter groups based on search
-  const filteredGroups = groups.filter(group => {
-    return !searchQuery ||
-      group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      group.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
-  });
+  const syncGroupRowIntoState = useCallback((row: GroupMetadataRow) => {
+    const apply = (group: Group) =>
+      group.id === row.id
+        ? {
+            ...group,
+            avatarUrl: row.avatar_url ?? null,
+            avatar_url: row.avatar_url ?? null,
+            description: row.description ?? null,
+            locationLabel: row.location_label ?? null,
+            locationCountry: row.location_country ?? null,
+            petFocus: row.pet_focus ?? null,
+            joinMethod: row.join_method ?? null,
+            visibility: row.visibility ?? null,
+            roomCode: row.room_code ?? null,
+            createdAt: row.created_at ?? null,
+            lastMessageAt: row.last_message_at ?? group.lastMessageAt ?? null,
+            memberCount: Number(row.member_count ?? group.memberCount ?? 0),
+            isAdmin: group.isAdmin || row.created_by === profile?.id,
+          }
+        : group;
+    setGroups((prev) => prev.map(apply));
+    setExploreGroups((prev) => prev.map(apply));
+    setInvitedExploreGroups((prev) => prev.map(apply));
+  }, [profile?.id]);
+
+  const filteredGroups = useMemo(() => {
+    const loweredQuery = searchQuery.trim().toLowerCase();
+    return [...groups]
+      .filter((group) =>
+        !loweredQuery ||
+        group.name.toLowerCase().includes(loweredQuery) ||
+        group.lastMessage.toLowerCase().includes(loweredQuery) ||
+        String(group.description || "").toLowerCase().includes(loweredQuery)
+      )
+      .sort(
+        (a, b) =>
+          groupActivityRankValue(b.lastMessageAt, b.createdAt) - groupActivityRankValue(a.lastMessageAt, a.createdAt) ||
+          a.name.localeCompare(b.name)
+      );
+  }, [groups, searchQuery]);
 
   const totalUnreadMessages = useMemo(
     () => chats.reduce((sum, chat) => sum + Math.max(0, chat.unread || 0), 0) + groups.reduce((sum, group) => sum + Math.max(0, group.unread || 0), 0),
     [chats, groups]
   );
+
+  useEffect(() => {
+    if (!groupManageId) {
+      setGroupDescriptionEditing(false);
+      setGroupDescriptionDraft("");
+      return;
+    }
+    const selected = groups.find((group) => group.id === groupManageId) || null;
+    setGroupDescriptionEditing(false);
+    setGroupDescriptionDraft(selected?.description || "");
+  }, [groupManageId, groups]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -4337,6 +4337,19 @@ const Chats = () => {
         setSentJoinRequests(new Set((requestRows as Array<{ chat_id: string }>).map((r) => r.chat_id)));
       }
 
+      const inviteMap = new Map<string, PendingGroupInvite>();
+      for (const row of (inviteRows || []) as Array<Record<string, unknown>>) {
+        const chatId = String(row.chat_id || "").trim();
+        if (!chatId) continue;
+        inviteMap.set(chatId, {
+          inviteId: String(row.id || ""),
+          chatId,
+          chatName: String(row.chat_name || "Group"),
+          inviterName: String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
+          createdAt: typeof row.created_at === "string" ? row.created_at : null,
+        });
+      }
+
       const profileLocation = (profileLocationResult.data || null) as {
         location_name?: string | null;
         location_country?: string | null;
@@ -4359,50 +4372,7 @@ const Chats = () => {
         profileLocationName: profileLocation?.location_name || profile?.location_name || null,
       });
 
-      if (!user?.id || !viewerCountry) {
-        setExploreGroups([]);
-        return;
-      }
-
-      const { data, error } = await (supabase.rpc as (
-        fn: string,
-        params?: Record<string, unknown>
-      ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_country", {
-        p_user_id: user.id,
-        p_country: viewerCountry,
-      });
-      if (error) throw error;
-
-      const rows = (Array.isArray(data) ? data : []) as Array<{
-        id: string;
-        name: string;
-        avatar_url: string | null;
-        location_label: string | null;
-        location_country: string | null;
-        pet_focus: string[] | null;
-        join_method: string;
-        last_message_at: string | null;
-        created_at: string;
-        description: string | null;
-        member_count: number | null;
-        created_by: string | null;
-      }>;
-
-      const inviteMap = new Map<string, PendingGroupInvite>();
-      for (const row of (inviteRows || []) as Array<Record<string, unknown>>) {
-        const chatId = String(row.chat_id || "").trim();
-        if (!chatId) continue;
-        inviteMap.set(chatId, {
-          inviteId: String(row.id || ""),
-          chatId,
-          chatName: String(row.chat_name || "Group"),
-          inviterName: String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
-          createdAt: typeof row.created_at === "string" ? row.created_at : null,
-        });
-      }
-
-      const missingInviteIds = Array.from(inviteMap.keys()).filter((chatId) => !rows.some((row) => row.id === chatId));
-      let inviteChatRows: Array<{
+      let rows: Array<{
         id: string;
         name: string;
         avatar_url: string | null;
@@ -4416,12 +4386,25 @@ const Chats = () => {
         member_count: number | null;
         created_by: string | null;
       }> = [];
+      if (user?.id && viewerCountry) {
+        const { data, error } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_country", {
+          p_user_id: user.id,
+          p_country: viewerCountry,
+        });
+        if (error) throw error;
+        rows = (Array.isArray(data) ? data : []) as typeof rows;
+      }
+
+      const missingInviteIds = Array.from(inviteMap.keys()).filter((chatId) => !rows.some((row) => row.id === chatId));
+      let inviteChatRows: typeof rows = [];
       if (missingInviteIds.length > 0) {
         const { data: inviteChats } = await supabase
           .from("chats")
-          .select("id, name, avatar_url, location_label, location_country, pet_focus, join_method, last_message_at, created_at, description, created_by")
-          .in("id", missingInviteIds)
-          .eq("visibility", "public");
+          .select("id, name, avatar_url, location_label, location_country, pet_focus, join_method, last_message_at, created_at, description, created_by, visibility, room_code")
+          .in("id", missingInviteIds);
         if (Array.isArray(inviteChats)) {
           const { data: inviteMembers } = await supabase
             .from("chat_room_members")
@@ -4436,7 +4419,7 @@ const Chats = () => {
             name: String(row.name || "Group"),
             avatar_url: (row.avatar_url as string | null) ?? null,
             location_label: (row.location_label as string | null) ?? null,
-            location_country: (row.location_country as string | null) ?? null,
+            location_country: normalizeCountryKey((row.location_country as string | null) ?? null) || null,
             pet_focus: Array.isArray(row.pet_focus) ? (row.pet_focus as string[]) : null,
             join_method: String(row.join_method || "request"),
             last_message_at: (row.last_message_at as string | null) ?? null,
@@ -4444,13 +4427,12 @@ const Chats = () => {
             description: (row.description as string | null) ?? null,
             member_count: counts.get(String(row.id || "")) ?? 0,
             created_by: (row.created_by as string | null) ?? null,
+            visibility: ((row.visibility as "public" | "private" | null) ?? null),
+            room_code: (row.room_code as string | null) ?? null,
           }));
         }
       }
 
-      const candidateRows = [...rows, ...inviteChatRows];
-
-      // The user's joined group IDs — filter these out of Explore (they live in My Groups)
       const joinedIds = new Set(groups.map((g) => g.id));
 
       // Client-side ranking: proximity (0|4) + pet relevance (0|1|3)×3 + activity (0–2)
@@ -4466,8 +4448,58 @@ const Chats = () => {
         .split(/[\s,]+/)
         .filter((w) => w.length > 2);
 
-      const scored = candidateRows
+      const toGroup = (
+        g: {
+          id: string;
+          name: string;
+          avatar_url: string | null;
+          location_label: string | null;
+          location_country: string | null;
+          pet_focus: string[] | null;
+          join_method: string;
+          last_message_at: string | null;
+          created_at: string;
+          description: string | null;
+          member_count: number | null;
+          created_by: string | null;
+          visibility?: "public" | "private" | null;
+          room_code?: string | null;
+        },
+        score = 0,
+      ): Group => ({
+        id: g.id,
+        inviteId: inviteMap.get(g.id)?.inviteId || null,
+        name: g.name,
+        avatarUrl: g.avatar_url,
+        avatar_url: g.avatar_url,
+        memberCount: Number(g.member_count ?? 0),
+        lastMessage: "",
+        lastMessageSender: "",
+        time: formatChatTimestamp(g.last_message_at || g.created_at || null),
+        unread: 0,
+        invitePending: inviteMap.has(g.id),
+        inviterName: inviteMap.get(g.id)?.inviterName || null,
+        petFocus: g.pet_focus ?? null,
+        locationLabel: g.location_label ?? null,
+        lastMessageAt: g.last_message_at ?? null,
+        joinMethod: g.join_method ?? "request",
+        description: g.description ?? null,
+        isAdmin: g.created_by === profile?.id,
+        locationCountry: g.location_country ?? null,
+        visibility: g.visibility ?? "public",
+        roomCode: g.room_code ?? null,
+        createdAt: g.created_at || null,
+        _score: score,
+      });
+
+      const invitedGroups = inviteChatRows
         .filter((g) => !joinedIds.has(g.id))
+        .map((g) => toGroup(g, Number.MAX_SAFE_INTEGER));
+
+      const invitedIds = new Set(invitedGroups.map((group) => group.id));
+
+      const scored = rows
+        .filter((g) => !joinedIds.has(g.id) && !invitedIds.has(g.id))
         .map((g) => {
           const focusLower = (g.pet_focus ?? []).map((f) => f.toLowerCase());
           let petScore = 0;
@@ -4482,40 +4514,28 @@ const Chats = () => {
           const groupLocWords = (g.location_label || "").toLowerCase().split(/[\s,]+/).filter((w) => w.length > 2);
           const proxScore = userLocWords.length > 0 && groupLocWords.some((w) => userLocWords.includes(w)) ? 4 : 0;
           return {
-            id: g.id,
-            inviteId: inviteMap.get(g.id)?.inviteId || null,
-            name: g.name,
-            avatarUrl: g.avatar_url,
-            avatar_url: g.avatar_url,
-            memberCount: Number(g.member_count ?? 0),
-            lastMessage: "",
-            lastMessageSender: "",
-            time: formatChatTimestamp(g.last_message_at || g.created_at || null),
-            unread: 0,
-            invitePending: inviteMap.has(g.id),
-            inviterName: inviteMap.get(g.id)?.inviterName || null,
-            petFocus: g.pet_focus ?? null,
-            locationLabel: g.location_label ?? null,
-            lastMessageAt: g.last_message_at ?? null,
-            joinMethod: g.join_method ?? "request",
-            description: g.description ?? null,
-            isAdmin: g.created_by === profile?.id,
-            locationCountry: g.location_country ?? null,
-            visibility: "public",
-            roomCode: null,
-            createdAt: g.created_at || null,
-            _score: (inviteMap.has(g.id) ? 1000 : 0) + proxScore + petScore * 3 + activeScore,
+            group: toGroup(g, proxScore + petScore * 3 + activeScore),
+            score: proxScore + petScore * 3 + activeScore,
           };
         });
 
       scored.sort((a, b) =>
-        (b._score ?? 0) - (a._score ?? 0) ||
-        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        b.score - a.score ||
+        groupActivityRankValue(b.group.lastMessageAt, b.group.createdAt) - groupActivityRankValue(a.group.lastMessageAt, a.group.createdAt) ||
+        new Date(b.group.createdAt || 0).getTime() - new Date(a.group.createdAt || 0).getTime()
       );
 
-      setExploreGroups(scored as Group[]);
+      setInvitedExploreGroups(
+        invitedGroups.sort(
+          (a, b) =>
+            groupActivityRankValue(b.lastMessageAt, b.createdAt) - groupActivityRankValue(a.lastMessageAt, a.createdAt) ||
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        )
+      );
+      setExploreGroups(scored.map((entry) => entry.group));
     } catch (error) {
       console.warn("[groups.explore] fetch failed", error);
+      setInvitedExploreGroups([]);
       setExploreGroups([]);
     } finally {
       setExploreLoading(false);
@@ -4535,23 +4555,6 @@ const Chats = () => {
       void fetchExploreGroups();
     }
   }, [mainTab, groupSubTab, fetchExploreGroups]);
-
-  const describeGroupActivity = useCallback((lastMessageAt?: string | null, createdAt?: string | null) => {
-    const reference = lastMessageAt || createdAt || null;
-    if (!reference) return "Active this month";
-    const stamp = new Date(reference).getTime();
-    if (!Number.isFinite(stamp)) return "Active this month";
-    const diffMs = Math.max(0, Date.now() - stamp);
-    const dayMs = 86_400_000;
-    const monthMs = 30 * dayMs;
-    const yearMs = 365 * dayMs;
-    if (diffMs < 7 * dayMs) return "Active this week";
-    if (diffMs < 14 * dayMs) return "Active last week";
-    if (diffMs < monthMs) return "Active this month";
-    if (diffMs < 2 * monthMs) return "Active last month";
-    if (diffMs < yearMs) return `Active ${Math.max(2, Math.floor(diffMs / monthMs))} months ago`;
-    return `Active ${Math.max(1, Math.floor(diffMs / yearMs))} years ago`;
-  }, []);
 
   const openGroupDetailsSheet = useCallback(async (group: Group) => {
     setGroupDetailsId(group.id);
@@ -4584,8 +4587,8 @@ const Chats = () => {
   }, []);
 
   const activeGroupDetails = useMemo(
-    () => [...groups, ...exploreGroups].find((group) => group.id === groupDetailsId) || null,
-    [exploreGroups, groupDetailsId, groups]
+    () => [...groups, ...invitedExploreGroups, ...exploreGroups].find((group) => group.id === groupDetailsId) || null,
+    [exploreGroups, groupDetailsId, groups, invitedExploreGroups]
   );
 
   const handleChatClick = (chat: ChatUser) => {
@@ -5449,7 +5452,7 @@ const Chats = () => {
                       <div className="flex justify-center py-8">
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" strokeWidth={1.75} />
                       </div>
-                    ) : exploreGroups.length === 0 ? (
+                    ) : invitedExploreGroups.length === 0 && exploreGroups.length === 0 ? (
                       <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
                         <img
                           src={emptyChatImage}
@@ -5461,174 +5464,248 @@ const Chats = () => {
                         </p>
                       </div>
                     ) : (
-                      exploreGroups.map((group, index) => {
-                        const isMember = groups.some((g) => g.id === group.id);
-                        const hasSentRequest = sentJoinRequests.has(group.id);
-                        const activityLabel = describeGroupActivity(group.lastMessageAt, group.createdAt);
+                      <>
+                        {invitedExploreGroups.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="px-1 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">
+                              You&apos;re invited
+                            </p>
+                            {invitedExploreGroups.map((group, index) => {
+                              const handleExploreCardCTA = async (e: React.MouseEvent) => {
+                                e.stopPropagation();
+                                try {
+                                  let data: unknown = null;
+                                  let error: { message?: string } | null = null;
+                                  if (group.inviteId) {
+                                    const byId = await (supabase.rpc as (
+                                      fn: string,
+                                      params?: Record<string, unknown>
+                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                      "accept_group_chat_invite_by_id",
+                                      { p_invite_id: group.inviteId }
+                                    );
+                                    data = byId.data;
+                                    error = byId.error;
+                                  } else {
+                                    const byChat = await (supabase.rpc as (
+                                      fn: string,
+                                      params?: Record<string, unknown>
+                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                      "accept_group_chat_invite",
+                                      { p_chat_id: group.id }
+                                    );
+                                    data = byChat.data;
+                                    error = byChat.error;
+                                  }
+                                  if (error) throw error;
+                                  const joined = Array.isArray(data)
+                                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
+                                    : false;
+                                  if (!joined) {
+                                    toast.error("Invite is no longer available.");
+                                    return;
+                                  }
+                                  await loadConversations();
+                                  await fetchExploreGroups();
+                                  navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                                } catch {
+                                  toast.error("Unable to join group right now.");
+                                }
+                              };
 
-                        const handleExploreCardCTA = async (e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          if (!user?.id) { toast.error("Sign in to join groups."); return; }
-                          if (isMember) {
-                            navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-                            return;
-                          }
-                          if (group.invitePending && (group.inviteId || group.id)) {
-                            try {
-                              let data: unknown = null;
-                              let error: { message?: string } | null = null;
-                              if (group.inviteId) {
-                                const byId = await (supabase.rpc as (
-                                  fn: string,
-                                  params?: Record<string, unknown>
-                                ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                  "accept_group_chat_invite_by_id",
-                                  { p_invite_id: group.inviteId }
-                                );
-                                data = byId.data;
-                                error = byId.error;
-                              } else {
-                                const byChat = await (supabase.rpc as (
-                                  fn: string,
-                                  params?: Record<string, unknown>
-                                ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                  "accept_group_chat_invite",
-                                  { p_chat_id: group.id }
-                                );
-                                data = byChat.data;
-                                error = byChat.error;
-                              }
-                              if (error) throw error;
-                              const joined = Array.isArray(data)
-                                ? ((data[0] || {}) as { joined?: unknown }).joined === true
-                                : false;
-                              if (!joined) { toast.error("Invite is no longer available."); return; }
-                              toast.success(`Joined ${group.name}`);
-                              await loadConversations();
+                              return (
+                                <motion.div
+                                  key={`invite-${group.id}`}
+                                  initial={{ opacity: 0, y: 8 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: index * 0.04, duration: 0.2 }}
+                                  className="relative rounded-xl bg-card p-3 shadow-card"
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <button
+                                      type="button"
+                                      className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                                      onClick={() => void openGroupDetailsSheet(group)}
+                                      aria-label={`Open ${group.name} details`}
+                                    >
+                                      {group.avatarUrl ? (
+                                        <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                                      ) : (
+                                        <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                                      )}
+                                    </button>
+                                    <div className="min-w-0 flex-1 pr-[118px]">
+                                      <button
+                                        type="button"
+                                        className="block min-w-0 text-left"
+                                        onClick={() => void openGroupDetailsSheet(group)}
+                                      >
+                                        <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                                      </button>
+                                      {group.locationLabel && (
+                                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                                          <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
+                                          {group.locationLabel}
+                                        </p>
+                                      )}
+                                      {group.petFocus && group.petFocus.length > 0 && (
+                                        <div className="mt-1 flex flex-wrap gap-1">
+                                          {group.petFocus.slice(0, 3).map((tag) => (
+                                            <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
+                                              {tag}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div className="mt-1">
+                                        <span className="inline-flex rounded-full bg-[#2147C9]/10 px-2.5 py-1 text-[11px] font-semibold text-[#2147C9]">
+                                          You&apos;re invited
+                                        </span>
+                                      </div>
+                                      {group.description && (
+                                        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                          {group.description}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="absolute right-3 top-3 flex min-w-[96px] flex-col items-end gap-2 text-right">
+                                    <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
+                                    <button
+                                      onClick={handleExploreCardCTA}
+                                      className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
+                                      style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                                    >
+                                      Join
+                                    </button>
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {exploreGroups.map((group, index) => {
+                          const isMember = groups.some((g) => g.id === group.id);
+                          const hasSentRequest = sentJoinRequests.has(group.id);
+
+                          const handleExploreCardCTA = async (e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            if (!user?.id) { toast.error("Sign in to join groups."); return; }
+                            if (isMember) {
                               navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-                            } catch {
-                              toast.error("Unable to join group right now.");
+                              return;
                             }
-                            return;
-                          }
-                          if (group.joinMethod === "instant") {
-                            const { error } = await supabase
-                              .from("chat_participants")
-                              .insert({ chat_id: group.id, user_id: user.id, role: "member" });
-                            if (error) { toast.error("Couldn't join. Please try again."); return; }
-                            const { error: memberErr } = await supabase
-                              .from("chat_room_members")
-                              .insert({ chat_id: group.id, user_id: user.id });
-                            if (memberErr) { toast.error("Couldn't join. Please try again."); return; }
-                            // Welcome message + admin notification (non-blocking)
-                            void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
-                            void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
-                            toast.success(`Joined ${group.name}!`);
-                            void loadConversations();
-                            navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-                          } else {
-                            const { error } = await supabase
-                              .from("group_join_requests")
-                              .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
-                            if (error && error.code !== "23505") { toast.error("Couldn't send request. Please try again."); return; }
-                            setSentJoinRequests((prev) => new Set([...prev, group.id]));
-                            toast.success("Request sent!");
-                          }
-                        };
+                            if (group.joinMethod === "instant") {
+                              const { error } = await supabase
+                                .from("chat_participants")
+                                .insert({ chat_id: group.id, user_id: user.id, role: "member" });
+                              if (error) { toast.error("Couldn't join. Please try again."); return; }
+                              const { error: memberErr } = await supabase
+                                .from("chat_room_members")
+                                .insert({ chat_id: group.id, user_id: user.id });
+                              if (memberErr) { toast.error("Couldn't join. Please try again."); return; }
+                              void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
+                              void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
+                              await loadConversations();
+                              await fetchExploreGroups();
+                              navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                            } else {
+                              const { error } = await supabase
+                                .from("group_join_requests")
+                                .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
+                              if (error && error.code !== "23505") { toast.error("Couldn't send request. Please try again."); return; }
+                              setSentJoinRequests((prev) => new Set([...prev, group.id]));
+                              toast.success("Request sent!");
+                            }
+                          };
 
-                        return (
-                          <motion.div
-                            key={group.id}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: index * 0.04, duration: 0.2 }}
-                            className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl bg-card p-3 shadow-card"
-                          >
-                            <button
-                              type="button"
-                              className="flex h-14 w-14 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                              onClick={() => void openGroupDetailsSheet(group)}
-                              aria-label={`Open ${group.name} details`}
+                          return (
+                            <motion.div
+                              key={group.id}
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: (invitedExploreGroups.length + index) * 0.04, duration: 0.2 }}
+                              className="relative rounded-xl bg-card p-3 shadow-card"
                             >
-                              {group.avatarUrl ? (
-                                <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
-                              ) : (
-                                <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                              )}
-                            </button>
-                            <div className="min-w-0">
-                              <button
-                                type="button"
-                                className="block min-w-0 text-left"
-                                onClick={() => void openGroupDetailsSheet(group)}
-                              >
-                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                              </button>
-                              {group.locationLabel && (
-                                <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                                  <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
-                                  {group.locationLabel}
-                                </p>
-                              )}
-                              {group.petFocus && group.petFocus.length > 0 && (
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  {group.petFocus.slice(0, 3).map((tag) => (
-                                    <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
-                                      {tag}
-                                    </span>
-                                  ))}
+                              <div className="flex items-start gap-3">
+                                <button
+                                  type="button"
+                                  className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                                  onClick={() => void openGroupDetailsSheet(group)}
+                                  aria-label={`Open ${group.name} details`}
+                                >
+                                  {group.avatarUrl ? (
+                                    <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                                  ) : (
+                                    <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                                  )}
+                                </button>
+                                <div className="min-w-0 flex-1 pr-[118px]">
+                                  <button
+                                    type="button"
+                                    className="block min-w-0 text-left"
+                                    onClick={() => void openGroupDetailsSheet(group)}
+                                  >
+                                    <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                                  </button>
+                                  {group.locationLabel && (
+                                    <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                                      <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
+                                      {group.locationLabel}
+                                    </p>
+                                  )}
+                                  {group.petFocus && group.petFocus.length > 0 && (
+                                    <div className="mt-1 flex flex-wrap gap-1">
+                                      {group.petFocus.slice(0, 3).map((tag) => (
+                                        <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {group.description && (
+                                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                      {group.description}
+                                    </p>
+                                  )}
                                 </div>
-                              )}
-                              {group.invitePending ? (
-                                <div className="mt-1">
-                                  <span className="inline-flex rounded-full bg-[#2147C9]/10 px-2.5 py-1 text-[11px] font-semibold text-[#2147C9]">
-                                    You&apos;re invited
-                                  </span>
-                                </div>
-                              ) : null}
-                              {group.description && (
-                                <p className="mt-1 line-clamp-2 pr-2 text-[11px] leading-relaxed text-muted-foreground">
-                                  {group.description}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex min-w-[92px] flex-col items-end gap-2 pl-2">
-                              <div className="text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                                <p>{`Members: ${group.memberCount}`}</p>
-                                <p>{activityLabel}</p>
                               </div>
-                              {isMember ? (
-                                <button
-                                  onClick={handleExploreCardCTA}
-                                  className="flex-shrink-0 flex items-center gap-0.5 text-[13px] font-medium text-primary"
-                                >
-                                  Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
-                                </button>
-                              ) : hasSentRequest ? (
-                                <span className="flex-shrink-0 rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
-                                  Requested
-                                </span>
-                              ) : group.invitePending || group.joinMethod === "instant" ? (
-                                <button
-                                  onClick={handleExploreCardCTA}
-                                  className="flex-shrink-0 rounded-full px-3 py-1 text-[13px] font-semibold text-white"
-                                  style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                                >
-                                  Join
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={handleExploreCardCTA}
-                                  className="flex-shrink-0 rounded-full border px-3 py-1 text-[13px] font-semibold"
-                                  style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
-                                >
-                                  Request
-                                </button>
-                              )}
-                            </div>
-                          </motion.div>
-                        );
-                      })
+                              <div className="absolute right-3 top-3 flex min-w-[96px] flex-col items-end gap-2 text-right">
+                                <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
+                                {isMember ? (
+                                  <button
+                                    onClick={handleExploreCardCTA}
+                                    className="flex items-center gap-0.5 text-[13px] font-medium text-primary"
+                                  >
+                                    Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
+                                  </button>
+                                ) : hasSentRequest ? (
+                                  <span className="rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
+                                    Requested
+                                  </span>
+                                ) : group.joinMethod === "instant" ? (
+                                  <button
+                                    onClick={handleExploreCardCTA}
+                                    className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
+                                    style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                                  >
+                                    Join
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={handleExploreCardCTA}
+                                    className="rounded-full border px-3 py-1 text-[13px] font-semibold"
+                                    style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
+                                  >
+                                    Request
+                                  </button>
+                                )}
+                              </div>
+                            </motion.div>
+                          );
+                        })}
+                      </>
                     )}
                   </div>
                 )}
@@ -5670,7 +5747,7 @@ const Chats = () => {
                             }
                           }}
                           onClick={() => handleGroupClick(group)}
-                          className="relative grid cursor-pointer grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl bg-card p-3 shadow-card"
+                          className="relative cursor-pointer rounded-xl bg-card p-3 shadow-card"
                         >
                           {group.isAdmin ? (
                             <button
@@ -5687,64 +5764,64 @@ const Chats = () => {
                               <Settings className="h-4 w-4" />
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            className="flex h-14 w-14 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openGroupDetailsSheet(group);
-                            }}
-                            aria-label={`Open ${group.name} details`}
-                          >
-                            {group.avatarUrl ? (
-                              <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
-                            ) : (
-                              <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                            )}
-                          </button>
-
-                          {/* Text content */}
-                          <div className="min-w-0">
+                          <div className="flex items-start gap-3">
                             <button
                               type="button"
-                              className="block min-w-0 text-left"
+                              className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void openGroupDetailsSheet(group);
                               }}
+                              aria-label={`Open ${group.name} details`}
                             >
-                              <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                              {group.avatarUrl ? (
+                                <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                              )}
                             </button>
-                            <div className="mt-0.5 flex items-center gap-2">
-                              {group.unread > 0 && (
-                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
-                                  {group.unread > 9 ? "9+" : group.unread}
-                                </span>
+
+                            <div className="min-w-0 flex-1 pr-[118px]">
+                              <button
+                                type="button"
+                                className="block min-w-0 text-left"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openGroupDetailsSheet(group);
+                                }}
+                              >
+                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                              </button>
+                              <div className="mt-0.5 flex items-center gap-2">
+                                {group.unread > 0 && (
+                                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
+                                    {group.unread > 9 ? "9+" : group.unread}
+                                  </span>
+                                )}
+                              </div>
+                              {group.locationLabel && (
+                                <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                                  <MapPin className="mr-0.5 inline w-3 h-3" strokeWidth={1.75} />{group.locationLabel}
+                                </p>
+                              )}
+                              {group.petFocus && group.petFocus.length > 0 && (
+                                <div className="flex gap-1 mt-1 flex-wrap">
+                                  {group.petFocus.slice(0, 3).map((tag) => (
+                                    <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/60 text-accent-foreground font-medium">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {group.description && (
+                                <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                  {group.description}
+                                </p>
                               )}
                             </div>
-                            {group.locationLabel && (
-                              <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                                <MapPin className="mr-0.5 inline w-3 h-3" strokeWidth={1.75} />{group.locationLabel}
-                              </p>
-                            )}
-                            {group.petFocus && group.petFocus.length > 0 && (
-                              <div className="flex gap-1 mt-1 flex-wrap">
-                                {group.petFocus.slice(0, 3).map((tag) => (
-                                  <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/60 text-accent-foreground font-medium">
-                                    {tag}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            {group.description && (
-                              <p className="mt-1 line-clamp-2 pr-2 text-[11px] leading-relaxed text-muted-foreground">
-                                {group.description}
-                              </p>
-                            )}
                           </div>
-                          <div className="min-w-[92px] pl-2 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                          <div className="absolute right-3 top-3 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
                             <p>{`Members: ${group.memberCount}`}</p>
-                            <p>{describeGroupActivity(group.lastMessageAt, group.createdAt)}</p>
                           </div>
 
                           {/* Invite pending CTA */}
@@ -5980,11 +6057,12 @@ const Chats = () => {
                       if (uploadErr) throw uploadErr;
                       const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
                       const url = pub.publicUrl;
-                      // Update group avatar in local state
-                      setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url, avatar_url: url } : g));
-                      // Persist to DB if groups table exists
-                      const { error: avatarPersistError } = await supabase.from("chats").update({ avatar_url: url }).eq("id", groupManageId);
-                      if (avatarPersistError) throw avatarPersistError;
+                      const row = await updateGroupChatMetadata({
+                        chatId: groupManageId,
+                        avatarUrl: url,
+                        updateAvatar: true,
+                      });
+                      syncGroupRowIntoState(row);
                       void loadConversations();
                       toast.success(t("Group image updated"));
                     } catch (err) {
@@ -6001,6 +6079,65 @@ const Chats = () => {
                   Change Image
                 </NeuButton>
               </label>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-semibold text-brandText/70">Description</div>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8C93AA] transition-colors hover:bg-muted/50"
+                  disabled={groupDescriptionSaving}
+                  onClick={async () => {
+                    if (!groupManageId) return;
+                    if (!groupDescriptionEditing) {
+                      setGroupDescriptionEditing(true);
+                      return;
+                    }
+                    setGroupDescriptionSaving(true);
+                    try {
+                      const row = await updateGroupChatMetadata({
+                        chatId: groupManageId,
+                        description: groupDescriptionDraft.trim() || null,
+                        updateDescription: true,
+                      });
+                      syncGroupRowIntoState(row);
+                      setGroupDescriptionDraft(row.description || "");
+                      setGroupDescriptionEditing(false);
+                      void loadConversations();
+                      toast.success("Group description updated");
+                    } catch {
+                      toast.error("Couldn't save group description.");
+                    } finally {
+                      setGroupDescriptionSaving(false);
+                    }
+                  }}
+                  aria-label={groupDescriptionEditing ? "Save description" : "Edit description"}
+                >
+                  {groupDescriptionSaving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : groupDescriptionEditing ? (
+                    <Save className="h-4 w-4" />
+                  ) : (
+                    <Pencil className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              {groupDescriptionEditing ? (
+                <div className="form-field-rest min-h-[92px] py-3">
+                  <textarea
+                    value={groupDescriptionDraft}
+                    onChange={(event) => setGroupDescriptionDraft(event.target.value)}
+                    className="field-input-core resize-none px-0 text-sm leading-relaxed"
+                    rows={4}
+                    placeholder="Tell members what this group is about."
+                  />
+                </div>
+              ) : (
+                <div className="rounded-[16px] border border-white/60 bg-white px-4 py-3 text-sm leading-relaxed text-brandText shadow-[0_10px_24px_rgba(66,73,101,0.08)]">
+                  {groupDescriptionDraft.trim() || "No description yet."}
+                </div>
+              )}
             </div>
 
             {/* Join Requests — approve or decline */}

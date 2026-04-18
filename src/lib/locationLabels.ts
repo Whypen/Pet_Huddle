@@ -65,11 +65,11 @@ export const resolveCountryByPrecedence = ({
   pinLocationName?: string | null;
   profileLocationName?: string | null;
 }) =>
-  String(gpsCountry || "").trim() ||
+  normalizeCountryToken(gpsCountry) ||
   extractCountryToken(gpsLocationName) ||
-  String(pinCountry || "").trim() ||
+  normalizeCountryToken(pinCountry) ||
   extractCountryToken(pinLocationName) ||
-  String(profileCountry || "").trim() ||
+  normalizeCountryToken(profileCountry) ||
   extractCountryToken(profileLocationName) ||
   null;
 
