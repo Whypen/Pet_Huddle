@@ -12,7 +12,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { getChatRoomSeenMap } from "@/lib/chatSeen";
 
 const navItems = [
   { icon: Home,          label: "Home",          path: "/" },
@@ -43,40 +42,18 @@ export const BottomNav = () => {
   const recalcUnreadFromBackend = useMemo(
     () =>
       async (userId: string) => {
-        const { data: memberships, error: membershipError } = await supabase
-          .from("chat_room_members")
-          .select("chat_id")
-          .eq("user_id", userId);
-        if (membershipError) return;
-        const roomIds = Array.from(
-          new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))
-        );
-        if (roomIds.length === 0) {
-          setChatUnread(0);
-          try {
-            localStorage.setItem(unreadStorageKey, "0");
-          } catch {
-            // ignore
-          }
-          return;
-        }
-        const seenByRoom = getChatRoomSeenMap(userId);
-        const { data: messages, error: messagesError } = await supabase
-          .from("chat_messages")
-          .select("chat_id, sender_id, created_at")
-          .in("chat_id", roomIds)
-          .order("created_at", { ascending: false })
-          .limit(500);
-        if (messagesError) return;
-        let unread = 0;
-        for (const message of (messages || []) as Array<{ chat_id: string; sender_id: string; created_at: string | null }>) {
-          if (!message.sender_id || message.sender_id === userId) continue;
-          const seenAtRaw = seenByRoom[message.chat_id];
-          const seenAtMs = seenAtRaw ? new Date(seenAtRaw).getTime() : Number.NaN;
-          const msgMs = message.created_at ? new Date(message.created_at).getTime() : Number.NaN;
-          if (!Number.isFinite(msgMs)) continue;
-          if (!Number.isFinite(seenAtMs) || msgMs > seenAtMs) unread += 1;
-        }
+        const { data, error } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_chat_inbox_summaries", {
+          p_scope: "all",
+          p_chat_ids: null,
+        });
+        if (error) return;
+        const rows = Array.isArray(data)
+          ? (data as Array<{ unread_count?: number | null }>)
+          : [];
+        const unread = rows.reduce((sum, row) => sum + Math.max(0, Number(row?.unread_count ?? 0)), 0);
         setChatUnread(unread);
         try {
           localStorage.setItem(unreadStorageKey, String(unread));
