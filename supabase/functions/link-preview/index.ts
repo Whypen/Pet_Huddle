@@ -179,6 +179,41 @@ const toAbsoluteUrl = (baseUrl: string, maybeRelative: string) => {
   }
 };
 
+// Headless-rendered fallback for sites that block all bot UAs (Rolling Stone,
+// some paywalled news). Jina Reader returns markdown with a YAML-ish header
+// containing Title/URL Source/Markdown Content. Free, no key required.
+const tryJinaReader = async (url: string): Promise<Record<string, unknown> | null> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("jina_timeout"), 6000);
+  try {
+    const r = await fetch(`https://r.jina.ai/${url}`, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { Accept: "text/plain", "X-Return-Format": "markdown" },
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    const titleMatch = text.match(/^Title:\s*(.+)$/m);
+    const descMatch = text.match(/^Description:\s*(.+)$/m);
+    const imgMatch = text.match(/^Image:\s*(\S+)/m) || text.match(/!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/);
+    const title = titleMatch?.[1]?.trim();
+    if (!title) return null;
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return {
+      url,
+      title,
+      description: descMatch?.[1]?.trim() || "",
+      image: imgMatch?.[1] || undefined,
+      siteName: host,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const fetchPage = async (url: string, userAgent: string) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("preview_timeout"), 7000);
@@ -222,6 +257,8 @@ Deno.serve(async (req) => {
     }
 
     if (!res || !res.ok) {
+      const jina = await tryJinaReader(normalizedUrl);
+      if (jina) return json(jina, 200, SUCCESS_CACHE_HEADERS);
       return json({ url: normalizedUrl, failed: true }, 200, FAILURE_CACHE_HEADERS);
     }
     const contentType = String(res.headers.get("content-type") || "").toLowerCase();
@@ -266,6 +303,16 @@ Deno.serve(async (req) => {
           if (!imageRaw && typeof data.thumbnail_url === "string") imageRaw = data.thumbnail_url;
           if (!description && typeof data.author_name === "string") description = data.author_name;
         }
+      }
+    }
+
+    // Last-resort: HTML loaded but had no usable meta (anti-bot stub page).
+    if (!title || !imageRaw) {
+      const jina = await tryJinaReader(finalUrl);
+      if (jina) {
+        title = title || (typeof jina.title === "string" ? jina.title : "");
+        if (!imageRaw && typeof jina.image === "string") imageRaw = jina.image;
+        if (!description && typeof jina.description === "string") description = jina.description;
       }
     }
 
