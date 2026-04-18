@@ -530,6 +530,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [editingNoticeId, setEditingNoticeId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const createInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [createMentions, setCreateMentions] = useState<MentionEntry[]>([]);
   const [createMentionQuery, setCreateMentionQuery] = useState<ActiveMentionQuery | null>(null);
@@ -2937,8 +2938,22 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return b.id.localeCompare(a.id);
     });
   }, [blockedUsers, commentsByThread, hiddenNotices, notices, pinnedNotices, savedNotices, searchQuery, sortMode, topicFilters]);
-  const createContentFirstUrl = useMemo(() => extractFirstHttpUrl(content || ""), [content]);
+  const createContentFirstUrl = useMemo(() => {
+    const u = extractFirstHttpUrl(content || "");
+    return u && !dismissedPreviewUrls.has(u) ? u : null;
+  }, [content, dismissedPreviewUrls]);
   const createContentPreview = createContentFirstUrl ? linkPreviewByUrl[createContentFirstUrl] : null;
+  const dismissCreatePreview = useCallback((url: string) => {
+    setDismissedPreviewUrls((prev) => {
+      const next = new Set(prev);
+      next.add(url);
+      return next;
+    });
+    setContent((prev) => {
+      const stripped = prev.replace(url, "").replace(/[ \t]{2,}/g, " ").replace(/\s+\n/g, "\n").trim();
+      return stripped;
+    });
+  }, []);
   const COLLAPSED_CONTENT_MAX_HEIGHT = 120;
 
   useEffect(() => {
@@ -3985,11 +4000,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     </div>
                   </div>
                   {createContentFirstUrl ? (
+                    <div className="relative mt-2">
+                    <button
+                      type="button"
+                      onClick={() => dismissCreatePreview(createContentFirstUrl)}
+                      aria-label="Remove link preview"
+                      className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-brandText shadow-sm hover:bg-background"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                     <a
                       href={createContentFirstUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="form-field-rest mt-2 block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
+                      className="form-field-rest block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
                     >
                       {createContentPreview?.image ? (
                         <img
@@ -4021,6 +4045,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         ) : null}
                       </div>
                     </a>
+                    </div>
                   ) : null}
                   {MENTION_LIVE_SUGGESTIONS_ENABLED
                     ? renderMentionSuggestions(
