@@ -5856,7 +5856,7 @@ const Chats = () => {
                           <div className="flex items-start gap-3">
                             <button
                               type="button"
-                              className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                              className="relative mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-visible rounded-full border border-border/30 bg-card"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void openGroupDetailsSheet(group);
@@ -5868,16 +5868,16 @@ const Chats = () => {
                               ) : (
                                 <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                               )}
+                              {group.unread > 0 ? (
+                                <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-muted-foreground/70 text-xs font-medium text-white shadow-sm">
+                                  {group.unread > 99 ? "9+" : group.unread}
+                                </span>
+                              ) : null}
                             </button>
                             <div className="min-w-0 flex-1">
                               <div className="relative min-w-0">
                                 <div className="absolute right-0 top-1/2 flex w-[78px] -translate-y-1/2 flex-col items-center gap-1 text-center text-[11px] leading-[1.25] text-[#8C93AA]">
                                   <p className="w-full">{`Members: ${group.memberCount}`}</p>
-                                  {group.unread > 0 ? (
-                                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted-foreground/70 text-xs font-medium text-white">
-                                      {group.unread > 99 ? "9+" : group.unread}
-                                    </span>
-                                  ) : null}
                                 </div>
                                 <button
                                   type="button"

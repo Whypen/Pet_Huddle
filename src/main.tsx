@@ -24,7 +24,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
 
 createRoot(document.getElementById("root")!).render(<App />);
 
-const SW_RESET_GUARD = "huddle:sw-reset-v1";
+const SW_RESET_GUARD = "huddle:sw-reset-v2";
 const resetServiceWorkerCachesOnce = async () => {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   try {
@@ -41,7 +41,7 @@ const resetServiceWorkerCachesOnce = async () => {
     console.warn("Service worker reset failed:", error);
   }
 };
-const ENABLE_AUTOMATIC_RUNTIME_RELOAD = false;
+const ENABLE_AUTOMATIC_RUNTIME_RELOAD = true;
 if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
   void resetServiceWorkerCachesOnce();
 }
