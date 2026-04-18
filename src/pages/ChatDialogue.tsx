@@ -139,8 +139,10 @@ const ChatDialogue = () => {
   const [groupManageFriends, setGroupManageFriends] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
   const [groupManageSearch, setGroupManageSearch] = useState("");
   const [groupManageLoading, setGroupManageLoading] = useState(false);
+  const [groupManageReturnToInfo, setGroupManageReturnToInfo] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+  const [confirmRemoveGroupOpen, setConfirmRemoveGroupOpen] = useState(false);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
@@ -277,7 +279,7 @@ const ChatDialogue = () => {
       profile?.id
         ? supabase
             .from("chat_participants")
-            .select("is_muted")
+            .select("is_muted, role")
             .eq("chat_id", nextRoomId)
             .eq("user_id", profile.id)
             .maybeSingle()
@@ -286,6 +288,10 @@ const ChatDialogue = () => {
     const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
     setGroupMemberCount(memberIds.length);
     setGroupMuted(Boolean((participantRow as { is_muted?: boolean } | null)?.is_muted));
+    setGroupIsAdmin(
+      (row.created_by || null) === profile?.id ||
+      String((participantRow as { role?: string } | null)?.role || "").toLowerCase() === "admin"
+    );
 
     if (memberIds.length > 0) {
       memberIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
@@ -1288,6 +1294,7 @@ const ChatDialogue = () => {
         data={profileSheetData}
         viewedUserId={counterpart?.id || null}
         hideStartChatAction={true}
+        zIndexBase={9900}
       />
 
       <Dialog open={confirmUnmatchOpen} onOpenChange={setConfirmUnmatchOpen}>
@@ -1367,6 +1374,7 @@ const ChatDialogue = () => {
                       icon: <Settings className="h-5 w-5 text-muted-foreground" />,
                       onClick: () => {
                         setGroupInfoOpen(false);
+                        setGroupManageReturnToInfo(true);
                         void loadGroupManageData();
                         setGroupManageOpen(true);
                       },
@@ -1381,16 +1389,27 @@ const ChatDialogue = () => {
                     setReportOpen(true);
                   },
                 },
-                {
-                  key: "leave",
-                  label: "Leave group",
-                  icon: <LogOut className="h-5 w-5 text-red-500" />,
-                  destructive: true,
-                  onClick: () => {
-                    setGroupInfoOpen(false);
-                    setConfirmLeaveOpen(true);
-                  },
-                },
+                ...(groupIsAdmin
+                  ? [{
+                      key: "remove-group",
+                      label: "Remove group",
+                      icon: <LogOut className="h-5 w-5 text-red-500" />,
+                      destructive: true,
+                      onClick: () => {
+                        setGroupInfoOpen(false);
+                        setConfirmRemoveGroupOpen(true);
+                      },
+                    }]
+                  : [{
+                      key: "leave",
+                      label: "Leave group",
+                      icon: <LogOut className="h-5 w-5 text-red-500" />,
+                      destructive: true,
+                      onClick: () => {
+                        setGroupInfoOpen(false);
+                        setConfirmLeaveOpen(true);
+                      },
+                    }]),
               ]}
             />
           </div>{/* end scrollable body */}
@@ -1398,10 +1417,27 @@ const ChatDialogue = () => {
       </Sheet>
 
       {/* ── Manager Group Sheet (legacy inline path) ── */}
-      <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) setGroupManageSearch(""); }}>
+      <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) { setGroupManageSearch(""); setGroupManageReturnToInfo(false); } }}>
         <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[88vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-3 shrink-0">
-            <SheetTitle className="text-left">Manage Group</SheetTitle>
+            <div className="flex items-center gap-2">
+              {groupManageReturnToInfo ? (
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-white/80"
+                  onClick={() => {
+                    setGroupManageOpen(false);
+                    setGroupManageSearch("");
+                    setGroupManageReturnToInfo(false);
+                    setGroupInfoOpen(true);
+                  }}
+                  aria-label="Back to group details"
+                >
+                  <ChevronLeft className="h-4 w-4 text-brandText/70" />
+                </button>
+              ) : null}
+              <SheetTitle className="text-left">Manage Group</SheetTitle>
+            </div>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
             {groupManageLoading ? (
@@ -1608,6 +1644,46 @@ const ChatDialogue = () => {
               }}
             >
               Leave
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmRemoveGroupOpen} onOpenChange={setConfirmRemoveGroupOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remove group?</DialogTitle>
+            <DialogDescription>
+              This group and all its content will be permanently deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="!flex-row gap-2 pt-2">
+            <button
+              className="flex-1 h-10 rounded-full border px-4 text-sm"
+              onClick={() => setConfirmRemoveGroupOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="flex-1 h-10 rounded-full bg-red-500 px-4 text-sm font-semibold text-white"
+              onClick={async () => {
+                if (!roomId) return;
+                setConfirmRemoveGroupOpen(false);
+                try {
+                  const { error } = await (supabase.rpc as (
+                    fn: string,
+                    params?: Record<string, unknown>,
+                  ) => Promise<{ error: { message?: string } | null }>)("remove_group_chat", {
+                    p_chat_id: roomId,
+                  });
+                  if (error) throw error;
+                  navigate("/chats?tab=groups", { replace: true });
+                } catch {
+                  toast.error("Unable to remove group right now.");
+                }
+              }}
+            >
+              Remove
             </button>
           </DialogFooter>
         </DialogContent>

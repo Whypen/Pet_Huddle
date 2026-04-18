@@ -689,6 +689,7 @@ const Chats = () => {
   // Group management
   const [groupManageId, setGroupManageId] = useState<string | null>(null);
   const [groupDetailsId, setGroupDetailsId] = useState<string | null>(null);
+  const [groupManageReturnToDetails, setGroupManageReturnToDetails] = useState(false);
   const [swipeDeleteId, setSwipeDeleteId] = useState<string | null>(null);
   const [swipeDeleteGroupId, setSwipeDeleteGroupId] = useState<string | null>(null);
   const [deleteGroupConfirmId, setDeleteGroupConfirmId] = useState<string | null>(null);
@@ -909,8 +910,8 @@ const Chats = () => {
       discoverySendCueProgress.set(0);
       setDiscoverySendCue({ kind, id: Date.now() });
 
-      const duration = kind === "wave" ? 0.18 : 0.78;
-      const commitAt = kind === "star" ? 0.16 : 1;
+      const duration = kind === "wave" ? 0.22 : 1.35;
+      const commitAt = kind === "star" ? 0.32 : 1;
       discoverySendCueAnimationRef.current = animate(discoverySendCueProgress, 1, {
         duration,
         ease: [0.22, 1, 0.36, 1],
@@ -939,27 +940,27 @@ const Chats = () => {
   const discoverySendCueScale = useTransform(discoverySendCueProgress, (progress) =>
     discoverySendCueKindRef.current === "wave"
       ? interpolateStops(progress, [0, 0.3, 0.72, 1], [0.58, 0.86, 1.04, 0.9])
-      : interpolateStops(progress, [0, 0.22, 0.52, 0.82, 1], [0.54, 0.98, 1.16, 0.94, 0.74])
+      : interpolateStops(progress, [0, 0.18, 0.46, 0.74, 1], [0.72, 1.02, 1.16, 1.02, 0.82])
   );
   const discoverySendCueX = useTransform(discoverySendCueProgress, (progress) =>
     discoverySendCueKindRef.current === "wave"
       ? interpolateStops(progress, [0, 0.28, 0.74, 1], [-44, -6, 86, 156])
-      : 224 * (1 - Math.pow(1 - progress, 2.1))
+      : interpolateStops(progress, [0, 0.22, 0.58, 1], [-168, -84, 88, 224])
   );
   const discoverySendCueY = useTransform(discoverySendCueProgress, (progress) =>
     discoverySendCueKindRef.current === "wave"
       ? interpolateStops(progress, [0, 0.28, 0.74, 1], [18, 6, -32, -64])
-      : 18 - 294 * progress - 72 * Math.sin(Math.PI * progress)
+      : interpolateStops(progress, [0, 0.18, 0.52, 1], [182, 124, -18, -318])
   );
   const discoverySendCueOpacity = useTransform(discoverySendCueProgress, (progress) =>
     discoverySendCueKindRef.current === "wave"
       ? interpolateStops(progress, [0, 0.28, 0.72, 1], [0.08, 0.54, 1, 0])
-      : interpolateStops(progress, [0, 0.16, 0.45, 0.84, 1], [0.04, 0.52, 1, 0.82, 0])
+      : interpolateStops(progress, [0, 0.12, 0.36, 0.84, 1], [0.1, 0.78, 1, 0.92, 0])
   );
   const discoverySendCueRotate = useTransform(discoverySendCueProgress, (progress) =>
     discoverySendCueKindRef.current === "wave"
       ? interpolateStops(progress, [0, 0.28, 0.72, 1], [-14, -6, 6, 10])
-      : interpolateStops(progress, [0, 0.22, 0.64, 1], [-14, -4, 10, 16])
+      : interpolateStops(progress, [0, 0.22, 0.58, 1], [-24, -12, 6, 18])
   );
   const discoveryKey = useMemo(() => {
     const d = new Date();
@@ -5385,11 +5386,11 @@ const Chats = () => {
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.04, duration: 0.2 }}
-                          className="flex items-start gap-3 rounded-xl bg-card p-3 shadow-card"
+                          className="relative flex items-center gap-3 rounded-xl bg-card p-3 shadow-card"
                         >
                           <button
                             type="button"
-                            className="mt-0.5 flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                            className="flex h-14 w-14 flex-shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
                             onClick={() => void openGroupDetailsSheet(group)}
                             aria-label={`Open ${group.name} details`}
                           >
@@ -5399,8 +5400,8 @@ const Chats = () => {
                               <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                             )}
                           </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 pr-[104px]">
+                            <div className="flex items-start gap-3">
                               <button
                                 type="button"
                                 className="min-w-0 text-left"
@@ -5408,10 +5409,6 @@ const Chats = () => {
                               >
                                 <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
                               </button>
-                              <div className="shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                                <p>{`Members: ${group.memberCount}`}</p>
-                                <p>{activityLabel}</p>
-                              </div>
                             </div>
                             {group.location_label && (
                               <p className="text-[12px] text-muted-foreground truncate mt-0.5">
@@ -5432,6 +5429,10 @@ const Chats = () => {
                                 {group.description}
                               </p>
                             )}
+                          </div>
+                          <div className="absolute right-3 top-3 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                            <p>{`Members: ${group.memberCount}`}</p>
+                            <p>{activityLabel}</p>
                           </div>
                           {/* CTA */}
                           {isMember ? (
@@ -5506,7 +5507,7 @@ const Chats = () => {
                             }
                           }}
                           onClick={() => handleGroupClick(group)}
-                          className="flex cursor-pointer items-start gap-3 rounded-xl bg-card p-3 shadow-card"
+                          className="relative flex cursor-pointer items-center gap-3 rounded-xl bg-card p-3 shadow-card"
                         >
                           {group.isAdmin ? (
                             <button
@@ -5515,6 +5516,7 @@ const Chats = () => {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                                setGroupManageReturnToDetails(false);
                                 setGroupManageId(group.id);
                               }}
                               aria-label={`Manage ${group.name}`}
@@ -5522,7 +5524,7 @@ const Chats = () => {
                               <Settings className="h-3.5 w-3.5" />
                             </button>
                           ) : null}
-                          <div className="relative flex-shrink-0">
+                          <div className="relative flex-shrink-0 self-center">
                             <button
                               type="button"
                               className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
@@ -5541,8 +5543,8 @@ const Chats = () => {
                           </div>
 
                           {/* Text content */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1 pr-[104px]">
+                            <div className="flex items-start gap-3">
                               <button
                                 type="button"
                                 className="min-w-0 text-left"
@@ -5553,10 +5555,6 @@ const Chats = () => {
                               >
                                 <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
                               </button>
-                              <div className="shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                                <p>{`Members: ${group.memberCount}`}</p>
-                                <p>{describeGroupActivity(group.lastMessageAt)}</p>
-                              </div>
                             </div>
                             <div className="mt-0.5 flex items-center gap-2">
                               {group.unread > 0 && (
@@ -5584,6 +5582,10 @@ const Chats = () => {
                                 {group.description}
                               </p>
                             )}
+                          </div>
+                          <div className="absolute right-3 top-3 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                            <p>{`Members: ${group.memberCount}`}</p>
+                            <p>{describeGroupActivity(group.lastMessageAt)}</p>
                           </div>
 
                           {/* Invite pending CTA */}
@@ -5733,6 +5735,7 @@ const Chats = () => {
                     onClick: () => {
                       setGroupDetailsId(null);
                       if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                      setGroupManageReturnToDetails(true);
                       setGroupManageId(activeGroupDetails.id);
                     },
                   }]
@@ -5754,10 +5757,29 @@ const Chats = () => {
       </Dialog>
 
       {/* Group Manage Modal — group image upload, members list with Remove, add members */}
-      <Dialog open={!!groupManageId} onOpenChange={() => { setGroupManageId(null); setGroupAddSearch(""); }}>
+      <Dialog open={!!groupManageId} onOpenChange={() => { setGroupManageId(null); setGroupAddSearch(""); setGroupManageReturnToDetails(false); }}>
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Group</DialogTitle>
+            <div className="flex items-center gap-2">
+              {groupManageReturnToDetails ? (
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-white/80"
+                  onClick={() => {
+                    setGroupManageId(null);
+                    setGroupAddSearch("");
+                    setGroupManageReturnToDetails(false);
+                    if (activeGroupDetails?.id) {
+                      setGroupDetailsId(activeGroupDetails.id);
+                    }
+                  }}
+                  aria-label="Back to group details"
+                >
+                  <ChevronLeft className="h-4 w-4 text-brandText/70" />
+                </button>
+              ) : null}
+              <DialogTitle>Manage Group</DialogTitle>
+            </div>
             <DialogDescription>Edit photo, members, and group settings.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -6352,6 +6374,7 @@ const Chats = () => {
         viewedUserId={profileSheetUser?.id}
         data={profileSheetData as never}
         onStarQuotaBlocked={(targetTier) => openStarUpgradeSheet(targetTier)}
+        zIndexBase={9900}
       />
       <StarUpgradeSheet
         isOpen={Boolean(starUpgradeTier)}
@@ -6408,7 +6431,7 @@ const Chats = () => {
                 "absolute flex items-center justify-center rounded-full",
                 discoverySendCue.kind === "wave"
                   ? "right-[18%] top-[28%] h-[84px] w-[84px] bg-[rgba(33,71,201,0.96)] text-white shadow-[0_18px_36px_rgba(33,71,201,0.34)]"
-                  : "left-1/2 top-1/2 h-[104px] w-[104px] -translate-x-1/2 -translate-y-1/2 bg-[rgba(245,200,92,0.98)] text-[#2C2A19] shadow-[0_18px_38px_rgba(245,200,92,0.5)]"
+                  : "left-[18%] top-[72%] h-[72px] w-[72px] -translate-x-1/2 -translate-y-1/2 text-white drop-shadow-[0_18px_36px_rgba(33,71,201,0.42)]"
               )}
               style={{
                 scale: discoverySendCueScale,
@@ -6421,7 +6444,7 @@ const Chats = () => {
               {discoverySendCue.kind === "wave" ? (
                 <WaveHandIcon size={56} className="drop-shadow-[0_10px_18px_rgba(7,24,108,0.22)]" />
               ) : (
-                <Star size={46} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+                <Star size={48} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
               )}
             </motion.div>
           </motion.div>

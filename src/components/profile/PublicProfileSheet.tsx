@@ -461,12 +461,12 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
                 exit={{ opacity: 0 }}
               >
                 <motion.div
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[#F5C85C] text-[34px] drop-shadow-[0_8px_18px_rgba(245,200,92,0.45)]"
-                  initial={{ scale: 1, x: 0, y: 0, opacity: 1 }}
-                  animate={{ scale: 0.36, x: 140, y: -220, opacity: 0 }}
-                  transition={{ duration: 0.4, ease: "easeInOut" }}
+                  className="absolute left-[22%] top-[74%] -translate-x-1/2 -translate-y-1/2 text-white drop-shadow-[0_18px_36px_rgba(33,71,201,0.42)]"
+                  initial={{ scale: 0.78, x: 0, y: 0, rotate: -18, opacity: 0.9 }}
+                  animate={{ scale: 0.42, x: 178, y: -348, rotate: 20, opacity: 0 }}
+                  transition={{ duration: 1.25, ease: [0.22, 1, 0.36, 1] }}
                 >
-                  ⭐
+                  <Star size={42} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
                 </motion.div>
               </motion.div>
             )}

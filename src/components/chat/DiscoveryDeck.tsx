@@ -173,6 +173,7 @@ const DiscoveryDeckInner = ({
       ? "hidden_locked"
       : footerCtaPlacement;
   const ctaDisabled = swipeUiBusy || isDiscoverDragging || showDiscoveryQuotaLock;
+  const hideTopChrome = isDiscoverDragging || swipeUiBusy;
 
   const stepAlbum = useCallback((direction: -1 | 1, length: number) => {
     setDiscoverImageIndex((idx) => {
@@ -382,7 +383,7 @@ const DiscoveryDeckInner = ({
             <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
             <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
             <motion.div
-              className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
+              className="pointer-events-none absolute bottom-[130px] left-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
               style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate, x: waveIndicatorX, y: waveIndicatorY }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -403,7 +404,7 @@ const DiscoveryDeckInner = ({
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%] bg-[linear-gradient(180deg,rgba(9,21,95,0)_0%,rgba(9,21,95,0.82)_100%)]" />
         <div className="absolute inset-x-4 top-4 z-[19] flex items-start justify-between gap-3">
           <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
-          {isActive ? (
+          {isActive && !hideTopChrome ? (
             <div className="pointer-events-auto flex items-start gap-2">
               <motion.button
                 type="button"

@@ -48,8 +48,7 @@ export function GroupDetailsPanel({
 
       {description ? (
         <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">Description</p>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-brandText">{description}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-brandText">{description}</p>
         </div>
       ) : null}
 

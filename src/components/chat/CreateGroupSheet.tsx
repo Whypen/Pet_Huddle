@@ -11,6 +11,7 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { countWords } from "@/lib/locationLabels";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,8 @@ const roomCodePlaceholder = "— —";
 const DESCRIPTION_WORD_LIMIT = 100;
 const optionCardClass =
   "rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors";
+const activeOptionCardClass =
+  "border-[#2147C9] bg-[#2147C9] text-white shadow-[0_16px_34px_rgba(33,71,201,0.24)]";
 
 // ── Collapse animation preset ─────────────────────────────────────────────────
 
@@ -221,7 +224,7 @@ export function CreateGroupSheet({
       onClose={onClose}
       title="Create a group"
       contentClassName="pb-2"
-      className="!px-4"
+      className="!px-3"
     >
       {/* Scrollable body */}
       <div className="flex flex-col space-y-5">
@@ -314,7 +317,11 @@ export function CreateGroupSheet({
             <div
               role="button"
               tabIndex={0}
-              className={`${optionCardClass} flex flex-row items-start gap-2 cursor-pointer text-left`}
+              className={cn(
+                optionCardClass,
+                "flex flex-row items-start gap-2 cursor-pointer text-left",
+                visibility === "public" && activeOptionCardClass
+              )}
               data-active={visibility === "public" ? "true" : undefined}
               onClick={() => setVisibility("public")}
               onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("public")}
@@ -329,7 +336,7 @@ export function CreateGroupSheet({
               </span>
               <span className="flex flex-col">
                 <span className="text-[13px] font-semibold">Public</span>
-                <span className="text-[11px] mt-0.5 leading-snug opacity-80">
+                <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "public" && "text-white/90")}>
                   Visible in Explore. Pet lovers nearby can find it.
                 </span>
               </span>
@@ -339,10 +346,22 @@ export function CreateGroupSheet({
             <div
               role="button"
               tabIndex={0}
-              className={`${optionCardClass} flex flex-row items-start gap-2 cursor-pointer text-left`}
+              className={cn(
+                optionCardClass,
+                "flex flex-row items-start gap-2 cursor-pointer text-left",
+                visibility === "private" && activeOptionCardClass
+              )}
               data-active={visibility === "private" ? "true" : undefined}
-              onClick={() => setVisibility("private")}
-              onKeyDown={e => (e.key === "Enter" || e.key === " ") && setVisibility("private")}
+              onClick={() => {
+                setVisibility("private");
+                setJoinMethod("request");
+              }}
+              onKeyDown={e => {
+                if (e.key === "Enter" || e.key === " ") {
+                  setVisibility("private");
+                  setJoinMethod("request");
+                }
+              }}
             >
               <span className="mt-0.5 flex-shrink-0">
                 {visibility === "private" ? (
@@ -354,7 +373,7 @@ export function CreateGroupSheet({
               </span>
               <span className="flex flex-col">
                 <span className="text-[13px] font-semibold">Private</span>
-                <span className="text-[11px] mt-0.5 leading-snug opacity-80">
+                <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "private" && "text-white/90")}>
                   Hidden. People join with a code.
                 </span>
               </span>
@@ -383,7 +402,11 @@ export function CreateGroupSheet({
                   {/* Request to join */}
                   <button
                     type="button"
-                    className={`${optionCardClass} w-full flex flex-row items-start gap-3 text-left`}
+                    className={cn(
+                      optionCardClass,
+                      "w-full flex flex-row items-start gap-3 text-left",
+                      joinMethod === "request" && activeOptionCardClass
+                    )}
                     data-active={joinMethod === "request" ? "true" : undefined}
                     onClick={() => setJoinMethod("request")}
                   >
@@ -398,9 +421,11 @@ export function CreateGroupSheet({
                     <span className="flex flex-col">
                       <span className="text-[13px] font-semibold">
                         Send a join request{" "}
-                        <span className="text-[11px] font-normal opacity-70">(recommended)</span>
+                        <span className={cn("text-[11px] font-normal opacity-70", joinMethod === "request" && "text-white/80")}>
+                          (recommended)
+                        </span>
                       </span>
-                      <span className="text-[11px] mt-0.5 opacity-70">
+                      <span className={cn("text-[11px] mt-0.5 opacity-70", joinMethod === "request" && "text-white/90")}>
                         You approve each new member.
                       </span>
                     </span>
@@ -409,7 +434,11 @@ export function CreateGroupSheet({
                   {/* Join instantly */}
                   <button
                     type="button"
-                    className={`${optionCardClass} w-full flex flex-row items-start gap-3 text-left`}
+                    className={cn(
+                      optionCardClass,
+                      "w-full flex flex-row items-start gap-3 text-left",
+                      joinMethod === "instant" && activeOptionCardClass
+                    )}
                     data-active={joinMethod === "instant" ? "true" : undefined}
                     onClick={() => setJoinMethod("instant")}
                   >
@@ -423,7 +452,7 @@ export function CreateGroupSheet({
                     </span>
                     <span className="flex flex-col">
                       <span className="text-[13px] font-semibold">Join instantly</span>
-                      <span className="text-[11px] mt-0.5 opacity-70">
+                      <span className={cn("text-[11px] mt-0.5 opacity-70", joinMethod === "instant" && "text-white/90")}>
                         Anyone can join right away.
                       </span>
                     </span>
