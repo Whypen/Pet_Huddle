@@ -17,6 +17,7 @@ type PostMediaCarouselProps = {
 
 const MIN_ASPECT = 3 / 4;
 const MAX_ASPECT = 4 / 3;
+const mediaAspectCache = new Map<string, number>();
 
 const isVideoSrc = (src: string) => /\.(mp4|mov|m4v|webm|ogg)$/i.test(src) || src.includes("video/");
 const clampAspect = (aspect: number) => Math.min(Math.max(aspect || 1, MIN_ASPECT), MAX_ASPECT);
@@ -48,7 +49,16 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   const [activeIndex, setActiveIndex] = useState(0);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState(0);
-  const [aspectMap, setAspectMap] = useState<Record<string, number>>({});
+  const [aspectMap, setAspectMap] = useState<Record<string, number>>(() =>
+    Object.fromEntries(
+      items
+        .map((item) => {
+          const cached = mediaAspectCache.get(item.src);
+          return cached ? [item.src, cached] : null;
+        })
+        .filter(Boolean) as Array<[string, number]>
+    )
+  );
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
   const [tapHintDismissed, setTapHintDismissed] = useState(
     () => localStorage.getItem(SENSITIVE_TAP_SEEN_KEY) === "1"
@@ -78,6 +88,26 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const cachedEntries = items
+      .map((item) => {
+        const cached = mediaAspectCache.get(item.src);
+        return cached ? [item.src, cached] : null;
+      })
+      .filter(Boolean) as Array<[string, number]>;
+    if (cachedEntries.length === 0) return;
+    setAspectMap((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      cachedEntries.forEach(([src, aspect]) => {
+        if (next[src] === aspect) return;
+        next[src] = aspect;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [items]);
+
   const slideWidth = useMemo(() => {
     if (mode === "full") return measuredWidth;
     return Math.max(measuredWidth - 56, measuredWidth * 0.82);
@@ -88,7 +118,9 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
 
   const updateAspect = (src: string, width: number, height: number) => {
     if (!width || !height) return;
-    setAspectMap((prev) => (prev[src] === width / height ? prev : { ...prev, [src]: width / height }));
+    const nextAspect = width / height;
+    mediaAspectCache.set(src, nextAspect);
+    setAspectMap((prev) => (prev[src] === nextAspect ? prev : { ...prev, [src]: nextAspect }));
   };
 
   const scrollToIndex = (index: number) => {
