@@ -3300,19 +3300,25 @@ const Chats = () => {
   }, [markChatMessagesRead]);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!profile?.id || subscribedInboxRoomIds.length === 0) return;
     const channel = supabase
-      .channel(`chats_messages_${profile.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, (payload) => {
-        const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
-        queueDirtyRoomSummaryRefresh(row?.chat_id || null);
-      })
-      .subscribe();
+      .channel(`chats_messages_${profile.id}`);
+    subscribedInboxRoomIds.forEach((roomId) => {
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` },
+        (payload) => {
+          const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
+          queueDirtyRoomSummaryRefresh(row?.chat_id || roomId);
+        }
+      );
+    });
+    channel.subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile?.id, queueDirtyRoomSummaryRefresh]);
+  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomIds]);
 
   useEffect(() => {
     if (!activeRoomId) return;
@@ -3473,6 +3479,15 @@ const Chats = () => {
 
   const totalUnreadMessages = useMemo(
     () => chats.reduce((sum, chat) => sum + Math.max(0, chat.unread || 0), 0) + groups.reduce((sum, group) => sum + Math.max(0, group.unread || 0), 0),
+    [chats, groups]
+  );
+  const subscribedInboxRoomIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...chats.map((chat) => String(chat.id || "").trim()), ...groups.map((group) => String(group.id || "").trim())].filter(Boolean)
+        )
+      ).sort(),
     [chats, groups]
   );
 

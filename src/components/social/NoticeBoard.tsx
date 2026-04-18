@@ -114,6 +114,23 @@ type HydratedRowsResult = {
   alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others">;
 };
 
+type FeedHydrationRpcRow = {
+  thread_id: string;
+  share_count?: number | null;
+  is_sensitive?: boolean | null;
+  author_display_name?: string | null;
+  author_social_id?: string | null;
+  author_avatar_url?: string | null;
+  author_is_verified?: boolean | null;
+  map_id?: string | null;
+  alert_type?: string | null;
+  alert_district?: string | null;
+  has_alert_link?: boolean | null;
+  comments?: unknown;
+  thread_mentions?: unknown;
+  reply_mentions?: unknown;
+};
+
 const normalizeNewsAlertType = (rawType: string | null | undefined): "Stray" | "Lost" | "Caution" | "Others" => {
   const normalized = String(rawType || "").toLowerCase();
   if (normalized === "lost") return "Lost";
@@ -1351,7 +1368,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     return applyFeedFilters(rpcRows.map(mapFeedRowToThread));
   }, [applyFeedFilters, mapFeedRowToThread, sortMode, user?.id]);
 
-  const hydrateRows = useCallback(async (rows: Thread[]): Promise<HydratedRowsResult> => {
+  const hydrateRowsLegacy = useCallback(async (rows: Thread[]): Promise<HydratedRowsResult> => {
     const ids = rows.map((n) => n.id);
     if (ids.length === 0) {
       return {
@@ -1567,6 +1584,147 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       alertTypes: nextAlertTypeMap,
     };
   }, [markMentionTablesUnavailable, primeMentionDirectory]);
+
+  const hydrateRows = useCallback(async (rows: Thread[]): Promise<HydratedRowsResult> => {
+    const ids = rows.map((notice) => notice.id).filter(Boolean);
+    if (ids.length === 0) {
+      return {
+        rows,
+        commentsByThread: {},
+        threadMentions: {},
+        replyMentions: {},
+        alertTypes: {},
+      };
+    }
+
+    const { data, error } = await (supabase.rpc as (
+      fn: string,
+      args?: Record<string, unknown>
+    ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>)(
+      "get_social_feed_hydration",
+      { p_thread_ids: ids },
+    );
+
+    if (error || !Array.isArray(data)) {
+      if (error) {
+        console.warn("[social.feed] helper hydration unavailable, falling back", error);
+      }
+      return hydrateRowsLegacy(rows);
+    }
+
+    const hydrationByThreadId = new Map<string, FeedHydrationRpcRow>(
+      (data as FeedHydrationRpcRow[])
+        .filter((row) => typeof row?.thread_id === "string" && row.thread_id.trim().length > 0)
+        .map((row) => [row.thread_id, row]),
+    );
+
+    const commentsByThread: Record<string, ThreadComment[]> = {};
+    const threadMentions: Record<string, MentionEntry[]> = {};
+    const replyMentions: Record<string, MentionEntry[]> = {};
+
+    const hydratedRows = rows.map((notice) => {
+      const hydration = hydrationByThreadId.get(notice.id);
+      if (!hydration) return notice;
+
+      const rawComments = Array.isArray(hydration.comments) ? hydration.comments : [];
+      commentsByThread[notice.id] = rawComments.map((comment) => {
+        const authorObj =
+          typeof comment === "object" && comment !== null && typeof (comment as Record<string, unknown>).author === "object"
+            ? ((comment as Record<string, unknown>).author as Record<string, unknown> | null)
+            : null;
+        return {
+          id: String((comment as Record<string, unknown>)?.id || ""),
+          thread_id: String((comment as Record<string, unknown>)?.thread_id || notice.id),
+          content: String((comment as Record<string, unknown>)?.content || ""),
+          images: Array.isArray((comment as Record<string, unknown>)?.images)
+            ? (((comment as Record<string, unknown>).images as unknown[]).filter((value): value is string => typeof value === "string"))
+            : null,
+          created_at: String((comment as Record<string, unknown>)?.created_at || new Date().toISOString()),
+          user_id: String((comment as Record<string, unknown>)?.user_id || ""),
+          author: authorObj
+            ? {
+                display_name: typeof authorObj.display_name === "string" ? authorObj.display_name : null,
+                social_id: typeof authorObj.social_id === "string" ? authorObj.social_id : null,
+                avatar_url: typeof authorObj.avatar_url === "string" ? authorObj.avatar_url : null,
+              }
+            : null,
+        } as ThreadComment;
+      });
+
+      const rawThreadMentions = Array.isArray(hydration.thread_mentions) ? hydration.thread_mentions : [];
+      threadMentions[notice.id] = rawThreadMentions
+        .map((entry) => ({
+          start: Number((entry as Record<string, unknown>)?.start ?? 0),
+          end: Number((entry as Record<string, unknown>)?.end ?? 0),
+          mentionedUserId: String((entry as Record<string, unknown>)?.mentionedUserId || ""),
+          socialIdAtTime: String((entry as Record<string, unknown>)?.socialIdAtTime || ""),
+        }))
+        .filter((entry) => entry.mentionedUserId && entry.socialIdAtTime);
+
+      const rawReplyMentions =
+        hydration.reply_mentions && typeof hydration.reply_mentions === "object"
+          ? (hydration.reply_mentions as Record<string, unknown>)
+          : {};
+      Object.entries(rawReplyMentions).forEach(([replyId, entries]) => {
+        if (!Array.isArray(entries)) return;
+        replyMentions[replyId] = entries
+          .map((entry) => ({
+            start: Number((entry as Record<string, unknown>)?.start ?? 0),
+            end: Number((entry as Record<string, unknown>)?.end ?? 0),
+            mentionedUserId: String((entry as Record<string, unknown>)?.mentionedUserId || ""),
+            socialIdAtTime: String((entry as Record<string, unknown>)?.socialIdAtTime || ""),
+          }))
+          .filter((entry) => entry.mentionedUserId && entry.socialIdAtTime);
+      });
+
+      return {
+        ...notice,
+        share_count: Number(hydration.share_count ?? notice.share_count ?? 0),
+        is_sensitive: hydration.is_sensitive === true,
+        map_id: typeof hydration.map_id === "string" ? hydration.map_id : notice.map_id ?? null,
+        alert_type: typeof hydration.alert_type === "string" ? hydration.alert_type : notice.alert_type ?? null,
+        alert_district: typeof hydration.alert_district === "string" ? hydration.alert_district : notice.alert_district ?? null,
+        has_alert_link: hydration.has_alert_link === true || notice.has_alert_link === true,
+        author: {
+          ...notice.author,
+          display_name:
+            typeof hydration.author_display_name === "string"
+              ? hydration.author_display_name
+              : notice.author?.display_name ?? null,
+          social_id:
+            typeof hydration.author_social_id === "string"
+              ? hydration.author_social_id
+              : notice.author?.social_id ?? null,
+          avatar_url:
+            typeof hydration.author_avatar_url === "string"
+              ? hydration.author_avatar_url
+              : notice.author?.avatar_url ?? null,
+          is_verified: hydration.author_is_verified === true,
+        },
+      };
+    });
+
+    await primeMentionDirectory([
+      ...hydratedRows.map((row) => row.content || ""),
+      ...Object.values(commentsByThread).flat().map((comment) => comment.content || ""),
+    ]);
+
+    const alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
+    hydratedRows.forEach((notice) => {
+      const derivedType = deriveAlertTypeFromNoticeData(notice);
+      if (derivedType) {
+        alertTypes[notice.id] = derivedType;
+      }
+    });
+
+    return {
+      rows: hydratedRows,
+      commentsByThread,
+      threadMentions,
+      replyMentions,
+      alertTypes,
+    };
+  }, [hydrateRowsLegacy, primeMentionDirectory]);
 
   const applyHydratedRows = useCallback((payload: HydratedRowsResult, options?: { reset?: boolean }) => {
     const reset = options?.reset === true;
