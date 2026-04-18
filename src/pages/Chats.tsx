@@ -4192,95 +4192,6 @@ const Chats = () => {
     [groups]
   );
 
-  const acceptGroupInviteAndOpen = useCallback(
-    async (invite: { chatId: string; chatName: string; inviteId?: string | null }) => {
-      let data: unknown = null;
-      let error: { message?: string } | null = null;
-      if (invite.inviteId) {
-        const byId = await (supabase.rpc as (
-          fn: string,
-          params?: Record<string, unknown>
-        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-          "accept_group_chat_invite_by_id",
-          { p_invite_id: invite.inviteId }
-        );
-        data = byId.data;
-        error = byId.error;
-      } else {
-        const byChat = await (supabase.rpc as (
-          fn: string,
-          params?: Record<string, unknown>
-        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-          "accept_group_chat_invite",
-          { p_chat_id: invite.chatId }
-        );
-        data = byChat.data;
-        error = byChat.error;
-      }
-      if (error) throw error;
-      const joined = Array.isArray(data)
-        ? ((data[0] || {}) as { joined?: unknown }).joined === true
-        : false;
-      if (!joined) {
-        toast.error("Invite is no longer available.");
-        return false;
-      }
-      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
-      navigate(`/chat-dialogue?room=${encodeURIComponent(invite.chatId)}&name=${encodeURIComponent(invite.chatName)}`);
-      return true;
-    },
-    [fetchExploreGroups, loadConversations, navigate]
-  );
-
-  const requestGroupJoin = useCallback(
-    async (group: Group) => {
-      if (!user?.id) {
-        toast.error("Sign in to join groups.");
-        return false;
-      }
-      const { error } = await supabase
-        .from("group_join_requests")
-        .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
-      if (error && error.code !== "23505") {
-        toast.error("Couldn't send request. Please try again.");
-        return false;
-      }
-      setSentJoinRequests((prev) => new Set([...prev, group.id]));
-      toast.success("Request sent!");
-      return true;
-    },
-    [user?.id]
-  );
-
-  const joinPublicGroupAndOpen = useCallback(
-    async (group: Group) => {
-      if (!user?.id) {
-        toast.error("Sign in to join groups.");
-        return false;
-      }
-      const { error } = await supabase
-        .from("chat_participants")
-        .insert({ chat_id: group.id, user_id: user.id, role: "member" });
-      if (error) {
-        toast.error("Couldn't join. Please try again.");
-        return false;
-      }
-      const { error: memberErr } = await supabase
-        .from("chat_room_members")
-        .insert({ chat_id: group.id, user_id: user.id });
-      if (memberErr) {
-        toast.error("Couldn't join. Please try again.");
-        return false;
-      }
-      void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
-      void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
-      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
-      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-      return true;
-    },
-    [fetchExploreGroups, loadConversations, navigate, user?.id]
-  );
-
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
     try {
@@ -4522,6 +4433,95 @@ const Chats = () => {
     profile?.pets,
     user?.id,
   ]);
+
+  const acceptGroupInviteAndOpen = useCallback(
+    async (invite: { chatId: string; chatName: string; inviteId?: string | null }) => {
+      let data: unknown = null;
+      let error: { message?: string } | null = null;
+      if (invite.inviteId) {
+        const byId = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+          "accept_group_chat_invite_by_id",
+          { p_invite_id: invite.inviteId }
+        );
+        data = byId.data;
+        error = byId.error;
+      } else {
+        const byChat = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+          "accept_group_chat_invite",
+          { p_chat_id: invite.chatId }
+        );
+        data = byChat.data;
+        error = byChat.error;
+      }
+      if (error) throw error;
+      const joined = Array.isArray(data)
+        ? ((data[0] || {}) as { joined?: unknown }).joined === true
+        : false;
+      if (!joined) {
+        toast.error("Invite is no longer available.");
+        return false;
+      }
+      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(invite.chatId)}&name=${encodeURIComponent(invite.chatName)}`);
+      return true;
+    },
+    [fetchExploreGroups, loadConversations, navigate]
+  );
+
+  const requestGroupJoin = useCallback(
+    async (group: Group) => {
+      if (!user?.id) {
+        toast.error("Sign in to join groups.");
+        return false;
+      }
+      const { error } = await supabase
+        .from("group_join_requests")
+        .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
+      if (error && error.code !== "23505") {
+        toast.error("Couldn't send request. Please try again.");
+        return false;
+      }
+      setSentJoinRequests((prev) => new Set([...prev, group.id]));
+      toast.success("Request sent!");
+      return true;
+    },
+    [user?.id]
+  );
+
+  const joinPublicGroupAndOpen = useCallback(
+    async (group: Group) => {
+      if (!user?.id) {
+        toast.error("Sign in to join groups.");
+        return false;
+      }
+      const { error } = await supabase
+        .from("chat_participants")
+        .insert({ chat_id: group.id, user_id: user.id, role: "member" });
+      if (error) {
+        toast.error("Couldn't join. Please try again.");
+        return false;
+      }
+      const { error: memberErr } = await supabase
+        .from("chat_room_members")
+        .insert({ chat_id: group.id, user_id: user.id });
+      if (memberErr) {
+        toast.error("Couldn't join. Please try again.");
+        return false;
+      }
+      void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
+      void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
+      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+      return true;
+    },
+    [fetchExploreGroups, loadConversations, navigate, user?.id]
+  );
 
   useEffect(() => {
     if (mainTab === "groups" && groupSubTab === "explore") {
