@@ -3503,7 +3503,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     )}
                   >
                     <div className="relative flex items-start gap-3">
-                      <div className="absolute right-0 top-0 z-10 flex items-center gap-1">
+                      <div className="absolute right-0 -top-1 z-10 flex items-center gap-1">
 	                        <button
 	                          type="button"
 	                          onClick={() => toggleSavedNotice(notice.id)}
