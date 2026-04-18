@@ -201,6 +201,7 @@ const LINK_PREVIEW_QUEUE_LIMIT = 3;
 const LINK_PREVIEW_LRU_LIMIT = 120;
 const LINK_PREVIEW_STORAGE_KEY = "noticeboard_link_preview_lru_v1";
 const LINK_PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
+const PULL_REFRESH_START_ZONE_PX = 88;
 
 const isLinkPreviewFresh = (value: StoredLinkPreview | null | undefined, now = Date.now()) =>
   Boolean(value && value.url && now - value.fetchedAt < LINK_PREVIEW_TTL_MS);
@@ -317,6 +318,18 @@ const countWords = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return 0;
   return trimmed.split(/\s+/).filter(Boolean).length;
+};
+
+const findNearestScrollableAncestor = (element: HTMLElement | null) => {
+  let current = element?.parentElement ?? null;
+  while (current) {
+    const style = window.getComputedStyle(current);
+    if (/(auto|scroll)/.test(style.overflowY || "") && current.scrollHeight > current.clientHeight + 1) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
 };
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -1302,8 +1315,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
       requestAnimationFrame(() => {
         if (!input) return;
-        input.focus({ preventScroll: true });
+        const activeElement = document.activeElement;
+        const scrollParent = findNearestScrollableAncestor(input);
+        const preservedScrollTop = scrollParent?.scrollTop ?? null;
+        const preservedWindowY = window.scrollY;
+        if (activeElement !== input) {
+          input.focus({ preventScroll: true });
+        }
         input.setSelectionRange(nextCaret, nextCaret);
+        if (scrollParent && preservedScrollTop != null) {
+          scrollParent.scrollTop = preservedScrollTop;
+        }
+        if (window.scrollY !== preservedWindowY) {
+          window.scrollTo({ top: preservedWindowY, behavior: "auto" });
+        }
       });
     },
     []
@@ -3083,6 +3108,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           <button
             key={`${suggestion.userId}-${suggestion.socialId}`}
             type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => event.preventDefault()}
             onClick={() => onSelect(suggestion)}
             className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/50"
           >
@@ -3641,17 +3668,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [fetchNewerNotices, pullRefreshing]);
 
   const handleTopPullStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    if ((scrollContainerRef.current?.scrollTop ?? 0) > 0 || pullRefreshing) {
+    const scroller = scrollContainerRef.current;
+    if ((scroller?.scrollTop ?? 0) > 0 || pullRefreshing) {
       pullTouchStartYRef.current = null;
       pullTouchEligibleRef.current = false;
       return;
     }
-    const scrollerRect = scrollContainerRef.current?.getBoundingClientRect();
+    const scrollerRect = scroller?.getBoundingClientRect();
     const filtersRect = filtersRowRef.current?.getBoundingClientRect();
     const touchY = event.touches[0]?.clientY ?? null;
-    const upperHalfLimit = scrollerRect ? scrollerRect.top + scrollerRect.height * 0.5 : Number.POSITIVE_INFINITY;
+    const nearTopZoneLimit = scrollerRect ? scrollerRect.top + PULL_REFRESH_START_ZONE_PX : Number.POSITIVE_INFINITY;
     const lowerBound = filtersRect ? filtersRect.bottom : 0;
-    pullTouchEligibleRef.current = touchY != null && touchY >= lowerBound && touchY <= upperHalfLimit;
+    pullTouchEligibleRef.current = touchY != null && touchY >= lowerBound && touchY <= nearTopZoneLimit;
     pullTouchStartYRef.current = pullTouchEligibleRef.current ? touchY : null;
     pullTriggeredRef.current = false;
   }, [pullRefreshing, scrollContainerRef]);
@@ -3662,10 +3690,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const currentY = event.touches[0]?.clientY ?? null;
     if (startY == null || currentY == null) return;
     if ((scrollContainerRef.current?.scrollTop ?? 0) > 0) {
+      pullTouchEligibleRef.current = false;
+      pullTouchStartYRef.current = null;
       setPullOffset(0);
       return;
     }
-    const deltaY = Math.max(0, currentY - startY);
+    if (currentY <= startY) {
+      setPullOffset(0);
+      return;
+    }
+    const deltaY = currentY - startY;
     const eased = Math.min(deltaY * 0.55, 64);
     setPullOffset(eased);
   }, [scrollContainerRef]);

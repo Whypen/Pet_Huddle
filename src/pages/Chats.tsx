@@ -3298,6 +3298,15 @@ const Chats = () => {
     setActiveRoomMessages(nextMessages);
     void markChatMessagesRead(roomId, nextMessages);
   }, [markChatMessagesRead]);
+  const subscribedInboxRoomIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...chats.map((chat) => String(chat.id || "").trim()), ...groups.map((group) => String(group.id || "").trim())].filter(Boolean)
+        )
+      ).sort(),
+    [chats, groups]
+  );
 
   useEffect(() => {
     if (!profile?.id || subscribedInboxRoomIds.length === 0) return;
@@ -3481,16 +3490,6 @@ const Chats = () => {
     () => chats.reduce((sum, chat) => sum + Math.max(0, chat.unread || 0), 0) + groups.reduce((sum, group) => sum + Math.max(0, group.unread || 0), 0),
     [chats, groups]
   );
-  const subscribedInboxRoomIds = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [...chats.map((chat) => String(chat.id || "").trim()), ...groups.map((group) => String(group.id || "").trim())].filter(Boolean)
-        )
-      ).sort(),
-    [chats, groups]
-  );
-
   useEffect(() => {
     if (!groupManageId) {
       setGroupDescriptionEditing(false);
