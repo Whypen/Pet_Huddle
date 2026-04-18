@@ -308,7 +308,7 @@ const getDiscoverySocialRole = (profile: DiscoveryProfile) => {
   const token = role.toLowerCase();
   if (token.includes("nann")) return "Pet Nanny";
   if (token.includes("play")) return "Pet Parent";
-  if (token.includes("animal")) return "Animal Friend (No Pet)";
+  if (token.includes("animal")) return "Animal Friend";
   return null;
 };
 
@@ -2455,7 +2455,7 @@ const Chats = () => {
         peerUserId: counterpartUserId,
         name: counterpartName,
         avatarUrl: counterpartAvatar,
-        socialAvailability,
+        socialAvailability: normalizeAvailabilityLabel(socialAvailability),
         previewOverride: previewOverride || null,
         isVerified: isOfficialTeamHuddle || row.peer_is_verified === true,
         hasCar: Boolean(row.peer_has_car),
@@ -4778,7 +4778,7 @@ const Chats = () => {
 
   const isTeamHuddleAvatarTapDisabled = useCallback(
     (userId: string | null | undefined, displayName: string | null | undefined) =>
-      String(userId || "").trim() === TEAM_HUDDLE_USER_ID || isTeamHuddleIdentity(displayName, "teamhuddle"),
+      String(userId || "").trim() === TEAM_HUDDLE_USER_ID || isTeamHuddleIdentity(displayName, null),
     []
   );
 
