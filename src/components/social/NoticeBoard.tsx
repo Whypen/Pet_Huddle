@@ -201,7 +201,7 @@ const LINK_PREVIEW_QUEUE_LIMIT = 3;
 const LINK_PREVIEW_LRU_LIMIT = 120;
 const LINK_PREVIEW_STORAGE_KEY = "noticeboard_link_preview_lru_v1";
 const LINK_PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
-const PULL_REFRESH_START_ZONE_PX = 88;
+const PULL_REFRESH_START_ZONE_PX = 156;
 
 const isLinkPreviewFresh = (value: StoredLinkPreview | null | undefined, now = Date.now()) =>
   Boolean(value && value.url && now - value.fetchedAt < LINK_PREVIEW_TTL_MS);
@@ -3704,10 +3704,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return;
     }
     const scrollerRect = scroller?.getBoundingClientRect();
-    const filtersRect = filtersRowRef.current?.getBoundingClientRect();
     const touchY = event.touches[0]?.clientY ?? null;
     const nearTopZoneLimit = scrollerRect ? scrollerRect.top + PULL_REFRESH_START_ZONE_PX : Number.POSITIVE_INFINITY;
-    const lowerBound = filtersRect ? filtersRect.bottom : 0;
+    const lowerBound = scrollerRect ? scrollerRect.top : 0;
     pullTouchEligibleRef.current = touchY != null && touchY >= lowerBound && touchY <= nearTopZoneLimit;
     pullTouchStartYRef.current = pullTouchEligibleRef.current ? touchY : null;
     pullTriggeredRef.current = false;
