@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { getChatRoomSeenMap } from "@/lib/chatSeen";
 
 const navItems = [
   { icon: Home,          label: "Home",          path: "/" },
@@ -59,14 +60,7 @@ export const BottomNav = () => {
           }
           return;
         }
-        const seenKey = `chat_room_seen_${userId}`;
-        let seenByRoom: Record<string, string> = {};
-        try {
-          const rawSeen = localStorage.getItem(seenKey);
-          seenByRoom = rawSeen ? (JSON.parse(rawSeen) as Record<string, string>) : {};
-        } catch {
-          seenByRoom = {};
-        }
+        const seenByRoom = getChatRoomSeenMap(userId);
         const { data: messages, error: messagesError } = await supabase
           .from("chat_messages")
           .select("chat_id, sender_id, created_at")
@@ -108,18 +102,24 @@ export const BottomNav = () => {
       const next = Number(detail?.count ?? 0);
       setChatUnread(Number.isFinite(next) ? Math.max(0, next) : 0);
     };
+    const onRoomSeen = () => {
+      if (!profile?.id) return;
+      void recalcUnreadFromBackend(profile.id);
+    };
     const onStorage = (event: StorageEvent) => {
       if (event.key !== unreadStorageKey) return;
       const next = event.newValue ? Number(event.newValue) : 0;
       setChatUnread(Number.isFinite(next) ? Math.max(0, next) : 0);
     };
     window.addEventListener("huddle:chats-unread", onUnread as EventListener);
+    window.addEventListener("huddle:chat-room-seen", onRoomSeen as EventListener);
     window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener("huddle:chats-unread", onUnread as EventListener);
+      window.removeEventListener("huddle:chat-room-seen", onRoomSeen as EventListener);
       window.removeEventListener("storage", onStorage);
     };
-  }, [unreadStorageKey]);
+  }, [profile?.id, recalcUnreadFromBackend, unreadStorageKey]);
 
   useEffect(() => {
     if (!profile?.id) return;

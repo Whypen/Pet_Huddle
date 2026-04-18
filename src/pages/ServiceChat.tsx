@@ -37,6 +37,7 @@ import {
 } from "@/lib/externalLinkPreview";
 import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
 import { parseChatShareMessage } from "@/lib/shareModel";
+import { markChatRoomSeen } from "@/lib/chatSeen";
 
 type ActiveSheet = "request" | "quote" | "payment" | "review" | "dispute" | null;
 type BlockState = "none" | "blocked_by_me" | "blocked_by_them";
@@ -159,6 +160,13 @@ const ServiceChat = () => {
     ? lockedPreviewUrl
     : composerFirstUrl;
   const composerPreview = activePreviewUrl ? linkPreviewByUrl[activePreviewUrl] || null : null;
+  const showLoading = authLoading || loading || (!!roomId && (!userId || !currentRoomResolved));
+
+  const markCurrentRoomSeen = useCallback(() => {
+    if (!userId || !roomId || messages.length === 0) return;
+    const latestMessage = messages[messages.length - 1];
+    markChatRoomSeen(userId, roomId, latestMessage?.created_at || null);
+  }, [messages, roomId, userId]);
 
   useEffect(() => {
     return () => {
@@ -237,7 +245,8 @@ const ServiceChat = () => {
     container.scrollTop = container.scrollHeight;
     pendingInitialScrollRef.current = false;
     setShowScrollToBottom(false);
-  }, [loading, messages, showLoading]);
+    markCurrentRoomSeen();
+  }, [loading, markCurrentRoomSeen, messages, showLoading]);
 
   useEffect(() => {
     if (loading || showLoading || messages.length === 0) return;
@@ -247,7 +256,18 @@ const ServiceChat = () => {
     if (lastMessage.sender_id !== userId) return;
     container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
     setShowScrollToBottom(false);
-  }, [loading, messages, showLoading, userId]);
+    markCurrentRoomSeen();
+  }, [loading, markCurrentRoomSeen, messages, showLoading, userId]);
+
+  useEffect(() => {
+    if (loading || showLoading || messages.length === 0) return;
+    const container = messageScrollRef.current;
+    if (!container) return;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceToBottom <= 120) {
+      markCurrentRoomSeen();
+    }
+  }, [loading, markCurrentRoomSeen, messages, showLoading]);
 
   useEffect(() => {
     const computeHeight = () => {
@@ -398,8 +418,6 @@ const ServiceChat = () => {
     status,
   ]);
 
-  const showLoading = authLoading || loading || (!!roomId && (!userId || !currentRoomResolved));
-
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-hidden">
       <div ref={topHeaderRef}>
@@ -450,6 +468,9 @@ const ServiceChat = () => {
           const container = event.currentTarget;
           const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
           setShowScrollToBottom(distanceToBottom > 120);
+          if (distanceToBottom <= 120) {
+            markCurrentRoomSeen();
+          }
           if (container.scrollTop <= 80 && hasOlderMessages && !loadingOlderMessages && !loading && !showLoading) {
             loadingOlderAnchorRef.current = {
               top: container.scrollTop,
@@ -558,7 +579,10 @@ const ServiceChat = () => {
         {showScrollToBottom ? (
           <button
             type="button"
-            onClick={() => scrollToBottom("smooth")}
+            onClick={() => {
+              scrollToBottom("smooth");
+              markCurrentRoomSeen();
+            }}
             className="sticky bottom-3 ml-auto flex items-center gap-1 rounded-full border border-border/50 bg-background px-3 py-1.5 text-xs text-brandText shadow-sm"
           >
             <ArrowDown className="h-3.5 w-3.5" />

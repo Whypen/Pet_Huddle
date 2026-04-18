@@ -25,6 +25,7 @@ import {
   type ExternalLinkPreview,
 } from "@/lib/externalLinkPreview";
 import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
+import { markChatRoomSeen } from "@/lib/chatSeen";
 import {
   TEAM_HUDDLE_AVAILABILITY,
   TEAM_HUDDLE_DISPLAY_NAME,
@@ -190,6 +191,11 @@ const ChatDialogue = () => {
     ? lockedPreviewUrl
     : composerFirstUrl;
   const composerPreview = activeComposerPreviewUrl ? linkPreviewByUrl[activeComposerPreviewUrl] || null : null;
+  const markCurrentRoomSeen = useCallback(() => {
+    if (!profile?.id || !roomId || messages.length === 0) return;
+    const latestMessage = messages[messages.length - 1];
+    markChatRoomSeen(profile.id, roomId, latestMessage?.created_at || null);
+  }, [messages, profile?.id, roomId]);
   const parseMessageContent = useCallback((content: string): ParsedMessage => {
     const share = parseChatShareMessage(content);
     if (share) {
@@ -407,7 +413,17 @@ const ChatDialogue = () => {
     if (!pendingInitialScrollRef.current || loading) return;
     pendingInitialScrollRef.current = false;
     snapToLatestMessage();
-  }, [loading, messages, snapToLatestMessage]);
+    markCurrentRoomSeen();
+  }, [loading, markCurrentRoomSeen, messages, snapToLatestMessage]);
+
+  useEffect(() => {
+    const viewport = messagesViewportRef.current;
+    if (!viewport || loading || !roomId || messages.length === 0) return;
+    const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (distanceToBottom <= 120) {
+      markCurrentRoomSeen();
+    }
+  }, [loading, markCurrentRoomSeen, messages, roomId]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!roomId || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
@@ -1278,6 +1294,10 @@ const ChatDialogue = () => {
         ref={messagesViewportRef}
         className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3"
         onScroll={(event) => {
+          const distanceToBottom = event.currentTarget.scrollHeight - event.currentTarget.scrollTop - event.currentTarget.clientHeight;
+          if (distanceToBottom <= 120) {
+            markCurrentRoomSeen();
+          }
           if (event.currentTarget.scrollTop < 56) {
             void loadOlderMessages();
           }
