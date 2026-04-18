@@ -3600,7 +3600,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             expandedContentIds.has(notice.id) ? "max-h-none" : "max-h-[120px] overflow-hidden"
                           )}
                         >
-                          {renderTextWithMentions(notice.content, threadMentionsById[notice.id], `thread-${notice.id}`)}
+                          {renderTextWithMentions(
+                            (() => {
+                              const body = notice.content || "";
+                              const u = extractFirstHttpUrl(body);
+                              const p = u ? linkPreviewByUrl[u] : null;
+                              if (!u || !p?.resolved || p.failed) return body;
+                              return body.replace(u, "").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+                            })(),
+                            threadMentionsById[notice.id],
+                            `thread-${notice.id}`,
+                          )}
                         </div>
                         {expandableContentById[notice.id] ? (
                           <button
