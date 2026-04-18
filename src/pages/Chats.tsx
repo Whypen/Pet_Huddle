@@ -4519,7 +4519,7 @@ const Chats = () => {
         return false;
       }
       await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
-      navigate(`/chat-dialogue?room=${encodeURIComponent(invite.chatId)}&name=${encodeURIComponent(invite.chatName)}`);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(invite.chatId)}&name=${encodeURIComponent(invite.chatName)}&joined=1`);
       return true;
     },
     [fetchExploreGroups, loadConversations, navigate]
@@ -4568,7 +4568,7 @@ const Chats = () => {
       void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
       void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
       await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
-      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}&joined=1`);
       return true;
     },
     [fetchExploreGroups, loadConversations, navigate, user?.id]

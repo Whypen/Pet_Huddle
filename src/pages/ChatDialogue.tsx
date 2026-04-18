@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -25,7 +25,6 @@ import {
   isTeamHuddleIdentity,
   resolveTeamHuddleAvatar,
 } from "@/lib/teamHuddleIdentity";
-import { pickFiles } from "@/lib/nativeShell";
 
 type ChatMessage = {
   id: string;
@@ -152,10 +151,12 @@ const ChatDialogue = () => {
   const [confirmRemoveGroupOpen, setConfirmRemoveGroupOpen] = useState(false);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const composerFileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingReadIdsRef = useRef<Set<string>>(new Set());
   const readFlushTimerRef = useRef<number | null>(null);
   const readFlushInFlightRef = useRef(false);
   const pendingInitialScrollRef = useRef(false);
+  const joinedGroupHydrationRef = useRef<string | null>(null);
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
@@ -404,6 +405,28 @@ const ChatDialogue = () => {
     }
   }, [hasOlderMessages, loadingOlderMessages, markMessagesAsRead, messages, roomId]);
 
+  const refreshReadReceipts = useCallback(async (messageRows?: ChatMessage[]) => {
+    if (!roomId || !profile?.id) return;
+    const sourceRows = messageRows || messages;
+    if (sourceRows.length === 0) {
+      setReadMessageIds(new Set());
+      return;
+    }
+    const myMessageIds = sourceRows.filter((message) => message.sender_id === profile.id).map((message) => message.id);
+    if (myMessageIds.length === 0) {
+      setReadMessageIds(new Set());
+      return;
+    }
+    const { data } = await supabase
+      .from("message_reads")
+      .select("message_id")
+      .in("message_id", myMessageIds)
+      .neq("user_id", profile.id);
+    if (data) {
+      setReadMessageIds(new Set((data as { message_id: string }[]).map((row) => row.message_id)));
+    }
+  }, [messages, profile?.id, roomId]);
+
   const openUserProfile = useCallback(async (userId: string, fallbackDisplayName: string) => {
     if (!userId || isTeamHuddleIdentity(fallbackDisplayName, null)) return;
     const { data } = await supabase
@@ -557,6 +580,19 @@ const ChatDialogue = () => {
     return uploaded;
   }, [profile?.id, roomId]);
 
+  const appendComposerUploads = useCallback((files: File[]) => {
+    const allowed = files.filter((file) => {
+      if (!file.type?.startsWith("video/")) return true;
+      return canSendVideo;
+    });
+    if (files.some((file) => file.type?.startsWith("video/")) && !canSendVideo) {
+      toast.info("Video upload is for Gold members only.");
+    }
+    if (allowed.length > 0) {
+      setComposerUploads((prev) => [...prev, ...allowed].slice(0, 10));
+    }
+  }, [canSendVideo]);
+
   useEffect(() => {
     if (!profile?.id) {
       navigate("/auth", { replace: true });
@@ -564,6 +600,7 @@ const ChatDialogue = () => {
     }
 
     const room = searchParams.get("room");
+    const joinedGroup = searchParams.get("joined") === "1";
     const name = searchParams.get("name") || "Conversation";
     const hintedUserId = searchParams.get("with");
     setLoading(true);
@@ -612,6 +649,8 @@ const ChatDialogue = () => {
             await loadRoomMessages(nextRoomId);
             if (!grouped) {
               await loadCounterpart(nextRoomId, name, directTargetId);
+            } else if (joinedGroup) {
+              joinedGroupHydrationRef.current = nextRoomId;
             }
             pendingInitialScrollRef.current = true;
             setLoading(false);
@@ -642,6 +681,8 @@ const ChatDialogue = () => {
           await loadRoomMessages(nextRoomId);
           if (!grouped2) {
             await loadCounterpart(nextRoomId, name, fallbackTargetId);
+          } else if (joinedGroup) {
+            joinedGroupHydrationRef.current = nextRoomId;
           }
           pendingInitialScrollRef.current = true;
           setLoading(false);
@@ -711,19 +752,8 @@ const ChatDialogue = () => {
   // Initial load of read receipts for my sent messages
   useEffect(() => {
     if (!roomId || !profile?.id || messages.length === 0) return;
-    const myMessageIds = messages.filter((m) => m.sender_id === profile.id).map((m) => m.id);
-    if (myMessageIds.length === 0) return;
-    void (async () => {
-      const { data } = await supabase
-        .from("message_reads")
-        .select("message_id")
-        .in("message_id", myMessageIds)
-        .neq("user_id", profile.id);
-      if (data) {
-        setReadMessageIds(new Set((data as { message_id: string }[]).map((r) => r.message_id)));
-      }
-    })();
-  }, [roomId, profile?.id, messages]);
+    void refreshReadReceipts(messages);
+  }, [messages, profile?.id, refreshReadReceipts, roomId]);
 
   // Realtime subscription for blue tick — separate from message reload
   useEffect(() => {
@@ -738,6 +768,34 @@ const ChatDialogue = () => {
       .subscribe();
     return () => { void supabase.removeChannel(readChannel); };
   }, [roomId, profile?.id]);
+
+  useEffect(() => {
+    if (!roomId || !isGroup || joinedGroupHydrationRef.current !== roomId) return;
+    let cancelled = false;
+    const settle = async () => {
+      try {
+        const grouped = await loadGroupInfo(roomId);
+        if (!grouped || cancelled) return;
+        await loadRoomMessages(roomId);
+        if (cancelled) return;
+        await refreshReadReceipts();
+      } catch {
+        // best-effort settle refresh only
+      }
+    };
+    const timerA = window.setTimeout(() => {
+      void settle();
+    }, 300);
+    const timerB = window.setTimeout(() => {
+      void settle();
+      joinedGroupHydrationRef.current = null;
+    }, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerA);
+      window.clearTimeout(timerB);
+    };
+  }, [isGroup, loadGroupInfo, loadRoomMessages, refreshReadReceipts, roomId]);
 
   // For group chats: lazily fetch display names for any new sender not yet loaded
   useEffect(() => {
@@ -777,8 +835,6 @@ const ChatDialogue = () => {
     setUploadingComposer(composerUploads.length > 0);
     const prevText = chatInput;
     const prevUploads = [...composerUploads];
-    setChatInput("");
-    setComposerUploads([]);
     try {
       const attachments = await uploadFilesToNotices(prevUploads, "chat-media");
       const payload = JSON.stringify({
@@ -787,6 +843,11 @@ const ChatDialogue = () => {
       });
       const { error } = await supabase.from("chat_messages").insert({ chat_id: roomId, sender_id: profile.id, content: payload });
       if (error) throw error;
+      setChatInput("");
+      setComposerUploads([]);
+      if (composerFileInputRef.current) {
+        composerFileInputRef.current.value = "";
+      }
       await loadRoomMessages(roomId);
     } catch {
       toast.error("Failed to send message");
@@ -798,29 +859,23 @@ const ChatDialogue = () => {
     }
   }, [blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
 
-  const attachComposerMedia = useCallback(async () => {
+  const attachComposerMedia = useCallback(() => {
     const cannotAttach =
       blockState === "blocked_by_them" ||
       blockState === "blocked_by_me" ||
       unmatchState === "unmatched_by_them" ||
       sending;
     if (cannotAttach) return;
-    const picked = await pickFiles({
-      accept: "image/*,video/*",
-      multiple: true,
-      source: "photo-library",
-    });
-    const allowed = picked.filter((file) => {
-      if (!file.type?.startsWith("video/")) return true;
-      return canSendVideo;
-    });
-    if (picked.some((file) => file.type?.startsWith("video/")) && !canSendVideo) {
-      toast.info("Video upload is for Gold members only.");
+    composerFileInputRef.current?.click();
+  }, [blockState, sending, unmatchState]);
+
+  const handleComposerMediaChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length > 0) {
+      appendComposerUploads(files);
     }
-    if (allowed.length) {
-      setComposerUploads((prev) => [...prev, ...allowed].slice(0, 10));
-    }
-  }, [blockState, canSendVideo, sending, unmatchState]);
+    event.target.value = "";
+  }, [appendComposerUploads]);
 
   const openCounterpartProfile = useCallback(async () => {
     if (!counterpart?.id || counterpart.isTeamHuddle) return;
@@ -1338,7 +1393,7 @@ const ChatDialogue = () => {
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-transparent disabled:opacity-45"
             onClick={() => {
-              void attachComposerMedia();
+              attachComposerMedia();
             }}
             aria-label="Upload media"
             disabled={
@@ -1350,6 +1405,14 @@ const ChatDialogue = () => {
           >
             <ImagePlus className="h-4 w-4 text-muted-foreground" />
           </button>
+          <input
+            ref={composerFileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            className="hidden"
+            onChange={handleComposerMediaChange}
+          />
           <input
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
