@@ -51,6 +51,7 @@ import { ScrollToTop } from "@/components/routing/ScrollToTop";
 import JoinGroup from "./pages/JoinGroup";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
+import { NativeRuntimeBridge } from "@/components/native/NativeRuntimeBridge";
 
 const CHUNK_RETRY_FLAG_PREFIX = "huddle:lazy-reload:";
 const forceReloadToLatestBundle = (key: string) => {
@@ -85,7 +86,6 @@ const lazyWithChunkRecovery = <T extends ComponentType<unknown>>(
     }
   });
 
-const Discover = lazyWithChunkRecovery("discover", () => import("./pages/Discover"));
 const Chats = lazyWithChunkRecovery("chats", () => import("./pages/Chats"));
 const ChatDialogue = lazyWithChunkRecovery("chat-dialogue", () => import("./pages/ChatDialogue"));
 const ServiceChat = lazyWithChunkRecovery("service-chat", () => import("./pages/ServiceChat"));
@@ -164,6 +164,7 @@ const App = () => (
                   <UpsellBannerProvider>
                   <OfflineBanner />
                   <ScrollToTop />
+                  <NativeRuntimeBridge />
                   <Routes>
                   {/* Public Routes */}
                   <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
@@ -214,10 +215,7 @@ const App = () => (
                     path="/discover"
                     element={
                       <ProtectedRoute>
-                        <AppShell>
-                          <RouteSuspense><Discover /></RouteSuspense>
-                          <BottomNav />
-                        </AppShell>
+                        <Navigate to="/chats?tab=discover" replace />
                       </ProtectedRoute>
                     }
                   />

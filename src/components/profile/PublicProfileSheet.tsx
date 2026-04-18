@@ -12,7 +12,7 @@ import { ensureDirectChatRoom } from "@/lib/chatRooms";
 import { quotaConfig } from "@/config/quotaConfig";
 import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
 import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
-import { startStripeCheckout } from "@/lib/stripeCheckout";
+import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { buildStarIntroPayload } from "@/lib/starChat";
 
@@ -254,16 +254,16 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           p_kind: "star",
           p_title: "New star",
           p_body: "Someone sent you a Star ⭐ Tap to find out who.",
-          p_href: `/chat-dialogue?room=${roomId}`,
+          p_href: `/chat-dialogue?room=${roomId}&with=${profile.id}`,
           p_data: { room_id: roomId, from_user_id: profile.id, type: "star" },
         }
       );
       setStarFlightVisible(true);
-      window.setTimeout(() => {
-        navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}`);
+      window.requestAnimationFrame(() => {
+        navigate(`/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}&with=${encodeURIComponent(viewedUserId)}`);
         onClose();
         setStarFlightVisible(false);
-      }, 420);
+      });
     } catch {
       toast.error("Unable to open chat right now.");
     } finally {
@@ -281,15 +281,14 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
     setStarCheckoutLoading(true);
     try {
       const selectedPlan = quotaConfig.stripePlans[starUpgradeTier][starUpgradeBilling];
-      const url = await startStripeCheckout({
+      await handoffStripeCheckout({
         mode: "subscription",
         type: `${starUpgradeTier}_${starUpgradeBilling === "annual" ? "annual" : "monthly"}`,
         lookupKey: selectedPlan.lookupKey,
         priceId: selectedPlan.priceId,
         successUrl: `${window.location.origin}/premium`,
         cancelUrl: window.location.href,
-      });
-      window.location.assign(url);
+      }, "profile-star-upgrade");
     } catch {
       toast.error("Unable to start checkout right now.");
     } finally {

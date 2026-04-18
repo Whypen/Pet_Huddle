@@ -28,17 +28,19 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
 
   const [code, setCode]         = useState(initialCode ?? "");
   const [isJoining, setIsJoining] = useState(false);
+  const [inlineError, setInlineError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const resetAndClose = () => {
     setCode("");
+    setInlineError("");
     onClose();
   };
 
   const handleJoin = async (rawCode: string) => {
-    const trimmed = rawCode.trim().toUpperCase();
+    const trimmed = rawCode.replace(/\s+/g, "").trim().toUpperCase();
     if (trimmed.length !== 6) {
-      toast.error("Enter the full 6-digit code.");
+      setInlineError("This code is invalid. Please try again.");
       return;
     }
     if (!user?.id) {
@@ -46,61 +48,29 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
       return;
     }
 
+    setInlineError("");
     setIsJoining(true);
     try {
-      // 1. Look up the group by room_code
-      const { data: chat, error: findError } = await supabase
-        .from("chats")
-        .select("id, name, visibility")
-        .eq("room_code", trimmed)
-        .eq("visibility", "private")
-        .maybeSingle();
+      const { data, error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>)("join_private_group_by_code", {
+        p_code: trimmed,
+      });
 
-      if (findError) throw findError;
-      if (!chat) {
-        toast.error("Code not found. Check and try again.");
-        setIsJoining(false);
+      if (error) throw error;
+
+      const row = Array.isArray(data) ? (data[0] as { chat_id?: string | null; chat_name?: string | null; joined?: boolean; reason?: string | null } | undefined) : undefined;
+      if (!row?.joined || !row.chat_id) {
+        setInlineError("This code is invalid. Please try again.");
         return;
       }
 
-      // 2. Check if already a member
-      const { data: existing } = await supabase
-        .from("chat_participants")
-        .select("id")
-        .eq("chat_id", chat.id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (existing) {
-        // Already in — just navigate
-        toast.success(`Back to ${chat.name}!`);
-        resetAndClose();
-        navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}`);
-        return;
-      }
-
-      // 3. Join — code is trust, no approval required
-      const { error: joinError } = await supabase
-        .from("chat_participants")
-        .insert({ chat_id: chat.id, user_id: user.id, role: "member" });
-      if (joinError) throw joinError;
-
-      // Add to chat_room_members so the group appears in My Groups
-      const { error: memberError } = await supabase
-        .from("chat_room_members")
-        .insert({ chat_id: chat.id, user_id: user.id });
-      if (memberError) throw memberError;
-
-      // Welcome message + notify admin (non-blocking)
-      void supabase.rpc("post_group_welcome_message", { p_chat_id: chat.id, p_user_id: user.id });
-      void supabase.rpc("notify_group_join", { p_chat_id: chat.id, p_user_id: user.id });
-
-      toast.success(`Joined ${chat.name}!`);
       resetAndClose();
-      navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}`);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(row.chat_id)}&name=${encodeURIComponent(row.chat_name || "Group")}`);
     } catch (err) {
       console.error("Join with code error:", err);
-      toast.error("Couldn't join. Please try again.");
+      setInlineError("This code is invalid. Please try again.");
     } finally {
       setIsJoining(false);
     }
@@ -109,6 +79,7 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/[^0-9A-Za-z]/g, "").toUpperCase().slice(0, 6);
     setCode(raw);
+    if (inlineError) setInlineError("");
     if (raw.length === 6) {
       void handleJoin(raw);
     }
@@ -149,6 +120,11 @@ export function JoinWithCodeSheet({ isOpen, onClose, initialCode }: JoinWithCode
             ].join(" ")}
           />
         </div>
+        {inlineError ? (
+          <p className="mt-[-8px] text-center text-[12px] font-medium text-[var(--color-error,#E84545)]">
+            {inlineError}
+          </p>
+        ) : null}
 
         {/* Digit progress dots */}
         <div className="flex gap-2">

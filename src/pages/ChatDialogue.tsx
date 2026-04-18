@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeCheck, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,6 +23,7 @@ import {
   isTeamHuddleIdentity,
   resolveTeamHuddleAvatar,
 } from "@/lib/teamHuddleIdentity";
+import { pickFiles } from "@/lib/nativeShell";
 
 type ChatMessage = {
   id: string;
@@ -59,6 +60,7 @@ type CounterpartProfile = {
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
+const MESSAGE_PAGE_SIZE = 40;
 
 const formatMessageTime = (iso: string) => {
   const dt = new Date(iso);
@@ -118,10 +120,17 @@ const ChatDialogue = () => {
   const [isGroup, setIsGroup] = useState(false);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
+  const [groupDescription, setGroupDescription] = useState("");
+  const [groupVisibility, setGroupVisibility] = useState<"public" | "private" | null>(null);
+  const [groupRoomCode, setGroupRoomCode] = useState<string | null>(null);
+  const [groupLocationLabel, setGroupLocationLabel] = useState<string | null>(null);
+  const [groupIsAdmin, setGroupIsAdmin] = useState(false);
   const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const [groupInfoOpen, setGroupInfoOpen] = useState(false);
   const [groupMuted, setGroupMuted] = useState(false);
   const [groupMediaUrls, setGroupMediaUrls] = useState<string[]>([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
   // Inline manage members — stays within ChatDialogue, no navigate-away
   const [groupManageOpen, setGroupManageOpen] = useState(false);
@@ -131,8 +140,8 @@ const ChatDialogue = () => {
   const [groupManageLoading, setGroupManageLoading] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
@@ -235,22 +244,47 @@ const ChatDialogue = () => {
   const loadGroupInfo = useCallback(async (nextRoomId: string): Promise<boolean> => {
     const { data: chatRow } = await supabase
       .from("chats")
-      .select("id, name, type, avatar_url")
+      .select("id, name, type, avatar_url, description, visibility, room_code, location_label, created_by")
       .eq("id", nextRoomId)
       .maybeSingle();
-    const row = chatRow as { name?: string | null; type?: string; avatar_url?: string | null } | null;
+    const row = chatRow as {
+      name?: string | null;
+      type?: string;
+      avatar_url?: string | null;
+      description?: string | null;
+      visibility?: "public" | "private" | null;
+      room_code?: string | null;
+      location_label?: string | null;
+      created_by?: string | null;
+    } | null;
     if (!row || row.type !== "group") return false;
 
     setIsGroup(true);
     setGroupAvatarUrl(row.avatar_url || null);
     setRoomName(row.name || "Group");
+    setGroupDescription(String(row.description || ""));
+    setGroupVisibility(row.visibility || null);
+    setGroupRoomCode(row.room_code || null);
+    setGroupLocationLabel(row.location_label || null);
+    setGroupIsAdmin((row.created_by || null) === profile?.id);
 
-    const { data: members } = await supabase
-      .from("chat_room_members")
-      .select("user_id")
-      .eq("chat_id", nextRoomId);
+    const [{ data: members }, { data: participantRow }] = await Promise.all([
+      supabase
+        .from("chat_room_members")
+        .select("user_id")
+        .eq("chat_id", nextRoomId),
+      profile?.id
+        ? supabase
+            .from("chat_participants")
+            .select("is_muted")
+            .eq("chat_id", nextRoomId)
+            .eq("user_id", profile.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
     const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
     setGroupMemberCount(memberIds.length);
+    setGroupMuted(Boolean((participantRow as { is_muted?: boolean } | null)?.is_muted));
 
     if (memberIds.length > 0) {
       memberIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
@@ -265,19 +299,66 @@ const ChatDialogue = () => {
       setSenderNames(nameMap);
     }
     return true;
-  }, []);
+  }, [profile?.id]);
 
   const loadRoomMessages = useCallback(async (nextRoomId: string) => {
     const { data, error } = await supabase
       .from("chat_messages")
       .select("id, sender_id, content, created_at")
       .eq("chat_id", nextRoomId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE + 1);
     if (error) throw error;
-    const nextMessages = (data || []) as ChatMessage[];
+    const rows = (data || []) as ChatMessage[];
+    const nextMessages = rows.slice(0, MESSAGE_PAGE_SIZE).reverse();
+    setHasOlderMessages(rows.length > MESSAGE_PAGE_SIZE);
     setMessages(nextMessages);
     void markMessagesAsRead(nextMessages);
   }, [markMessagesAsRead]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!roomId || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
+    const oldestCreatedAt = messages[0]?.created_at;
+    if (!oldestCreatedAt) return;
+    setLoadingOlderMessages(true);
+    const viewport = messagesViewportRef.current;
+    const previousHeight = viewport?.scrollHeight || 0;
+    try {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("id, sender_id, content, created_at")
+        .eq("chat_id", roomId)
+        .lt("created_at", oldestCreatedAt)
+        .order("created_at", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE + 1);
+      if (error) throw error;
+      const rows = (data || []) as ChatMessage[];
+      const olderMessages = rows.slice(0, MESSAGE_PAGE_SIZE).reverse();
+      setHasOlderMessages(rows.length > MESSAGE_PAGE_SIZE);
+      if (olderMessages.length === 0) return;
+      setMessages((prev) => [...olderMessages, ...prev]);
+      void markMessagesAsRead(olderMessages);
+      requestAnimationFrame(() => {
+        const nextHeight = viewport?.scrollHeight || 0;
+        if (viewport) viewport.scrollTop += nextHeight - previousHeight;
+      });
+    } catch {
+      toast.error("Unable to load older messages.");
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [hasOlderMessages, loadingOlderMessages, markMessagesAsRead, messages, roomId]);
+
+  const openUserProfile = useCallback(async (userId: string, fallbackDisplayName: string) => {
+    if (!userId || isTeamHuddleIdentity(fallbackDisplayName, null)) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+    setProfileSheetData((data as Record<string, unknown> | null) ?? null);
+    setProfileSheetOpen(true);
+  }, []);
 
   const latestStarIntro = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -450,6 +531,10 @@ const ChatDialogue = () => {
             setRoomId(room);
             const grouped = await loadGroupInfo(room);
             await Promise.all([loadRoomMessages(room), grouped ? Promise.resolve() : loadCounterpart(room, name, hintedUserId)]);
+            requestAnimationFrame(() => {
+              const viewport = messagesViewportRef.current;
+              if (viewport) viewport.scrollTop = viewport.scrollHeight;
+            });
             return;
           }
 
@@ -475,6 +560,10 @@ const ChatDialogue = () => {
           setRoomId(nextRoomId);
           const grouped2 = await loadGroupInfo(nextRoomId);
           await Promise.all([loadRoomMessages(nextRoomId), grouped2 ? Promise.resolve() : loadCounterpart(nextRoomId, name, fallbackTargetId)]);
+          requestAnimationFrame(() => {
+            const viewport = messagesViewportRef.current;
+            if (viewport) viewport.scrollTop = viewport.scrollHeight;
+          });
           navigate(
             `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}&with=${encodeURIComponent(fallbackTargetId)}`,
             { replace: true }
@@ -501,6 +590,10 @@ const ChatDialogue = () => {
         const directRoomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
         setRoomId(directRoomId);
         await Promise.all([loadRoomMessages(directRoomId), loadCounterpart(directRoomId, targetName, targetUserId)]);
+        requestAnimationFrame(() => {
+          const viewport = messagesViewportRef.current;
+          if (viewport) viewport.scrollTop = viewport.scrollHeight;
+        });
       } catch {
         toast.error("Unable to open conversation right now.");
         navigate("/chats?tab=chats", { replace: true });
@@ -514,14 +607,26 @@ const ChatDialogue = () => {
     if (!roomId) return;
     const roomChannel = supabase
       .channel(`chat_dialogue_room_${roomId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` }, () => {
-        void loadRoomMessages(roomId);
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` }, (payload) => {
+        const row = payload.new as ChatMessage | null;
+        if (!row?.id) return;
+        setMessages((prev) => {
+          if (prev.some((message) => message.id === row.id)) return prev;
+          return [...prev, row];
+        });
+        void markMessagesAsRead([row]);
+        requestAnimationFrame(() => {
+          const viewport = messagesViewportRef.current;
+          if (!viewport) return;
+          const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
+          if (nearBottom) viewport.scrollTop = viewport.scrollHeight;
+        });
       })
       .subscribe();
     return () => {
       void supabase.removeChannel(roomChannel);
     };
-  }, [loadRoomMessages, roomId]);
+  }, [markMessagesAsRead, roomId]);
 
   // Initial load of read receipts for my sent messages
   useEffect(() => {
@@ -613,16 +718,59 @@ const ChatDialogue = () => {
     }
   }, [blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
 
+  const attachComposerMedia = useCallback(async () => {
+    const cannotAttach =
+      blockState === "blocked_by_them" ||
+      blockState === "blocked_by_me" ||
+      unmatchState === "unmatched_by_them" ||
+      sending;
+    if (cannotAttach) return;
+    const picked = await pickFiles({
+      accept: "image/*,video/*",
+      multiple: true,
+      source: "photo-library",
+    });
+    const allowed = picked.filter((file) => {
+      if (!file.type?.startsWith("video/")) return true;
+      return canSendVideo;
+    });
+    if (picked.some((file) => file.type?.startsWith("video/")) && !canSendVideo) {
+      toast.info("Video upload is for Gold members only.");
+    }
+    if (allowed.length) {
+      setComposerUploads((prev) => [...prev, ...allowed].slice(0, 10));
+    }
+  }, [blockState, canSendVideo, sending, unmatchState]);
+
   const openCounterpartProfile = useCallback(async () => {
     if (!counterpart?.id || counterpart.isTeamHuddle) return;
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", counterpart.id)
-      .maybeSingle();
-    setProfileSheetData((data as Record<string, unknown> | null) ?? null);
-    setProfileSheetOpen(true);
-  }, [counterpart?.id, counterpart?.isTeamHuddle]);
+    await openUserProfile(counterpart.id, counterpart.displayName);
+  }, [counterpart?.displayName, counterpart?.id, counterpart?.isTeamHuddle, openUserProfile]);
+
+  const toggleGroupMute = useCallback(async () => {
+    if (!roomId) return;
+    const nextMuted = !groupMuted;
+    setGroupMuted(nextMuted);
+    try {
+      const { error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>
+      ) => Promise<{ error: { message?: string } | null }>)("set_group_mute_state", {
+        p_chat_id: roomId,
+        p_muted: nextMuted,
+      });
+      if (error) throw error;
+      if (profile?.id) {
+        await supabase
+          .from("chat_participants")
+          .upsert({ chat_id: roomId, user_id: profile.id, role: "member", is_muted: nextMuted }, { onConflict: "chat_id,user_id" });
+      }
+      toast.success(nextMuted ? "Group muted" : "Notifications on");
+    } catch {
+      setGroupMuted(!nextMuted);
+      toast.error("Unable to update notifications right now.");
+    }
+  }, [groupMuted, profile?.id, roomId]);
 
   const handleBlockToggle = useCallback(async () => {
     if (!counterpart?.id) return;
@@ -859,7 +1007,34 @@ const ChatDialogue = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2 flex flex-col">
+      <div
+        ref={messagesViewportRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3"
+        onScroll={(event) => {
+          if (event.currentTarget.scrollTop < 56) {
+            void loadOlderMessages();
+          }
+        }}
+      >
+        {isGroup && groupVisibility === "private" && groupRoomCode ? (
+          <div className="sticky top-0 z-[2] mb-3 flex justify-center">
+            <span className="rounded-full border border-[rgba(245,200,92,0.46)] bg-[rgba(245,200,92,0.18)] px-3 py-1 text-xs font-semibold text-[#8A6C1E] shadow-[0_8px_18px_rgba(245,200,92,0.18)]">
+              {`Room Code: ${groupRoomCode}`}
+            </span>
+          </div>
+        ) : null}
+        {hasOlderMessages || loadingOlderMessages ? (
+          <div className="mb-3 flex justify-center">
+            <button
+              type="button"
+              className="rounded-full border border-border bg-white/82 px-3 py-1 text-xs font-medium text-[#6B7280] shadow-[0_8px_18px_rgba(66,73,101,0.08)] disabled:opacity-60"
+              disabled={loadingOlderMessages}
+              onClick={() => void loadOlderMessages()}
+            >
+              {loadingOlderMessages ? "Loading..." : "Load more"}
+            </button>
+          </div>
+        ) : null}
         {blockState === "blocked_by_me" && (
           <div className="flex justify-center py-1">
             <span className="rounded-full bg-[rgba(120,128,150,0.15)] px-3 py-1 text-xs font-medium text-[#8C93AA]">
@@ -890,6 +1065,7 @@ const ChatDialogue = () => {
             </span>
           </div>
         )}
+        <div className="space-y-2">
         {messages.length === 0 && !isGroup ? (
           <div className="mt-auto rounded-[18px] border border-white/45 bg-white/55 p-3 shadow-[0_10px_24px_rgba(33,71,201,0.10)] backdrop-blur-[18px]">
             <p className="text-sm font-semibold text-[#4F5677]">Paw-Vibe Check?</p>
@@ -1019,6 +1195,7 @@ const ChatDialogue = () => {
             );
           })
         )}
+        </div>
       </div>
 
       <div className="border-t border-border bg-white/92 px-3 py-2 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]">
@@ -1048,7 +1225,9 @@ const ChatDialogue = () => {
           <button
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-transparent disabled:opacity-45"
-            onClick={() => imageInputRef.current?.click()}
+            onClick={() => {
+              void attachComposerMedia();
+            }}
             aria-label="Upload media"
             disabled={
               blockState === "blocked_by_them" ||
@@ -1059,25 +1238,6 @@ const ChatDialogue = () => {
           >
             <ImagePlus className="h-4 w-4 text-muted-foreground" />
           </button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*,video/*"
-            multiple
-            className="hidden"
-            onChange={(event) => {
-              const picked = Array.from(event.target.files || []);
-              const allowed = picked.filter((file) => {
-                if (!file.type?.startsWith("video/")) return true;
-                return canSendVideo;
-              });
-              if (picked.some((file) => file.type?.startsWith("video/")) && !canSendVideo) {
-                toast.info("Video upload is for Gold members only.");
-              }
-              if (allowed.length) setComposerUploads((prev) => [...prev, ...allowed].slice(0, 10));
-              event.currentTarget.value = "";
-            }}
-          />
           <input
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
@@ -1188,11 +1348,19 @@ const ChatDialogue = () => {
               </div>
               <div className="min-w-0">
                 <SheetTitle className="text-left">{roomName}</SheetTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">{groupMemberCount} members</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {groupLocationLabel ? `${groupMemberCount} members · ${groupLocationLabel}` : `${groupMemberCount} members`}
+                </p>
               </div>
             </div>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
+          {groupDescription ? (
+            <div className="mb-5 rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">Description</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-brandText">{groupDescription}</p>
+            </div>
+          ) : null}
 
           {/* Media — horizontal swipeable album */}
           <div className="mb-5">
@@ -1225,10 +1393,7 @@ const ChatDialogue = () => {
           <div className="space-y-1">
             {/* Mute notifications */}
             <button
-              onClick={() => {
-                setGroupMuted((v) => !v);
-                toast.success(groupMuted ? "Notifications on" : "Group muted");
-              }}
+              onClick={() => void toggleGroupMute()}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
             >
               {groupMuted
@@ -1237,18 +1402,19 @@ const ChatDialogue = () => {
               <span className="text-sm font-medium">{groupMuted ? "Unmute notifications" : "Mute notifications"}</span>
             </button>
 
-            {/* Manage Group */}
-            <button
-              onClick={() => {
-                setGroupInfoOpen(false);
-                if (!roomId) return;
-                navigate(`/chats?tab=groups&manage=${encodeURIComponent(roomId)}`);
-              }}
-              className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
-            >
-              <Settings className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm font-medium">Manager Group</span>
-            </button>
+            {groupIsAdmin ? (
+              <button
+                onClick={() => {
+                  setGroupInfoOpen(false);
+                  void loadGroupManageData();
+                  setGroupManageOpen(true);
+                }}
+                className="w-full flex items-center gap-3 px-2 py-3 rounded-xl hover:bg-muted/60 transition-colors text-left"
+              >
+                <Settings className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm font-medium">Manage Group</span>
+              </button>
+            ) : null}
 
             {/* Report group */}
             <button
@@ -1276,7 +1442,7 @@ const ChatDialogue = () => {
       <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) setGroupManageSearch(""); }}>
         <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[88vh] flex flex-col overflow-hidden">
           <SheetHeader className="pb-3 shrink-0">
-            <SheetTitle className="text-left">Manager Group</SheetTitle>
+            <SheetTitle className="text-left">Manage Group</SheetTitle>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
             {groupManageLoading ? (
@@ -1291,10 +1457,14 @@ const ChatDialogue = () => {
                   <div className="space-y-2">
                     {groupManageMembers.map((m) => (
                       <div key={m.id} className="flex items-center justify-between py-1">
-                        <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-2"
+                          onClick={() => void openUserProfile(m.id, m.name)}
+                        >
                           <UserAvatar avatarUrl={m.avatarUrl} name={m.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                           <span className="text-sm text-brandText">{m.id === profile?.id ? `${m.name} (You)` : m.name}</span>
-                        </div>
+                        </button>
                         {m.id !== profile?.id && (
                           <button
                             onClick={async () => {
@@ -1303,8 +1473,13 @@ const ChatDialogue = () => {
                                 return;
                               }
                               try {
-                                await supabase.from("chat_room_members").delete().eq("chat_id", roomId!).eq("user_id", m.id);
+                                const { error } = await supabase.rpc("remove_group_member", {
+                                  p_chat_id: roomId!,
+                                  p_user_id: m.id,
+                                });
+                                if (error) throw error;
                                 setGroupManageMembers((prev) => prev.filter((x) => x.id !== m.id));
+                                setGroupMemberCount((prev) => Math.max(0, prev - 1));
                                 toast.success(`${m.name} removed`);
                               } catch {
                                 toast.error("Couldn't remove member.");
@@ -1341,10 +1516,14 @@ const ChatDialogue = () => {
                       <div className="space-y-2">
                         {filtered.map((u) => (
                           <div key={u.id} className="flex items-center justify-between py-1">
-                            <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2"
+                              onClick={() => void openUserProfile(u.id, u.name)}
+                            >
                               <UserAvatar avatarUrl={u.avatarUrl} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                               <span className="text-sm text-brandText">{u.name}</span>
-                            </div>
+                            </button>
                             <button
                               onClick={async () => {
                                 if (!(profile as unknown as { is_verified?: boolean })?.is_verified) {
@@ -1353,11 +1532,21 @@ const ChatDialogue = () => {
                                 }
                                 if (!profile?.id || !roomId) return;
                                 try {
-                                  await supabase.from("chat_room_members").insert({ chat_id: roomId, user_id: u.id });
-                                  setGroupManageMembers((prev) => [...prev, u]);
+                                  const { error } = await supabase
+                                    .from("group_chat_invites")
+                                    .upsert(
+                                      {
+                                        chat_id: roomId,
+                                        chat_name: roomName,
+                                        inviter_user_id: profile.id,
+                                        invitee_user_id: u.id,
+                                        status: "pending",
+                                      },
+                                      { onConflict: "chat_id,invitee_user_id", ignoreDuplicates: false }
+                                    );
+                                  if (error) throw error;
                                   setGroupManageFriends((prev) => prev.filter((f) => f.id !== u.id));
-                                  toast.success(`${u.name} added`);
-                                  // Notify the added user via security-definer RPC (bypasses insert RLS)
+                                  toast.success(`${u.name} invited`);
                                   const inviterName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
                                   void supabase.rpc("enqueue_notification", {
                                     p_user_id: u.id,
@@ -1447,6 +1636,12 @@ const ChatDialogue = () => {
                     .delete()
                     .eq("chat_id", roomId)
                     .eq("user_id", profile.id);
+                  await supabase
+                    .from("chat_participants")
+                    .delete()
+                    .eq("chat_id", roomId)
+                    .eq("user_id", profile.id);
+                  setGroupMemberCount((prev) => Math.max(0, prev - 1));
                   navigate("/chats?tab=groups", { replace: true });
                 } catch {
                   toast.error("Unable to leave group right now.");

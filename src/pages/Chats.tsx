@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, Pencil, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck, Settings } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -52,6 +52,13 @@ import {
   resolveTeamHuddleAvailability,
   resolveTeamHuddleDisplayName,
 } from "@/lib/teamHuddleIdentity";
+import {
+  extractCountryToken,
+  extractDistrictToken,
+  normalizeCountryKey,
+  resolveCountryByPrecedence,
+  resolveDiscoveryLocationLabel,
+} from "@/lib/locationLabels";
 
 /* ── Discovery Filter Types & Defaults ── */
 const ALL_GENDERS = [...CANONICAL_GENDER_OPTIONS] as const;
@@ -168,7 +175,8 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
 const DISCOVERY_EXPAND_STEP_KM = 15;
 const DISCOVERY_MAX_RADIUS_KM = 150;
 const DISCOVERY_CLIENT_RESET_USER_ID = "735e8908-6dc8-4b41-837e-d4917e93caae";
-const DISCOVERY_CLIENT_RESET_STAMP = "2026-04-16-deck-reset-v3";
+const DISCOVERY_CLIENT_RESET_STAMP = "2026-04-18-deck-reset-v4";
+const DISCOVERY_CLIENT_RESET_DISPLAY_NAMES = new Set(["hyphen fong", "social manager"]);
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -310,32 +318,6 @@ const normalizeAvailabilityLabel = (value: string) => {
 const DISCOVER_MIN_AGE_MESSAGE = "User must be 16+ to access Discover feature on Chats.";
 const DISCOVER_AGE_GATE_BODY =
   "Discover & Chat features are for 16+ only. For now, join the social conversation and help protect the pack by keeping an eye on the Map.";
-
-const extractDistrictToken = (value: string | null | undefined) => {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
-  if (parts.length >= 3) return parts[1] || parts[0] || raw || null;
-  if (parts.length === 2) return parts[0] || raw || null;
-  return parts[0] || raw || null;
-};
-
-const resolveDiscoveryLocationLabel = ({
-  liveLocationDistrict,
-  pinDistrict,
-  profileLocationDistrict,
-  profileLocationName,
-}: {
-  liveLocationDistrict?: string | null;
-  pinDistrict?: string | null;
-  profileLocationDistrict?: string | null;
-  profileLocationName?: string | null;
-}) =>
-  extractDistrictToken(liveLocationDistrict) ||
-  extractDistrictToken(pinDistrict) ||
-  extractDistrictToken(profileLocationDistrict) ||
-  extractDistrictToken(profileLocationName) ||
-  null;
 
 type MainTab = "friends" | "groups" | "service";
 const mainTabs: { id: MainTab; label: string; icon: typeof MessageSquare }[] = [
@@ -539,6 +521,9 @@ interface Group {
   joinMethod?: string | null;
   description?: string | null;
   isAdmin?: boolean;
+  locationCountry?: string | null;
+  visibility?: "public" | "private" | null;
+  roomCode?: string | null;
 }
 
 interface GroupContactOption {
@@ -702,6 +687,7 @@ const Chats = () => {
   const [profileSheetLoading, setProfileSheetLoading] = useState(false);
   // Group management
   const [groupManageId, setGroupManageId] = useState<string | null>(null);
+  const [groupDetailsId, setGroupDetailsId] = useState<string | null>(null);
   const [swipeDeleteId, setSwipeDeleteId] = useState<string | null>(null);
   const [swipeDeleteGroupId, setSwipeDeleteGroupId] = useState<string | null>(null);
   const [deleteGroupConfirmId, setDeleteGroupConfirmId] = useState<string | null>(null);
@@ -710,6 +696,7 @@ const Chats = () => {
   const [groupMembers, setGroupMembers] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupPendingInvites, setGroupPendingInvites] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupJoinRequests, setGroupJoinRequests] = useState<{ requestId: string; userId: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [groupDetailsMediaUrls, setGroupDetailsMediaUrls] = useState<string[]>([]);
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupAddSearch, setGroupAddSearch] = useState("");
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
@@ -921,8 +908,8 @@ const Chats = () => {
       discoverySendCueProgress.set(0);
       setDiscoverySendCue({ kind, id: Date.now() });
 
-      const duration = kind === "wave" ? 0.24 : 1.18;
-      const commitAt = kind === "star" ? 0.2 : 1;
+      const duration = kind === "wave" ? 0.18 : 0.78;
+      const commitAt = kind === "star" ? 0.16 : 1;
       discoverySendCueAnimationRef.current = animate(discoverySendCueProgress, 1, {
         duration,
         ease: [0.22, 1, 0.36, 1],
@@ -1147,7 +1134,11 @@ const Chats = () => {
   }, [discoveryFiltersKey, filters, profile?.id]);
 
   useEffect(() => {
-    if (profile?.id !== DISCOVERY_CLIENT_RESET_USER_ID) return;
+    const normalizedDisplayName = String(profile?.display_name || "").trim().toLowerCase();
+    const shouldRunDiscoveryClientReset =
+      profile?.id === DISCOVERY_CLIENT_RESET_USER_ID ||
+      DISCOVERY_CLIENT_RESET_DISPLAY_NAMES.has(normalizedDisplayName);
+    if (!shouldRunDiscoveryClientReset || !profile?.id) return;
     const resetFlagKey = `discovery_client_reset_${profile.id}`;
     try {
       if (localStorage.getItem(resetFlagKey) === DISCOVERY_CLIENT_RESET_STAMP) return;
@@ -1158,6 +1149,8 @@ const Chats = () => {
           key === handledDiscoveryKey ||
           key === passedDiscoveryKey ||
           key === matchedDiscoveryKey ||
+          key === seenMatchesKey ||
+          key === pendingSeenMatchesKey ||
           key.startsWith(`discovery_seen_`) ||
           key.startsWith(`discovery_handled_${profile.id}`) ||
           key.startsWith(`discovery_passed_${profile.id}`) ||
@@ -1186,6 +1179,12 @@ const Chats = () => {
     setPassedDiscoveryIds(new Set());
     setCarryoverPassedIds(new Set());
     setHiddenDiscoveryIds(new Set());
+    seenMatchUserIdsRef.current = new Set();
+    pendingSeenMatchWritesRef.current = new Set();
+    serverSeenMatchUserIdsRef.current = new Set();
+    setLocalSeenMatchesHydrated(false);
+    setSeenMatchesHydrated(false);
+    setSeenMatchesServerState("idle");
     setDiscoveryHistoryHydrated(false);
     setDiscoveryVisibleCount(20);
     setSwipeDir(null);
@@ -1198,9 +1197,12 @@ const Chats = () => {
     dragY,
     handledDiscoveryKey,
     matchedDiscoveryKey,
+    pendingSeenMatchesKey,
     passedDiscoveryKey,
     passedDiscoverySessionKey,
     profile?.id,
+    profile?.display_name,
+    seenMatchesKey,
   ]);
 
   useEffect(() => {
@@ -1894,6 +1896,22 @@ const Chats = () => {
     advanceDiscoveryCard(currentId, action);
   }, [advanceDiscoveryCard]);
 
+  const rollbackDiscoverySwipe = useCallback((currentId?: string, action?: "wave" | "star" | "pass") => {
+    if (!currentId || action === "pass") return;
+    setSwipeDir(null);
+    setHandledDiscoveryIds((prev) => {
+      if (!prev.has(currentId)) return prev;
+      const next = new Set(prev);
+      next.delete(currentId);
+      try {
+        localStorage.setItem(handledDiscoveryKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore cache write failure
+      }
+      return next;
+    });
+  }, [handledDiscoveryKey]);
+
   const performDiscoverySwipe = useCallback(
     async (
       direction: "left" | "right",
@@ -1903,6 +1921,8 @@ const Chats = () => {
         velocityX?: number;
         task?: () => Promise<boolean>;
         nextProfileId?: string | null;
+        optimistic?: boolean;
+        onRollback?: () => void;
       }
     ) => {
       if (discoverySwipeBusyRef.current) return false;
@@ -1911,13 +1931,30 @@ const Chats = () => {
       setDiscoverySwipeUiBusy(true);
 
       try {
-        // Parallel: fling animation + network task fire simultaneously.
-        // Next card appears the instant exit completes, not after server.
+        // Fire the network task immediately, but don't make the deck wait for it
+        // after the fling completes. That removes the "sent but stuck" feel.
         noteDiscoveryDragEnd();
-        const [, ok] = await Promise.all([
-          flingDiscoveryCard(direction, options?.velocityX ?? 0),
-          options?.task ? options.task() : Promise.resolve(true),
-        ]);
+        const taskPromise = options?.task ? options.task() : Promise.resolve(true);
+        await flingDiscoveryCard(direction, options?.velocityX ?? 0);
+        if (options?.optimistic) {
+          commitDiscoverySwipe(direction, currentId, action);
+          await new Promise<void>((resolve) => {
+            if (typeof window === "undefined") {
+              resolve();
+              return;
+            }
+            window.requestAnimationFrame(() => resolve());
+          });
+          dragX.set(0);
+          dragY.set(0);
+          dragRotateOverride.set(0);
+          const ok = await taskPromise;
+          if (!ok) {
+            options.onRollback?.();
+          }
+          return ok;
+        }
+        const ok = await taskPromise;
         if (!ok) {
           setSwipeDir(null);
           await springDiscoveryCardHome();
@@ -1943,7 +1980,7 @@ const Chats = () => {
         setDiscoverySwipeUiBusy(false);
       }
     },
-    [commitDiscoverySwipe, dragRotateOverride, dragX, dragY, ensureDiscoveryProfileReady, flingDiscoveryCard, springDiscoveryCardHome]
+    [commitDiscoverySwipe, dragRotateOverride, dragX, dragY, flingDiscoveryCard, springDiscoveryCardHome]
   );
 
   const enqueueChatNotification = useCallback(
@@ -2391,7 +2428,10 @@ const Chats = () => {
       }
 
       const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, { data: serviceChats, error: serviceChatsError }, matchesRows] = await Promise.all([
-        supabase.from("chats").select("id, name, avatar_url, type, pet_focus, location_label, last_message_at, join_method, description, created_by").in("id", roomIds),
+        supabase
+          .from("chats")
+          .select("id, name, avatar_url, type, pet_focus, location_label, location_country, visibility, room_code, last_message_at, join_method, description, created_by")
+          .in("id", roomIds),
         supabase
           .from("chat_room_members")
           .select("chat_id, user_id")
@@ -2668,6 +2708,9 @@ const Chats = () => {
             joinMethod: (room.join_method as string | null) ?? null,
             description: (room.description as string | null) ?? null,
             isAdmin: (room.created_by as string | null) === profile.id,
+            locationCountry: (room.location_country as string | null) ?? null,
+            visibility: ((room.visibility as "public" | "private" | null) ?? null),
+            roomCode: (room.room_code as string | null) ?? null,
           });
           continue;
         }
@@ -4043,16 +4086,16 @@ const Chats = () => {
       return performDiscoverySwipe("right", target.id, "wave", {
         velocityX,
         nextProfileId: stackedDiscoveryCards[1]?.id ?? null,
+        optimistic: true,
+        onRollback: () => rollbackDiscoverySwipe(target.id, "wave"),
         task: async () => {
+          launchDiscoverySendCue("wave");
           const ok = await executeDiscoveryWaveTask(target, showToast);
-          if (ok) {
-            launchDiscoverySendCue("wave");
-          }
           return ok;
         },
       });
     },
-    [blockedUserIds, executeDiscoveryWaveTask, launchDiscoverySendCue, performDiscoverySwipe, stackedDiscoveryCards]
+    [blockedUserIds, executeDiscoveryWaveTask, launchDiscoverySendCue, performDiscoverySwipe, rollbackDiscoverySwipe, stackedDiscoveryCards]
   );
 
   const triggerDiscoveryPass = useCallback(
@@ -4259,14 +4302,7 @@ const Chats = () => {
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
     try {
-      const [{ data }, { data: requestRows }] = await Promise.all([
-        supabase
-          .from("chats")
-          .select("id, name, avatar_url, location_label, pet_focus, join_method, last_message_at, created_at, description")
-          .eq("type", "group")
-          .eq("visibility", "public")
-          .order("last_message_at", { ascending: false, nullsFirst: false })
-          .limit(100),
+      const [{ data: requestRows }, liveLocationResult, profileLocationResult] = await Promise.all([
         user?.id
           ? supabase
               .from("group_join_requests")
@@ -4274,13 +4310,78 @@ const Chats = () => {
               .eq("user_id", user.id)
               .eq("status", "pending")
           : Promise.resolve({ data: [] }),
+        user?.id
+          ? supabase
+              .from("user_locations")
+              .select("location_name")
+              .eq("user_id", user.id)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+        user?.id
+          ? supabase
+              .from("profiles")
+              .select("location_name, location_country, location_district, location_pinned_until")
+              .eq("id", user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
 
       if (requestRows) {
         setSentJoinRequests(new Set((requestRows as Array<{ chat_id: string }>).map((r) => r.chat_id)));
       }
 
-      if (!data) return;
+      const profileLocation = (profileLocationResult.data || null) as {
+        location_name?: string | null;
+        location_country?: string | null;
+        location_district?: string | null;
+        location_pinned_until?: string | null;
+      } | null;
+      const profilePinnedUntilMs = profileLocation?.location_pinned_until ? new Date(profileLocation.location_pinned_until).getTime() : Number.NaN;
+      const pinActive = Number.isFinite(profilePinnedUntilMs) && profilePinnedUntilMs > Date.now();
+      const viewerCountry = resolveCountryByPrecedence({
+        gpsLocationName: (liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null,
+        pinCountry: pinActive ? profileLocation?.location_country || null : null,
+        pinLocationName: pinActive ? profileLocation?.location_name || null : null,
+        profileCountry: profileLocation?.location_country || profile?.location_country || null,
+        profileLocationName: profileLocation?.location_name || profile?.location_name || null,
+      });
+      const viewerDistrict = resolveDiscoveryLocationLabel({
+        liveLocationDistrict: extractDistrictToken((liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null),
+        pinDistrict: pinActive ? extractDistrictToken(profileLocation?.location_name || null) : null,
+        profileLocationDistrict: profileLocation?.location_district || profile?.location_district || null,
+        profileLocationName: profileLocation?.location_name || profile?.location_name || null,
+      });
+
+      if (!user?.id || !viewerCountry) {
+        setExploreGroups([]);
+        return;
+      }
+
+      const { data, error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_country", {
+        p_user_id: user.id,
+        p_country: viewerCountry,
+      });
+      if (error) throw error;
+
+      const rows = (Array.isArray(data) ? data : []) as Array<{
+        id: string;
+        name: string;
+        avatar_url: string | null;
+        location_label: string | null;
+        location_country: string | null;
+        pet_focus: string[] | null;
+        join_method: string;
+        last_message_at: string | null;
+        created_at: string;
+        description: string | null;
+        member_count: number | null;
+        created_by: string | null;
+      }>;
 
       // The user's joined group IDs — filter these out of Explore (they live in My Groups)
       const joinedIds = new Set(groups.map((g) => g.id));
@@ -4293,12 +4394,12 @@ const Chats = () => {
         .filter(Boolean);
 
       // Extract meaningful location tokens from user's profile location for proximity matching
-      const userLocWords = (profile?.location_name || "")
+      const userLocWords = String(viewerDistrict || "")
         .toLowerCase()
         .split(/[\s,]+/)
         .filter((w) => w.length > 2);
 
-      const scored = (data as Array<{ id: string; name: string; avatar_url: string | null; location_label: string | null; pet_focus: string[] | null; join_method: string; last_message_at: string | null; created_at: string; description: string | null }>)
+      const scored = rows
         .filter((g) => !joinedIds.has(g.id))
         .map((g) => {
           const focusLower = (g.pet_focus ?? []).map((f) => f.toLowerCase());
@@ -4322,16 +4423,68 @@ const Chats = () => {
       );
 
       setExploreGroups(scored);
+    } catch (error) {
+      console.warn("[groups.explore] fetch failed", error);
+      setExploreGroups([]);
     } finally {
       setExploreLoading(false);
     }
-  }, [profile?.pets, profile?.location_name, user?.id, groups]);
+  }, [
+    groups,
+    profile?.location_country,
+    profile?.location_district,
+    profile?.location_name,
+    profile?.pets,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (mainTab === "groups" && groupSubTab === "explore") {
       void fetchExploreGroups();
     }
   }, [mainTab, groupSubTab, fetchExploreGroups]);
+
+  const describeGroupActivity = useCallback((lastMessageAt?: string | null) => {
+    if (!lastMessageAt) return "Not recently active";
+    const ms = Date.now() - new Date(lastMessageAt).getTime();
+    if (ms < 604_800_000) return "Active this week";
+    return "Not recently active";
+  }, []);
+
+  const openGroupDetailsSheet = useCallback(async (group: Group) => {
+    setGroupDetailsId(group.id);
+    try {
+      const { data } = await supabase
+        .from("chat_messages")
+        .select("content")
+        .eq("chat_id", group.id)
+        .order("created_at", { ascending: false })
+        .limit(80);
+      const urls: string[] = [];
+      for (const row of (data || []) as Array<{ content?: string | null }>) {
+        try {
+          const parsed = JSON.parse(String(row.content || "")) as { attachments?: Array<{ url?: string; mime?: string }> };
+          if (!Array.isArray(parsed.attachments)) continue;
+          parsed.attachments.forEach((attachment) => {
+            const url = String(attachment?.url || "").trim();
+            const mime = String(attachment?.mime || "").trim();
+            if (!url || mime.startsWith("video/")) return;
+            urls.push(url);
+          });
+        } catch {
+          // ignore plain text rows
+        }
+      }
+      setGroupDetailsMediaUrls(urls);
+    } catch {
+      setGroupDetailsMediaUrls([]);
+    }
+  }, []);
+
+  const activeGroupDetails = useMemo(
+    () => [...groups, ...exploreGroups].find((group) => group.id === groupDetailsId) || null,
+    [exploreGroups, groupDetailsId, groups]
+  );
 
   const handleChatClick = (chat: ChatUser) => {
     // Mark as read
@@ -4496,9 +4649,7 @@ const Chats = () => {
     window.setTimeout(() => {
       setWaveButtonAnimating(false);
     }, 500);
-    window.setTimeout(() => {
-      void triggerDiscoveryWave(p, { showToast: true });
-    }, 110);
+    void triggerDiscoveryWave(p, { showToast: true });
   }, [currentDiscovery, showDiscoverEmpty, showDiscoveryQuotaLock, triggerDiscoveryWave]);
 
   return (
@@ -5204,6 +5355,7 @@ const Chats = () => {
                       exploreGroups.map((group, index) => {
                         const isMember = groups.some((g) => g.id === group.id);
                         const hasSentRequest = sentJoinRequests.has(group.id);
+                        const activityLabel = describeGroupActivity(group.last_message_at);
 
                         const handleExploreCardCTA = async (e: React.MouseEvent) => {
                           e.stopPropagation();
@@ -5243,17 +5395,34 @@ const Chats = () => {
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: index * 0.04, duration: 0.2 }}
-                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl"
+                          className="flex items-start gap-3 rounded-xl bg-card p-3 shadow-card"
                         >
-                          <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center">
+                          <button
+                            type="button"
+                            className="mt-0.5 flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                            onClick={() => void openGroupDetailsSheet(group)}
+                            aria-label={`Open ${group.name} details`}
+                          >
                             {group.avatar_url ? (
-                              <img src={group.avatar_url} alt={group.name} className="w-full h-full object-cover" />
+                              <img src={group.avatar_url} alt={group.name} className="h-full w-full object-cover" />
                             ) : (
-                              <Users className="w-6 h-6 text-primary" strokeWidth={1.75} />
+                              <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                             )}
-                          </div>
+                          </button>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-[15px] truncate text-brandText">{group.name}</p>
+                            <div className="flex items-start justify-between gap-3">
+                              <button
+                                type="button"
+                                className="min-w-0 text-left"
+                                onClick={() => void openGroupDetailsSheet(group)}
+                              >
+                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                              </button>
+                              <div className="shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                                <p>{`Members: ${group.memberCount}`}</p>
+                                <p>{activityLabel}</p>
+                              </div>
+                            </div>
                             {group.location_label && (
                               <p className="text-[12px] text-muted-foreground truncate mt-0.5">
                                 <MapPin className="inline w-3 h-3 mr-0.5" strokeWidth={1.75} />{group.location_label}
@@ -5268,19 +5437,8 @@ const Chats = () => {
                                 ))}
                               </div>
                             )}
-                            <p className="text-[11px] text-muted-foreground mt-1">
-                              {group.last_message_at
-                                ? (() => {
-                                    const ms = Date.now() - new Date(group.last_message_at).getTime();
-                                    if (ms < 3_600_000) return `Active ${Math.floor(ms / 60_000)}m ago`;
-                                    if (ms < 86_400_000) return "Active today";
-                                    if (ms < 604_800_000) return "Active this week";
-                                    return "Not recently active";
-                                  })()
-                                : "No messages yet"}
-                            </p>
                             {group.description && (
-                              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                                 {group.description}
                               </p>
                             )}
@@ -5341,11 +5499,6 @@ const Chats = () => {
                   ) : (
                     filteredGroups.slice(0, groupVisibleCount).map((group, index) => (
                       <div key={group.id} className="relative overflow-hidden rounded-xl">
-                        {/* Swipe-to-leave: leave action revealed behind */}
-                        <div className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 bg-red-500/10 rounded-xl pointer-events-none">
-                          <Trash2 className="w-4 h-4 text-red-500 opacity-0 transition-opacity" style={{ opacity: swipeDeleteGroupId === group.id ? 1 : 0 }} />
-                        </div>
-
                         <motion.div
                           initial={{ opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -5363,42 +5516,63 @@ const Chats = () => {
                             }
                           }}
                           onClick={() => handleGroupClick(group)}
-                          className="flex items-center gap-3 p-3 bg-card shadow-card rounded-xl cursor-pointer"
+                          className="flex cursor-pointer items-start gap-3 rounded-xl bg-card p-3 shadow-card"
                         >
-                          {/* Avatar — clickable for admin only */}
-                          <div
-                            className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 bg-card border border-border/30 flex items-center justify-center relative"
-                            onClick={(e) => {
-                              if (!group.isAdmin) return;
-                              e.stopPropagation();
-                              if (!isVerified) { setGroupVerifyGateOpen(true); return; }
-                              setGroupManageId(group.id);
-                            }}
-                          >
-                            {group.avatarUrl ? (
-                              <img src={group.avatarUrl} alt={group.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <Users className="w-6 h-6 text-primary" strokeWidth={1.75} />
-                            )}
-                            {/* Admin edit hint overlay */}
-                            {group.isAdmin && (
-                              <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity rounded-full">
-                                <Pencil className="w-3.5 h-3.5 text-white" />
-                              </div>
-                            )}
+                          {group.isAdmin ? (
+                            <button
+                              type="button"
+                              className="absolute left-2 top-2 z-[2] flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#4A4965] shadow-[0_8px_18px_rgba(66,73,101,0.18)]"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                                setGroupManageId(group.id);
+                              }}
+                              aria-label={`Manage ${group.name}`}
+                            >
+                              <Settings className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+                          <div className="relative flex-shrink-0">
+                            <button
+                              type="button"
+                              className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openGroupDetailsSheet(group);
+                              }}
+                              aria-label={`Open ${group.name} details`}
+                            >
+                              {group.avatarUrl ? (
+                                <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                              )}
+                            </button>
                           </div>
 
                           {/* Text content */}
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-[15px] truncate text-brandText">{group.name}</p>
+                            <div className="flex items-start justify-between gap-3">
+                              <button
+                                type="button"
+                                className="min-w-0 text-left"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openGroupDetailsSheet(group);
+                                }}
+                              >
+                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                              </button>
+                              <div className="shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                                <p>{`Members: ${group.memberCount}`}</p>
+                                <p>{describeGroupActivity(group.lastMessageAt)}</p>
+                              </div>
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-2">
                               {group.unread > 0 && (
                                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
                                   {group.unread > 9 ? "9+" : group.unread}
                                 </span>
-                              )}
-                              {group.isAdmin && (
-                                <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/60 text-accent-foreground">Admin</span>
                               )}
                             </div>
                             {group.locationLabel && (
@@ -5415,21 +5589,8 @@ const Chats = () => {
                                 ))}
                               </div>
                             )}
-                            <p className="text-[11px] text-muted-foreground mt-1">
-                              {group.lastMessageAt
-                                ? (() => {
-                                    const ms = Date.now() - new Date(group.lastMessageAt).getTime();
-                                    if (ms < 3_600_000) return `Active ${Math.floor(ms / 60_000)}m ago`;
-                                    if (ms < 86_400_000) return "Active today";
-                                    if (ms < 604_800_000) return "Active this week";
-                                    return "Not recently active";
-                                  })()
-                                : group.memberCount
-                                ? `${group.memberCount} members`
-                                : "No messages yet"}
-                            </p>
                             {group.description && (
-                              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                                 {group.description}
                               </p>
                             )}
@@ -5485,6 +5646,13 @@ const Chats = () => {
                               Join
                             </button>
                           )}
+                          <div className="flex flex-shrink-0 items-center gap-2">
+                            {swipeDeleteGroupId === group.id ? (
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-red-500">
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </div>
+                            ) : null}
+                          </div>
                         </motion.div>
                       </div>
                     ))
@@ -5554,11 +5722,89 @@ const Chats = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(activeGroupDetails)} onOpenChange={(open) => { if (!open) setGroupDetailsId(null); }}>
+        <DialogContent className="max-w-sm max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card">
+                {activeGroupDetails?.avatarUrl || activeGroupDetails?.avatar_url ? (
+                  <img
+                    src={activeGroupDetails.avatarUrl || activeGroupDetails.avatar_url || ""}
+                    alt={activeGroupDetails?.name || "Group"}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <Users className="h-6 w-6 text-primary" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="truncate">{activeGroupDetails?.name || "Group"}</DialogTitle>
+                <DialogDescription>{`${activeGroupDetails?.memberCount || 0} members`}</DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          {activeGroupDetails?.description ? (
+            <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">Description</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-brandText">{activeGroupDetails.description}</p>
+            </div>
+          ) : null}
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#8C93AA]">
+              Media{groupDetailsMediaUrls.length > 0 ? ` (${groupDetailsMediaUrls.length})` : ""}
+            </p>
+            {groupDetailsMediaUrls.length > 0 ? (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {groupDetailsMediaUrls.map((url, index) => (
+                  <a key={`${url}-${index}`} href={url} target="_blank" rel="noreferrer" className="h-24 w-24 shrink-0 overflow-hidden rounded-xl">
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <ImageIcon className="h-4 w-4" />
+                <span>No media shared yet</span>
+              </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            {activeGroupDetails?.isAdmin ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-muted/60"
+                onClick={() => {
+                  setGroupDetailsId(null);
+                  if (!isVerified) { setGroupVerifyGateOpen(true); return; }
+                  setGroupManageId(activeGroupDetails.id);
+                }}
+              >
+                <Settings className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm font-medium">Manage Group</span>
+              </button>
+            ) : null}
+            {activeGroupDetails?.id && groups.some((group) => group.id === activeGroupDetails.id) ? (
+              <button
+                type="button"
+                className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-left transition-colors hover:bg-muted/60"
+                onClick={() => {
+                  setGroupDetailsId(null);
+                  handleGroupClick(activeGroupDetails);
+                }}
+              >
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm font-medium">Open group</span>
+              </button>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Group Manage Modal — group image upload, members list with Remove, add members */}
       <Dialog open={!!groupManageId} onOpenChange={() => { setGroupManageId(null); setGroupAddSearch(""); }}>
         <DialogContent className="max-w-sm max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manager Group</DialogTitle>
+            <DialogTitle>Manage Group</DialogTitle>
             <DialogDescription>Edit photo, members, and group settings.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -5595,7 +5841,7 @@ const Chats = () => {
                       const { default: compress } = await import("browser-image-compression");
                       const compressed = await compress(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
                       const ext = compressed.name.split(".").pop() || "jpg";
-                      const path = `groups/${groupManageId}/${Date.now()}.${ext}`;
+                      const path = `${profile.id}/groups/${groupManageId}/${Date.now()}.${ext}`;
                       const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, compressed, { upsert: true });
                       if (uploadErr) throw uploadErr;
                       const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
@@ -5603,7 +5849,8 @@ const Chats = () => {
                       // Update group avatar in local state
                       setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url } : g));
                       // Persist to DB if groups table exists
-                      await supabase.from("chats").update({ avatar_url: url }).eq("id", groupManageId);
+                      const { error: avatarPersistError } = await supabase.from("chats").update({ avatar_url: url }).eq("id", groupManageId);
+                      if (avatarPersistError) throw avatarPersistError;
                       toast.success(t("Group image updated"));
                     } catch (err) {
                       console.error("Group image upload failed:", err);
@@ -5631,12 +5878,18 @@ const Chats = () => {
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {groupJoinRequests.map((req) => (
-                    <div key={req.requestId} className="flex items-center justify-between py-1.5">
-                      <div className="flex items-center gap-2">
+                {groupJoinRequests.map((req) => (
+                  <div key={req.requestId} className="flex items-center justify-between py-1.5">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2"
+                        onClick={() => void handleProfileTap(req.userId, req.name, req.avatarUrl ?? null)}
+                      >
                         <UserAvatar avatarUrl={req.avatarUrl ?? null} name={req.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                         <span className="text-sm text-brandText">{req.name}</span>
-                      </div>
+                      </button>
+                    </div>
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={async () => {
@@ -5689,10 +5942,14 @@ const Chats = () => {
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {groupMembers.length > 0 ? groupMembers.map((m) => (
                   <div key={m.id} className="flex items-center justify-between py-1.5">
-                    <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2"
+                      onClick={() => void handleProfileTap(m.id, m.name, m.avatarUrl)}
+                    >
                       <UserAvatar avatarUrl={m.avatarUrl} name={m.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                       <span className="text-sm text-brandText">{m.id === profile?.id ? `${m.name} (You)` : m.name}</span>
-                    </div>
+                    </button>
                     {m.id !== profile?.id && (
                       <button
                         onClick={async () => {
@@ -5724,10 +5981,14 @@ const Chats = () => {
                 )}
                 {groupPendingInvites.map((invitee) => (
                   <div key={`invite-${invitee.id}`} className="flex items-center justify-between py-1.5">
-                    <div className="flex items-center gap-2 opacity-65">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 opacity-65"
+                      onClick={() => void handleProfileTap(invitee.id, invitee.name, invitee.avatarUrl)}
+                    >
                       <UserAvatar avatarUrl={invitee.avatarUrl} name={invitee.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                       <span className="text-sm text-brandText">{invitee.name}</span>
-                    </div>
+                    </button>
                     <span className="text-[10px] font-medium text-[#9AA0B5]">Invited</span>
                   </div>
                 ))}
@@ -5763,10 +6024,14 @@ const Chats = () => {
                   <div className="space-y-1.5 max-h-32 overflow-y-auto">
                     {filtered.slice(0, 20).map((u) => (
                       <div key={u.id} className="flex items-center justify-between py-1">
-                        <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-2"
+                          onClick={() => void handleProfileTap(u.id, u.name, u.avatarUrl || null)}
+                        >
                           <UserAvatar avatarUrl={u.avatarUrl || null} name={u.name} isVerified={false} hasCar={false} size="sm" showBadges={false} />
                           <span className="text-sm text-brandText">{u.name}</span>
-                        </div>
+                        </button>
                         <NeuButton
                           size="sm"
                           variant="secondary"
