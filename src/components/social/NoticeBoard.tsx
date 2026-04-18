@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode, type RefObject } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
@@ -510,6 +511,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const params = useParams();
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setScrollerEl(scrollContainerRef?.current ?? null);
+  }, [scrollContainerRef]);
   const [notices, setNotices] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1636,7 +1642,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (!focusedThreadId) return;
     if (lastAutoFocusedThreadRef.current === focusedThreadId) return;
     const node = threadRefs.current[focusedThreadId];
-    if (!node) return;
+    if (!node) {
+      const idx = notices.findIndex((n) => n.id === focusedThreadId);
+      if (idx >= 0 && virtuosoRef.current) {
+        virtuosoRef.current.scrollToIndex({ index: idx, align: "start", behavior: "smooth" });
+      }
+      return;
+    }
     lastAutoFocusedThreadRef.current = focusedThreadId;
     const scroller = scrollContainerRef?.current;
     if (scroller) {
@@ -3309,8 +3321,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-border/70">
-                {visibleNotices.map((notice) => {
+              <Virtuoso
+                ref={virtuosoRef}
+                customScrollParent={scrollerEl ?? undefined}
+                data={visibleNotices}
+                computeItemKey={(_, n) => n.id}
+                increaseViewportBy={{ top: 600, bottom: 1200 }}
+                itemContent={(_, notice) => {
                   const primaryTag = getPrimaryTag(notice);
                   const firstUrl = extractFirstHttpUrl(notice.content || "");
                   const preview = firstUrl ? linkPreviewByUrl[firstUrl] : null;
@@ -3323,7 +3340,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     tabIndex={-1}
                     data-thread-id={notice.id}
                     className={cn(
-                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none [content-visibility:auto] [contain-intrinsic-size:0_320px]",
+                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none border-b border-border/70 [content-visibility:auto] [contain-intrinsic-size:0_320px]",
                       focusedThreadId === notice.id && "bg-[#2145CF]/[0.03]"
                     )}
                   >
@@ -3878,8 +3895,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       </div>
                     </div>
                   </div>
-                )})}
-              </div>
+                  );
+                }}
+              />
             )}
 
       {loadingMore ? (
