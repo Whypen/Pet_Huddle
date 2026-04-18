@@ -3832,7 +3832,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     tabIndex={-1}
                     data-thread-id={notice.id}
                     className={cn(
-                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none border-b border-border/70 [content-visibility:auto] [contain-intrinsic-size:0_320px]",
+                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none border-b border-border/70",
                       focusedThreadId === notice.id && "bg-[#2145CF]/[0.03]"
                     )}
                   >
