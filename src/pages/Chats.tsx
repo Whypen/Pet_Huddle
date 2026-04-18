@@ -2328,19 +2328,32 @@ const Chats = () => {
   useEffect(() => {
     if (!groupManageId || !profile?.id) return;
     void loadChatsGroupManageData();
+    let reloadTimer: ReturnType<typeof window.setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) {
+        window.clearTimeout(reloadTimer);
+      }
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        void loadChatsGroupManageData();
+      }, 120);
+    };
     const channel = supabase
       .channel(`group-manage-${groupManageId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${groupManageId}` }, () => {
-        void loadChatsGroupManageData();
+        scheduleReload();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${groupManageId}` }, () => {
-        void loadChatsGroupManageData();
+        scheduleReload();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${groupManageId}` }, () => {
-        void loadChatsGroupManageData();
+        scheduleReload();
       })
       .subscribe();
     return () => {
+      if (reloadTimer) {
+        window.clearTimeout(reloadTimer);
+      }
       void supabase.removeChannel(channel);
     };
   }, [groupManageId, loadChatsGroupManageData, profile?.id]);

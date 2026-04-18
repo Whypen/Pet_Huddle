@@ -994,19 +994,32 @@ const ChatDialogue = () => {
 
   useEffect(() => {
     if (!groupManageOpen || !roomId) return;
+    let reloadTimer: ReturnType<typeof window.setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) {
+        window.clearTimeout(reloadTimer);
+      }
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        void loadGroupManageData();
+      }, 120);
+    };
     const channel = supabase
       .channel(`chat-dialogue-manage-${roomId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_room_members", filter: `chat_id=eq.${roomId}` }, () => {
-        void loadGroupManageData();
+        scheduleReload();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "group_chat_invites", filter: `chat_id=eq.${roomId}` }, () => {
-        void loadGroupManageData();
+        scheduleReload();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "group_join_requests", filter: `chat_id=eq.${roomId}` }, () => {
-        void loadGroupManageData();
+        scheduleReload();
       })
       .subscribe();
     return () => {
+      if (reloadTimer) {
+        window.clearTimeout(reloadTimer);
+      }
       void supabase.removeChannel(channel);
     };
   }, [groupManageOpen, loadGroupManageData, roomId]);

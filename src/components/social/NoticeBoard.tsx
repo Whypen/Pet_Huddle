@@ -1,7 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, type ReactNode, type RefObject } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import { motion, AnimatePresence } from "framer-motion";
-import { createPortal } from "react-dom";
 import {
   X,
   Image,
@@ -27,8 +25,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -37,15 +33,32 @@ import imageCompression from "browser-image-compression";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
-import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
-import { ShareSheet } from "@/components/social/ShareSheet";
 import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
-import { ReportModal } from "@/components/moderation/ReportModal";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 import { detectSensitiveImage } from "@/lib/sensitiveContent";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import { NoticeBoardComposerModal } from "@/components/social/noticeboard/NoticeBoardComposerModal";
+import { NoticeBoardOverlays } from "@/components/social/noticeboard/NoticeBoardOverlays";
+import {
+  fetchFeedPage as fetchFeedPageData,
+  fetchFocusedThreadRow as fetchFocusedThreadRowData,
+  hydrateRows as hydrateFeedRows,
+} from "@/components/social/noticeboard/feedData";
+import type {
+  ActiveMentionQuery,
+  ComposerMedia,
+  ComposerUploadState,
+  FeedCursor,
+  HydratedRowsResult,
+  LinkPreview,
+  LinkPreviewPayload,
+  MentionEntry,
+  MentionSuggestion,
+  Thread,
+  ThreadComment,
+} from "@/components/social/noticeboard/types";
 
 
 const tags = [
@@ -57,87 +70,6 @@ const tags = [
   { id: "Adoption", label: "Adoption" },
   { id: "Meetup", label: "Meetup" },
 ];
-
-
-interface Thread {
-  id: string;
-  title: string;
-  content: string;
-  tags: string[] | null;
-  hashtags: string[] | null;
-  images: string[] | null;
-  created_at: string;
-  user_id: string;
-  likes?: number | null;
-  like_count?: number | null;
-  support_count?: number | null;
-  comment_count?: number | null;
-  share_count?: number | null;
-  score?: number | null;
-  map_id?: string | null;
-  alert_type?: string | null;
-  alert_district?: string | null;
-  has_alert_link?: boolean;
-  is_sensitive?: boolean | null;
-  author: {
-    display_name: string | null;
-    social_id?: string | null;
-    avatar_url: string | null;
-    verification_status?: string | null;
-    is_verified?: boolean | null;
-    location_country?: string | null;
-    last_lat?: number | null;
-    last_lng?: number | null;
-    non_social?: boolean | null;
-  } | null;
-}
-
-interface ThreadComment {
-  id: string;
-  thread_id: string;
-  content: string;
-  images?: string[] | null;
-  created_at: string;
-  user_id: string;
-  author: {
-    display_name: string | null;
-    social_id?: string | null;
-    avatar_url?: string | null;
-  } | null;
-}
-
-type HydratedRowsResult = {
-  rows: Thread[];
-  commentsByThread: Record<string, ThreadComment[]>;
-  threadMentions: Record<string, MentionEntry[]>;
-  replyMentions: Record<string, MentionEntry[]>;
-  alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others">;
-};
-
-type FeedHydrationRpcRow = {
-  thread_id: string;
-  share_count?: number | null;
-  is_sensitive?: boolean | null;
-  author_display_name?: string | null;
-  author_social_id?: string | null;
-  author_avatar_url?: string | null;
-  author_is_verified?: boolean | null;
-  map_id?: string | null;
-  alert_type?: string | null;
-  alert_district?: string | null;
-  has_alert_link?: boolean | null;
-  comments?: unknown;
-  thread_mentions?: unknown;
-  reply_mentions?: unknown;
-};
-
-const normalizeNewsAlertType = (rawType: string | null | undefined): "Stray" | "Lost" | "Caution" | "Others" => {
-  const normalized = String(rawType || "").toLowerCase();
-  if (normalized === "lost") return "Lost";
-  if (normalized === "stray") return "Stray";
-  if (normalized === "caution") return "Caution";
-  return "Others";
-};
 
 const AuthorHandle = ({
   displayName,
@@ -159,34 +91,6 @@ const AuthorHandle = ({
     ) : null}
   </span>
 );
-
-type MentionEntry = {
-  start: number;
-  end: number;
-  mentionedUserId: string;
-  socialIdAtTime: string;
-};
-
-type LinkPreview = {
-  url: string;
-  title?: string;
-  description?: string;
-  image?: string;
-  siteName?: string;
-  loading?: boolean;
-  failed?: boolean;
-  resolved?: boolean;
-  error?: string;
-};
-
-type LinkPreviewPayload = {
-  url?: unknown;
-  title?: unknown;
-  description?: unknown;
-  image?: unknown;
-  siteName?: unknown;
-  failed?: unknown;
-};
 
 type StoredLinkPreview = {
   url: string;
@@ -253,23 +157,9 @@ const trimLinkPreviewState = (
   return next;
 };
 
-type MentionSuggestion = {
-  userId: string;
-  socialId: string;
-  displayName: string;
-  avatarUrl: string | null;
-};
-
 type MentionSeed = MentionSuggestion & {
   score: number;
   lastSeenAt?: number;
-};
-
-type ActiveMentionQuery = {
-  query: string;
-  tokenStart: number;
-  tokenEnd: number;
-  caret: number;
 };
 
 interface NoticeBoardProps {
@@ -277,12 +167,6 @@ interface NoticeBoardProps {
   composeSignal: number;
   scrollContainerRef: RefObject<HTMLDivElement>;
 }
-
-type FeedCursor = {
-  created_at: string;
-  id: string;
-  score?: number | null;
-};
 
 type SocialFeedEventType =
   | "impression"
@@ -296,19 +180,6 @@ type SocialFeedEventType =
   | "share"
   | "hide"
   | "block";
-
-type ComposerMedia = {
-  file: File;
-  kind: "image" | "video";
-  previewUrl: string;
-};
-
-type UploadLifecycleStatus = "idle" | "uploading" | "success" | "error";
-type ComposerUploadState = {
-  scope: "thread" | "reply" | null;
-  status: UploadLifecycleStatus;
-  progress: number;
-};
 
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
@@ -631,7 +502,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [pullOffset, setPullOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const lastCursorRef = useRef<FeedCursor | null>(null);
-  const mentionTablesAvailableRef = useRef(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [socialRestrictionModalOpen, setSocialRestrictionModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -717,7 +587,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const linkPreviewQueueRef = useRef<string[]>([]);
   const linkPreviewActiveCountRef = useRef(0);
   const linkPreviewAccessRef = useRef<Map<string, number>>(new Map());
-  const linkPreviewRemoteDisabledRef = useRef(false);
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const isGoldUser = effectiveTier === "gold";
@@ -792,16 +661,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setProfileFallbackName(fallbackName);
     setProfileOpen(true);
   }, [recordSocialFeedEvent]);
-
-  const markMentionTablesUnavailable = useCallback((error: { code?: string; message?: string } | null | undefined) => {
-    if (!error) return false;
-    if (error.code === "PGRST205" || String(error.message || "").includes("404")) {
-      mentionTablesAvailableRef.current = false;
-      console.warn("[social.mentions.disabled]", error.message || error.code);
-      return true;
-    }
-    return false;
-  }, []);
 
   const upsertMentionDirectory = useCallback((profiles: MentionSuggestion[]) => {
     if (profiles.length === 0) return;
@@ -1142,18 +1001,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           .select("user_id, joined_at, chats!chat_participants_chat_id_fkey(last_message_at)")
           .neq("user_id", user.id)
           .limit(24),
-        mentionTablesAvailableRef.current
-          ? supabase
-              .from("post_mentions" as never)
-              .select("mentioned_user_id, created_at, threads!post_mentions_post_id_fkey(user_id)")
-              .limit(24)
-          : Promise.resolve({ data: [], error: null }),
-        mentionTablesAvailableRef.current
-          ? supabase
-              .from("reply_mentions" as never)
-              .select("mentioned_user_id, created_at, thread_comments!reply_mentions_reply_id_fkey(user_id)")
-              .limit(24)
-          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("post_mentions" as never)
+          .select("mentioned_user_id, created_at, threads!post_mentions_post_id_fkey(user_id)")
+          .limit(24),
+        supabase
+          .from("reply_mentions" as never)
+          .select("mentioned_user_id, created_at, thread_comments!reply_mentions_reply_id_fkey(user_id)")
+          .limit(24),
       ]);
 
       const collectProfileIds = new Set<string>();
@@ -1218,8 +1073,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             lastSeenAt: row.created_at ? new Date(row.created_at).getTime() : undefined,
           });
         });
-      } else {
-        markMentionTablesUnavailable(mentionPostsResult.error as { code?: string; message?: string });
+      } else if (import.meta.env.DEV) {
+        console.warn("[social.mentions.seed_post_failed]", mentionPostsResult.error);
       }
 
       if (!mentionRepliesResult.error) {
@@ -1235,8 +1090,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             lastSeenAt: row.created_at ? new Date(row.created_at).getTime() : undefined,
           });
         });
-      } else {
-        markMentionTablesUnavailable(mentionRepliesResult.error as { code?: string; message?: string });
+      } else if (import.meta.env.DEV) {
+        console.warn("[social.mentions.seed_reply_failed]", mentionRepliesResult.error);
       }
 
       const unresolvedIds = Array.from(collectProfileIds).filter((id) => !Array.from(seedMap.values()).some((entry) => entry.userId === id && entry.socialId));
@@ -1277,7 +1132,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     return () => {
       cancelled = true;
     };
-  }, [commentsByThread, markMentionTablesUnavailable, notices, upsertMentionDirectory, user?.id]);
+  }, [commentsByThread, notices, upsertMentionDirectory, user?.id]);
 
   const insertMentionIntoComposer = useCallback(
     (
@@ -1335,39 +1190,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     []
   );
 
-  const mapFeedRowToThread = useCallback((row: Record<string, unknown>): Thread => ({
-    id: String(row.id),
-    title: String(row.title || ""),
-    content: String(row.content || ""),
-    tags: (row.tags as string[] | null) ?? null,
-    hashtags: (row.hashtags as string[] | null) ?? null,
-    images: (row.images as string[] | null) ?? null,
-    likes: Number(row.like_count ?? 0),
-    like_count: Number(row.like_count ?? 0),
-    support_count: Number(row.support_count ?? 0),
-    comment_count: Number(row.comment_count ?? 0),
-    share_count: Number(row.share_count ?? row.clicks ?? 0),
-    score: typeof row.score === "number" ? row.score : Number(row.score ?? 0),
-    map_id: typeof row.map_id === "string" ? row.map_id : null,
-    alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
-    alert_district: typeof row.alert_district === "string" ? row.alert_district : null,
-    has_alert_link: Boolean(row.has_alert_link),
-    is_sensitive: row.is_sensitive === true,
-    created_at: String(row.created_at || new Date().toISOString()),
-    user_id: String(row.user_id),
-    author: {
-      display_name: (row.author_display_name as string | null) ?? null,
-      social_id: (row.author_social_id as string | null) ?? null,
-      avatar_url: (row.author_avatar_url as string | null) ?? null,
-      verification_status: (row.author_verification_status as string | null) ?? null,
-      is_verified: (row.author_is_verified as boolean | null) ?? false,
-      location_country: (row.author_location_country as string | null) ?? null,
-      last_lat: typeof row.author_last_lat === "number" ? row.author_last_lat : null,
-      last_lng: typeof row.author_last_lng === "number" ? row.author_last_lng : null,
-      non_social: Boolean(row.author_non_social),
-    },
-  }), []);
-
   const getDerivedAlertType = useCallback((notice: Thread): "Stray" | "Lost" | "Caution" | "Others" | null => {
     const stateType = newsAlertTypeByThread[notice.id];
     if (stateType) return stateType;
@@ -1380,377 +1202,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const fetchFeedPage = useCallback(async (cursor: FeedCursor | null = null) => {
     if (!user?.id) return [];
-    const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-      "get_social_feed",
-      {
-        p_viewer_id: user.id,
-        p_sort: sortMode === "Saves" || !sortMode ? "Latest" : sortMode,
-        p_limit: 20,
-        p_cursor: cursor,
-      }
-    );
-    if (error) throw error;
-    const rpcRows = (Array.isArray(data) ? data : []) as Array<Record<string, unknown>>;
-    return applyFeedFilters(rpcRows.map(mapFeedRowToThread));
-  }, [applyFeedFilters, mapFeedRowToThread, sortMode, user?.id]);
-
-  const hydrateRowsLegacy = useCallback(async (rows: Thread[]): Promise<HydratedRowsResult> => {
-    const ids = rows.map((n) => n.id);
-    if (ids.length === 0) {
-      return {
-        rows,
-        commentsByThread: {},
-        threadMentions: {},
-        replyMentions: {},
-        alertTypes: {},
-      };
-    }
-
-    let hydratedRows = rows;
-
-    const { data: shareRows } = await supabase
-      .from("threads" as "profiles")
-      .select("id, clicks")
-      .in("id", ids);
-    if (shareRows && shareRows.length > 0) {
-      const shareMap = new Map<string, number>(
-        (shareRows as Array<{ id: string; clicks: number | null }>).map((row) => [row.id, Number(row.clicks ?? 0)])
-      );
-      hydratedRows = hydratedRows.map((notice) =>
-        shareMap.has(notice.id)
-          ? { ...notice, share_count: shareMap.get(notice.id) ?? 0 }
-          : notice
-      );
-    }
-
-    const { data: alertRows, error: alertRowsError } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
-      "get_social_feed_alert_context",
-      { p_thread_ids: ids },
-    );
-    if (!alertRowsError && Array.isArray(alertRows) && alertRows.length > 0) {
-      const alertMap = new Map(
-        (alertRows as Array<{ thread_id?: string; map_id?: string | null; alert_type?: string | null; location_district?: string | null }>).map((row) => [
-          String(row.thread_id || ""),
-          {
-            map_id: typeof row.map_id === "string" ? row.map_id : null,
-            alert_type: typeof row.alert_type === "string" ? row.alert_type : null,
-            location_district: typeof row.location_district === "string" ? row.location_district : null,
-            has_alert_link:
-              (typeof row.map_id === "string" && row.map_id.trim().length > 0)
-              || (typeof row.alert_type === "string" && row.alert_type.trim().length > 0)
-              || (typeof row.location_district === "string" && row.location_district.trim().length > 0),
-          },
-        ])
-      );
-      hydratedRows = hydratedRows.map((notice) => {
-        const linked = alertMap.get(notice.id);
-        if (!linked) return notice;
-        return {
-          ...notice,
-          map_id: linked.map_id ?? notice.map_id ?? null,
-          alert_type: linked.alert_type ?? notice.alert_type ?? null,
-          alert_district: linked.location_district ?? notice.alert_district ?? null,
-          has_alert_link: linked.has_alert_link || notice.has_alert_link === true,
-        };
-      });
-    }
-
-    const { data: sensitiveRows } = await supabase
-      .from("threads" as "profiles")
-      .select("id,is_sensitive")
-      .in("id", ids);
-    if (sensitiveRows && sensitiveRows.length > 0) {
-      const sensitiveMap = new Map<string, boolean>(
-        (sensitiveRows as Array<{ id: string; is_sensitive?: boolean | null }>).map((row) => [
-          row.id,
-          row.is_sensitive === true,
-        ])
-      );
-      hydratedRows = hydratedRows.map((notice) => ({
-        ...notice,
-        is_sensitive: sensitiveMap.get(notice.id) === true,
-      }));
-    } else {
-      hydratedRows = hydratedRows.map((notice) => ({ ...notice, is_sensitive: notice.is_sensitive === true }));
-    }
-
-    const userIds = Array.from(new Set(hydratedRows.map((row) => row.user_id).filter(Boolean)));
-    if (userIds.length > 0) {
-      const { data: profileRows } = await supabase
-        .from("profiles")
-        .select("id, social_id, display_name, avatar_url, is_verified")
-        .in("id", userIds);
-      if (profileRows && profileRows.length > 0) {
-        const profileMap = new Map(
-          (profileRows as Array<{ id: string; social_id?: string | null; display_name?: string | null; avatar_url?: string | null; is_verified?: boolean | null }>).map((row) => [
-            row.id,
-            row,
-          ])
-        );
-        hydratedRows = hydratedRows.map((notice) => {
-          const author = profileMap.get(notice.user_id);
-          if (!author) return notice;
-          return {
-            ...notice,
-            author: {
-              ...notice.author,
-              display_name: author.display_name ?? notice.author?.display_name ?? null,
-              social_id: author.social_id ?? notice.author?.social_id ?? null,
-              avatar_url: author.avatar_url ?? notice.author?.avatar_url ?? null,
-              is_verified: author.is_verified === true,
-            },
-          };
-        });
-      }
-    }
-
-    const { data: comments } = await supabase
-      .from("thread_comments" as "profiles")
-      .select(`
-        id,
-        thread_id,
-        content,
-        images,
-        created_at,
-        user_id,
-        author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url)
-      `)
-      .in("thread_id", ids)
-      .order("created_at", { ascending: true });
-    const grouped: Record<string, ThreadComment[]> = {};
-    ((((comments || []) as unknown) as Array<Record<string, unknown>>)).forEach((comment) => {
-      const authorObj = Array.isArray(comment.author) ? comment.author[0] : comment.author;
-      const normalizedComment = {
-        id: String(comment.id),
-        thread_id: String(comment.thread_id),
-        content: String(comment.content || ""),
-        images: (comment.images as string[] | null) ?? null,
-        created_at: String(comment.created_at || new Date().toISOString()),
-        user_id: String(comment.user_id),
-        author: typeof authorObj === "object" && authorObj !== null
-          ? {
-              display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
-              social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
-              avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
-            }
-          : null,
-      } as ThreadComment;
-      grouped[normalizedComment.thread_id] = [...(grouped[normalizedComment.thread_id] || []), normalizedComment];
+    return fetchFeedPageData({
+      viewerId: user.id,
+      sortMode,
+      cursor,
+      applyFeedFilters,
     });
-    const commentIds = ((comments || []) as Array<{ id: string }>).map((comment) => comment.id);
-
-    const [postMentionResult, replyMentionResult] = mentionTablesAvailableRef.current
-      ? await Promise.all([
-          supabase
-            .from("post_mentions" as never)
-            .select("post_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-            .in("post_id", ids)
-            .order("start_idx", { ascending: true }),
-          commentIds.length > 0
-            ? supabase
-                .from("reply_mentions" as never)
-                .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-                .in("reply_id", commentIds)
-                .order("start_idx", { ascending: true })
-            : Promise.resolve({ data: [], error: null }),
-        ])
-      : [{ data: [], error: null }, { data: [], error: null }];
-
-    const nextThreadMentions: Record<string, MentionEntry[]> = {};
-    if (!postMentionResult.error) {
-      ((postMentionResult.data || []) as Array<{ post_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
-        nextThreadMentions[row.post_id] = [
-          ...(nextThreadMentions[row.post_id] || []),
-          {
-            start: Number(row.start_idx),
-            end: Number(row.end_idx),
-            mentionedUserId: row.mentioned_user_id,
-            socialIdAtTime: row.social_id_at_time,
-          },
-        ];
-      });
-    } else {
-      markMentionTablesUnavailable(postMentionResult.error as { code?: string; message?: string });
-    }
-
-    const nextReplyMentions: Record<string, MentionEntry[]> = {};
-    if (!replyMentionResult.error) {
-      ((replyMentionResult.data || []) as Array<{ reply_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
-        nextReplyMentions[row.reply_id] = [
-          ...(nextReplyMentions[row.reply_id] || []),
-          {
-            start: Number(row.start_idx),
-            end: Number(row.end_idx),
-            mentionedUserId: row.mentioned_user_id,
-            socialIdAtTime: row.social_id_at_time,
-          },
-        ];
-      });
-    } else {
-      markMentionTablesUnavailable(replyMentionResult.error as { code?: string; message?: string });
-    }
-
-    await primeMentionDirectory([
-      ...hydratedRows.map((row) => row.content || ""),
-      ...(((comments || []) as ThreadComment[]).map((comment) => comment.content || "")),
-    ]);
-
-    const nextAlertTypeMap: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
-    for (const notice of hydratedRows) {
-      const derivedType = deriveAlertTypeFromNoticeData(notice);
-      if (!derivedType) continue;
-      nextAlertTypeMap[notice.id] = derivedType;
-    }
-
-    return {
-      rows: hydratedRows,
-      commentsByThread: grouped,
-      threadMentions: nextThreadMentions,
-      replyMentions: nextReplyMentions,
-      alertTypes: nextAlertTypeMap,
-    };
-  }, [markMentionTablesUnavailable, primeMentionDirectory]);
+  }, [applyFeedFilters, sortMode, user?.id]);
 
   const hydrateRows = useCallback(async (rows: Thread[]): Promise<HydratedRowsResult> => {
-    const ids = rows.map((notice) => notice.id).filter(Boolean);
-    if (ids.length === 0) {
-      return {
-        rows,
-        commentsByThread: {},
-        threadMentions: {},
-        replyMentions: {},
-        alertTypes: {},
-      };
-    }
-
-    const { data, error } = await (supabase.rpc as (
-      fn: string,
-      args?: Record<string, unknown>
-    ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>)(
-      "get_social_feed_hydration",
-      { p_thread_ids: ids },
-    );
-
-    if (error || !Array.isArray(data)) {
-      if (error) {
-        console.warn("[social.feed] helper hydration unavailable, falling back", error);
-      }
-      return hydrateRowsLegacy(rows);
-    }
-
-    const hydrationByThreadId = new Map<string, FeedHydrationRpcRow>(
-      (data as FeedHydrationRpcRow[])
-        .filter((row) => typeof row?.thread_id === "string" && row.thread_id.trim().length > 0)
-        .map((row) => [row.thread_id, row]),
-    );
-
-    const commentsByThread: Record<string, ThreadComment[]> = {};
-    const threadMentions: Record<string, MentionEntry[]> = {};
-    const replyMentions: Record<string, MentionEntry[]> = {};
-
-    const hydratedRows = rows.map((notice) => {
-      const hydration = hydrationByThreadId.get(notice.id);
-      if (!hydration) return notice;
-
-      const rawComments = Array.isArray(hydration.comments) ? hydration.comments : [];
-      commentsByThread[notice.id] = rawComments.map((comment) => {
-        const authorObj =
-          typeof comment === "object" && comment !== null && typeof (comment as Record<string, unknown>).author === "object"
-            ? ((comment as Record<string, unknown>).author as Record<string, unknown> | null)
-            : null;
-        return {
-          id: String((comment as Record<string, unknown>)?.id || ""),
-          thread_id: String((comment as Record<string, unknown>)?.thread_id || notice.id),
-          content: String((comment as Record<string, unknown>)?.content || ""),
-          images: Array.isArray((comment as Record<string, unknown>)?.images)
-            ? (((comment as Record<string, unknown>).images as unknown[]).filter((value): value is string => typeof value === "string"))
-            : null,
-          created_at: String((comment as Record<string, unknown>)?.created_at || new Date().toISOString()),
-          user_id: String((comment as Record<string, unknown>)?.user_id || ""),
-          author: authorObj
-            ? {
-                display_name: typeof authorObj.display_name === "string" ? authorObj.display_name : null,
-                social_id: typeof authorObj.social_id === "string" ? authorObj.social_id : null,
-                avatar_url: typeof authorObj.avatar_url === "string" ? authorObj.avatar_url : null,
-              }
-            : null,
-        } as ThreadComment;
-      });
-
-      const rawThreadMentions = Array.isArray(hydration.thread_mentions) ? hydration.thread_mentions : [];
-      threadMentions[notice.id] = rawThreadMentions
-        .map((entry) => ({
-          start: Number((entry as Record<string, unknown>)?.start ?? 0),
-          end: Number((entry as Record<string, unknown>)?.end ?? 0),
-          mentionedUserId: String((entry as Record<string, unknown>)?.mentionedUserId || ""),
-          socialIdAtTime: String((entry as Record<string, unknown>)?.socialIdAtTime || ""),
-        }))
-        .filter((entry) => entry.mentionedUserId && entry.socialIdAtTime);
-
-      const rawReplyMentions =
-        hydration.reply_mentions && typeof hydration.reply_mentions === "object"
-          ? (hydration.reply_mentions as Record<string, unknown>)
-          : {};
-      Object.entries(rawReplyMentions).forEach(([replyId, entries]) => {
-        if (!Array.isArray(entries)) return;
-        replyMentions[replyId] = entries
-          .map((entry) => ({
-            start: Number((entry as Record<string, unknown>)?.start ?? 0),
-            end: Number((entry as Record<string, unknown>)?.end ?? 0),
-            mentionedUserId: String((entry as Record<string, unknown>)?.mentionedUserId || ""),
-            socialIdAtTime: String((entry as Record<string, unknown>)?.socialIdAtTime || ""),
-          }))
-          .filter((entry) => entry.mentionedUserId && entry.socialIdAtTime);
-      });
-
-      return {
-        ...notice,
-        share_count: Number(hydration.share_count ?? notice.share_count ?? 0),
-        is_sensitive: hydration.is_sensitive === true,
-        map_id: typeof hydration.map_id === "string" ? hydration.map_id : notice.map_id ?? null,
-        alert_type: typeof hydration.alert_type === "string" ? hydration.alert_type : notice.alert_type ?? null,
-        alert_district: typeof hydration.alert_district === "string" ? hydration.alert_district : notice.alert_district ?? null,
-        has_alert_link: hydration.has_alert_link === true || notice.has_alert_link === true,
-        author: {
-          ...notice.author,
-          display_name:
-            typeof hydration.author_display_name === "string"
-              ? hydration.author_display_name
-              : notice.author?.display_name ?? null,
-          social_id:
-            typeof hydration.author_social_id === "string"
-              ? hydration.author_social_id
-              : notice.author?.social_id ?? null,
-          avatar_url:
-            typeof hydration.author_avatar_url === "string"
-              ? hydration.author_avatar_url
-              : notice.author?.avatar_url ?? null,
-          is_verified: hydration.author_is_verified === true,
-        },
-      };
+    return hydrateFeedRows(rows, {
+      deriveAlertTypeFromNoticeData,
+      primeMentionDirectory,
     });
-
-    await primeMentionDirectory([
-      ...hydratedRows.map((row) => row.content || ""),
-      ...Object.values(commentsByThread).flat().map((comment) => comment.content || ""),
-    ]);
-
-    const alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
-    hydratedRows.forEach((notice) => {
-      const derivedType = deriveAlertTypeFromNoticeData(notice);
-      if (derivedType) {
-        alertTypes[notice.id] = derivedType;
-      }
-    });
-
-    return {
-      rows: hydratedRows,
-      commentsByThread,
-      threadMentions,
-      replyMentions,
-      alertTypes,
-    };
-  }, [hydrateRowsLegacy, primeMentionDirectory]);
+  }, [primeMentionDirectory]);
 
   const applyHydratedRows = useCallback((payload: HydratedRowsResult, options?: { reset?: boolean }) => {
     const reset = options?.reset === true;
@@ -1768,65 +1233,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setNewsAlertTypeByThread({});
   }, []);
 
-  const fetchFocusedThreadRow = useCallback(async (threadId: string) => {
-    if (!threadId) return null;
-    const { data: focusedThread } = await supabase
-      .from("threads" as "profiles")
-      .select(`
-        id,
-        title,
-        content,
-        tags,
-        hashtags,
-        images,
-        map_id,
-        alert_type,
-        likes,
-        created_at,
-        user_id,
-        author:profiles!threads_user_id_fkey(
-          display_name,
-          social_id,
-          avatar_url,
-          verification_status,
-          is_verified,
-          non_social,
-          location_country,
-          last_lat,
-          last_lng
-        )
-      `)
-      .eq("id", threadId)
-      .maybeSingle();
-    if (!focusedThread) return null;
-    const focusedRow = focusedThread as unknown as Record<string, unknown>;
-    const authorObj = Array.isArray(focusedRow.author) ? focusedRow.author[0] : focusedRow.author;
-    return mapFeedRowToThread({
-      id: focusedRow.id,
-      title: focusedRow.title,
-      content: focusedRow.content,
-      tags: focusedRow.tags,
-      hashtags: focusedRow.hashtags,
-      images: focusedRow.images,
-      like_count: focusedRow.likes,
-      support_count: focusedRow.support_count ?? 0,
-      comment_count: focusedRow.comment_count ?? 0,
-      score: focusedRow.score ?? 0,
-      map_id: focusedRow.map_id,
-      alert_type: focusedRow.alert_type,
-      created_at: focusedRow.created_at,
-      user_id: focusedRow.user_id,
-      author_display_name: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).display_name : null,
-      author_social_id: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).social_id : null,
-      author_avatar_url: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).avatar_url : null,
-      author_verification_status: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).verification_status : null,
-      author_is_verified: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).is_verified : null,
-      author_location_country: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).location_country : null,
-      author_last_lat: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lat : null,
-      author_last_lng: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lng : null,
-      author_non_social: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).non_social : false,
-    });
-  }, [mapFeedRowToThread]);
+  const fetchFocusedThreadRow = useCallback(async (threadId: string) => fetchFocusedThreadRowData(threadId), []);
 
   const fetchNotices = useCallback(async (reset: boolean = false) => {
     const requestToken = ++feedRequestTokenRef.current;
@@ -2312,7 +1719,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const persistPostMentions = useCallback(async (postId: string, entries: MentionEntry[]) => {
     if (!postId || entries.length === 0) return;
-    if (!mentionTablesAvailableRef.current) return;
     const rows = dedupeMentionEntries(entries).map((entry) => ({
       post_id: postId,
       mentioned_user_id: entry.mentionedUserId,
@@ -2322,16 +1728,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }));
     const { error } = await supabase.from("post_mentions" as never).insert(rows);
     if (error) {
-      if (markMentionTablesUnavailable(error as { code?: string; message?: string })) return;
       console.error("[social.mentions.persist_post_failed]", { postId, error: error.message, rows });
       throw error;
     }
     setThreadMentionsById((prev) => ({ ...prev, [postId]: dedupeMentionEntries(entries) }));
-  }, [markMentionTablesUnavailable]);
+  }, []);
 
   const persistReplyMentions = useCallback(async (replyId: string, entries: MentionEntry[]) => {
     if (!replyId || entries.length === 0) return;
-    if (!mentionTablesAvailableRef.current) return;
     const rows = dedupeMentionEntries(entries).map((entry) => ({
       reply_id: replyId,
       mentioned_user_id: entry.mentionedUserId,
@@ -2341,12 +1745,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }));
     const { error } = await supabase.from("reply_mentions" as never).insert(rows);
     if (error) {
-      if (markMentionTablesUnavailable(error as { code?: string; message?: string })) return;
       console.error("[social.mentions.persist_reply_failed]", { replyId, error: error.message, rows });
       throw error;
     }
     setReplyMentionsById((prev) => ({ ...prev, [replyId]: dedupeMentionEntries(entries) }));
-  }, [markMentionTablesUnavailable]);
+  }, []);
 
   const createMentionNotifications = useCallback(
     async (threadId: string, recipientIds: string[]) => {
@@ -2776,12 +2179,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             )
           );
 
-          if (mentionTablesAvailableRef.current) {
+          {
             const { error: deleteMentionsError } = await supabase
               .from("post_mentions" as never)
               .delete()
               .eq("post_id", String(updatedThread.id));
-            if (deleteMentionsError && !markMentionTablesUnavailable(deleteMentionsError as { code?: string; message?: string })) {
+            if (deleteMentionsError) {
               console.error("[social.mentions.clear_failed]", deleteMentionsError);
             }
           }
@@ -3441,10 +2844,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       persistLinkPreviewToLocalCache(url, intrinsicPreview);
       return;
     }
-    if (linkPreviewRemoteDisabledRef.current) {
-      updateLinkPreviewEntry(url, buildFallbackLinkPreview(url, "remote_preview_unavailable"));
-      return;
-    }
     linkPreviewInFlightRef.current.add(url);
     updateLinkPreviewEntry(url, {
       ...(existing || { url }),
@@ -3474,13 +2873,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
       if (error || !data || typeof data !== "object") {
         const reason = error?.message || "invalid_payload";
-        if (
-          reason === "Failed to send a request to the Edge Function" ||
-          reason === "FunctionsFetchError" ||
-          /not found/i.test(reason)
-        ) {
-          linkPreviewRemoteDisabledRef.current = true;
-        }
         if (import.meta.env.DEV) {
           console.debug("[link-preview] fetch:failed", { url, reason });
         }
@@ -3532,13 +2924,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unexpected_error";
-      if (
-        reason === "Failed to send a request to the Edge Function" ||
-        reason === "FunctionsFetchError" ||
-        /not found/i.test(reason)
-      ) {
-        linkPreviewRemoteDisabledRef.current = true;
-      }
       if (import.meta.env.DEV) {
         console.debug("[link-preview] fetch:exception", { url, reason, err });
       }
@@ -4439,300 +3824,96 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         </div>
       ) : null}
 
-      {/* Create Notice Modal */}
-      {typeof document !== "undefined" &&
-        createPortal(
-          <AnimatePresence>
-            {isCreateOpen && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-[5000] bg-black/50"
-                onClick={closeCreateComposer}
-              >
-                <motion.div
-                  initial={{ y: "100%" }}
-                  animate={{ y: 0 }}
-                  exit={{ y: "100%" }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="fixed left-0 right-0 bottom-0 w-full max-h-[100svh] overflow-y-auto bg-card rounded-t-3xl p-6 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
-                >
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-semibold">{editingNoticeId ? t("Edit Post") : t("Create Post")}</h3>
-                <button onClick={closeCreateComposer}>
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div className="form-field-rest relative flex items-center">
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="field-input-core bg-transparent pr-8 text-sm"
-                  >
-                    {tags.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div className={cn("form-field-rest relative flex items-center", createErrors.title && "form-field-error")}>
-                    <input
-                      type="text"
-                      placeholder={t("Title")}
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="field-input-core rounded-none border-0 bg-transparent px-0 py-0 shadow-none outline-none focus-visible:ring-0"
-                      aria-invalid={Boolean(createErrors.title)}
-                    />
-                  </div>
-                  {createErrors.title && <p className="mt-1 text-xs text-destructive">{createErrors.title}</p>}
-                </div>
-
-                <div>
-                  <div className={cn("form-field-rest relative h-auto min-h-[132px] py-3", createErrors.content && "form-field-error")}>
-                    <div className="relative min-h-[108px]">
-                      <div className="pointer-events-none min-h-[108px] whitespace-pre-wrap break-words text-sm leading-5">
-                        {renderComposerTextWithMentions(content, createMentions, t("What's on your mind?"), "create-composer")}
-                      </div>
-                      <Textarea
-                        ref={createInputRef}
-                        value={content}
-                        onChange={(e) => handleCreateInputChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-                        onFocus={() => setCreateComposerFocused(true)}
-                        onBlur={() => {
-                          setCreateComposerFocused(false);
-                          window.setTimeout(() => setCreateMentionQuery(null), 120);
-                        }}
-                        className="field-input-core absolute inset-x-0 top-0 bottom-0 min-h-[108px] resize-none rounded-none border-0 bg-transparent px-0 py-0 text-transparent caret-[var(--text-primary)] shadow-none outline-none focus-visible:ring-0"
-                        aria-invalid={Boolean(createErrors.content)}
-                      />
-                    </div>
-                  </div>
-                  {activePreviewUrl ? (
-                    <div className="relative mt-2">
-                    <button
-                      type="button"
-                      onClick={() => dismissCreatePreview(activePreviewUrl)}
-                      aria-label="Remove link preview"
-                      className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-brandText shadow-sm hover:bg-background"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                    <a
-                      href={activePreviewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="form-field-rest block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
-                    >
-                      {createContentPreview?.image ? (
-                        <img
-                          src={createContentPreview.image}
-                          alt={createContentPreview.title || "Link preview"}
-                          className="h-40 w-full object-cover"
-                        />
-                      ) : null}
-                      <div className="space-y-1.5 px-3 py-2.5">
-                        <p className="text-xs text-[rgba(74,73,101,0.62)]">
-                          {createContentPreview?.siteName || (() => {
-                            try {
-                              return new URL(activePreviewUrl).hostname.replace(/^www\./, "");
-                            } catch {
-                              return "External link";
-                            }
-                          })()}
-                        </p>
-                        <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-brandText">
-                          {createContentPreview?.title || formatUrlLabel(activePreviewUrl)}
-                        </p>
-                        {createContentPreview?.loading ? (
-                          <p className="text-xs text-[rgba(74,73,101,0.62)]">Loading preview...</p>
-                        ) : null}
-                        {createContentPreview?.failed ? (
-                          <p className="text-xs text-[rgba(74,73,101,0.62)]">
-                            Preview unavailable{import.meta.env.DEV && createContentPreview.error ? `: ${createContentPreview.error}` : ""}
-                          </p>
-                        ) : null}
-                      </div>
-                    </a>
-                    </div>
-                  ) : null}
-                  {MENTION_LIVE_SUGGESTIONS_ENABLED
-                    ? renderMentionSuggestions(
-                        createMentionSuggestions,
-                        (suggestion) =>
-                          insertMentionIntoComposer(
-                            "create",
-                            suggestion,
-                            createMentionQuery,
-                            content,
-                            createMentions,
-                            createInputRef.current
-                          ),
-                        "mt-2 max-h-52 overflow-y-auto"
-                      )
-                    : null}
-                  {remainingCreateWords < 0 && (
-                    <div className="mt-2 text-right text-xs font-medium text-destructive">
-                      {remainingCreateWords}
-                    </div>
-                  )}
-                  {createErrors.content && <p className="mt-1 text-xs text-destructive">{createErrors.content}</p>}
-                </div>
-              </div>
-
-              {createMediaFiles.length > 0 && (
-                <div className="mt-4 mb-4 flex flex-wrap items-start gap-3">
-                  {createMediaFiles.map((item, index) => (
-                    <div key={`create-media-${index}`} className="relative h-[150px] w-[150px] shrink-0 overflow-hidden rounded-[24px]">
-                      <MediaThumb
-                        src={item.previewUrl}
-                        alt="Thread preview"
-                        className={cn(
-                          "h-full w-full rounded-[24px]",
-                          composerUploadState.scope === "thread" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]"
-                        )}
-                      />
-                      {composerUploadState.scope === "thread" && composerUploadState.status === "uploading" ? (
-                        <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
-                          Uploading {Math.round(composerUploadState.progress)}%
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => removeCreateMediaAt(index)}
-                        className="absolute top-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
-                      >
-                        <X className="w-4 h-4 text-white" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {createMediaFiles.length > 0 ? (
-                <div className="mb-4">
-                  <label className="flex items-start gap-2 text-xs text-[rgba(74,73,101,0.78)]">
-                    <input
-                      type="checkbox"
-                      checked={createIsSensitive}
-                      onChange={(event) => {
-                        setCreateIsSensitive(event.target.checked);
-                        if (!event.target.checked) setCreateSensitiveSuggested(false);
-                      }}
-                      className="mt-[2px] h-4 w-4 rounded border-border"
-                    />
-                    <span>This photo contains injury, blood, sensitive or disturbing content</span>
-                  </label>
-                  {createSensitiveSuggested ? (
-                    <p className="mt-1 text-xs text-[#B46900]">Detected possible sensitive content</p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {/* Actions */}
-              <div className="mt-3 flex items-center gap-3 pb-2">
-                <label className="p-2 rounded-full bg-muted cursor-pointer hover:bg-muted/80">
-                  <Image className="w-5 h-5 text-muted-foreground" />
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    multiple
-                    onChange={handleCreateMediaChange}
-                    className="hidden"
-                  />
-                </label>
-
-                <NeuButton
-                  onClick={handleCreateNotice}
-                  disabled={creating || !content.trim() || !title.trim() || remainingCreateWords < 0}
-                  className="flex-1 h-12 rounded-xl bg-primary hover:bg-primary/90 text-white"
-                >
-                  {creating ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    "Post"
-                  )}
-                </NeuButton>
-              </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>,
-          document.body
-      )}
-
-      <PublicProfileSheet
-        isOpen={profileOpen}
-        onClose={() => setProfileOpen(false)}
-        loading={false}
-        fallbackName={profileFallbackName}
-        viewedUserId={profileUserId}
-        data={null}
+      <NoticeBoardComposerModal
+        activePreviewUrl={activePreviewUrl}
+        category={category}
+        composerUploadState={composerUploadState}
+        content={content}
+        createContentPreview={createContentPreview}
+        createErrors={createErrors}
+        createInputRef={createInputRef}
+        createIsSensitive={createIsSensitive}
+        createMediaFiles={createMediaFiles}
+        createMentions={createMentions}
+        createSensitiveSuggested={createSensitiveSuggested}
+        creating={creating}
+        editingNoticeId={editingNoticeId}
+        isOpen={isCreateOpen}
+        mentionSuggestionsContent={
+          MENTION_LIVE_SUGGESTIONS_ENABLED
+            ? renderMentionSuggestions(
+                createMentionSuggestions,
+                (suggestion) =>
+                  insertMentionIntoComposer(
+                    "create",
+                    suggestion,
+                    createMentionQuery,
+                    content,
+                    createMentions,
+                    createInputRef.current,
+                  ),
+                "mt-2 max-h-52 overflow-y-auto",
+              )
+            : null
+        }
+        onCategoryChange={setCategory}
+        onClose={closeCreateComposer}
+        onContentBlur={() => {
+          setCreateComposerFocused(false);
+          window.setTimeout(() => setCreateMentionQuery(null), 120);
+        }}
+        onContentChange={handleCreateInputChange}
+        onContentFocus={() => setCreateComposerFocused(true)}
+        onDismissPreview={dismissCreatePreview}
+        onMediaChange={handleCreateMediaChange}
+        onRemoveMedia={removeCreateMediaAt}
+        onSensitiveChange={(checked) => {
+          setCreateIsSensitive(checked);
+          if (!checked) setCreateSensitiveSuggested(false);
+        }}
+        onSubmit={handleCreateNotice}
+        onTitleChange={setTitle}
+        previewUrlLabel={formatUrlLabel}
+        remainingCreateWords={remainingCreateWords}
+        renderComposerTextWithMentions={renderComposerTextWithMentions}
+        tags={tags}
+        title={title}
+        translate={t}
       />
 
-      {sharePayload && (
-        <ShareSheet
-          open={shareOpen}
-          onClose={() => setShareOpen(false)}
-          share={sharePayload}
-          onShareAction={() => void recordShareClick(sharePayload.contentId)}
-        />
-      )}
-      <ReportModal
-        open={reportOpen}
-        onClose={() => {
+      <NoticeBoardOverlays
+        confirmBlockId={confirmBlockId}
+        confirmBlockName={confirmBlockName}
+        onBlockConfirm={() => {
+          if (confirmBlockId) void handleBlockUser(confirmBlockId);
+          setConfirmBlockId(null);
+        }}
+        onBlockDialogChange={(open) => {
+          if (!open) setConfirmBlockId(null);
+        }}
+        onProfileClose={() => setProfileOpen(false)}
+        onReportClose={() => {
           setReportOpen(false);
           setReportTargetUserId(null);
           setReportTargetName("");
         }}
-        targetUserId={reportTargetUserId}
-        targetName={reportTargetName}
-        source="Social"
+        onRestrictionClose={() => setSocialRestrictionModalOpen(false)}
+        onShareAction={() => {
+          if (sharePayload) {
+            void recordShareClick(sharePayload.contentId);
+          }
+        }}
+        onShareClose={() => setShareOpen(false)}
+        profileFallbackName={profileFallbackName}
+        profileOpen={profileOpen}
+        profileUserId={profileUserId}
+        reportOpen={reportOpen}
+        reportTargetName={reportTargetName}
+        reportTargetUserId={reportTargetUserId}
+        shareOpen={shareOpen}
+        sharePayload={sharePayload}
+        socialRestrictionModalOpen={socialRestrictionModalOpen}
       />
-      <Dialog open={socialRestrictionModalOpen} onOpenChange={setSocialRestrictionModalOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Posting Access Limited</DialogTitle>
-            <DialogDescription>
-              Your ability to post or reply has been limited due to recent account activity that does not meet our community safety standards.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <button
-              type="button"
-              className="h-10 rounded-full bg-brandBlue px-4 text-sm font-semibold text-white"
-              onClick={() => setSocialRestrictionModalOpen(false)}
-            >
-              Confirm
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-    <AlertDialog open={!!confirmBlockId} onOpenChange={(v) => !v && setConfirmBlockId(null)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Block {confirmBlockName}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            You will no longer see their posts or alerts, and they won't be able to interact with you.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => setConfirmBlockId(null)}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => { if (confirmBlockId) void handleBlockUser(confirmBlockId); setConfirmBlockId(null); }}
-            className="bg-destructive text-white hover:bg-destructive/90"
-          >
-            Block
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
 
     </div>
   );
