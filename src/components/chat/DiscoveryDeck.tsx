@@ -383,7 +383,7 @@ const DiscoveryDeckInner = ({
             <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(33,71,201,0.96)]" style={{ opacity: waveTintOpacity }} />
             <motion.div className="pointer-events-none absolute inset-0 bg-[rgba(233,76,92,0.95)]" style={{ opacity: passTintOpacity }} />
             <motion.div
-              className="pointer-events-none absolute bottom-[130px] left-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-white/92 px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)]"
+              className="pointer-events-none absolute bottom-[130px] left-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#2147C9] bg-[rgba(255,255,255,0.52)] px-3 py-2 text-[#2147C9] shadow-[0_10px_24px_rgba(33,71,201,0.14)] backdrop-blur-[12px]"
               style={{ opacity: waveIndicatorOpacity, scale: waveIndicatorScale, rotate: stampCounterRotate, x: waveIndicatorX, y: waveIndicatorY }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -393,7 +393,7 @@ const DiscoveryDeckInner = ({
               <span className="text-[13px] font-extrabold tracking-[0.18em]">WAVE</span>
             </motion.div>
             <motion.div
-              className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-white/92 px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)]"
+              className="pointer-events-none absolute right-4 top-4 z-[18] flex items-center gap-2 rounded-[16px] border-2 border-[#E94C5C] bg-[rgba(255,255,255,0.52)] px-3 py-2 text-[#E94C5C] shadow-[0_10px_24px_rgba(233,76,92,0.14)] backdrop-blur-[12px]"
               style={{ opacity: passIndicatorOpacity, scale: passIndicatorScale, rotate: stampCounterRotate, x: passIndicatorX, y: passIndicatorY }}
             >
               <span className="text-[13px] font-extrabold tracking-[0.18em]">SKIP</span>
@@ -410,7 +410,7 @@ const DiscoveryDeckInner = ({
                 type="button"
                 aria-label={`Star ${profile.display_name || "profile"}`}
                 className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-[rgba(255,255,255,0.18)] text-white shadow-[0_12px_28px_rgba(7,24,108,0.26)] backdrop-blur-[20px] transition-transform duration-150 hover:scale-[1.03] active:scale-[0.96]",
+                  "flex h-11 w-11 items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-[#2C2A19] shadow-[0_12px_28px_rgba(245,200,92,0.32)] transition-transform duration-150 hover:scale-[1.03] active:scale-[0.96]",
                   ctaDisabled && "cursor-not-allowed opacity-45"
                 )}
                 disabled={ctaDisabled}

@@ -4,6 +4,7 @@ import { CakeSlice, Heart, Loader2, PawPrint, Ruler, Star, User, X } from "lucid
 import { useNavigate } from "react-router-dom";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
@@ -102,9 +103,17 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           .select("*")
           .eq("id", viewedUserId)
           .maybeSingle();
-        if (error) throw error;
-        if (!profileRow) {
-          if (!cancelled) setResolvedData(null);
+        let resolvedRow = profileRow as Record<string, unknown> | null;
+        if (error || !resolvedRow) {
+          const { data: publicRow } = await supabase
+            .from("profiles_public")
+            .select("id, display_name, avatar_url, availability_status, user_role, has_car, location_name")
+            .eq("id", viewedUserId)
+            .maybeSingle();
+          resolvedRow = (publicRow as Record<string, unknown> | null) ?? null;
+        }
+        if (!resolvedRow) {
+          if (!cancelled) setResolvedData((data as PublicProfileSheetData | null) ?? null);
           return;
         }
         const { data: pets } = await supabase
@@ -113,10 +122,14 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           .eq("owner_id", viewedUserId);
         const petHeads = (pets || []).filter((pet) => pet.is_active !== false);
         if (!cancelled) {
-          setResolvedData({ ...(profileRow as Record<string, unknown>), pet_heads: petHeads });
+          setResolvedData({
+            ...(data as Record<string, unknown> | null || {}),
+            ...resolvedRow,
+            pet_heads: petHeads,
+          });
         }
       } catch {
-        if (!cancelled) setResolvedData(data ?? null);
+        if (!cancelled) setResolvedData((data as PublicProfileSheetData | null) ?? null);
       } finally {
         if (!cancelled) setResolvedLoading(false);
       }
@@ -225,11 +238,11 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
         throw new Error("star_failed");
       }
       setStarFlightVisible(true);
-      window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
         navigate(`/chat-dialogue?room=${encodeURIComponent(result.roomId)}&name=${encodeURIComponent(resolvedData?.display_name || fallbackName || "Conversation")}&with=${encodeURIComponent(viewedUserId)}`);
         onClose();
         setStarFlightVisible(false);
-      });
+      }, 900);
     } catch {
       toast.error("Unable to open chat right now.");
     } finally {
@@ -461,7 +474,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
                 exit={{ opacity: 0 }}
               >
                 <motion.div
-                  className="absolute left-[22%] top-[74%] -translate-x-1/2 -translate-y-1/2 text-white drop-shadow-[0_18px_36px_rgba(33,71,201,0.42)]"
+                  className="absolute left-[22%] top-[74%] -translate-x-1/2 -translate-y-1/2 text-[#F5C85C] drop-shadow-[0_18px_36px_rgba(245,200,92,0.42)]"
                   initial={{ scale: 0.78, x: 0, y: 0, rotate: -18, opacity: 0.9 }}
                   animate={{ scale: 0.42, x: 178, y: -348, rotate: 20, opacity: 0 }}
                   transition={{ duration: 1.25, ease: [0.22, 1, 0.36, 1] }}

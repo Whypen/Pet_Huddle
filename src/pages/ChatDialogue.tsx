@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeCheck, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -936,6 +936,22 @@ const ChatDialogue = () => {
     }
   }, [roomId, profile?.id]);
 
+  const openGroupInfoPanel = useCallback(() => {
+    const media: string[] = [];
+    for (const msg of messages) {
+      try {
+        const parsed = JSON.parse(msg.content) as { attachments?: { url: string; mime: string }[] };
+        if (Array.isArray(parsed.attachments)) {
+          parsed.attachments.filter((item) => !item.mime.startsWith("video/")).forEach((item) => media.push(item.url));
+        }
+      } catch {
+        // plain text rows
+      }
+    }
+    setGroupMediaUrls(media);
+    setGroupInfoOpen(true);
+  }, [messages]);
+
   if (loading) {
     return (
       <div className="h-full min-h-0 flex items-center justify-center">
@@ -958,19 +974,24 @@ const ChatDialogue = () => {
           </button>
           {isGroup ? (
             <>
-              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center">
+              <button
+                type="button"
+                className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-card border border-border/30 flex items-center justify-center"
+                onClick={openGroupInfoPanel}
+                aria-label="Open group details"
+              >
                 {groupAvatarUrl ? (
                   <img src={groupAvatarUrl} alt={roomName} className="h-full w-full object-cover" />
                 ) : (
                   <Users className="h-4 w-4 text-primary" />
                 )}
-              </div>
-              <div className="min-w-0 flex-1">
+              </button>
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={openGroupInfoPanel}>
                 <div className="truncate text-sm font-semibold text-brandText">{roomName}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {groupMemberCount > 0 ? `${groupMemberCount} members` : "Group"}
                 </div>
-              </div>
+              </button>
             </>
           ) : (
             <>
@@ -998,20 +1019,7 @@ const ChatDialogue = () => {
             <button
               className="rounded-full p-2 hover:bg-muted"
               aria-label="Group info"
-              onClick={() => {
-                // Collect media from current messages
-                const media: string[] = [];
-                for (const msg of messages) {
-                  try {
-                    const p = JSON.parse(msg.content) as { attachments?: { url: string; mime: string }[] };
-                    if (Array.isArray(p.attachments)) {
-                      p.attachments.filter((a) => !a.mime.startsWith("video/")).forEach((a) => media.push(a.url));
-                    }
-                  } catch { /* plain text */ }
-                }
-                setGroupMediaUrls(media);
-                setGroupInfoOpen(true);
-              }}
+              onClick={openGroupInfoPanel}
             >
               <MoreVertical className="h-4 w-4 text-muted-foreground" />
             </button>
@@ -1154,13 +1162,13 @@ const ChatDialogue = () => {
                     {senderNames[message.sender_id] || ""}
                   </div>
                 )}
-                {isSystemMsg ? (
+                {isSystemMsg && !(isGroup && groupRoomCode && normalizedText.startsWith(`Room Code: ${groupRoomCode}`)) ? (
                   <div className="flex justify-center py-2">
                     <span className="rounded-full bg-[rgba(59,130,246,0.10)] px-3 py-1 text-[12px] font-medium text-[#3B82F6] text-center max-w-[80%]">
                       {normalizedText}
                     </span>
                   </div>
-                ) : isMembershipHint ? (
+                ) : isSystemMsg ? null : isMembershipHint ? (
                   <div className="flex justify-center py-1">
                     <span className="rounded-full bg-[rgba(120,128,150,0.15)] px-3 py-1 text-xs font-medium text-[#8C93AA]">
                       {normalizedText}
@@ -1321,7 +1329,7 @@ const ChatDialogue = () => {
         data={profileSheetData}
         viewedUserId={counterpart?.id || null}
         hideStartChatAction={true}
-        zIndexBase={9900}
+        zIndexBase={12000}
       />
 
       <Dialog open={confirmUnmatchOpen} onOpenChange={setConfirmUnmatchOpen}>
@@ -1502,6 +1510,7 @@ const ChatDialogue = () => {
                                 if (error) throw error;
                                 setGroupManageMembers((prev) => prev.filter((x) => x.id !== m.id));
                                 setGroupMemberCount((prev) => Math.max(0, prev - 1));
+                                void loadGroupManageData();
                                 toast.success(`${m.name} removed`);
                               } catch {
                                 toast.error("Couldn't remove member.");
@@ -1568,6 +1577,7 @@ const ChatDialogue = () => {
                                     );
                                   if (error) throw error;
                                   setGroupManageFriends((prev) => prev.filter((f) => f.id !== u.id));
+                                  void loadGroupManageData();
                                   toast.success(`${u.name} invited`);
                                   const inviterName = (profile as unknown as { display_name?: string })?.display_name || "Someone";
                                   void supabase.rpc("enqueue_notification", {

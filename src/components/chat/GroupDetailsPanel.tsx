@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ImageIcon, Users } from "lucide-react";
 
 type GroupDetailsAction = {
@@ -28,6 +28,13 @@ export function GroupDetailsPanel({
   mediaUrls,
   actions,
 }: GroupDetailsPanelProps) {
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const canExpandDescription = useMemo(() => {
+    const value = String(description || "").trim();
+    if (!value) return false;
+    return value.length > 160 || value.split("\n").length > 3;
+  }, [description]);
+
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
@@ -47,8 +54,25 @@ export function GroupDetailsPanel({
       </div>
 
       {description ? (
-        <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-brandText">{description}</p>
+        <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 pr-5 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
+          <p
+            className={
+              descriptionExpanded
+                ? "whitespace-pre-wrap break-words text-sm leading-relaxed text-brandText"
+                : "whitespace-pre-wrap break-words text-sm leading-relaxed text-brandText line-clamp-3"
+            }
+          >
+            {description}
+          </p>
+          {canExpandDescription ? (
+            <button
+              type="button"
+              className="mt-1 text-xs font-bold text-[rgba(74,73,101,0.72)]"
+              onClick={() => setDescriptionExpanded((prev) => !prev)}
+            >
+              {descriptionExpanded ? "See Less" : "Read More"}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

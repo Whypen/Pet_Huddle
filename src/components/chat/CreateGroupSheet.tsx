@@ -10,7 +10,7 @@ import { FormField, FormTextArea } from "@/components/ui/FormField";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { countWords } from "@/lib/locationLabels";
+import { countWords, resolveCountryByPrecedence } from "@/lib/locationLabels";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -137,6 +137,42 @@ export function CreateGroupSheet({
     }
     setIsCreating(true);
     try {
+      const [{ data: liveLocation }, { data: profileLocation }] = await Promise.all([
+        supabase
+          .from("user_locations")
+          .select("location_name, location_country, location_pinned_until")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("location_country, location_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+      ]);
+      const liveLocationRow = (liveLocation || null) as {
+        location_name?: string | null;
+        location_country?: string | null;
+        location_pinned_until?: string | null;
+      } | null;
+      const profileLocationRow = (profileLocation || null) as {
+        location_country?: string | null;
+        location_name?: string | null;
+      } | null;
+      const pinActive = (() => {
+        const raw = liveLocationRow?.location_pinned_until;
+        if (!raw) return false;
+        const pinnedUntil = new Date(raw).getTime();
+        return Number.isFinite(pinnedUntil) && pinnedUntil > Date.now();
+      })();
+      const groupCountry = resolveCountryByPrecedence({
+        gpsCountry: liveLocationRow?.location_country || null,
+        gpsLocationName: liveLocationRow?.location_name || null,
+        pinCountry: pinActive ? liveLocationRow?.location_country || null : null,
+        pinLocationName: pinActive ? liveLocationRow?.location_name || null : null,
+        profileCountry: profileLocationRow?.location_country || null,
+        profileLocationName: profileLocationRow?.location_name || null,
+      });
+
       // 1. Insert chat
       const { data: chat, error: chatError } = await supabase
         .from("chats")
@@ -146,6 +182,7 @@ export function CreateGroupSheet({
           visibility,
           join_method: visibility === "public" ? joinMethod : "request",
           location_label: locationLabel.trim() || null,
+          location_country: groupCountry,
           pet_focus: selectedPetFocus.length > 0 ? selectedPetFocus : null,
           description: description.trim() || null,
           created_by: user.id,
@@ -258,6 +295,7 @@ export function CreateGroupSheet({
               label="Group name"
               placeholder="Sunday Small Dog Walks"
               value={groupName}
+              className="[&_.field-input-core]:pl-3 [&_.field-input-core]:pr-3"
               onChange={e => setGroupName(e.target.value)}
             />
           </div>
@@ -268,6 +306,7 @@ export function CreateGroupSheet({
           label="Location"
           placeholder="Neighbourhood or area"
           value={locationLabel}
+          className="[&_.field-input-core]:pl-3 [&_.field-input-core]:pr-3"
           onChange={e => setLocationLabel(e.target.value)}
         />
 
@@ -298,6 +337,7 @@ export function CreateGroupSheet({
           label="Description"
           placeholder="Tell people what this group is about and how you usually meet."
           value={description}
+          className="[&_textarea.field-input-core]:px-3"
           onChange={e => {
             const nextValue = e.target.value;
             const words = countWords(nextValue);

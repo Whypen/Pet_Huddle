@@ -508,6 +508,7 @@ interface Group {
   inviteId?: string | null;
   name: string;
   avatarUrl?: string | null;
+  avatar_url?: string | null;
   memberCount: number;
   lastMessage: string;
   lastMessageSender: string;
@@ -525,6 +526,7 @@ interface Group {
   locationCountry?: string | null;
   visibility?: "public" | "private" | null;
   roomCode?: string | null;
+  createdAt?: string | null;
 }
 
 interface GroupContactOption {
@@ -2421,7 +2423,7 @@ const Chats = () => {
       const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, { data: serviceChats, error: serviceChatsError }, matchesRows] = await Promise.all([
         supabase
           .from("chats")
-          .select("id, name, avatar_url, type, pet_focus, location_label, location_country, visibility, room_code, last_message_at, join_method, description, created_by")
+          .select("id, name, avatar_url, type, pet_focus, location_label, location_country, visibility, room_code, last_message_at, created_at, join_method, description, created_by")
           .in("id", roomIds),
         supabase
           .from("chat_room_members")
@@ -2686,6 +2688,7 @@ const Chats = () => {
             inviteId: pendingInvite?.inviteId || null,
             name: String(room.name || "Group"),
             avatarUrl: (room.avatar_url as string | null) ?? null,
+            avatar_url: (room.avatar_url as string | null) ?? null,
             memberCount: roomMembers.length,
             lastMessage: parseChatPreviewText(last?.content),
             lastMessageSender: senderName || "",
@@ -2702,6 +2705,7 @@ const Chats = () => {
             locationCountry: (room.location_country as string | null) ?? null,
             visibility: ((room.visibility as "public" | "private" | null) ?? null),
             roomCode: (room.room_code as string | null) ?? null,
+            createdAt: (room.created_at as string | null) ?? null,
           });
           continue;
         }
@@ -4296,12 +4300,19 @@ const Chats = () => {
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
     try {
-      const [{ data: requestRows }, liveLocationResult, profileLocationResult] = await Promise.all([
+      const [{ data: requestRows }, { data: inviteRows }, liveLocationResult, profileLocationResult] = await Promise.all([
         user?.id
           ? supabase
               .from("group_join_requests")
               .select("chat_id")
               .eq("user_id", user.id)
+              .eq("status", "pending")
+          : Promise.resolve({ data: [] }),
+        user?.id
+          ? supabase
+              .from("group_chat_invites")
+              .select("id, chat_id, chat_name, created_at, profiles!group_chat_invites_inviter_user_id_fkey(display_name)")
+              .eq("invitee_user_id", user.id)
               .eq("status", "pending")
           : Promise.resolve({ data: [] }),
         user?.id
@@ -4377,6 +4388,68 @@ const Chats = () => {
         created_by: string | null;
       }>;
 
+      const inviteMap = new Map<string, PendingGroupInvite>();
+      for (const row of (inviteRows || []) as Array<Record<string, unknown>>) {
+        const chatId = String(row.chat_id || "").trim();
+        if (!chatId) continue;
+        inviteMap.set(chatId, {
+          inviteId: String(row.id || ""),
+          chatId,
+          chatName: String(row.chat_name || "Group"),
+          inviterName: String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
+          createdAt: typeof row.created_at === "string" ? row.created_at : null,
+        });
+      }
+
+      const missingInviteIds = Array.from(inviteMap.keys()).filter((chatId) => !rows.some((row) => row.id === chatId));
+      let inviteChatRows: Array<{
+        id: string;
+        name: string;
+        avatar_url: string | null;
+        location_label: string | null;
+        location_country: string | null;
+        pet_focus: string[] | null;
+        join_method: string;
+        last_message_at: string | null;
+        created_at: string;
+        description: string | null;
+        member_count: number | null;
+        created_by: string | null;
+      }> = [];
+      if (missingInviteIds.length > 0) {
+        const { data: inviteChats } = await supabase
+          .from("chats")
+          .select("id, name, avatar_url, location_label, location_country, pet_focus, join_method, last_message_at, created_at, description, created_by")
+          .in("id", missingInviteIds)
+          .eq("visibility", "public");
+        if (Array.isArray(inviteChats)) {
+          const { data: inviteMembers } = await supabase
+            .from("chat_room_members")
+            .select("chat_id, user_id")
+            .in("chat_id", missingInviteIds);
+          const counts = new Map<string, number>();
+          for (const member of (inviteMembers || []) as Array<{ chat_id: string }>) {
+            counts.set(member.chat_id, (counts.get(member.chat_id) || 0) + 1);
+          }
+          inviteChatRows = (inviteChats as Array<Record<string, unknown>>).map((row) => ({
+            id: String(row.id || ""),
+            name: String(row.name || "Group"),
+            avatar_url: (row.avatar_url as string | null) ?? null,
+            location_label: (row.location_label as string | null) ?? null,
+            location_country: (row.location_country as string | null) ?? null,
+            pet_focus: Array.isArray(row.pet_focus) ? (row.pet_focus as string[]) : null,
+            join_method: String(row.join_method || "request"),
+            last_message_at: (row.last_message_at as string | null) ?? null,
+            created_at: String(row.created_at || ""),
+            description: (row.description as string | null) ?? null,
+            member_count: counts.get(String(row.id || "")) ?? 0,
+            created_by: (row.created_by as string | null) ?? null,
+          }));
+        }
+      }
+
+      const candidateRows = [...rows, ...inviteChatRows];
+
       // The user's joined group IDs — filter these out of Explore (they live in My Groups)
       const joinedIds = new Set(groups.map((g) => g.id));
 
@@ -4393,7 +4466,7 @@ const Chats = () => {
         .split(/[\s,]+/)
         .filter((w) => w.length > 2);
 
-      const scored = rows
+      const scored = candidateRows
         .filter((g) => !joinedIds.has(g.id))
         .map((g) => {
           const focusLower = (g.pet_focus ?? []).map((f) => f.toLowerCase());
@@ -4408,15 +4481,39 @@ const Chats = () => {
           // Proximity: does the group's location share any meaningful word with user's location?
           const groupLocWords = (g.location_label || "").toLowerCase().split(/[\s,]+/).filter((w) => w.length > 2);
           const proxScore = userLocWords.length > 0 && groupLocWords.some((w) => userLocWords.includes(w)) ? 4 : 0;
-          return { ...g, _score: proxScore + petScore * 3 + activeScore };
+          return {
+            id: g.id,
+            inviteId: inviteMap.get(g.id)?.inviteId || null,
+            name: g.name,
+            avatarUrl: g.avatar_url,
+            avatar_url: g.avatar_url,
+            memberCount: Number(g.member_count ?? 0),
+            lastMessage: "",
+            lastMessageSender: "",
+            time: formatChatTimestamp(g.last_message_at || g.created_at || null),
+            unread: 0,
+            invitePending: inviteMap.has(g.id),
+            inviterName: inviteMap.get(g.id)?.inviterName || null,
+            petFocus: g.pet_focus ?? null,
+            locationLabel: g.location_label ?? null,
+            lastMessageAt: g.last_message_at ?? null,
+            joinMethod: g.join_method ?? "request",
+            description: g.description ?? null,
+            isAdmin: g.created_by === profile?.id,
+            locationCountry: g.location_country ?? null,
+            visibility: "public",
+            roomCode: null,
+            createdAt: g.created_at || null,
+            _score: (inviteMap.has(g.id) ? 1000 : 0) + proxScore + petScore * 3 + activeScore,
+          };
         });
 
       scored.sort((a, b) =>
         (b._score ?? 0) - (a._score ?? 0) ||
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
       );
 
-      setExploreGroups(scored);
+      setExploreGroups(scored as Group[]);
     } catch (error) {
       console.warn("[groups.explore] fetch failed", error);
       setExploreGroups([]);
@@ -4425,6 +4522,7 @@ const Chats = () => {
     }
   }, [
     groups,
+    profile?.id,
     profile?.location_country,
     profile?.location_district,
     profile?.location_name,
@@ -4438,11 +4536,21 @@ const Chats = () => {
     }
   }, [mainTab, groupSubTab, fetchExploreGroups]);
 
-  const describeGroupActivity = useCallback((lastMessageAt?: string | null) => {
-    if (!lastMessageAt) return "Not recently active";
-    const ms = Date.now() - new Date(lastMessageAt).getTime();
-    if (ms < 604_800_000) return "Active this week";
-    return "Not recently active";
+  const describeGroupActivity = useCallback((lastMessageAt?: string | null, createdAt?: string | null) => {
+    const reference = lastMessageAt || createdAt || null;
+    if (!reference) return "Active this month";
+    const stamp = new Date(reference).getTime();
+    if (!Number.isFinite(stamp)) return "Active this month";
+    const diffMs = Math.max(0, Date.now() - stamp);
+    const dayMs = 86_400_000;
+    const monthMs = 30 * dayMs;
+    const yearMs = 365 * dayMs;
+    if (diffMs < 7 * dayMs) return "Active this week";
+    if (diffMs < 14 * dayMs) return "Active last week";
+    if (diffMs < monthMs) return "Active this month";
+    if (diffMs < 2 * monthMs) return "Active last month";
+    if (diffMs < yearMs) return `Active ${Math.max(2, Math.floor(diffMs / monthMs))} months ago`;
+    return `Active ${Math.max(1, Math.floor(diffMs / yearMs))} years ago`;
   }, []);
 
   const openGroupDetailsSheet = useCallback(async (group: Group) => {
@@ -5356,7 +5464,7 @@ const Chats = () => {
                       exploreGroups.map((group, index) => {
                         const isMember = groups.some((g) => g.id === group.id);
                         const hasSentRequest = sentJoinRequests.has(group.id);
-                        const activityLabel = describeGroupActivity(group.last_message_at);
+                        const activityLabel = describeGroupActivity(group.lastMessageAt, group.createdAt);
 
                         const handleExploreCardCTA = async (e: React.MouseEvent) => {
                           e.stopPropagation();
@@ -5365,7 +5473,45 @@ const Chats = () => {
                             navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
                             return;
                           }
-                          if (group.join_method === "instant") {
+                          if (group.invitePending && (group.inviteId || group.id)) {
+                            try {
+                              let data: unknown = null;
+                              let error: { message?: string } | null = null;
+                              if (group.inviteId) {
+                                const byId = await (supabase.rpc as (
+                                  fn: string,
+                                  params?: Record<string, unknown>
+                                ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                  "accept_group_chat_invite_by_id",
+                                  { p_invite_id: group.inviteId }
+                                );
+                                data = byId.data;
+                                error = byId.error;
+                              } else {
+                                const byChat = await (supabase.rpc as (
+                                  fn: string,
+                                  params?: Record<string, unknown>
+                                ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+                                  "accept_group_chat_invite",
+                                  { p_chat_id: group.id }
+                                );
+                                data = byChat.data;
+                                error = byChat.error;
+                              }
+                              if (error) throw error;
+                              const joined = Array.isArray(data)
+                                ? ((data[0] || {}) as { joined?: unknown }).joined === true
+                                : false;
+                              if (!joined) { toast.error("Invite is no longer available."); return; }
+                              toast.success(`Joined ${group.name}`);
+                              await loadConversations();
+                              navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                            } catch {
+                              toast.error("Unable to join group right now.");
+                            }
+                            return;
+                          }
+                          if (group.joinMethod === "instant") {
                             const { error } = await supabase
                               .from("chat_participants")
                               .insert({ chat_id: group.id, user_id: user.id, role: "member" });
@@ -5391,89 +5537,96 @@ const Chats = () => {
                         };
 
                         return (
-                        <motion.div
-                          key={group.id}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.04, duration: 0.2 }}
-                          className="relative flex items-center gap-3 rounded-xl bg-card p-3 shadow-card"
-                        >
-                          <button
-                            type="button"
-                            className="flex h-14 w-14 flex-shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                            onClick={() => void openGroupDetailsSheet(group)}
-                            aria-label={`Open ${group.name} details`}
+                          <motion.div
+                            key={group.id}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.04, duration: 0.2 }}
+                            className="grid grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl bg-card p-3 shadow-card"
                           >
-                            {group.avatar_url ? (
-                              <img src={group.avatar_url} alt={group.name} className="h-full w-full object-cover" />
-                            ) : (
-                              <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                            )}
-                          </button>
-                          <div className="min-w-0 flex-1 pr-[104px]">
-                            <div className="flex items-start gap-3">
+                            <button
+                              type="button"
+                              className="flex h-14 w-14 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                              onClick={() => void openGroupDetailsSheet(group)}
+                              aria-label={`Open ${group.name} details`}
+                            >
+                              {group.avatarUrl ? (
+                                <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                              ) : (
+                                <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                              )}
+                            </button>
+                            <div className="min-w-0">
                               <button
                                 type="button"
-                                className="min-w-0 text-left"
+                                className="block min-w-0 text-left"
                                 onClick={() => void openGroupDetailsSheet(group)}
                               >
                                 <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
                               </button>
-                            </div>
-                            {group.location_label && (
-                              <p className="text-[12px] text-muted-foreground truncate mt-0.5">
-                                <MapPin className="inline w-3 h-3 mr-0.5" strokeWidth={1.75} />{group.location_label}
-                              </p>
-                            )}
-                            {group.pet_focus && group.pet_focus.length > 0 && (
-                              <div className="flex gap-1 mt-1 flex-wrap">
-                                {group.pet_focus.slice(0, 3).map((tag) => (
-                                  <span key={tag} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/60 text-accent-foreground font-medium">
-                                    {tag}
+                              {group.locationLabel && (
+                                <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                                  <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
+                                  {group.locationLabel}
+                                </p>
+                              )}
+                              {group.petFocus && group.petFocus.length > 0 && (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {group.petFocus.slice(0, 3).map((tag) => (
+                                    <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              {group.invitePending ? (
+                                <div className="mt-1">
+                                  <span className="inline-flex rounded-full bg-[#2147C9]/10 px-2.5 py-1 text-[11px] font-semibold text-[#2147C9]">
+                                    You&apos;re invited
                                   </span>
-                                ))}
+                                </div>
+                              ) : null}
+                              {group.description && (
+                                <p className="mt-1 line-clamp-2 pr-2 text-[11px] leading-relaxed text-muted-foreground">
+                                  {group.description}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex min-w-[92px] flex-col items-end gap-2 pl-2">
+                              <div className="text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                                <p>{`Members: ${group.memberCount}`}</p>
+                                <p>{activityLabel}</p>
                               </div>
-                            )}
-                            {group.description && (
-                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-                                {group.description}
-                              </p>
-                            )}
-                          </div>
-                          <div className="absolute right-3 top-3 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                            <p>{`Members: ${group.memberCount}`}</p>
-                            <p>{activityLabel}</p>
-                          </div>
-                          {/* CTA */}
-                          {isMember ? (
-                            <button
-                              onClick={handleExploreCardCTA}
-                              className="flex-shrink-0 flex items-center gap-0.5 text-[13px] font-medium text-primary"
-                            >
-                              Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
-                            </button>
-                          ) : hasSentRequest ? (
-                            <span className="flex-shrink-0 text-[12px] font-medium text-muted-foreground px-3 py-1 rounded-full bg-accent/40">
-                              Requested
-                            </span>
-                          ) : group.join_method === "instant" ? (
-                            <button
-                              onClick={handleExploreCardCTA}
-                              className="flex-shrink-0 text-[13px] font-semibold text-white px-3 py-1 rounded-full"
-                              style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                            >
-                              Join
-                            </button>
-                          ) : (
-                            <button
-                              onClick={handleExploreCardCTA}
-                              className="flex-shrink-0 text-[13px] font-semibold px-3 py-1 rounded-full border"
-                              style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
-                            >
-                              Request
-                            </button>
-                          )}
-                        </motion.div>
+                              {isMember ? (
+                                <button
+                                  onClick={handleExploreCardCTA}
+                                  className="flex-shrink-0 flex items-center gap-0.5 text-[13px] font-medium text-primary"
+                                >
+                                  Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
+                                </button>
+                              ) : hasSentRequest ? (
+                                <span className="flex-shrink-0 rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
+                                  Requested
+                                </span>
+                              ) : group.invitePending || group.joinMethod === "instant" ? (
+                                <button
+                                  onClick={handleExploreCardCTA}
+                                  className="flex-shrink-0 rounded-full px-3 py-1 text-[13px] font-semibold text-white"
+                                  style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                                >
+                                  Join
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={handleExploreCardCTA}
+                                  className="flex-shrink-0 rounded-full border px-3 py-1 text-[13px] font-semibold"
+                                  style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
+                                >
+                                  Request
+                                </button>
+                              )}
+                            </div>
+                          </motion.div>
                         );
                       })
                     )}
@@ -5517,12 +5670,12 @@ const Chats = () => {
                             }
                           }}
                           onClick={() => handleGroupClick(group)}
-                          className="relative flex cursor-pointer items-center gap-3 rounded-xl bg-card p-3 shadow-card"
+                          className="relative grid cursor-pointer grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-xl bg-card p-3 shadow-card"
                         >
                           {group.isAdmin ? (
                             <button
                               type="button"
-                              className="absolute left-2 top-2 z-[2] flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#4A4965] shadow-[0_8px_18px_rgba(66,73,101,0.18)]"
+                              className="absolute left-0 top-0 z-[2] flex h-6 w-6 items-center justify-center text-[#8C93AA]"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (!isVerified) { setGroupVerifyGateOpen(true); return; }
@@ -5531,41 +5684,37 @@ const Chats = () => {
                               }}
                               aria-label={`Manage ${group.name}`}
                             >
-                              <Settings className="h-3.5 w-3.5" />
+                              <Settings className="h-4 w-4" />
                             </button>
                           ) : null}
-                          <div className="relative flex-shrink-0 self-center">
+                          <button
+                            type="button"
+                            className="flex h-14 w-14 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openGroupDetailsSheet(group);
+                            }}
+                            aria-label={`Open ${group.name} details`}
+                          >
+                            {group.avatarUrl ? (
+                              <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
+                            ) : (
+                              <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
+                            )}
+                          </button>
+
+                          {/* Text content */}
+                          <div className="min-w-0">
                             <button
                               type="button"
-                              className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                              className="block min-w-0 text-left"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void openGroupDetailsSheet(group);
                               }}
-                              aria-label={`Open ${group.name} details`}
                             >
-                              {group.avatarUrl ? (
-                                <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
-                              ) : (
-                                <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                              )}
+                              <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
                             </button>
-                          </div>
-
-                          {/* Text content */}
-                          <div className="min-w-0 flex-1 pr-[104px]">
-                            <div className="flex items-start gap-3">
-                              <button
-                                type="button"
-                                className="min-w-0 text-left"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void openGroupDetailsSheet(group);
-                                }}
-                              >
-                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                              </button>
-                            </div>
                             <div className="mt-0.5 flex items-center gap-2">
                               {group.unread > 0 && (
                                 <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
@@ -5574,8 +5723,8 @@ const Chats = () => {
                               )}
                             </div>
                             {group.locationLabel && (
-                              <p className="text-[12px] text-muted-foreground truncate mt-0.5">
-                                <MapPin className="inline w-3 h-3 mr-0.5" strokeWidth={1.75} />{group.locationLabel}
+                              <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                                <MapPin className="mr-0.5 inline w-3 h-3" strokeWidth={1.75} />{group.locationLabel}
                               </p>
                             )}
                             {group.petFocus && group.petFocus.length > 0 && (
@@ -5588,14 +5737,14 @@ const Chats = () => {
                               </div>
                             )}
                             {group.description && (
-                              <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                              <p className="mt-1 line-clamp-2 pr-2 text-[11px] leading-relaxed text-muted-foreground">
                                 {group.description}
                               </p>
                             )}
                           </div>
-                          <div className="absolute right-3 top-3 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                          <div className="min-w-[92px] pl-2 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
                             <p>{`Members: ${group.memberCount}`}</p>
-                            <p>{describeGroupActivity(group.lastMessageAt)}</p>
+                            <p>{describeGroupActivity(group.lastMessageAt, group.createdAt)}</p>
                           </div>
 
                           {/* Invite pending CTA */}
@@ -5832,10 +5981,11 @@ const Chats = () => {
                       const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
                       const url = pub.publicUrl;
                       // Update group avatar in local state
-                      setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url } : g));
+                      setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, avatarUrl: url, avatar_url: url } : g));
                       // Persist to DB if groups table exists
                       const { error: avatarPersistError } = await supabase.from("chats").update({ avatar_url: url }).eq("id", groupManageId);
                       if (avatarPersistError) throw avatarPersistError;
+                      void loadConversations();
                       toast.success(t("Group image updated"));
                     } catch (err) {
                       console.error("Group image upload failed:", err);
@@ -5887,6 +6037,7 @@ const Chats = () => {
                               setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
                               setGroupMembers((prev) => [...prev, { id: req.userId, name: req.name, avatarUrl: req.avatarUrl }]);
                               setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
+                              void loadConversations();
                               toast.success(`${req.name} approved`);
                             } catch {
                               toast.error("Couldn't approve request.");
@@ -5950,6 +6101,7 @@ const Chats = () => {
                             if (rpcError) throw rpcError;
                             setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
                             setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g));
+                            void loadConversations();
                             toast.success(`${m.name} removed`);
                           } catch {
                             toast.error(t("Failed to remove member"));
@@ -6047,6 +6199,7 @@ const Chats = () => {
                                   ? prev
                                   : [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]
                               );
+                              void loadConversations();
                               toast.success(`${u.name} invited`);
                             } catch {
                               toast.error("Couldn't invite member.");
@@ -6384,7 +6537,7 @@ const Chats = () => {
         viewedUserId={profileSheetUser?.id}
         data={profileSheetData as never}
         onStarQuotaBlocked={(targetTier) => openStarUpgradeSheet(targetTier)}
-        zIndexBase={9900}
+        zIndexBase={12000}
       />
       <StarUpgradeSheet
         isOpen={Boolean(starUpgradeTier)}
@@ -6441,7 +6594,7 @@ const Chats = () => {
                 "absolute flex items-center justify-center rounded-full",
                 discoverySendCue.kind === "wave"
                   ? "right-[18%] top-[28%] h-[84px] w-[84px] bg-[rgba(33,71,201,0.96)] text-white shadow-[0_18px_36px_rgba(33,71,201,0.34)]"
-                  : "left-[18%] top-[72%] h-[72px] w-[72px] -translate-x-1/2 -translate-y-1/2 text-white drop-shadow-[0_18px_36px_rgba(33,71,201,0.42)]"
+                  : "left-[18%] top-[72%] h-[72px] w-[72px] -translate-x-1/2 -translate-y-1/2 bg-[#F5C85C] text-[#2C2A19] shadow-[0_18px_36px_rgba(245,200,92,0.34)]"
               )}
               style={{
                 scale: discoverySendCueScale,
