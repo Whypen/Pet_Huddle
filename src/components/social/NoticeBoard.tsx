@@ -688,6 +688,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const dwellTimeoutsRef = useRef<Map<string, number>>(new Map());
   const lastAutoFocusedThreadRef = useRef<string | null>(null);
   const focusFallbackShownRef = useRef<string | null>(null);
+  const feedRequestTokenRef = useRef(0);
   const focusThreadId = params.threadId || searchParams.get("focus") || searchParams.get("thread");
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -1760,110 +1761,138 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setNewsAlertTypeByThread((prev) => (reset ? payload.alertTypes : { ...prev, ...payload.alertTypes }));
   }, []);
 
+  const resetHydrationState = useCallback(() => {
+    setCommentsByThread({});
+    setThreadMentionsById({});
+    setReplyMentionsById({});
+    setNewsAlertTypeByThread({});
+  }, []);
+
+  const fetchFocusedThreadRow = useCallback(async (threadId: string) => {
+    if (!threadId) return null;
+    const { data: focusedThread } = await supabase
+      .from("threads" as "profiles")
+      .select(`
+        id,
+        title,
+        content,
+        tags,
+        hashtags,
+        images,
+        map_id,
+        alert_type,
+        likes,
+        created_at,
+        user_id,
+        author:profiles!threads_user_id_fkey(
+          display_name,
+          social_id,
+          avatar_url,
+          verification_status,
+          is_verified,
+          non_social,
+          location_country,
+          last_lat,
+          last_lng
+        )
+      `)
+      .eq("id", threadId)
+      .maybeSingle();
+    if (!focusedThread) return null;
+    const focusedRow = focusedThread as unknown as Record<string, unknown>;
+    const authorObj = Array.isArray(focusedRow.author) ? focusedRow.author[0] : focusedRow.author;
+    return mapFeedRowToThread({
+      id: focusedRow.id,
+      title: focusedRow.title,
+      content: focusedRow.content,
+      tags: focusedRow.tags,
+      hashtags: focusedRow.hashtags,
+      images: focusedRow.images,
+      like_count: focusedRow.likes,
+      support_count: focusedRow.support_count ?? 0,
+      comment_count: focusedRow.comment_count ?? 0,
+      score: focusedRow.score ?? 0,
+      map_id: focusedRow.map_id,
+      alert_type: focusedRow.alert_type,
+      created_at: focusedRow.created_at,
+      user_id: focusedRow.user_id,
+      author_display_name: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).display_name : null,
+      author_social_id: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).social_id : null,
+      author_avatar_url: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).avatar_url : null,
+      author_verification_status: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).verification_status : null,
+      author_is_verified: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).is_verified : null,
+      author_location_country: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).location_country : null,
+      author_last_lat: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lat : null,
+      author_last_lng: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lng : null,
+      author_non_social: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).non_social : false,
+    });
+  }, [mapFeedRowToThread]);
+
   const fetchNotices = useCallback(async (reset: boolean = false) => {
+    const requestToken = ++feedRequestTokenRef.current;
     try {
       if (reset) setLoading(true);
       else setLoadingMore(true);
 
       if (!user?.id) {
         setNotices([]);
+        resetHydrationState();
         setHasMore(false);
         return;
       }
 
-      const pageRows = await fetchFeedPage(reset ? null : lastCursorRef.current);
-      let nextRows = pageRows;
+      if (reset) {
+        const [pageRows, focusedRow] = await Promise.all([
+          fetchFeedPage(null),
+          focusThreadId ? fetchFocusedThreadRow(focusThreadId) : Promise.resolve(null),
+        ]);
+        if (feedRequestTokenRef.current !== requestToken) return;
 
-      if (reset && focusThreadId && !nextRows.some((item) => item.id === focusThreadId)) {
-        const { data: focusedThread } = await supabase
-          .from("threads" as "profiles")
-          .select(`
-            id,
-            title,
-            content,
-            tags,
-            hashtags,
-            images,
-            map_id,
-            alert_type,
-            likes,
-            created_at,
-            user_id,
-            author:profiles!threads_user_id_fkey(
-              display_name,
-              social_id,
-              avatar_url,
-              verification_status,
-              is_verified,
-              non_social,
-              location_country,
-              last_lat,
-              last_lng
-            )
-          `)
-          .eq("id", focusThreadId)
-          .maybeSingle();
-        if (focusedThread) {
-          const focusedRow = focusedThread as unknown as Record<string, unknown>;
-          const authorObj = Array.isArray(focusedRow.author) ? focusedRow.author[0] : focusedRow.author;
-          const normalizedFocused = mapFeedRowToThread({
-            id: focusedRow.id,
-            title: focusedRow.title,
-            content: focusedRow.content,
-            tags: focusedRow.tags,
-            hashtags: focusedRow.hashtags,
-            images: focusedRow.images,
-            like_count: focusedRow.likes,
-            support_count: focusedRow.support_count ?? 0,
-            comment_count: focusedRow.comment_count ?? 0,
-            score: focusedRow.score ?? 0,
-            map_id: focusedRow.map_id,
-            alert_type: focusedRow.alert_type,
-            created_at: focusedRow.created_at,
-            user_id: focusedRow.user_id,
-            author_display_name: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).display_name : null,
-            author_social_id: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).social_id : null,
-            author_avatar_url: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).avatar_url : null,
-            author_verification_status: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).verification_status : null,
-            author_is_verified: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).is_verified : null,
-            author_location_country: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).location_country : null,
-            author_last_lat: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lat : null,
-            author_last_lng: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).last_lng : null,
-            author_non_social: typeof authorObj === "object" && authorObj !== null ? (authorObj as Record<string, unknown>).non_social : false,
-          });
-          nextRows = [normalizedFocused, ...nextRows.filter((item) => item.id !== normalizedFocused.id)];
-        } else if (focusFallbackShownRef.current !== focusThreadId) {
+        let nextRows = pageRows;
+        if (focusedRow && !nextRows.some((item) => item.id === focusedRow.id)) {
+          nextRows = [focusedRow, ...nextRows];
+        } else if (focusThreadId && !nextRows.some((item) => item.id === focusThreadId) && focusFallbackShownRef.current !== focusThreadId) {
           focusFallbackShownRef.current = focusThreadId;
           toast.info("That post is no longer available.");
           setFocusedThreadId(null);
         }
-      }
 
-      if (reset) {
-        const hydrated = await hydrateRows(nextRows);
-        noticesRef.current = hydrated.rows;
-        setNotices(hydrated.rows);
-        applyHydratedRows(hydrated, { reset: true });
+        resetHydrationState();
+        noticesRef.current = nextRows;
+        setNotices(nextRows);
+        lastCursorRef.current = buildFeedCursor(nextRows[nextRows.length - 1]);
+        setHasMore(pageRows.length === 20);
+        setLoading(false);
+
+        void (async () => {
+          const hydrated = await hydrateRows(nextRows);
+          if (feedRequestTokenRef.current !== requestToken) return;
+          noticesRef.current = hydrated.rows;
+          setNotices(hydrated.rows);
+          applyHydratedRows(hydrated, { reset: true });
+        })();
+        return;
       } else {
+        const pageRows = await fetchFeedPage(lastCursorRef.current);
+        if (feedRequestTokenRef.current !== requestToken) return;
         const existingIds = new Set(noticesRef.current.map((notice) => notice.id));
-        const uniqueOlderRows = nextRows.filter((notice) => !existingIds.has(notice.id));
+        const uniqueOlderRows = pageRows.filter((notice) => !existingIds.has(notice.id));
         const hydrated = await hydrateRows(uniqueOlderRows);
+        if (feedRequestTokenRef.current !== requestToken) return;
         const merged = [...noticesRef.current, ...hydrated.rows];
         noticesRef.current = merged;
         setNotices(merged);
         applyHydratedRows(hydrated);
-        nextRows = hydrated.rows;
+        lastCursorRef.current = buildFeedCursor(noticesRef.current[noticesRef.current.length - 1]);
+        setHasMore(pageRows.length === 20);
       }
-
-      lastCursorRef.current = buildFeedCursor(noticesRef.current[noticesRef.current.length - 1]);
-      setHasMore(pageRows.length === 20);
     } catch (error) {
       console.error("Error fetching notices:", error);
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [applyHydratedRows, fetchFeedPage, focusThreadId, hydrateRows, mapFeedRowToThread, user?.id]);
+  }, [applyHydratedRows, fetchFeedPage, fetchFocusedThreadRow, focusThreadId, hydrateRows, resetHydrationState, user?.id]);
 
   useEffect(() => {
     fetchNotices(true);
@@ -1944,7 +1973,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (!node) {
       const idx = notices.findIndex((n) => n.id === focusedThreadId);
       if (idx >= 0 && virtuosoRef.current) {
-        virtuosoRef.current.scrollToIndex({ index: idx, align: "start", behavior: "smooth" });
+        virtuosoRef.current.scrollToIndex({ index: idx, align: "start", behavior: "auto" });
       }
       return;
     }
@@ -1958,10 +1987,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         8;
       scroller.scrollTo({
         top: Math.max(0, targetTop),
-        behavior: "smooth",
+        behavior: "auto",
       });
     } else {
-      node.scrollIntoView({ behavior: "smooth", block: "start" });
+      node.scrollIntoView({ behavior: "auto", block: "start" });
     }
     const timer = window.setTimeout(() => {
       setFocusedThreadId((current) => (current === focusedThreadId ? null : current));
@@ -3883,6 +3912,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           <img 
                             src={notice.author.avatar_url} 
                             alt="" 
+                            width={40}
+                            height={40}
                             className="relative z-[1] w-full h-full object-cover" 
                           />
                         ) : (
