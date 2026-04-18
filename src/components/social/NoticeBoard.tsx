@@ -171,6 +171,70 @@ type LinkPreviewPayload = {
   failed?: unknown;
 };
 
+type StoredLinkPreview = {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  siteName?: string;
+  fetchedAt: number;
+};
+
+const LINK_PREVIEW_QUEUE_LIMIT = 3;
+const LINK_PREVIEW_LRU_LIMIT = 120;
+const LINK_PREVIEW_STORAGE_KEY = "noticeboard_link_preview_lru_v1";
+const LINK_PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
+
+const isLinkPreviewFresh = (value: StoredLinkPreview | null | undefined, now = Date.now()) =>
+  Boolean(value && value.url && now - value.fetchedAt < LINK_PREVIEW_TTL_MS);
+
+const loadStoredLinkPreviewMap = (): Record<string, StoredLinkPreview> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(LINK_PREVIEW_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, StoredLinkPreview>;
+    if (!parsed || typeof parsed !== "object") return {};
+    const next: Record<string, StoredLinkPreview> = {};
+    const now = Date.now();
+    Object.entries(parsed).forEach(([url, value]) => {
+      if (!isLinkPreviewFresh(value, now)) return;
+      next[url] = value;
+    });
+    return next;
+  } catch {
+    return {};
+  }
+};
+
+const saveStoredLinkPreviewMap = (entries: Record<string, StoredLinkPreview>) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LINK_PREVIEW_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // ignore storage write failure
+  }
+};
+
+const trimLinkPreviewState = (
+  entries: Record<string, LinkPreview>,
+  accessMap: Map<string, number>,
+  maxEntries = LINK_PREVIEW_LRU_LIMIT,
+) => {
+  const keys = Object.keys(entries);
+  if (keys.length <= maxEntries) return entries;
+  const sorted = [...keys].sort((a, b) => (accessMap.get(b) ?? 0) - (accessMap.get(a) ?? 0));
+  const keep = new Set(sorted.slice(0, maxEntries));
+  const next: Record<string, LinkPreview> = {};
+  keep.forEach((key) => {
+    next[key] = entries[key];
+  });
+  keys.forEach((key) => {
+    if (!keep.has(key)) accessMap.delete(key);
+  });
+  return next;
+};
+
 type MentionSuggestion = {
   userId: string;
   socialId: string;
@@ -618,6 +682,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const linkPreviewMapRef = useRef<Record<string, LinkPreview>>({});
   const linkPreviewInFlightRef = useRef<Set<string>>(new Set());
+  const linkPreviewQueuedRef = useRef<Set<string>>(new Set());
+  const linkPreviewQueueRef = useRef<string[]>([]);
+  const linkPreviewActiveCountRef = useRef(0);
+  const linkPreviewAccessRef = useRef<Map<string, number>>(new Map());
   const linkPreviewRemoteDisabledRef = useRef(false);
   const composerUploadTickerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const effectiveTier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
@@ -3053,6 +3121,36 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     linkPreviewMapRef.current = linkPreviewByUrl;
   }, [linkPreviewByUrl]);
 
+  const updateLinkPreviewEntry = useCallback((url: string, preview: LinkPreview) => {
+    linkPreviewAccessRef.current.set(url, Date.now());
+    setLinkPreviewByUrl((prev) =>
+      trimLinkPreviewState(
+        {
+          ...prev,
+          [url]: preview,
+        },
+        linkPreviewAccessRef.current,
+      ),
+    );
+  }, []);
+
+  const persistLinkPreviewToLocalCache = useCallback((url: string, preview: LinkPreview) => {
+    if (!(preview.title || preview.description || preview.image || preview.siteName)) return;
+    const stored = loadStoredLinkPreviewMap();
+    stored[url] = {
+      url,
+      title: preview.title,
+      description: preview.description,
+      image: preview.image,
+      siteName: preview.siteName,
+      fetchedAt: Date.now(),
+    };
+    const sorted = Object.entries(stored)
+      .sort(([, left], [, right]) => right.fetchedAt - left.fetchedAt)
+      .slice(0, LINK_PREVIEW_LRU_LIMIT);
+    saveStoredLinkPreviewMap(Object.fromEntries(sorted));
+  }, []);
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const next: Record<string, boolean> = {};
@@ -3119,31 +3217,29 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     };
   }, [recordSocialFeedEvent, visibleNotices]);
 
-  const ensureLinkPreview = useCallback(async (url: string) => {
-    if (!url) return;
+  const fetchLinkPreview = useCallback(async (url: string) => {
     const existing = linkPreviewMapRef.current[url];
     if (existing && (existing.loading || existing.resolved)) return;
     if (linkPreviewInFlightRef.current.has(url)) return;
     const intrinsicPreview = buildIntrinsicLinkPreview(url);
     if (intrinsicPreview) {
-      setLinkPreviewByUrl((prev) => ({
-        ...prev,
-        [url]: intrinsicPreview,
-      }));
+      updateLinkPreviewEntry(url, intrinsicPreview);
+      persistLinkPreviewToLocalCache(url, intrinsicPreview);
       return;
     }
     if (linkPreviewRemoteDisabledRef.current) {
-      setLinkPreviewByUrl((prev) => ({
-        ...prev,
-        [url]: buildFallbackLinkPreview(url, "remote_preview_unavailable"),
-      }));
+      updateLinkPreviewEntry(url, buildFallbackLinkPreview(url, "remote_preview_unavailable"));
       return;
     }
     linkPreviewInFlightRef.current.add(url);
-    setLinkPreviewByUrl((prev) => ({
-      ...prev,
-      [url]: { ...(prev[url] || { url }), url, loading: true, failed: false, resolved: false, error: undefined },
-    }));
+    updateLinkPreviewEntry(url, {
+      ...(existing || { url }),
+      url,
+      loading: true,
+      failed: false,
+      resolved: false,
+      error: undefined,
+    });
     if (import.meta.env.DEV) {
       console.debug("[link-preview] fetch:start", { url });
     }
@@ -3174,10 +3270,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         if (import.meta.env.DEV) {
           console.debug("[link-preview] fetch:failed", { url, reason });
         }
-        setLinkPreviewByUrl((prev) => ({
-          ...prev,
-          [url]: buildFallbackLinkPreview(url, reason),
-        }));
+        updateLinkPreviewEntry(url, buildFallbackLinkPreview(url, reason));
         return;
       }
       const payload = data as LinkPreviewPayload;
@@ -3192,10 +3285,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         if (import.meta.env.DEV) {
           console.debug("[link-preview] fetch:empty", { url, reason, payload });
         }
-        setLinkPreviewByUrl((prev) => ({
-          ...prev,
-          [url]: buildFallbackLinkPreview(url, reason),
-        }));
+        updateLinkPreviewEntry(url, buildFallbackLinkPreview(url, reason));
         return;
       }
       if (import.meta.env.DEV) {
@@ -3218,8 +3308,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         resolved: true,
         error: undefined,
       };
-      setLinkPreviewByUrl((prev) => ({ ...prev, [url]: resolved }));
-      // Cache-aside write: persist for instant paint on next mount.
+      updateLinkPreviewEntry(url, resolved);
+      persistLinkPreviewToLocalCache(url, resolved);
       void (supabase.from("link_preview_cache" as "profiles") as unknown as {
         upsert: (row: Record<string, unknown>, opts?: Record<string, unknown>) => Promise<unknown>;
       }).upsert(
@@ -3238,14 +3328,37 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       if (import.meta.env.DEV) {
         console.debug("[link-preview] fetch:exception", { url, reason, err });
       }
-      setLinkPreviewByUrl((prev) => ({
-        ...prev,
-        [url]: buildFallbackLinkPreview(url, reason),
-      }));
+      updateLinkPreviewEntry(url, buildFallbackLinkPreview(url, reason));
     } finally {
       linkPreviewInFlightRef.current.delete(url);
     }
-  }, []);
+  }, [persistLinkPreviewToLocalCache, updateLinkPreviewEntry]);
+
+  const processLinkPreviewQueue = useCallback(() => {
+    while (
+      linkPreviewActiveCountRef.current < LINK_PREVIEW_QUEUE_LIMIT &&
+      linkPreviewQueueRef.current.length > 0
+    ) {
+      const nextUrl = linkPreviewQueueRef.current.shift();
+      if (!nextUrl) continue;
+      linkPreviewQueuedRef.current.delete(nextUrl);
+      linkPreviewActiveCountRef.current += 1;
+      void fetchLinkPreview(nextUrl).finally(() => {
+        linkPreviewActiveCountRef.current = Math.max(0, linkPreviewActiveCountRef.current - 1);
+        processLinkPreviewQueue();
+      });
+    }
+  }, [fetchLinkPreview]);
+
+  const ensureLinkPreview = useCallback(async (url: string) => {
+    if (!url) return;
+    const existing = linkPreviewMapRef.current[url];
+    if (existing && (existing.loading || existing.resolved)) return;
+    if (linkPreviewInFlightRef.current.has(url) || linkPreviewQueuedRef.current.has(url)) return;
+    linkPreviewQueuedRef.current.add(url);
+    linkPreviewQueueRef.current.push(url);
+    processLinkPreviewQueue();
+  }, [processLinkPreviewQueue]);
 
   useEffect(() => {
     const urls = Array.from(
@@ -3257,6 +3370,29 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     ).slice(0, 20);
     if (urls.length === 0) return;
     let cancelled = false;
+    const localCached = loadStoredLinkPreviewMap();
+    if (Object.keys(localCached).length > 0) {
+      setLinkPreviewByUrl((prev) => {
+        const next = { ...prev };
+        urls.forEach((url) => {
+          const cached = localCached[url];
+          if (!cached || next[url]?.resolved) return;
+          linkPreviewAccessRef.current.set(url, cached.fetchedAt);
+          next[url] = {
+            url,
+            title: cached.title,
+            description: cached.description,
+            image: cached.image,
+            siteName: cached.siteName,
+            loading: false,
+            failed: false,
+            resolved: true,
+            error: undefined,
+          };
+        });
+        return trimLinkPreviewState(next, linkPreviewAccessRef.current);
+      });
+    }
     // Batch cache-aside read: hydrate state from server cache before any edge fetch.
     const hashes = urls.map((u) => u.toLowerCase());
     void (async () => {
@@ -3275,6 +3411,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               const p = row.payload;
               const has = Boolean(p.title || p.description || p.image || p.siteName);
               if (!has) continue;
+              linkPreviewAccessRef.current.set(row.url, Date.now());
               next[row.url] = {
                 url: row.url,
                 title: p.title || undefined,
@@ -3286,23 +3423,28 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                 resolved: true,
                 error: undefined,
               };
+              persistLinkPreviewToLocalCache(row.url, next[row.url]);
               cachedUrls.add(row.url);
             }
-            return next;
+            return trimLinkPreviewState(next, linkPreviewAccessRef.current);
           });
         }
         // Only fetch URLs missing from cache.
         const misses = urls.filter((u) => !cachedUrls.has(u));
         if (misses.length > 0) {
-          void Promise.all(misses.map((url) => ensureLinkPreview(url)));
+          misses.forEach((url) => {
+            void ensureLinkPreview(url);
+          });
         }
       } catch {
         // Cache lookup failure is non-fatal; fall back to direct fetch.
-        void Promise.all(urls.map((url) => ensureLinkPreview(url)));
+        urls.forEach((url) => {
+          void ensureLinkPreview(url);
+        });
       }
     })();
     return () => { cancelled = true; };
-  }, [ensureLinkPreview, visibleNotices]);
+  }, [ensureLinkPreview, persistLinkPreviewToLocalCache, visibleNotices]);
 
   useEffect(() => {
     const draftUrl = extractFirstHttpUrl(content || "");

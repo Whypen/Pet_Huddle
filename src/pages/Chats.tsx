@@ -176,6 +176,7 @@ const DEFAULT_FILTERS: DiscoveryFilters = {
 
 const DISCOVERY_EXPAND_STEP_KM = 15;
 const DISCOVERY_MAX_RADIUS_KM = 150;
+const DISCOVERY_FILTER_DEBOUNCE_MS = 300;
 const DISCOVERY_CLIENT_RESET_USER_ID = "735e8908-6dc8-4b41-837e-d4917e93caae";
 const DISCOVERY_CLIENT_RESET_STAMP = "2026-04-18-deck-reset-v4";
 const DISCOVERY_CLIENT_RESET_DISPLAY_NAMES = new Set(["hyphen fong", "social manager"]);
@@ -785,6 +786,7 @@ const Chats = () => {
   const [discoveryVisibleCount, setDiscoveryVisibleCount] = useState(20);
   const [activeFilterRow, setActiveFilterRow] = useState<FilterRowDef | null>(null);
   const [filters, setFilters] = useState<DiscoveryFilters>({ ...DEFAULT_FILTERS });
+  const [debouncedFilters, setDebouncedFilters] = useState<DiscoveryFilters>({ ...DEFAULT_FILTERS });
   const [expandedDistanceKm, setExpandedDistanceKm] = useState<number | null>(null);
   const [ageMinDraft, setAgeMinDraft] = useState(String(DEFAULT_FILTERS.ageMin));
   const [ageMaxDraft, setAgeMaxDraft] = useState(String(DEFAULT_FILTERS.ageMax));
@@ -836,7 +838,6 @@ const Chats = () => {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const [showChatsToggleDot, setShowChatsToggleDot] = useState(false);
-  const [lastClearedUnreadCount, setLastClearedUnreadCount] = useState(0);
   const [starUpgradeTier, setStarUpgradeTier] = useState<StarUpgradeTier | null>(null);
   const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
   const [starCheckoutLoading, setStarCheckoutLoading] = useState(false);
@@ -1163,6 +1164,13 @@ const Chats = () => {
       // ignore cache write failure
     }
   }, [discoveryFiltersKey, filters, profile?.id]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedFilters(filters);
+    }, DISCOVERY_FILTER_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [filters]);
 
   useEffect(() => {
     const normalizedDisplayName = String(profile?.display_name || "").trim().toLowerCase();
@@ -1533,10 +1541,10 @@ const Chats = () => {
   const showDiscoveryQuotaLock = discoveryQuotaReached && !isGoldTier;
   const silentGoldDiscoveryCapReached = discoveryQuotaReached && isGoldTier;
   const effectiveDiscoveryDistanceKm = useMemo(() => {
-    const base = Math.max(1, Math.round(filters.maxDistanceKm || 5));
+    const base = Math.max(1, Math.round(debouncedFilters.maxDistanceKm || 5));
     const expanded = expandedDistanceKm === null ? base : Math.max(base, Math.round(expandedDistanceKm));
     return Math.min(DISCOVERY_MAX_RADIUS_KM, expanded);
-  }, [expandedDistanceKm, filters.maxDistanceKm]);
+  }, [debouncedFilters.maxDistanceKm, expandedDistanceKm]);
   const canExpandSearch = effectiveDiscoveryDistanceKm < DISCOVERY_MAX_RADIUS_KM;
   const prevDiscoveryQuotaReachedRef = useRef(discoveryQuotaReached);
 
@@ -2743,8 +2751,13 @@ const Chats = () => {
   );
 
   useEffect(() => {
-    if (authLoading || !profile?.id || topTab !== "chats") return;
-    if (!inboxLoadedScopesRef.current.has(mainTab)) {
+    if (authLoading || !profile?.id) return;
+    const shouldHydrateDiscoverInbox =
+      topTab !== "chats" &&
+      (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
+    if (shouldHydrateDiscoverInbox) {
+      void loadConversations("all");
+    } else if (!inboxLoadedScopesRef.current.has(mainTab)) {
       void loadConversations(mainTab);
     }
     if (inboxWarmTimerRef.current != null) {
@@ -2752,7 +2765,7 @@ const Chats = () => {
     }
     inboxWarmTimerRef.current = window.setTimeout(() => {
       const inactiveScopes = (["friends", "groups", "service"] as const).filter(
-        (scope) => scope !== mainTab && !inboxLoadedScopesRef.current.has(scope)
+        (scope) => (topTab !== "chats" || scope !== mainTab) && !inboxLoadedScopesRef.current.has(scope)
       );
       void (async () => {
         for (const scope of inactiveScopes) {
@@ -2848,7 +2861,7 @@ const Chats = () => {
       try {
         setDiscoveryVisibleCount(20);
         const wavedByUserIds = new Set<string>();
-        if (filters.whoWavedAtMe) {
+        if (debouncedFilters.whoWavedAtMe) {
           const waveSelectAttempts = [
             "from_user_id, sender_id",
             "from_user_id",
@@ -3027,7 +3040,7 @@ const Chats = () => {
         const pinRadiusM = Math.max(1000, Math.round(effectiveDiscoveryDistanceKm * 1000));
         try {
           const hasExplicitHeightFilter =
-            isPremium && (filters.heightMin > DEFAULT_FILTERS.heightMin || filters.heightMax < DEFAULT_FILTERS.heightMax);
+            isPremium && (debouncedFilters.heightMin > DEFAULT_FILTERS.heightMin || debouncedFilters.heightMax < DEFAULT_FILTERS.heightMax);
           const { data, error } = await (supabase.rpc as (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>)(
             "social_discovery_restricted",
             {
@@ -3035,17 +3048,17 @@ const Chats = () => {
               p_lat: anchor.lat,
               p_lng: anchor.lng,
               p_radius_m: pinRadiusM,
-              p_min_age: Math.max(16, filters.ageMin || 16),
-              p_max_age: Math.max(Math.max(16, filters.ageMin || 16), filters.ageMax || 99),
+              p_min_age: Math.max(16, debouncedFilters.ageMin || 16),
+              p_max_age: Math.max(Math.max(16, debouncedFilters.ageMin || 16), debouncedFilters.ageMax || 99),
               p_role: null,
-              p_gender: filters.genders.length === 1 ? filters.genders[0] ?? null : null,
-              p_species: filters.species.length === ALL_SPECIES.length ? null : filters.species,
+              p_gender: debouncedFilters.genders.length === 1 ? debouncedFilters.genders[0] ?? null : null,
+              p_species: debouncedFilters.species.length === ALL_SPECIES.length ? null : debouncedFilters.species,
               p_pet_size: null,
               p_advanced: isPremium,
-              p_height_min: hasExplicitHeightFilter ? filters.heightMin : null,
-              p_height_max: hasExplicitHeightFilter ? filters.heightMax : null,
-              p_only_waved: filters.whoWavedAtMe,
-              p_active_only: filters.activeOnly,
+              p_height_min: hasExplicitHeightFilter ? debouncedFilters.heightMin : null,
+              p_height_max: hasExplicitHeightFilter ? debouncedFilters.heightMax : null,
+              p_only_waved: debouncedFilters.whoWavedAtMe,
+              p_active_only: debouncedFilters.activeOnly,
             }
           );
           if (error) throw error;
@@ -3113,11 +3126,11 @@ const Chats = () => {
           return;
         }
         const mergedList = applyDiscoveryClientFilters(Array.from(mergedProfiles.values()), {
-          ...filters,
+          ...debouncedFilters,
           maxDistanceKm: effectiveDiscoveryDistanceKm,
         }, {
-          enforceVerifiedOnly: filters.verifiedOnly,
-          enforceActiveOnly: filters.activeOnly,
+          enforceVerifiedOnly: debouncedFilters.verifiedOnly,
+          enforceActiveOnly: debouncedFilters.activeOnly,
           wavedByUserIds,
           anchor,
           viewerCountry: profile.location_country ?? null,
@@ -3143,7 +3156,7 @@ const Chats = () => {
     profile?.location_country,
     discoverLocationGate.anchor,
     discoverLocationGate.canShowDiscover,
-    filters,
+    debouncedFilters,
     effectiveDiscoveryDistanceKm,
     isPremium,
     effectiveTier,
@@ -3485,33 +3498,44 @@ const Chats = () => {
   }, [profile?.id, totalUnreadMessages]);
 
   useEffect(() => {
-    if (topTab === "chats") {
-      setShowChatsToggleDot(false);
-      setLastClearedUnreadCount(totalUnreadMessages);
-      return;
-    }
-    if (totalUnreadMessages <= 0) {
-      setShowChatsToggleDot(false);
-      return;
-    }
-    if (totalUnreadMessages > lastClearedUnreadCount) {
-      setShowChatsToggleDot(true);
-    }
-  }, [lastClearedUnreadCount, topTab, totalUnreadMessages]);
+    setShowChatsToggleDot(topTab !== "chats" && totalUnreadMessages > 0);
+  }, [topTab, totalUnreadMessages]);
 
-  const baseDiscoverySource = discoveryProfiles.filter(
-    (p) =>
-      !hiddenDiscoveryIds.has(p.id) &&
-      !blockedUserIds.has(p.id) &&
-      !handledDiscoveryIds.has(p.id) &&
-      !strictMatchedDiscoveryIds.has(p.id)
+  const baseDiscoverySource = useMemo(
+    () =>
+      discoveryProfiles.filter(
+        (p) =>
+          !hiddenDiscoveryIds.has(p.id) &&
+          !blockedUserIds.has(p.id) &&
+          !handledDiscoveryIds.has(p.id) &&
+          !strictMatchedDiscoveryIds.has(p.id)
+      ),
+    [blockedUserIds, discoveryProfiles, handledDiscoveryIds, hiddenDiscoveryIds, strictMatchedDiscoveryIds]
   );
-  const visibleDiscoverySource = baseDiscoverySource.filter((p) => !passedDiscoveryIds.has(p.id));
-  const carryoverQueue = visibleDiscoverySource.filter((p) => carryoverPassedIds.has(p.id));
-  const primaryQueue = visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id));
-  const discoverySource = silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue];
-  const discoveryDeck = discoverySource.slice(0, discoveryVisibleCount);
-  const stackedDiscoveryCards = discoveryDeck.slice(0, 2);
+  const visibleDiscoverySource = useMemo(
+    () => baseDiscoverySource.filter((p) => !passedDiscoveryIds.has(p.id)),
+    [baseDiscoverySource, passedDiscoveryIds]
+  );
+  const carryoverQueue = useMemo(
+    () => visibleDiscoverySource.filter((p) => carryoverPassedIds.has(p.id)),
+    [carryoverPassedIds, visibleDiscoverySource]
+  );
+  const primaryQueue = useMemo(
+    () => visibleDiscoverySource.filter((p) => !carryoverPassedIds.has(p.id)),
+    [carryoverPassedIds, visibleDiscoverySource]
+  );
+  const discoverySource = useMemo(
+    () => (silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue]),
+    [carryoverQueue, primaryQueue, silentGoldDiscoveryCapReached]
+  );
+  const discoveryDeck = useMemo(
+    () => discoverySource.slice(0, discoveryVisibleCount),
+    [discoverySource, discoveryVisibleCount]
+  );
+  const stackedDiscoveryCards = useMemo(
+    () => discoveryDeck.slice(0, 2),
+    [discoveryDeck]
+  );
   const currentDiscovery = stackedDiscoveryCards[0] ?? null;
   const showDiscoverEmpty = discoveryLoadSettled && !discoveryLoading && !currentDiscovery && !discoveryLocationBlocked;
   const pendingDiscoverEmpty = Boolean(
@@ -4849,6 +4873,9 @@ const Chats = () => {
                 <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[rgba(33,69,207,0.14)] px-1.5 py-[1px] text-[10px] font-semibold leading-none text-[#2145CF] ring-2 ring-white">
                   {totalUnreadMessages > 99 ? "99+" : totalUnreadMessages}
                 </span>
+              )}
+              {topTab === "chats" && totalUnreadMessages > 0 && (
+                <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-[#FF4D4F] ring-2 ring-white" />
               )}
             </button>
           </div>

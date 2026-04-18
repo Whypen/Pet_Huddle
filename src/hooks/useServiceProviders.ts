@@ -15,22 +15,62 @@ interface UseServiceProvidersResult {
 
 type Anchor = { lat: number; lng: number } | null;
 
+type ServiceProvidersCacheEntry = {
+  providers: ProviderSummary[];
+  updatedAt: number;
+};
+
+const SERVICE_PROVIDERS_STALE_MS = 5 * 60 * 1000;
+const serviceProvidersCache = new Map<string, ServiceProvidersCacheEntry>();
+const socialAlbumUrlCache = new Map<string, string[]>();
+
+const buildServiceProvidersCacheKey = (anchor?: Anchor, viewerCountry?: string | null) =>
+  JSON.stringify({
+    lat: anchor && Number.isFinite(anchor.lat) ? Number(anchor.lat.toFixed(3)) : null,
+    lng: anchor && Number.isFinite(anchor.lng) ? Number(anchor.lng.toFixed(3)) : null,
+    viewerCountry: normalizeCountryKey(viewerCountry),
+  });
+
 export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | null): UseServiceProvidersResult {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const bookmarkInFlight = useRef<Set<string>>(new Set());
+  const cacheKey = buildServiceProvidersCacheKey(anchor, viewerCountry);
+  const lastFetchedAtRef = useRef(0);
 
-  const fetchProviders = useCallback(async () => {
-    setLoading(true);
+  const fetchProviders = useCallback(async (options?: { force?: boolean; background?: boolean }) => {
+    const force = options?.force === true;
+    const background = options?.background === true;
+    const cached = serviceProvidersCache.get(cacheKey);
+    const cacheAgeMs = cached ? Date.now() - cached.updatedAt : Number.POSITIVE_INFINITY;
+    const shouldUseFreshCache = !force && cached && cacheAgeMs < SERVICE_PROVIDERS_STALE_MS;
+
+    if (shouldUseFreshCache) {
+      setProviders(cached.providers);
+      setError(null);
+      setLoading(false);
+      lastFetchedAtRef.current = cached.updatedAt;
+      return;
+    }
+
+    if (cached && !force) {
+      setProviders(cached.providers);
+      setError(null);
+      lastFetchedAtRef.current = cached.updatedAt;
+    }
+
+    if (!background || !cached) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
-      const { data: rows, error: rowsError } = await supabase
-        .from("pet_care_profiles")
+      const { data: rows, error: rowsError } = await (supabase
+        .from("pet_care_profiles" as never)
         .select(
           [
             "user_id",
@@ -64,7 +104,10 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
           ].join(","),
         )
         .eq("listed", true)
-        .order("updated_at", { ascending: false });
+        .order("updated_at", { ascending: false })) as unknown as {
+          data: Array<Record<string, unknown>> | null;
+          error: { message?: string } | null;
+        };
       if (rowsError) throw rowsError;
 
       const providerRows = rows ?? [];
@@ -168,7 +211,14 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
           let albumUrls: string[] = [];
           if (albumRaw.length > 0) {
             try {
-              albumUrls = await resolveSocialAlbumUrlList(albumRaw);
+              const albumCacheKey = albumRaw.join("|");
+              const cachedAlbumUrls = socialAlbumUrlCache.get(albumCacheKey);
+              if (cachedAlbumUrls) {
+                albumUrls = cachedAlbumUrls;
+              } else {
+                albumUrls = await resolveSocialAlbumUrlList(albumRaw);
+                socialAlbumUrlCache.set(albumCacheKey, albumUrls);
+              }
             } catch (error) {
               console.warn("[service.fetch_providers.album_url_resolve_failed]", {
                 providerUserId,
@@ -197,19 +247,23 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
       // Defense-in-depth: only surface verified providers in the public feed.
       // The listing gate in CarerProfile prevents unverified users from setting
       // listed=true going forward, but this filter protects against legacy rows.
-      setProviders(
-        geoFiltered.filter(
-          (entry): entry is ProviderSummary =>
-            entry !== null && entry.verificationStatus === "verified",
-        ),
+      const nextProviders = geoFiltered.filter(
+        (entry): entry is ProviderSummary =>
+          entry !== null && entry.verificationStatus === "verified",
       );
+      setProviders(nextProviders);
+      lastFetchedAtRef.current = Date.now();
+      serviceProvidersCache.set(cacheKey, {
+        providers: nextProviders,
+        updatedAt: lastFetchedAtRef.current,
+      });
     } catch (e) {
       console.error("[service.fetch_providers_failed]", e);
       setError("Unable to load services right now.");
     } finally {
       setLoading(false);
     }
-  }, [anchor, viewerCountry]);
+  }, [anchor, cacheKey, viewerCountry]);
 
   useEffect(() => {
     void fetchProviders();
@@ -217,11 +271,14 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
 
   useEffect(() => {
     const onFocus = () => {
-      void fetchProviders();
+      const cached = serviceProvidersCache.get(cacheKey);
+      const cacheAgeMs = cached ? Date.now() - cached.updatedAt : Number.POSITIVE_INFINITY;
+      if (cacheAgeMs < SERVICE_PROVIDERS_STALE_MS) return;
+      void fetchProviders({ background: true });
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [fetchProviders]);
+  }, [cacheKey, fetchProviders]);
 
   const toggleBookmark = useCallback(async (providerUserId: string) => {
     if (bookmarkInFlight.current.has(providerUserId)) return;
@@ -271,16 +328,22 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
           item.userId === providerUserId ? { ...item, isBookmarked: !isBookmarked } : item,
         ),
       );
+      serviceProvidersCache.set(cacheKey, {
+        providers: previous.map((item) =>
+          item.userId === providerUserId ? { ...item, isBookmarked: !isBookmarked } : item,
+        ),
+        updatedAt: lastFetchedAtRef.current || Date.now(),
+      });
     } catch (err) {
       setProviders(previous);
       throw err;
     } finally {
       bookmarkInFlight.current.delete(providerUserId);
     }
-  }, [providers]);
+  }, [cacheKey, providers]);
 
   const refresh = useCallback(async () => {
-    await fetchProviders();
+    await fetchProviders({ force: true });
   }, [fetchProviders]);
 
   return {

@@ -63,6 +63,7 @@ type CounterpartProfile = {
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
 const MESSAGE_PAGE_SIZE = 40;
+const MESSAGE_READ_BUFFER_MS = 100;
 
 const formatMessageTime = (iso: string) => {
   const dt = new Date(iso);
@@ -150,6 +151,10 @@ const ChatDialogue = () => {
   const [confirmRemoveGroupOpen, setConfirmRemoveGroupOpen] = useState(false);
   const fetchedSenderIdsRef = useRef<Set<string>>(new Set());
   const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+  const pendingReadIdsRef = useRef<Set<string>>(new Set());
+  const readFlushTimerRef = useRef<number | null>(null);
+  const readFlushInFlightRef = useRef(false);
+  const pendingInitialScrollRef = useRef(false);
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
@@ -210,44 +215,80 @@ const ChatDialogue = () => {
     return { text: content, attachments: [], share: null };
   }, []);
 
-  const markMessagesAsRead = useCallback(async (roomMessages: ChatMessage[]) => {
-    if (!profile?.id || roomMessages.length === 0) return;
+  const snapToLatestMessage = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const viewport = messagesViewportRef.current;
+        if (!viewport) return;
+        viewport.scrollTop = viewport.scrollHeight;
+      });
+    });
+  }, []);
 
-    const incomingIds = roomMessages
-      .filter((message) => message.sender_id && message.sender_id !== profile.id)
-      .map((message) => message.id)
-      .filter(Boolean);
+  const flushPendingMessageReads = useCallback(async () => {
+    if (!profile?.id || readFlushInFlightRef.current) return;
+    const pendingIds = Array.from(pendingReadIdsRef.current);
+    if (pendingIds.length === 0) return;
 
-    if (incomingIds.length === 0) return;
-
-    const { data: existingReads } = await supabase
-      .from("message_reads")
-      .select("message_id")
-      .eq("user_id", profile.id)
-      .in("message_id", incomingIds);
-
-    const existingSet = new Set(
-      (existingReads || []).map((row: { message_id?: string | null }) => String(row?.message_id || "")).filter(Boolean),
-    );
-
-    const missingRows = incomingIds
-      .filter((messageId) => !existingSet.has(messageId))
-      .map((messageId) => ({
-        message_id: messageId,
-        user_id: profile.id,
-        read_at: new Date().toISOString(),
-      }));
-
-    if (missingRows.length === 0) return;
+    pendingReadIdsRef.current = new Set();
+    readFlushInFlightRef.current = true;
 
     const { error: upsertError } = await supabase
       .from("message_reads")
-      .upsert(missingRows, { onConflict: "message_id,user_id" });
+      .upsert(
+        pendingIds.map((messageId) => ({
+          message_id: messageId,
+          user_id: profile.id,
+          read_at: new Date().toISOString(),
+        })),
+        { onConflict: "message_id,user_id" },
+      );
 
     if (upsertError) {
+      pendingIds.forEach((messageId) => pendingReadIdsRef.current.add(messageId));
       console.warn("[ChatDialogue] mark read failed", upsertError.message);
     }
+
+    readFlushInFlightRef.current = false;
+    if (pendingReadIdsRef.current.size > 0) {
+      if (readFlushTimerRef.current !== null) {
+        window.clearTimeout(readFlushTimerRef.current);
+      }
+      readFlushTimerRef.current = window.setTimeout(() => {
+        readFlushTimerRef.current = null;
+        void flushPendingMessageReads();
+      }, MESSAGE_READ_BUFFER_MS);
+    }
   }, [profile?.id]);
+
+  const markMessagesAsRead = useCallback((roomMessages: ChatMessage[]) => {
+    if (!profile?.id || roomMessages.length === 0) return;
+
+    let queued = false;
+    roomMessages.forEach((message) => {
+      const messageId = String(message.id || "");
+      if (!messageId || !message.sender_id || message.sender_id === profile.id) return;
+      if (pendingReadIdsRef.current.has(messageId)) return;
+      pendingReadIdsRef.current.add(messageId);
+      queued = true;
+    });
+
+    if (!queued || readFlushTimerRef.current !== null) return;
+    readFlushTimerRef.current = window.setTimeout(() => {
+      readFlushTimerRef.current = null;
+      void flushPendingMessageReads();
+    }, MESSAGE_READ_BUFFER_MS);
+  }, [flushPendingMessageReads, profile?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (readFlushTimerRef.current !== null) {
+        window.clearTimeout(readFlushTimerRef.current);
+        readFlushTimerRef.current = null;
+      }
+      void flushPendingMessageReads();
+    };
+  }, [flushPendingMessageReads, roomId]);
 
   const loadGroupInfo = useCallback(async (nextRoomId: string): Promise<boolean> => {
     const { data: chatRow } = await supabase
@@ -276,29 +317,31 @@ const ChatDialogue = () => {
     setGroupLocationLabel(row.location_label || null);
     setGroupIsAdmin((row.created_by || null) === profile?.id);
 
-    const [{ data: members }, { data: participantRow }] = await Promise.all([
-      supabase
-        .from("chat_room_members")
-        .select("user_id")
-        .eq("chat_id", nextRoomId),
-      profile?.id
-        ? supabase
-            .from("chat_participants")
-            .select("is_muted, role")
-            .eq("chat_id", nextRoomId)
-            .eq("user_id", profile.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
-    const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
-    setGroupMemberCount(memberIds.length);
-    setGroupMuted(Boolean((participantRow as { is_muted?: boolean } | null)?.is_muted));
-    setGroupIsAdmin(
-      (row.created_by || null) === profile?.id ||
-      String((participantRow as { role?: string } | null)?.role || "").toLowerCase() === "admin"
-    );
+    void (async () => {
+      try {
+      const [{ data: members }, { data: participantRow }] = await Promise.all([
+        supabase
+          .from("chat_room_members")
+          .select("user_id")
+          .eq("chat_id", nextRoomId),
+        profile?.id
+          ? supabase
+              .from("chat_participants")
+              .select("is_muted, role")
+              .eq("chat_id", nextRoomId)
+              .eq("user_id", profile.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      const memberIds = ((members || []) as { user_id: string }[]).map((m) => m.user_id).filter(Boolean);
+      setGroupMemberCount(memberIds.length);
+      setGroupMuted(Boolean((participantRow as { is_muted?: boolean } | null)?.is_muted));
+      setGroupIsAdmin(
+        (row.created_by || null) === profile?.id ||
+        String((participantRow as { role?: string } | null)?.role || "").toLowerCase() === "admin"
+      );
 
-    if (memberIds.length > 0) {
+      if (memberIds.length === 0) return;
       memberIds.forEach((id) => fetchedSenderIdsRef.current.add(id));
       const { data: memberProfiles } = await supabase
         .from("profiles")
@@ -309,7 +352,11 @@ const ChatDialogue = () => {
         if (p.id && p.display_name) nameMap[p.id] = p.display_name;
       });
       setSenderNames(nameMap);
-    }
+      } catch (error) {
+        console.warn("[ChatDialogue] load group details failed", error);
+      }
+    })();
+
     return true;
   }, [profile?.id]);
 
@@ -327,6 +374,12 @@ const ChatDialogue = () => {
     setMessages(nextMessages);
     void markMessagesAsRead(nextMessages);
   }, [markMessagesAsRead]);
+
+  useEffect(() => {
+    if (!pendingInitialScrollRef.current || loading) return;
+    pendingInitialScrollRef.current = false;
+    snapToLatestMessage();
+  }, [loading, messages, snapToLatestMessage]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!roomId || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
@@ -396,49 +449,51 @@ const ChatDialogue = () => {
 
   const loadCounterpart = useCallback(async (nextRoomId: string, fallbackName: string, hintUserId?: string | null) => {
     if (!profile?.id) return;
-    const { data: members, error: membersError } = await supabase
-      .from("chat_room_members")
-      .select("user_id")
-      .eq("chat_id", nextRoomId);
-    if (membersError) throw membersError;
-
-    const memberCounterpartId = (members || [])
-      .map((row: { user_id: string }) => row.user_id)
-      .find((id: string) => id !== profile.id);
-    let counterpartId = memberCounterpartId || null;
-    if (!counterpartId && hintUserId && hintUserId !== profile.id) {
-      counterpartId = hintUserId;
+    let counterpartId = hintUserId && hintUserId !== profile.id ? hintUserId : null;
+    if (!counterpartId) {
+      const { data: members, error: membersError } = await supabase
+        .from("chat_room_members")
+        .select("user_id")
+        .eq("chat_id", nextRoomId);
+      if (membersError) throw membersError;
+      counterpartId = (members || [])
+        .map((row: { user_id: string }) => row.user_id)
+        .find((id: string) => id !== profile.id) || null;
     }
     if (!counterpartId) return;
 
-    let profileRow: Record<string, unknown> | null = null;
-    let privateRow: Record<string, unknown> | null = null;
     const privateSelectPrimary = "id, display_name, social_id, avatar_url, availability_status, verification_status, is_verified, has_car";
-    const privateSelectFallback = "id, display_name, social_id, avatar_url, availability_status, verification_status, is_verified, has_car";
-    const { data: privateData, error: privateErr } = await supabase
-      .from("profiles")
-      .select(privateSelectPrimary)
-      .eq("id", counterpartId)
-      .maybeSingle();
-    if (privateErr) {
-      const { data: fallbackData } = await supabase
+    const [
+      privateProfileResult,
+      publicProfileResult,
+      blocksResult,
+      unmatchesResult,
+    ] = await Promise.all([
+      supabase
         .from("profiles")
-        .select(privateSelectFallback)
+        .select(privateSelectPrimary)
         .eq("id", counterpartId)
-        .maybeSingle();
-      privateRow = (fallbackData as Record<string, unknown> | null) ?? null;
-    } else {
-      privateRow = (privateData as Record<string, unknown> | null) ?? null;
-    }
-    profileRow = privateRow;
-    if (!profileRow) {
-      const { data: publicRow } = await supabase
+        .maybeSingle(),
+      supabase
         .from("profiles_public")
         .select("id, display_name, avatar_url, availability_status, user_role, has_car")
         .eq("id", counterpartId)
-        .maybeSingle();
-      profileRow = (publicRow as Record<string, unknown> | null) ?? null;
-    }
+        .maybeSingle(),
+      supabase
+        .from("user_blocks")
+        .select("blocker_id, blocked_id")
+        .or(`and(blocker_id.eq.${profile.id},blocked_id.eq.${counterpartId}),and(blocker_id.eq.${counterpartId},blocked_id.eq.${profile.id})`)
+        .limit(1),
+      supabase
+        .from("user_unmatches")
+        .select("actor_id, target_id")
+        .or(`and(actor_id.eq.${counterpartId},target_id.eq.${profile.id}),and(actor_id.eq.${profile.id},target_id.eq.${counterpartId})`)
+        .limit(1),
+    ]);
+
+    const profileRow =
+      ((privateProfileResult.data as Record<string, unknown> | null) ?? null)
+      || ((publicProfileResult.data as Record<string, unknown> | null) ?? null);
 
     const displayName = String(profileRow?.display_name || fallbackName || "Conversation");
     const socialId = typeof profileRow?.social_id === "string" && profileRow.social_id ? String(profileRow.social_id) : null;
@@ -466,11 +521,7 @@ const ChatDialogue = () => {
       isTeamHuddle: isOfficialTeamHuddle,
     });
 
-    const { data: blocks } = await supabase
-      .from("user_blocks")
-      .select("blocker_id, blocked_id")
-      .or(`and(blocker_id.eq.${profile.id},blocked_id.eq.${counterpartId}),and(blocker_id.eq.${counterpartId},blocked_id.eq.${profile.id})`)
-      .limit(1);
+    const blocks = blocksResult.data;
     const relation = Array.isArray(blocks) && blocks.length > 0 ? blocks[0] : null;
     if (relation?.blocker_id === counterpartId && relation?.blocked_id === profile.id) {
       setBlockState("blocked_by_them");
@@ -480,11 +531,7 @@ const ChatDialogue = () => {
       setBlockState("none");
     }
 
-    const { data: unmatches } = await supabase
-      .from("user_unmatches")
-      .select("actor_id, target_id")
-      .or(`and(actor_id.eq.${counterpartId},target_id.eq.${profile.id}),and(actor_id.eq.${profile.id},target_id.eq.${counterpartId})`)
-      .limit(1);
+    const unmatches = unmatchesResult.data;
     const unmatchRelation = Array.isArray(unmatches) && unmatches.length > 0 ? unmatches[0] : null;
     if (unmatchRelation?.actor_id === counterpartId && unmatchRelation?.target_id === profile.id) {
       setUnmatchState("unmatched_by_them");
@@ -529,9 +576,28 @@ const ChatDialogue = () => {
     const room = searchParams.get("room");
     const name = searchParams.get("name") || "Conversation";
     const hintedUserId = searchParams.get("with");
+    setLoading(true);
+    setRoomName(name);
+    setIsGroup(false);
+    setCounterpart(null);
+    setMessages([]);
+    setHasOlderMessages(false);
+    setReadMessageIds(new Set());
+    setSenderNames({});
+    setGroupAvatarUrl(null);
+    setGroupMemberCount(0);
+    setGroupDescription("");
+    setGroupVisibility(null);
+    setGroupRoomCode(null);
+    setGroupLocationLabel(null);
+    setGroupIsAdmin(false);
+    setGroupMuted(false);
+    setBlockState("none");
+    setUnmatchState("none");
     if (room) {
       void (async () => {
         try {
+          setRoomId(room);
           const { data: membership } = await supabase
             .from("chat_room_members")
             .select("chat_id")
@@ -552,27 +618,15 @@ const ChatDialogue = () => {
                   .map((member) => String(member.user_id || "").trim())
                   .find((userId) => Boolean(userId) && userId !== profile.id) || null;
             }
-            const canonicalRoomId =
-              !grouped && directTargetId
-                ? await ensureDirectChatRoom(supabase, profile.id, directTargetId, name)
-                : room;
-            const nextRoomId = canonicalRoomId || room;
-            setRoomId(nextRoomId);
-            await Promise.all([
-              loadRoomMessages(nextRoomId),
-              grouped ? Promise.resolve() : loadCounterpart(nextRoomId, name, directTargetId),
-            ]);
-            requestAnimationFrame(() => {
-              const viewport = messagesViewportRef.current;
-              if (viewport) viewport.scrollTop = viewport.scrollHeight;
-            });
-            if (nextRoomId !== room) {
-              navigate(
-                `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}${
-                  directTargetId ? `&with=${encodeURIComponent(directTargetId)}` : ""
-                }`,
-                { replace: true }
-              );
+            const nextRoomId = room;
+            await loadRoomMessages(nextRoomId);
+            setLoading(false);
+            pendingInitialScrollRef.current = true;
+            snapToLatestMessage();
+            if (!grouped) {
+              void loadCounterpart(nextRoomId, name, directTargetId).catch((error) => {
+                console.warn("[ChatDialogue] load counterpart failed", error);
+              });
             }
             return;
           }
@@ -598,11 +652,15 @@ const ChatDialogue = () => {
           const nextRoomId = await ensureDirectChatRoom(supabase, profile.id, fallbackTargetId, name);
           setRoomId(nextRoomId);
           const grouped2 = await loadGroupInfo(nextRoomId);
-          await Promise.all([loadRoomMessages(nextRoomId), grouped2 ? Promise.resolve() : loadCounterpart(nextRoomId, name, fallbackTargetId)]);
-          requestAnimationFrame(() => {
-            const viewport = messagesViewportRef.current;
-            if (viewport) viewport.scrollTop = viewport.scrollHeight;
-          });
+          await loadRoomMessages(nextRoomId);
+          setLoading(false);
+          pendingInitialScrollRef.current = true;
+          snapToLatestMessage();
+          if (!grouped2) {
+            void loadCounterpart(nextRoomId, name, fallbackTargetId).catch((error) => {
+              console.warn("[ChatDialogue] load counterpart failed", error);
+            });
+          }
           navigate(
             `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}&with=${encodeURIComponent(fallbackTargetId)}`,
             { replace: true }
@@ -611,7 +669,7 @@ const ChatDialogue = () => {
           toast.error("Unable to load messages right now.");
           navigate("/chats?tab=chats", { replace: true });
         } finally {
-          setLoading(false);
+          setLoading((prev) => (roomId ? prev : false));
         }
       })();
       return;
@@ -628,19 +686,21 @@ const ChatDialogue = () => {
       try {
         const directRoomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
         setRoomId(directRoomId);
-        await Promise.all([loadRoomMessages(directRoomId), loadCounterpart(directRoomId, targetName, targetUserId)]);
-        requestAnimationFrame(() => {
-          const viewport = messagesViewportRef.current;
-          if (viewport) viewport.scrollTop = viewport.scrollHeight;
+        await loadRoomMessages(directRoomId);
+        setLoading(false);
+        pendingInitialScrollRef.current = true;
+        snapToLatestMessage();
+        void loadCounterpart(directRoomId, targetName, targetUserId).catch((error) => {
+          console.warn("[ChatDialogue] load counterpart failed", error);
         });
       } catch {
         toast.error("Unable to open conversation right now.");
         navigate("/chats?tab=chats", { replace: true });
       } finally {
-        setLoading(false);
+        setLoading((prev) => (roomId ? prev : false));
       }
     })();
-  }, [loadCounterpart, loadGroupInfo, loadRoomMessages, navigate, profile?.id, searchParams]);
+  }, [loadCounterpart, loadGroupInfo, loadRoomMessages, navigate, profile?.id, roomId, searchParams, snapToLatestMessage]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -986,7 +1046,7 @@ const ChatDialogue = () => {
     setGroupInfoOpen(true);
   }, [messages]);
 
-  if (loading) {
+  if (loading && !roomId) {
     return (
       <div className="h-full min-h-0 flex items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
