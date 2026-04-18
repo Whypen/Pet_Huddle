@@ -41,7 +41,7 @@ const PET_FOCUS_OPTIONS = [
 const roomCodePlaceholder = "— —";
 const DESCRIPTION_WORD_LIMIT = 100;
 const optionCardClass =
-  "rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors";
+  "min-w-0 overflow-hidden rounded-[14px] border border-[rgba(66,73,101,0.14)] bg-white/72 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.16),inset_-1px_-1px_4px_rgba(255,255,255,0.82)] transition-colors";
 const activeOptionCardClass =
   "border-[#2147C9] bg-[#2147C9] text-white shadow-[0_16px_34px_rgba(33,71,201,0.24)]";
 
@@ -260,8 +260,8 @@ export function CreateGroupSheet({
       isOpen={isOpen}
       onClose={onClose}
       title="Create a group"
-      contentClassName="pb-2"
-      className="!px-3"
+      contentClassName="!pr-0 pb-2"
+      className="!p-4 !pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]"
     >
       {/* Scrollable body */}
       <div className="flex flex-col space-y-5">
@@ -295,7 +295,7 @@ export function CreateGroupSheet({
               label="Group name"
               placeholder="Sunday Small Dog Walks"
               value={groupName}
-              className="[&_.field-input-core]:pl-3 [&_.field-input-core]:pr-3"
+              className="[&_.field-input-core]:pl-2.5 [&_.field-input-core]:pr-2.5"
               onChange={e => setGroupName(e.target.value)}
             />
           </div>
@@ -306,7 +306,7 @@ export function CreateGroupSheet({
           label="Location"
           placeholder="Neighbourhood or area"
           value={locationLabel}
-          className="[&_.field-input-core]:pl-3 [&_.field-input-core]:pr-3"
+          className="[&_.field-input-core]:pl-2.5 [&_.field-input-core]:pr-2.5"
           onChange={e => setLocationLabel(e.target.value)}
         />
 
@@ -337,7 +337,7 @@ export function CreateGroupSheet({
           label="Description"
           placeholder="Tell people what this group is about and how you usually meet."
           value={description}
-          className="[&_textarea.field-input-core]:px-3"
+          className="[&_textarea.field-input-core]:px-2.5"
           onChange={e => {
             const nextValue = e.target.value;
             const words = countWords(nextValue);
@@ -359,7 +359,7 @@ export function CreateGroupSheet({
               tabIndex={0}
               className={cn(
                 optionCardClass,
-                "flex flex-row items-start gap-2 cursor-pointer text-left",
+                "flex min-w-0 flex-row items-start gap-2 cursor-pointer text-left",
                 visibility === "public" && activeOptionCardClass
               )}
               data-active={visibility === "public" ? "true" : undefined}
@@ -374,7 +374,7 @@ export function CreateGroupSheet({
                     style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
-              <span className="flex flex-col">
+              <span className="flex min-w-0 flex-col">
                 <span className="text-[13px] font-semibold">Public</span>
                 <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "public" && "text-white/90")}>
                   Visible in Explore. Pet lovers nearby can find it.
@@ -388,7 +388,7 @@ export function CreateGroupSheet({
               tabIndex={0}
               className={cn(
                 optionCardClass,
-                "flex flex-row items-start gap-2 cursor-pointer text-left",
+                "flex min-w-0 flex-row items-start gap-2 cursor-pointer text-left",
                 visibility === "private" && activeOptionCardClass
               )}
               data-active={visibility === "private" ? "true" : undefined}
@@ -411,7 +411,7 @@ export function CreateGroupSheet({
                     style={{ borderColor: "var(--blue, #3B82F6)" }} />
                 )}
               </span>
-              <span className="flex flex-col">
+              <span className="flex min-w-0 flex-col">
                 <span className="text-[13px] font-semibold">Private</span>
                 <span className={cn("text-[11px] mt-0.5 leading-snug opacity-80", visibility === "private" && "text-white/90")}>
                   Hidden. People join with a code.
@@ -444,7 +444,7 @@ export function CreateGroupSheet({
                     type="button"
                     className={cn(
                       optionCardClass,
-                      "w-full flex flex-row items-start gap-3 text-left",
+                      "w-full min-w-0 flex flex-row items-start gap-3 text-left",
                       joinMethod === "request" && activeOptionCardClass
                     )}
                     data-active={joinMethod === "request" ? "true" : undefined}
@@ -458,7 +458,7 @@ export function CreateGroupSheet({
                           style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
-                    <span className="flex flex-col">
+                    <span className="flex min-w-0 flex-col">
                       <span className="text-[13px] font-semibold">
                         Send a join request{" "}
                         <span className={cn("text-[11px] font-normal opacity-70", joinMethod === "request" && "text-white/80")}>
@@ -476,7 +476,7 @@ export function CreateGroupSheet({
                     type="button"
                     className={cn(
                       optionCardClass,
-                      "w-full flex flex-row items-start gap-3 text-left",
+                      "w-full min-w-0 flex flex-row items-start gap-3 text-left",
                       joinMethod === "instant" && activeOptionCardClass
                     )}
                     data-active={joinMethod === "instant" ? "true" : undefined}
@@ -490,7 +490,7 @@ export function CreateGroupSheet({
                           style={{ borderColor: "var(--blue, #3B82F6)" }} />
                       )}
                     </span>
-                    <span className="flex flex-col">
+                    <span className="flex min-w-0 flex-col">
                       <span className="text-[13px] font-semibold">Join instantly</span>
                       <span className={cn("text-[11px] mt-0.5 opacity-70", joinMethod === "instant" && "text-white/90")}>
                         Anyone can join right away.

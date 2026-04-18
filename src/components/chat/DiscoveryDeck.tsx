@@ -193,9 +193,7 @@ const DiscoveryDeckInner = ({
         {promotedProfile ? (
           <motion.button
             className={cn(
-              isPromoted
-                ? "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#2147C9] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
-                : "flex items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-[#2C2A19] shadow-[0_14px_28px_rgba(245,200,92,0.24)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+              "flex items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-white shadow-[0_14px_28px_rgba(245,200,92,0.24)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
               isPromoted ? "h-10 w-10" : "h-12 w-12",
               ctaDisabled && "cursor-not-allowed opacity-45"
             )}
@@ -426,19 +424,6 @@ const DiscoveryDeckInner = ({
           <ProfileBadges isVerified={profile.is_verified === true} hasCar={!!profile.has_car} size="lg" />
           {isActive && !hideTopChrome ? (
             <div className="pointer-events-auto flex items-start gap-2">
-              <motion.button
-                type="button"
-                aria-label={`Star ${profile.display_name || "profile"}`}
-                className={cn(
-                  "flex h-11 w-11 items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-[#2C2A19] shadow-[0_12px_28px_rgba(245,200,92,0.32)] transition-transform duration-150 hover:scale-[1.03] active:scale-[0.96]",
-                  ctaDisabled && "cursor-not-allowed opacity-45"
-                )}
-                disabled={ctaDisabled}
-                whileTap={{ scale: 0.92 }}
-                onClick={(event) => promptStarFromCorner(event, profile)}
-              >
-                <Star size={22} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-              </motion.button>
               {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted", profile) : null}
             </div>
           ) : (
