@@ -188,19 +188,23 @@ const DiscoveryDeckInner = ({
     promotedProfile?: DiscoveryDeckProfile | null
   ) => {
     const isPromoted = variant === "promoted";
+    const showStarButton = Boolean(promotedProfile) || (!isPromoted && discoveryLoading);
     return (
       <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
-        {promotedProfile ? (
+        {showStarButton ? (
           <motion.button
             className={cn(
               "flex items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-white shadow-[0_14px_28px_rgba(245,200,92,0.24)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
               isPromoted ? "h-10 w-10" : "h-12 w-12",
               ctaDisabled && "cursor-not-allowed opacity-45"
             )}
-            aria-label={`Star ${promotedProfile.display_name || "profile"}`}
-            disabled={ctaDisabled}
+            aria-label={promotedProfile ? `Star ${promotedProfile.display_name || "profile"}` : "Star"}
+            disabled={ctaDisabled || !promotedProfile}
             whileTap={{ scale: 0.9 }}
-            onClick={(event) => promptStarFromCorner(event, promotedProfile)}
+            onClick={(event) => {
+              if (!promotedProfile) return;
+              promptStarFromCorner(event, promotedProfile);
+            }}
           >
             <Star size={isPromoted ? 18 : 22} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
           </motion.button>

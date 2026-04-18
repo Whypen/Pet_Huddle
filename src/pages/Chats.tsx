@@ -541,6 +541,31 @@ interface GroupContactOption {
   verified: boolean;
 }
 
+const formatChatTimestamp = (iso?: string | null) => {
+  if (!iso) return "";
+  const stamp = new Date(iso);
+  if (Number.isNaN(stamp.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    stamp.getFullYear() === now.getFullYear() &&
+    stamp.getMonth() === now.getMonth() &&
+    stamp.getDate() === now.getDate();
+  if (sameDay) {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(stamp);
+  }
+  const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+  if (now.getTime() - stamp.getTime() <= oneWeekMs) {
+    return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(stamp);
+  }
+  const day = String(stamp.getDate()).padStart(2, "0");
+  const month = String(stamp.getMonth() + 1);
+  return `${day}/${month}/${stamp.getFullYear()}`;
+};
+
 type PendingGroupInvite = {
   inviteId: string;
   chatId: string;
@@ -2610,31 +2635,6 @@ const Chats = () => {
 
       const nextChats: ChatUser[] = [];
       const nextGroups: Group[] = [];
-
-      const formatChatTimestamp = (iso?: string | null) => {
-        if (!iso) return "";
-        const stamp = new Date(iso);
-        if (Number.isNaN(stamp.getTime())) return "";
-        const now = new Date();
-        const sameDay =
-          stamp.getFullYear() === now.getFullYear() &&
-          stamp.getMonth() === now.getMonth() &&
-          stamp.getDate() === now.getDate();
-        if (sameDay) {
-          return new Intl.DateTimeFormat("en-GB", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          }).format(stamp);
-        }
-        const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
-        if (now.getTime() - stamp.getTime() <= oneWeekMs) {
-          return new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(stamp);
-        }
-        const day = String(stamp.getDate()).padStart(2, "0");
-        const month = String(stamp.getMonth() + 1);
-        return `${day}/${month}/${stamp.getFullYear()}`;
-      };
 
       const formatServiceDateRange = (requestCard: Record<string, unknown> | null | undefined) => {
         if (!requestCard) return null;
