@@ -22,6 +22,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.json" />
 
+    <!-- Image CDN warm-up for instant link preview thumbnails -->
+    <link rel="preconnect" href="https://i.ytimg.com" crossorigin />
+    <link rel="preconnect" href="https://i.scdn.co" crossorigin />
+    <link rel="dns-prefetch" href="https://i.ytimg.com" />
+    <link rel="dns-prefetch" href="https://i.scdn.co" />
+
     <!-- Stripe connection warm-up: pre-resolve DNS and open TCP connections so
          the card iframe does not hit a cold ERR_CONNECTION_CLOSED on first mount -->
     <link rel="preconnect" href="https://js.stripe.com" crossorigin />

@@ -4,11 +4,62 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const json = (body: Record<string, unknown>, status = 200) =>
+const json = (body: Record<string, unknown>, status = 200, extraHeaders: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json", ...extraHeaders },
   });
+
+const CACHEABLE_HEADERS = {
+  // Edge/CDN cache for 1 day, browser for 1 hour, stale-while-revalidate for 7 days
+  "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+};
+
+const tryOEmbed = async (url: string): Promise<Record<string, unknown> | null> => {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
+
+    // YouTube fast-path
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be") {
+      const videoId = host === "youtu.be"
+        ? u.pathname.slice(1).split("/")[0]
+        : u.searchParams.get("v") || u.pathname.split("/").filter(Boolean).pop();
+      if (!videoId) return null;
+      return {
+        url,
+        title: `YouTube video`,
+        description: "",
+        image: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        siteName: "YouTube",
+      };
+    }
+
+    // Spotify fast-path via oEmbed
+    if (host === "open.spotify.com") {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      try {
+        const r = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, { signal: ctrl.signal });
+        if (r.ok) {
+          const data = await r.json();
+          return {
+            url,
+            title: data.title || "Spotify",
+            description: "",
+            image: data.thumbnail_url || undefined,
+            siteName: "Spotify",
+          };
+        }
+      } finally {
+        clearTimeout(t);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
 
 const normalizeUrl = (value: unknown) => {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -105,6 +156,9 @@ Deno.serve(async (req) => {
     const normalizedUrl = normalizeUrl(url);
     if (!normalizedUrl) return json({ error: "invalid_url" }, 400);
 
+    const oembed = await tryOEmbed(normalizedUrl);
+    if (oembed) return json(oembed, 200, CACHEABLE_HEADERS);
+
     const userAgents = [
       "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -119,7 +173,7 @@ Deno.serve(async (req) => {
       if (res == null) res = candidate;
     }
 
-    if (!res || !res.ok) return json({ url: normalizedUrl, failed: true });
+    if (!res || !res.ok) return json({ url: normalizedUrl, failed: true }, 200, CACHEABLE_HEADERS);
     const contentType = String(res.headers.get("content-type") || "").toLowerCase();
     const finalUrl = normalizeUrl(res.url) || normalizedUrl;
     if (!contentType.includes("text/html")) {
@@ -127,7 +181,7 @@ Deno.serve(async (req) => {
         url: finalUrl,
         title: finalUrl,
         siteName: new URL(finalUrl).hostname.replace(/^www\./, ""),
-      });
+      }, 200, CACHEABLE_HEADERS);
     }
 
     const html = await res.text();
@@ -156,7 +210,7 @@ Deno.serve(async (req) => {
       description,
       image: image || undefined,
       siteName: siteName.replace(/^@/, ""),
-    });
+    }, 200, CACHEABLE_HEADERS);
   } catch (error) {
     console.error("[link-preview] failed", error);
     return json({ failed: true });
