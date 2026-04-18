@@ -42,6 +42,7 @@ import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
 import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { groupActivityRankValue, updateGroupChatMetadata, type GroupMetadataRow } from "@/lib/groupChats";
+import { useDiscoverLocationGate } from "@/hooks/useDiscoverLocationGate";
 import {
   noteDiscoveryCommit,
   noteDiscoveryDragEnd,
@@ -595,7 +596,7 @@ type MatchOnlyAvatar = {
 type DiscoveryAnchor = {
   lat: number;
   lng: number;
-  source: "device" | "pinned" | "profile";
+  source: "device";
 };
 
 type MatchModalState = {
@@ -621,6 +622,48 @@ type MatchRow = {
   chat_id?: string | null;
   matched_at?: string | null;
   created_at?: string | null;
+};
+
+type InboxScope = MainTab | "all";
+
+type InboxSummaryRow = {
+  chat_id: string;
+  room_type: string | null;
+  peer_user_id?: string | null;
+  peer_name?: string | null;
+  peer_avatar_url?: string | null;
+  peer_is_verified?: boolean | null;
+  peer_has_car?: boolean | null;
+  peer_availability_label?: string | null;
+  peer_social_id?: string | null;
+  blocked_by_me?: boolean | null;
+  blocked_by_them?: boolean | null;
+  unmatched_by_them?: boolean | null;
+  matched_at?: string | null;
+  chat_name?: string | null;
+  avatar_url?: string | null;
+  member_count?: number | null;
+  pet_focus?: string[] | null;
+  location_label?: string | null;
+  location_country?: string | null;
+  visibility?: "public" | "private" | null;
+  room_code?: string | null;
+  join_method?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+  created_by?: string | null;
+  last_message_id?: string | null;
+  last_message_sender_id?: string | null;
+  last_message_sender_name?: string | null;
+  last_message_content?: string | null;
+  last_message_at?: string | null;
+  unread_count?: number | null;
+  last_message_read_by_other?: boolean | null;
+  service_status?: ChatUser["serviceStatus"] | null;
+  service_requester_id?: string | null;
+  service_provider_id?: string | null;
+  service_request_card?: Record<string, unknown> | null;
+  shape_issue?: string | null;
 };
 
 const isDuplicateWaveError = (err: unknown) => {
@@ -674,6 +717,23 @@ const isGroupMembershipHint = (text: string | null | undefined) => {
   return /just joined the chat\.$/i.test(value) || /left the group\.$/i.test(value);
 };
 
+const formatServiceDateRange = (requestCard: Record<string, unknown> | null | undefined) => {
+  if (!requestCard) return null;
+  const requestedDates = Array.isArray(requestCard.requestedDates)
+    ? (requestCard.requestedDates as unknown[]).map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const fallback = String(requestCard.requestedDate || "").trim();
+  const items = requestedDates.length > 0 ? requestedDates : fallback ? [fallback] : [];
+  if (items.length === 0) return null;
+  const sorted = [...items].sort();
+  const format = (iso: string) => {
+    const [year, month, day] = iso.split("-");
+    if (!year || !month || !day) return iso;
+    return `${day}-${month}-${year}`;
+  };
+  return `From ${format(sorted[0])} to ${format(sorted[sorted.length - 1])}`;
+};
+
 const Chats = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -698,6 +758,15 @@ const Chats = () => {
   const [exploreGroups, setExploreGroups] = useState<Group[]>([]);
   const [invitedExploreGroups, setInvitedExploreGroups] = useState<Group[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
+  const inboxCacheRef = useRef<{ friends: ChatUser[]; service: ChatUser[]; groups: Group[] }>({
+    friends: [],
+    service: [],
+    groups: [],
+  });
+  const inboxLoadedScopesRef = useRef<Set<MainTab>>(new Set());
+  const inboxWarmTimerRef = useRef<number | null>(null);
+  const dirtyRoomIdsRef = useRef<Set<string>>(new Set());
+  const dirtyRoomFlushTimerRef = useRef<number | null>(null);
   const [groupsPullRefreshing, setGroupsPullRefreshing] = useState(false);
   const [groupsPullOffset, setGroupsPullOffset] = useState(0);
   const groupsTouchStartYRef = useRef<number | null>(null);
@@ -746,7 +815,6 @@ const Chats = () => {
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryLoadSettled, setDiscoveryLoadSettled] = useState(false);
   const [discoveryAnchor, setDiscoveryAnchor] = useState<DiscoveryAnchor | null>(null);
-  const [discoveryLocationBlocked, setDiscoveryLocationBlocked] = useState(false);
   const [groupContactPool, setGroupContactPool] = useState<GroupContactOption[]>([]);
   const [hiddenDiscoveryIds, setHiddenDiscoveryIds] = useState<Set<string>>(new Set());
   const [handledDiscoveryIds, setHandledDiscoveryIds] = useState<Set<string>>(new Set());
@@ -1050,90 +1118,12 @@ const Chats = () => {
     () => `discovery_matched_${profile?.id || "anon"}`,
     [profile?.id]
   );
-  const resolveDiscoveryAnchor = useCallback(async (): Promise<DiscoveryAnchor | null> => {
-    if (profile?.id) {
-      const { data } = await supabase
-        .from("user_locations")
-        .select("location")
-        .eq("user_id", profile.id)
-        .eq("is_public", true)
-        .maybeSingle();
-      const point = (data?.location || null) as unknown as { coordinates?: unknown } | null;
-      const coords = Array.isArray(point?.coordinates) ? point?.coordinates : null;
-      if (coords && typeof coords[0] === "number" && typeof coords[1] === "number") {
-        return { lat: Number(coords[1]), lng: Number(coords[0]), source: "device" };
-      }
-    }
-
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
-      try {
-        const permissionState =
-          navigator.permissions?.query
-            ? (await navigator.permissions.query({ name: "geolocation" as PermissionName })).state
-            : "prompt";
-        if (permissionState === "granted") {
-          const deviceAnchor = await new Promise<DiscoveryAnchor>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(
-              (position) =>
-                resolve({
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude,
-                  source: "device",
-                }),
-              (error) => reject(error),
-              { enableHighAccuracy: true, timeout: 6000, maximumAge: 60_000 }
-            );
-          });
-          if (Number.isFinite(deviceAnchor.lat) && Number.isFinite(deviceAnchor.lng)) {
-            return deviceAnchor;
-          }
-        }
-      } catch {
-        // fall through to pinned/profile fallback
-      }
-    }
-
-    if (profile?.id) {
-      const { data: latestPin } = await supabase
-        .from("pins")
-        .select("lat, lng")
-        .eq("user_id", profile.id)
-        .is("thread_id", null)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (typeof latestPin?.lat === "number" && typeof latestPin?.lng === "number") {
-        return { lat: latestPin.lat, lng: latestPin.lng, source: "pinned" };
-      }
-    }
-
-    if (profile?.id) {
-      if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
-        return { lat: profile.last_lat, lng: profile.last_lng, source: "profile" };
-      }
-    }
-
-    if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
-      return { lat: profile.last_lat, lng: profile.last_lng, source: "profile" };
-    }
-
-    return null;
-  }, [profile?.id, profile?.last_lat, profile?.last_lng]);
-
-  const openLocationSettings = useCallback(() => {
-    const ua = navigator.userAgent || "";
-    if (/iPhone|iPad|iPod/i.test(ua)) {
-      window.location.href = "App-Prefs:Privacy&path=LOCATION";
-      toast.info("If settings did not open, use iOS Settings > Privacy & Security > Location Services > Browser.");
-      return;
-    }
-    if (/Android/i.test(ua)) {
-      window.location.href = "intent://settings/location#Intent;scheme=android-app;end";
-      toast.info("If settings did not open, use Android Settings > Location > App permissions.");
-      return;
-    }
-    toast.info("Open your browser site settings and allow Location for this app.");
-  }, []);
+  const discoverLocationGate = useDiscoverLocationGate(topTab === "discover" && !discoverChatAgeBlocked);
+  const discoveryLocationBlocked =
+    topTab === "discover" &&
+    !discoverChatAgeBlocked &&
+    !discoverLocationGate.checking &&
+    !discoverLocationGate.canShowDiscover;
 
   useEffect(() => {
     try {
@@ -2358,504 +2348,232 @@ const Chats = () => {
     })();
   }, [profile?.id]);
 
-  const loadConversations = useCallback(async () => {
-    if (!profile?.id) return;
-    try {
-      const { data: memberships, error: membershipsError } = await supabase
-        .from("chat_room_members")
-        .select("chat_id")
-        .eq("user_id", profile.id);
-      if (membershipsError) throw membershipsError;
-
-      let roomIds = [...new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
-      if (!roomIds.length) {
-        const { data: ownedChats } = await supabase
-          .from("chats")
-          .select("id")
-          .eq("created_by", profile.id)
-          .eq("type", "direct")
-          .order("created_at", { ascending: false })
-          .limit(40);
-        roomIds = [...new Set((ownedChats || []).map((row: { id: string }) => row.id).filter(Boolean))];
+  const sortChatUsers = useCallback((items: ChatUser[]) => {
+    return [...items].sort((a, b) => {
+      const aMatch = a.matchedAt ? new Date(a.matchedAt).getTime() : Number.NaN;
+      const bMatch = b.matchedAt ? new Date(b.matchedAt).getTime() : Number.NaN;
+      if (Number.isFinite(aMatch) || Number.isFinite(bMatch)) {
+        const safeA = Number.isFinite(aMatch) ? aMatch : -Infinity;
+        const safeB = Number.isFinite(bMatch) ? bMatch : -Infinity;
+        if (safeA !== safeB) return safeB - safeA;
       }
-      if (!roomIds.length) {
-        setChats([]);
-        setGroups([]);
-        const matchesRows = await fetchUserMatches();
-        const counterpartIds = Array.from(
-          new Set(
-            ((matchesRows || []) as Array<{ user1_id: string; user2_id: string }>)
-              .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
-              .filter((id) => Boolean(id) && id !== profile.id)
-          )
-        );
-        if (counterpartIds.length === 0) {
-          setMatchOnlyAvatars([]);
-          return;
-        }
-        const profileById = new Map<string, Record<string, unknown>>();
-        const profileSelect = "id, display_name, avatar_url, verification_status, is_verified, has_car, availability_status, social_album";
-        const { data: profileRows } = await supabase
-          .from("profiles")
-          .select(profileSelect)
-          .in("id", counterpartIds);
-        if (Array.isArray(profileRows)) {
-          for (const row of profileRows as Array<Record<string, unknown>>) {
-            const rowId = String(row.id || "");
-            if (rowId) profileById.set(rowId, row);
-          }
-        }
-        const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
-        if (unresolvedIds.length > 0) {
-          const { data: publicRows } = await supabase
-            .from("profiles_public")
-            .select("id, display_name, avatar_url, has_car, availability_status, user_role")
-            .in("id", unresolvedIds);
-          if (Array.isArray(publicRows)) {
-            for (const row of publicRows as Array<Record<string, unknown>>) {
-              const rowId = String(row.id || "");
-              if (rowId) profileById.set(rowId, row);
-            }
-          }
-        }
-        const nextAvatars: MatchOnlyAvatar[] = counterpartIds
-          .map((counterpart) => {
-            const row = (profileById.get(counterpart) || {}) as Record<string, unknown>;
-            const socialAlbumFallback = Array.isArray(row.social_album)
-              ? String((row.social_album as unknown[])[0] || "").trim()
+      const aMsg = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : Number.NaN;
+      const bMsg = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : Number.NaN;
+      const safeA = Number.isFinite(aMsg) ? aMsg : -Infinity;
+      const safeB = Number.isFinite(bMsg) ? bMsg : -Infinity;
+      return safeB - safeA;
+    });
+  }, []);
+
+  const sortGroups = useCallback(
+    (items: Group[]) =>
+      [...items].sort(
+        (a, b) =>
+          groupActivityRankValue(b.lastMessageAt, b.createdAt) - groupActivityRankValue(a.lastMessageAt, a.createdAt) ||
+          a.name.localeCompare(b.name)
+      ),
+    []
+  );
+
+  const commitInboxCaches = useCallback(() => {
+    setChats([...inboxCacheRef.current.friends, ...inboxCacheRef.current.service]);
+    setGroups(inboxCacheRef.current.groups);
+  }, []);
+
+  const buildChatFromSummary = useCallback(
+    (row: InboxSummaryRow): ChatUser | null => {
+      const roomId = String(row.chat_id || "").trim();
+      if (!roomId) return null;
+      const roomType = String(row.room_type || "").trim();
+      const isService = roomType === "service" || Boolean(row.service_status);
+      const counterpartUserId = String(row.peer_user_id || "").trim() || null;
+      if (!counterpartUserId) {
+        console.warn("[chats.inbox] missing counterpart", roomId, row.shape_issue || null);
+        return null;
+      }
+      rememberDirectPeer(roomId, counterpartUserId);
+      if (row.shape_issue) {
+        console.warn("[chats.inbox.shape_issue]", roomId, row.shape_issue);
+      }
+      const fallbackName = String(row.peer_name || row.chat_name || "Conversation").trim() || "Conversation";
+      const counterpartSocialId = String(row.peer_social_id || "").trim() || null;
+      const counterpartName =
+        resolveTeamHuddleDisplayName(counterpartUserId, fallbackName, counterpartSocialId) || fallbackName;
+      const isOfficialTeamHuddle =
+        counterpartUserId === TEAM_HUDDLE_USER_ID ||
+        isTeamHuddleIdentity(counterpartName, counterpartSocialId);
+      const counterpartAvatar = resolveTeamHuddleAvatar(
+        (row.peer_avatar_url as string | null) || (row.avatar_url as string | null) || null,
+        counterpartName,
+        counterpartSocialId
+      );
+      const socialAvailability = resolveTeamHuddleAvailability(
+        counterpartUserId,
+        counterpartName,
+        counterpartSocialId,
+        String(row.peer_availability_label || "Friend").trim() || "Friend"
+      );
+      const parsedLastMeta = parseStarChatContent(String(row.last_message_content || ""));
+      const serviceRequestCard =
+        row.service_request_card && typeof row.service_request_card === "object"
+          ? (row.service_request_card as Record<string, unknown>)
+          : null;
+      const showRequesterRequestPrompt =
+        Boolean(isService && row.service_requester_id === profile?.id && !serviceRequestCard);
+      const previewOverride = row.blocked_by_me
+        ? `You've blocked ${counterpartName}`
+        : row.blocked_by_them
+          ? `You're blocked by ${counterpartName}.`
+          : row.unmatched_by_them
+            ? "You've been unmatched."
+            : showRequesterRequestPrompt
+              ? "Send a request to get started!"
               : "";
-            return {
-              userId: counterpart,
-              name: String(row.display_name || "User"),
-              avatarUrl: (row.avatar_url as string | null) || socialAlbumFallback || null,
-              isVerified: row.is_verified === true,
-              hasCar: Boolean(row.has_car),
-              matchedAt:
-                ((matchesRows || []) as Array<{ user1_id: string; user2_id: string; matched_at?: string | null }>)
-              .find((r) => (r.user1_id === profile.id ? r.user2_id : r.user1_id) === counterpart)?.matched_at || null,
-            };
-          })
-          .slice(0, 12);
-        setMatchOnlyAvatars(nextAvatars);
-        return;
-      }
+      return {
+        id: roomId,
+        peerUserId: counterpartUserId,
+        name: counterpartName,
+        avatarUrl: counterpartAvatar,
+        socialAvailability,
+        previewOverride: previewOverride || null,
+        isVerified: isOfficialTeamHuddle || row.peer_is_verified === true,
+        hasCar: Boolean(row.peer_has_car),
+        isPremium: false,
+        lastMessage: parseChatPreviewText(String(row.last_message_content || "")),
+        lastMessageAt: row.last_message_at || null,
+        time: formatChatTimestamp(row.last_message_at || row.matched_at || row.created_at || null),
+        lastMessageFromMe: row.last_message_sender_id === profile?.id,
+        lastMessageReadByOther: row.last_message_read_by_other === true,
+        unread: Number(row.unread_count ?? 0),
+        type: isService ? "service" : "friend",
+        isOnline: false,
+        hasTransaction: false,
+        matchedAt: row.matched_at || null,
+        lastMessageKind: parsedLastMeta.kind,
+        lastMessageStarSenderId: parsedLastMeta.senderId,
+        lastMessageStarRecipientId: parsedLastMeta.recipientId,
+        serviceStatus: isService ? ((row.service_status as ChatUser["serviceStatus"]) || "pending") : null,
+        serviceType: isService ? String(serviceRequestCard?.serviceType || "").trim() || null : null,
+        serviceDateLabel: isService ? formatServiceDateRange(serviceRequestCard) : null,
+      };
+    },
+    [profile?.id, rememberDirectPeer]
+  );
 
-      const [{ data: rooms, error: roomsError }, { data: members, error: membersError }, { data: messages, error: messagesError }, { data: serviceChats, error: serviceChatsError }, matchesRows] = await Promise.all([
-        supabase
-          .from("chats")
-          .select("id, name, avatar_url, type, pet_focus, location_label, location_country, visibility, room_code, last_message_at, created_at, join_method, description, created_by")
-          .in("id", roomIds),
-        supabase
-          .from("chat_room_members")
-          .select("chat_id, user_id")
-          .in("chat_id", roomIds),
-        supabase
-          .from("chat_messages")
-          .select("id, chat_id, sender_id, content, created_at")
-          .in("chat_id", roomIds)
-          .order("created_at", { ascending: false }),
-        (supabase as unknown as {
-          from: (table: string) => {
-            select: (cols: string) => {
-              in: (col: string, values: string[]) => Promise<{ data: unknown; error: { message?: string } | null }>;
-            };
-          };
-        })
-          .from("service_chats")
-          .select("chat_id,status,requester_id,provider_id,request_card")
-          .in("chat_id", roomIds),
-        fetchUserMatches(),
-      ]);
-
-      if (roomsError) throw roomsError;
-      if (membersError) console.warn("[chats] members query failed", membersError);
-      if (messagesError) console.warn("[chats] messages query failed", messagesError);
-      if (serviceChatsError) console.warn("[chats] service_chats query failed", serviceChatsError);
-
-      const serviceByChatId = new Map<
-        string,
-        {
-          status?: string | null;
-          requester_id?: string | null;
-          provider_id?: string | null;
-          request_card?: Record<string, unknown> | null;
-        }
-      >();
-      if (Array.isArray(serviceChats)) {
-        for (const row of serviceChats as Array<Record<string, unknown>>) {
-          const chatId = String(row.chat_id || "");
-          if (!chatId) continue;
-          serviceByChatId.set(chatId, {
-            status: typeof row.status === "string" ? row.status : null,
-            requester_id: typeof row.requester_id === "string" ? row.requester_id : null,
-            provider_id: typeof row.provider_id === "string" ? row.provider_id : null,
-            request_card:
-              row.request_card && typeof row.request_card === "object"
-                ? (row.request_card as Record<string, unknown>)
-                : null,
-          });
-        }
+  const buildGroupFromSummary = useCallback(
+    (row: InboxSummaryRow): Group | null => {
+      const roomId = String(row.chat_id || "").trim();
+      if (!roomId) return null;
+      if (String(row.room_type || "").trim() !== "group") {
+        console.warn("[chats.inbox] skipping non-group summary in group scope", roomId, row.room_type || null);
+        return null;
       }
+      if (row.shape_issue) {
+        console.warn("[chats.inbox.shape_issue]", roomId, row.shape_issue);
+      }
+      return {
+        id: roomId,
+        name: String(row.chat_name || "Group"),
+        avatarUrl: (row.avatar_url as string | null) ?? null,
+        avatar_url: (row.avatar_url as string | null) ?? null,
+        memberCount: Number(row.member_count ?? 0),
+        lastMessage: parseChatPreviewText(String(row.last_message_content || "")),
+        lastMessageSender:
+          row.last_message_sender_id === profile?.id
+            ? "You"
+            : String(row.last_message_sender_name || "").trim(),
+        time: formatChatTimestamp(row.last_message_at || row.created_at || null),
+        lastMessageFromMe: row.last_message_sender_id === profile?.id,
+        lastMessageReadByOther: row.last_message_read_by_other === true,
+        unread: Number(row.unread_count ?? 0),
+        petFocus: Array.isArray(row.pet_focus) ? row.pet_focus : null,
+        locationLabel: (row.location_label as string | null) ?? null,
+        lastMessageAt: row.last_message_at || null,
+        joinMethod: (row.join_method as string | null) ?? null,
+        description: (row.description as string | null) ?? null,
+        isAdmin: (row.created_by as string | null) === profile?.id,
+        locationCountry: (row.location_country as string | null) ?? null,
+        visibility: ((row.visibility as "public" | "private" | null) ?? null),
+        roomCode: (row.room_code as string | null) ?? null,
+        createdAt: row.created_at || null,
+      };
+    },
+    [profile?.id]
+  );
 
-      const memberRows = (members || []) as { chat_id: string; user_id: string }[];
-      const matchByChatId = new Map<string, string>();
-      const matchedAtByCounterpart = new Map<string, string>();
-      for (const row of matchesRows) {
-        const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
-        if (!counterpart) continue;
-        if (row.chat_id) matchByChatId.set(String(row.chat_id), counterpart);
-        if (row.matched_at && !matchedAtByCounterpart.has(counterpart)) matchedAtByCounterpart.set(counterpart, row.matched_at);
-        if (row.chat_id) rememberDirectPeer(String(row.chat_id), counterpart);
-      }
-      const counterpartByLastSender = new Map<string, string>();
-      for (const msg of (messages || []) as { chat_id: string; sender_id: string }[]) {
-        if (!msg?.chat_id || !msg?.sender_id || msg.sender_id === profile.id) continue;
-        if (!counterpartByLastSender.has(msg.chat_id)) {
-          counterpartByLastSender.set(msg.chat_id, msg.sender_id);
-        }
-      }
+  const fetchInboxSummaryRows = useCallback(
+    async (scope: InboxScope = "all", chatIds?: string[]) => {
+      if (!profile?.id) return [] as InboxSummaryRow[];
+      const payload = {
+        p_scope: scope,
+        p_chat_ids: chatIds && chatIds.length > 0 ? chatIds : null,
+      };
+      const { data, error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_chat_inbox_summaries", payload);
+      if (error) throw error;
+      return Array.isArray(data) ? (data as InboxSummaryRow[]) : [];
+    },
+    [profile?.id]
+  );
+
+  const refreshMatchOnlyAvatars = useCallback(
+    async (friendChats: ChatUser[]) => {
+      if (!profile?.id) return;
+      const matchesRows = await fetchUserMatches();
       const counterpartIds = Array.from(
         new Set(
-          [
-            ...memberRows.map((member) => member.user_id),
-            ...Array.from(matchByChatId.values()),
-            ...Object.values(directPeerByRoomRef.current),
-            ...Array.from(counterpartByLastSender.values()),
-          ].filter((userId) => userId && userId !== profile.id)
+          matchesRows
+            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+            .filter((id) => Boolean(id) && id !== profile.id)
         )
       );
-      const profileById = new Map<string, Record<string, unknown>>();
-      const blockedByMe = new Set<string>();
-      const blockedByThem = new Set<string>();
-      const unmatchedByThem = new Set<string>();
-      if (counterpartIds.length > 0) {
-        const profileSelect = "id, display_name, avatar_url, verification_status, is_verified, has_car, availability_status, social_album";
-        let profileRows: unknown[] | null = null;
-        const { data: primaryRows, error: profileRowsError } = await supabase
-          .from("profiles")
-          .select(profileSelect)
-          .in("id", counterpartIds);
-        if (profileRowsError) {
-          profileRows = [];
-        } else {
-          profileRows = (primaryRows || []) as unknown[];
-        }
-        if (Array.isArray(profileRows)) {
-          for (const row of profileRows as Array<Record<string, unknown>>) {
-            const rowId = String(row.id || "");
-            if (rowId) profileById.set(rowId, row);
-          }
-        }
-        const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
-        if (unresolvedIds.length > 0) {
-          const { data: publicRows, error: publicRowsError } = await supabase
-            .from("profiles_public")
-            .select("id, display_name, avatar_url, has_car, availability_status, user_role")
-            .in("id", unresolvedIds);
-          if (!publicRowsError && Array.isArray(publicRows)) {
-            for (const row of publicRows as Array<Record<string, unknown>>) {
-              const rowId = String(row.id || "");
-              if (rowId) profileById.set(rowId, row);
-            }
-          }
-        }
-
-        const [{ data: blocksFromMe }, { data: blocksToMe }, { data: unmatchesToMe }] = await Promise.all([
-          supabase
-            .from("user_blocks")
-            .select("blocked_id")
-            .eq("blocker_id", profile.id)
-            .in("blocked_id", counterpartIds),
-          supabase
-            .from("user_blocks")
-            .select("blocker_id")
-            .eq("blocked_id", profile.id)
-            .in("blocker_id", counterpartIds),
-          supabase
-            .from("user_unmatches")
-            .select("actor_id")
-            .eq("target_id", profile.id)
-            .in("actor_id", counterpartIds),
-        ]);
-        for (const row of (blocksFromMe || []) as Array<{ blocked_id?: string | null }>) {
-          const id = String(row.blocked_id || "").trim();
-          if (id) blockedByMe.add(id);
-        }
-        for (const row of (blocksToMe || []) as Array<{ blocker_id?: string | null }>) {
-          const id = String(row.blocker_id || "").trim();
-          if (id) blockedByThem.add(id);
-        }
-        for (const row of (unmatchesToMe || []) as Array<{ actor_id?: string | null }>) {
-          const id = String(row.actor_id || "").trim();
-          if (id) unmatchedByThem.add(id);
-        }
+      if (counterpartIds.length === 0) {
+        setMatchOnlyAvatars([]);
+        return;
       }
-
-      const messageRows = (messages || []) as { id: string; chat_id: string; sender_id: string; content: string; created_at: string }[];
-      const incomingMessageIds = Array.from(
-        new Set(
-          messageRows
-            .filter((msg) => msg.sender_id && msg.sender_id !== profile.id)
-            .map((msg) => msg.id)
-            .filter(Boolean)
-        )
-      );
-      const readByMe = new Set<string>();
-      if (incomingMessageIds.length > 0) {
-        const { data: myReadRows } = await supabase
-          .from("message_reads")
-          .select("message_id")
-          .eq("user_id", profile.id)
-          .in("message_id", incomingMessageIds);
-        for (const row of (myReadRows || []) as Array<{ message_id?: string | null }>) {
-          const messageId = String(row?.message_id || "").trim();
-          if (messageId) readByMe.add(messageId);
-        }
-      }
-
-      const lastByRoom = new Map<string, { id: string; sender_id: string; content: string; created_at: string }>();
-      const unreadByRoom = new Map<string, number>();
-      for (const msg of messageRows) {
-        if (!lastByRoom.has(msg.chat_id)) lastByRoom.set(msg.chat_id, msg);
-        if (msg.sender_id === profile.id) continue;
-        if (!readByMe.has(msg.id)) {
-          unreadByRoom.set(msg.chat_id, (unreadByRoom.get(msg.chat_id) || 0) + 1);
-        }
-      }
-      const lastMessageIds = Array.from(new Set(Array.from(lastByRoom.values()).map((message) => message.id).filter(Boolean)));
-      const lastMessageReadByOther = new Map<string, boolean>();
-      if (lastMessageIds.length > 0) {
-        const { data: readRows } = await supabase
-          .from("message_reads")
-          .select("message_id, user_id")
-          .in("message_id", lastMessageIds);
-        for (const row of (readRows || []) as Array<{ message_id: string; user_id: string }>) {
-          if (!row?.message_id || !row?.user_id) continue;
-          if (row.user_id === profile.id) continue;
-          lastMessageReadByOther.set(row.message_id, true);
-        }
-      }
-
-      const membersByRoom = new Map<string, { user_id: string; profiles?: Record<string, unknown> }[]>();
-      for (const member of memberRows) {
-        const arr = membersByRoom.get(member.chat_id) || [];
-        arr.push({ ...member, profiles: profileById.get(member.user_id) });
-        membersByRoom.set(member.chat_id, arr);
-      }
-
-      const nextChats: ChatUser[] = [];
-      const nextGroups: Group[] = [];
-
-      const formatServiceDateRange = (requestCard: Record<string, unknown> | null | undefined) => {
-        if (!requestCard) return null;
-        const requestedDates = Array.isArray(requestCard.requestedDates)
-          ? (requestCard.requestedDates as unknown[]).map((item) => String(item || "").trim()).filter(Boolean)
-          : [];
-        const fallback = String(requestCard.requestedDate || "").trim();
-        const items = requestedDates.length > 0 ? requestedDates : fallback ? [fallback] : [];
-        if (items.length === 0) return null;
-        const sorted = [...items].sort();
-        const format = (iso: string) => {
-          const [year, month, day] = iso.split("-");
-          if (!year || !month || !day) return iso;
-          return `${day}-${month}-${year}`;
-        };
-        return `From ${format(sorted[0])} to ${format(sorted[sorted.length - 1])}`;
-      };
-
-      for (const room of (rooms || []) as Record<string, unknown>[]) {
-        const roomId = String(room.id || "");
-        if (!roomId) continue;
-        const roomMembers = membersByRoom.get(roomId) || [];
-        const roomType = String(room.type || "direct");
-        const isService = roomType === "service";
-        const isGroup = roomType === "group" || (!isService && roomMembers.length > 2);
-        const last = lastByRoom.get(roomId);
-
-        if (isGroup) {
-          const senderProfile = last?.sender_id ? (profileById.get(last.sender_id) || null) : null;
-          const senderName = last?.sender_id === profile.id
-            ? "You"
-            : (String(senderProfile?.display_name || "").trim() || null);
-          nextGroups.push({
-            id: roomId,
-            name: String(room.name || "Group"),
-            avatarUrl: (room.avatar_url as string | null) ?? null,
-            avatar_url: (room.avatar_url as string | null) ?? null,
-            memberCount: roomMembers.length,
-            lastMessage: parseChatPreviewText(last?.content),
-            lastMessageSender: senderName || "",
-            time: formatChatTimestamp(last?.created_at),
-            lastMessageFromMe: last?.sender_id === profile.id,
-            lastMessageReadByOther: Boolean(last?.id && lastMessageReadByOther.get(last.id)),
-            unread: unreadByRoom.get(roomId) || 0,
-            petFocus: Array.isArray(room.pet_focus) ? (room.pet_focus as string[]) : null,
-            locationLabel: (room.location_label as string | null) ?? null,
-            lastMessageAt: (last?.created_at as string | null) ?? null,
-            joinMethod: (room.join_method as string | null) ?? null,
-            description: (room.description as string | null) ?? null,
-            isAdmin: (room.created_by as string | null) === profile.id,
-            locationCountry: (room.location_country as string | null) ?? null,
-            visibility: ((room.visibility as "public" | "private" | null) ?? null),
-            roomCode: (room.room_code as string | null) ?? null,
-            createdAt: (room.created_at as string | null) ?? null,
-          });
-          continue;
-        }
-
-        const other = roomMembers.find((m) => m.user_id !== profile.id);
-      const counterpartUserId =
-          other?.user_id ||
-          matchByChatId.get(roomId) ||
-          directPeerByRoomRef.current[roomId] ||
-          counterpartByLastSender.get(roomId) ||
-          null;
-        if (!counterpartUserId) continue;
-        if (counterpartUserId && counterpartUserId === profile.id) continue;
-        if (counterpartUserId) rememberDirectPeer(roomId, counterpartUserId);
-        const otherProfile = (other?.profiles || (counterpartUserId ? profileById.get(counterpartUserId) : {}) || {}) as Record<string, unknown>;
-        const tier = "free";
-        const fallbackName = String(room.name || "").trim() || "Conversation";
-        const rawCounterpartName = String(otherProfile.display_name || "").trim() || fallbackName;
-        const counterpartSocialId =
-          typeof otherProfile.social_id === "string" && otherProfile.social_id.trim().length > 0
-            ? otherProfile.social_id
-            : null;
-        const counterpartName =
-          resolveTeamHuddleDisplayName(counterpartUserId, rawCounterpartName, counterpartSocialId) || fallbackName;
-        const isOfficialTeamHuddle =
-          counterpartUserId === TEAM_HUDDLE_USER_ID ||
-          isTeamHuddleIdentity(counterpartName, counterpartSocialId);
-        const socialAlbumFallback = Array.isArray(otherProfile.social_album)
-          ? String((otherProfile.social_album as unknown[])[0] || "").trim()
-          : "";
-        const counterpartAvatar = resolveTeamHuddleAvatar(
-          (otherProfile.avatar_url as string | null) || socialAlbumFallback || ((room.avatar_url as string | null) ?? null),
-          counterpartName,
-          counterpartSocialId,
-        );
-        const availabilityList = Array.isArray(otherProfile.availability_status)
-          ? (otherProfile.availability_status as unknown[]).map((entry) => String(entry || "").trim()).filter(Boolean)
-          : [];
-        const socialAvailability = resolveTeamHuddleAvailability(
-          counterpartUserId,
-          counterpartName,
-          counterpartSocialId,
-          availabilityList.length > 0
-            ? availabilityList.map((entry) => normalizeAvailabilityLabel(entry)).filter(Boolean).join(" • ")
-            : normalizeAvailabilityLabel(String(otherProfile.social_role || otherProfile.user_role || "Friend")),
-        );
-        const parsedLastMeta = parseStarChatContent(last?.content || "");
-        const preview = parseChatPreviewText(last?.content);
-        const serviceMeta = isService ? serviceByChatId.get(roomId) : null;
-        const serviceRequestCard = serviceMeta?.request_card || null;
-        const showRequesterRequestPrompt =
-          Boolean(isService && serviceMeta && serviceMeta.requester_id === profile.id && !serviceRequestCard);
-        const previewOverride = counterpartUserId
-          ? (
-              blockedByMe.has(counterpartUserId)
-                ? `You've blocked ${counterpartName}`
-                : blockedByThem.has(counterpartUserId)
-                  ? `You're blocked by ${counterpartName}.`
-                  : unmatchedByThem.has(counterpartUserId)
-                    ? "You've been unmatched."
-                    : showRequesterRequestPrompt
-                      ? "Send a request to get started!"
-                    : ""
-            )
-          : "";
-        nextChats.push({
-          id: roomId,
-          peerUserId: counterpartUserId || null,
-          name: counterpartName,
-          avatarUrl: counterpartAvatar,
-          socialAvailability,
-          previewOverride: previewOverride || null,
-          isVerified: isOfficialTeamHuddle || otherProfile.is_verified === true,
-          hasCar: Boolean(otherProfile.has_car),
-          isPremium: tier !== "free",
-          lastMessage: preview,
-          lastMessageAt: last?.created_at || null,
-          time: formatChatTimestamp(last?.created_at),
-          lastMessageFromMe: last?.sender_id === profile.id,
-          lastMessageReadByOther: Boolean(last?.id && lastMessageReadByOther.get(last.id)),
-          lastMessageKind: parsedLastMeta.kind,
-          lastMessageStarSenderId: parsedLastMeta.senderId,
-          lastMessageStarRecipientId: parsedLastMeta.recipientId,
-          unread: unreadByRoom.get(roomId) || 0,
-          type: isService ? "service" : "friend",
-          isOnline: false,
-          hasTransaction: false,
-          matchedAt: (counterpartUserId && matchedAtByCounterpart.get(counterpartUserId)) || null,
-          serviceStatus: isService
-            ? ((serviceMeta?.status as ChatUser["serviceStatus"]) || "pending")
-            : null,
-          serviceType: isService
-            ? String(serviceRequestCard?.serviceType || "").trim() || null
-            : null,
-          serviceDateLabel: isService
-            ? formatServiceDateRange(serviceRequestCard)
-            : null,
-        });
-      }
-
-      const uniqueChats: ChatUser[] = [];
-      for (const chat of nextChats) {
-        const nextScore = new Date(chat.lastMessageAt || chat.matchedAt || 0).getTime();
-        const foundIndex = uniqueChats.findIndex((existing) => {
-          if (chat.peerUserId && existing.peerUserId) return chat.peerUserId === existing.peerUserId;
-          return chat.id === existing.id;
-        });
-
-        if (foundIndex < 0) {
-          uniqueChats.push(chat);
-          continue;
-        }
-
-        const existing = uniqueChats[foundIndex];
-        const existingScore = new Date(existing.lastMessageAt || existing.matchedAt || 0).getTime();
-        const preferred = (chat.peerUserId && !existing.peerUserId) || (chat.avatarUrl && !existing.avatarUrl) || nextScore > existingScore;
-        if (preferred) {
-          uniqueChats[foundIndex] = { ...existing, ...chat };
-        } else if (!existing.socialAvailability && chat.socialAvailability) {
-          uniqueChats[foundIndex] = { ...existing, socialAvailability: chat.socialAvailability };
-        }
-      }
-
-      uniqueChats.sort((a, b) => {
-        const aMatch = a.matchedAt ? new Date(a.matchedAt).getTime() : Number.NaN;
-        const bMatch = b.matchedAt ? new Date(b.matchedAt).getTime() : Number.NaN;
-        if (Number.isFinite(aMatch) || Number.isFinite(bMatch)) {
-          const safeA = Number.isFinite(aMatch) ? aMatch : -Infinity;
-          const safeB = Number.isFinite(bMatch) ? bMatch : -Infinity;
-          if (safeA !== safeB) return safeB - safeA;
-        }
-        const aMsg = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : Number.NaN;
-        const bMsg = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : Number.NaN;
-        const safeA = Number.isFinite(aMsg) ? aMsg : -Infinity;
-        const safeB = Number.isFinite(bMsg) ? bMsg : -Infinity;
-        return safeB - safeA;
-      });
-
-      setChats(uniqueChats);
-      setGroups(nextGroups);
       const counterpartInActiveConversations = new Set(
-        uniqueChats
+        friendChats
           .filter((chat) => Boolean(chat.lastMessageAt) || parseChatPreviewText(chat.lastMessage).length > 0)
           .map((chat) => String(chat.peerUserId || "").trim())
           .filter(Boolean)
       );
+      const profileById = new Map<string, Record<string, unknown>>();
+      const { data: profileRows } = await supabase
+        .from("profiles")
+        .select("id, display_name, avatar_url, is_verified, has_car, social_album, social_id")
+        .in("id", counterpartIds);
+      if (Array.isArray(profileRows)) {
+        for (const row of profileRows as Array<Record<string, unknown>>) {
+          const rowId = String(row.id || "");
+          if (rowId) profileById.set(rowId, row);
+        }
+      }
+      const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
+      if (unresolvedIds.length > 0) {
+        const { data: publicRows } = await supabase
+          .from("profiles_public")
+          .select("id, display_name, avatar_url, is_verified, has_car")
+          .in("id", unresolvedIds);
+        if (Array.isArray(publicRows)) {
+          for (const row of publicRows as Array<Record<string, unknown>>) {
+            const rowId = String(row.id || "");
+            if (rowId) profileById.set(rowId, row);
+          }
+        }
+      }
       const avatarCandidates = new Map<string, MatchOnlyAvatar>();
       for (const row of matchesRows) {
         const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
         if (!counterpart || counterpart === profile.id) continue;
         if (counterpartInActiveConversations.has(counterpart)) continue;
         const profileRow = (profileById.get(counterpart) || {}) as Record<string, unknown>;
+        const displayName = String(profileRow.display_name || "User");
         const socialId =
           typeof profileRow.social_id === "string" && profileRow.social_id.trim().length > 0
             ? profileRow.social_id
             : null;
-        const displayName = String(profileRow.display_name || "User");
         const isOfficialTeamHuddle =
           counterpart === TEAM_HUDDLE_USER_ID ||
           isTeamHuddleIdentity(displayName, socialId);
@@ -2868,52 +2586,195 @@ const Chats = () => {
           avatarUrl: resolveTeamHuddleAvatar(
             (profileRow.avatar_url as string | null) || socialAlbumFallback || null,
             displayName,
-            socialId,
+            socialId
           ),
           isVerified: isOfficialTeamHuddle || profileRow.is_verified === true,
           hasCar: Boolean(profileRow.has_car),
+          matchedAt: row.matched_at || null,
         });
       }
-      setMatchOnlyAvatars((prev) => {
-        const merged = new Map<string, MatchOnlyAvatar>();
-        for (const candidate of avatarCandidates.values()) {
-          merged.set(candidate.userId, candidate);
-        }
-        for (const existing of prev) {
-          if (!existing?.userId) continue;
-          if (counterpartInActiveConversations.has(existing.userId)) continue;
-          if (!merged.has(existing.userId)) {
-            merged.set(existing.userId, existing);
-          }
-        }
-        return Array.from(merged.values()).slice(0, 12);
-      });
-      conversationsHydratedRef.current = true;
-    } catch {
-      if (!conversationsHydratedRef.current) {
-        if (conversationsRetryTimerRef.current == null) {
-          conversationsRetryTimerRef.current = window.setTimeout(() => {
-            conversationsRetryTimerRef.current = null;
-            void loadConversations();
-          }, 650);
-        }
-        return;
-      }
-      toast.error("Failed to load conversations");
-    }
-  }, [fetchUserMatches, profile?.id, rememberDirectPeer]);
+      setMatchOnlyAvatars(Array.from(avatarCandidates.values()).slice(0, 12));
+    },
+    [fetchUserMatches, profile?.id]
+  );
 
-  // Load conversations from backend
+  const scheduleMatchOnlyAvatarRefresh = useCallback((friendChats: ChatUser[]) => {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      void refreshMatchOnlyAvatars(friendChats);
+    }, 0);
+  }, [refreshMatchOnlyAvatars]);
+
+  const applyInboxRowsToCaches = useCallback(
+    (scope: InboxScope, rows: InboxSummaryRow[], targetedRoomIds?: string[]) => {
+      const nextFriends: ChatUser[] = [];
+      const nextService: ChatUser[] = [];
+      const nextGroups: Group[] = [];
+      for (const row of rows) {
+        const roomType = String(row.room_type || "").trim();
+        if (roomType === "group") {
+          const group = buildGroupFromSummary(row);
+          if (group) nextGroups.push(group);
+          continue;
+        }
+        const chat = buildChatFromSummary(row);
+        if (!chat) continue;
+        if (chat.type === "service") {
+          nextService.push(chat);
+        } else {
+          nextFriends.push(chat);
+        }
+      }
+
+      const mergeById = <T extends { id: string }>(existing: T[], incoming: T[], sortFn: (items: T[]) => T[]) => {
+        if (!targetedRoomIds || targetedRoomIds.length === 0) return sortFn(incoming);
+        const map = new Map<string, T>();
+        for (const item of existing) {
+          if (!targetedRoomIds.includes(item.id)) map.set(item.id, item);
+        }
+        for (const item of incoming) {
+          map.set(item.id, item);
+        }
+        return sortFn(Array.from(map.values()));
+      };
+
+      if (scope === "all" || scope === "friends") {
+        inboxCacheRef.current.friends = mergeById(
+          inboxCacheRef.current.friends,
+          nextFriends,
+          sortChatUsers
+        );
+        inboxLoadedScopesRef.current.add("friends");
+      }
+      if (scope === "all" || scope === "service") {
+        inboxCacheRef.current.service = mergeById(
+          inboxCacheRef.current.service,
+          nextService,
+          sortChatUsers
+        );
+        inboxLoadedScopesRef.current.add("service");
+      }
+      if (scope === "all" || scope === "groups") {
+        inboxCacheRef.current.groups = mergeById(
+          inboxCacheRef.current.groups,
+          nextGroups,
+          sortGroups
+        );
+        inboxLoadedScopesRef.current.add("groups");
+      }
+      commitInboxCaches();
+    },
+    [buildChatFromSummary, buildGroupFromSummary, commitInboxCaches, sortChatUsers, sortGroups]
+  );
+
+  const loadConversations = useCallback(
+    async (scope: InboxScope = "all") => {
+      if (!profile?.id) return;
+      try {
+        const rows = await fetchInboxSummaryRows(scope);
+        applyInboxRowsToCaches(scope, rows);
+        if (scope === "all" || scope === "friends") {
+          const friendChats =
+            scope === "all"
+              ? inboxCacheRef.current.friends
+              : sortChatUsers(
+                  rows
+                    .map((row) => (String(row.room_type || "").trim() === "group" ? null : buildChatFromSummary(row)))
+                    .filter((row): row is ChatUser => Boolean(row) && row.type === "friend")
+                );
+          scheduleMatchOnlyAvatarRefresh(friendChats);
+        }
+        conversationsHydratedRef.current = true;
+      } catch {
+        if (!conversationsHydratedRef.current) {
+          if (conversationsRetryTimerRef.current == null) {
+            conversationsRetryTimerRef.current = window.setTimeout(() => {
+              conversationsRetryTimerRef.current = null;
+              void loadConversations(scope);
+            }, 650);
+          }
+          return;
+        }
+        toast.error("Failed to load conversations");
+      }
+    },
+    [applyInboxRowsToCaches, buildChatFromSummary, fetchInboxSummaryRows, profile?.id, scheduleMatchOnlyAvatarRefresh, sortChatUsers]
+  );
+
+  const refreshRoomSummaries = useCallback(
+    async (roomIds: string[]) => {
+      const nextRoomIds = Array.from(new Set(roomIds.map((id) => String(id || "").trim()).filter(Boolean)));
+      if (!profile?.id || nextRoomIds.length === 0) return;
+      try {
+        const rows = await fetchInboxSummaryRows("all", nextRoomIds);
+        applyInboxRowsToCaches("all", rows, nextRoomIds);
+        if (rows.some((row) => String(row.room_type || "").trim() !== "group")) {
+          scheduleMatchOnlyAvatarRefresh(inboxCacheRef.current.friends);
+        }
+      } catch (error) {
+        console.warn("[chats.inbox] room summary refresh failed", error);
+      }
+    },
+    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id, scheduleMatchOnlyAvatarRefresh]
+  );
+
+  const flushDirtyRoomSummaries = useCallback(async () => {
+    if (dirtyRoomFlushTimerRef.current != null) {
+      window.clearTimeout(dirtyRoomFlushTimerRef.current);
+      dirtyRoomFlushTimerRef.current = null;
+    }
+    const roomIds = Array.from(dirtyRoomIdsRef.current);
+    dirtyRoomIdsRef.current.clear();
+    if (roomIds.length === 0) return;
+    await refreshRoomSummaries(roomIds);
+  }, [refreshRoomSummaries]);
+
+  const queueDirtyRoomSummaryRefresh = useCallback(
+    (roomId: string | null | undefined) => {
+      const normalized = String(roomId || "").trim();
+      if (!normalized) return;
+      dirtyRoomIdsRef.current.add(normalized);
+      if (dirtyRoomFlushTimerRef.current != null) return;
+      dirtyRoomFlushTimerRef.current = window.setTimeout(() => {
+        void flushDirtyRoomSummaries();
+      }, 120);
+    },
+    [flushDirtyRoomSummaries]
+  );
+
   useEffect(() => {
-    if (authLoading || !profile?.id) return;
-    void loadConversations();
+    if (authLoading || !profile?.id || topTab !== "chats") return;
+    if (!inboxLoadedScopesRef.current.has(mainTab)) {
+      void loadConversations(mainTab);
+    }
+    if (inboxWarmTimerRef.current != null) {
+      window.clearTimeout(inboxWarmTimerRef.current);
+    }
+    inboxWarmTimerRef.current = window.setTimeout(() => {
+      const inactiveScopes = (["friends", "groups", "service"] as const).filter(
+        (scope) => scope !== mainTab && !inboxLoadedScopesRef.current.has(scope)
+      );
+      void (async () => {
+        for (const scope of inactiveScopes) {
+          await loadConversations(scope);
+        }
+      })();
+    }, 260);
     return () => {
       if (conversationsRetryTimerRef.current != null) {
         window.clearTimeout(conversationsRetryTimerRef.current);
         conversationsRetryTimerRef.current = null;
       }
+      if (inboxWarmTimerRef.current != null) {
+        window.clearTimeout(inboxWarmTimerRef.current);
+        inboxWarmTimerRef.current = null;
+      }
+      if (dirtyRoomFlushTimerRef.current != null) {
+        window.clearTimeout(dirtyRoomFlushTimerRef.current);
+        dirtyRoomFlushTimerRef.current = null;
+      }
     };
-  }, [authLoading, loadConversations, profile?.id]);
+  }, [authLoading, loadConversations, mainTab, profile?.id, topTab]);
 
   // Check for pending group invites when opening Groups tab
   useEffect(() => {
@@ -2974,17 +2835,16 @@ const Chats = () => {
     const runDiscovery = async () => {
       if (!profile?.id || !discoveryHistoryHydrated) return;
       setDiscoveryLoadSettled(false);
-      setDiscoveryLoading(true);
-      const anchor = await resolveDiscoveryAnchor();
-      setDiscoveryAnchor(anchor);
-      if (!anchor) {
+      if (!discoverLocationGate.canShowDiscover || !discoverLocationGate.anchor) {
+        setDiscoveryAnchor(null);
         setDiscoveryProfiles([]);
-        setDiscoveryLocationBlocked(true);
         setDiscoveryLoading(false);
         setDiscoveryLoadSettled(true);
         return;
       }
-      setDiscoveryLocationBlocked(false);
+      setDiscoveryLoading(true);
+      const anchor = discoverLocationGate.anchor;
+      setDiscoveryAnchor(anchor);
       try {
         setDiscoveryVisibleCount(20);
         const wavedByUserIds = new Set<string>();
@@ -3281,11 +3141,12 @@ const Chats = () => {
     fetchUserMatches,
     profile?.id,
     profile?.location_country,
+    discoverLocationGate.anchor,
+    discoverLocationGate.canShowDiscover,
     filters,
     effectiveDiscoveryDistanceKm,
     isPremium,
     effectiveTier,
-    resolveDiscoveryAnchor,
     discoveryRefreshTick,
     handledDiscoveryKey,
     passedDiscoveryKey,
@@ -3429,15 +3290,16 @@ const Chats = () => {
     if (!profile?.id) return;
     const channel = supabase
       .channel(`chats_messages_${profile.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
-        void loadConversations();
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, (payload) => {
+        const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
+        queueDirtyRoomSummaryRefresh(row?.chat_id || null);
       })
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadConversations, profile?.id]);
+  }, [profile?.id, queueDirtyRoomSummaryRefresh]);
 
   useEffect(() => {
     if (!activeRoomId) return;
@@ -3574,10 +3436,11 @@ const Chats = () => {
             isAdmin: group.isAdmin || row.created_by === profile?.id,
           }
         : group;
-    setGroups((prev) => prev.map(apply));
+    inboxCacheRef.current.groups = sortGroups(inboxCacheRef.current.groups.map(apply));
+    commitInboxCaches();
     setExploreGroups((prev) => prev.map(apply));
     setInvitedExploreGroups((prev) => prev.map(apply));
-  }, [profile?.id]);
+  }, [commitInboxCaches, profile?.id, sortGroups]);
 
   const filteredGroups = useMemo(() => {
     const loweredQuery = searchQuery.trim().toLowerCase();
@@ -3983,7 +3846,7 @@ const Chats = () => {
         roomId: null,
       };
       setMatchModal(nextModal);
-      void loadConversations();
+      void loadConversations("friends");
       try {
         const roomId = await ensureDirectChatRoom(
           supabase,
@@ -4208,7 +4071,7 @@ const Chats = () => {
       const user2 = String(row.user2_id || "");
       if (user1 !== profile.id && user2 !== profile.id) return;
       setMatchesFeedTick((prev) => prev + 1);
-      void loadConversations();
+      void loadConversations("friends");
     };
 
     const channel = supabase
@@ -4297,14 +4160,14 @@ const Chats = () => {
         .insert({ chat_id: activeRoomId, sender_id: profile.id, content: text });
       if (error) throw error;
       await loadRoomMessages(activeRoomId);
-      await loadConversations();
+      await refreshRoomSummaries([activeRoomId]);
     } catch {
       toast.error("Failed to send message");
       setChatInput(text);
     } finally {
       setChatSending(false);
     }
-  }, [activeRoomId, chatInput, chatSending, loadConversations, loadRoomMessages, profile?.id]);
+  }, [activeRoomId, chatInput, chatSending, loadRoomMessages, profile?.id, refreshRoomSummaries]);
 
   const handleCreateGroup = () => {
     if (!isVerified) {
@@ -4315,9 +4178,108 @@ const Chats = () => {
   };
 
   const handleGroupCreated = (chatId: string) => {
-    void loadConversations();
+    void loadConversations("groups");
     navigate(`/chat-dialogue?room=${encodeURIComponent(chatId)}`);
   };
+
+  const joinedGroupIdsKey = useMemo(
+    () =>
+      groups
+        .map((group) => String(group.id || "").trim())
+        .filter(Boolean)
+        .sort()
+        .join(","),
+    [groups]
+  );
+
+  const acceptGroupInviteAndOpen = useCallback(
+    async (invite: { chatId: string; chatName: string; inviteId?: string | null }) => {
+      let data: unknown = null;
+      let error: { message?: string } | null = null;
+      if (invite.inviteId) {
+        const byId = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+          "accept_group_chat_invite_by_id",
+          { p_invite_id: invite.inviteId }
+        );
+        data = byId.data;
+        error = byId.error;
+      } else {
+        const byChat = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+          "accept_group_chat_invite",
+          { p_chat_id: invite.chatId }
+        );
+        data = byChat.data;
+        error = byChat.error;
+      }
+      if (error) throw error;
+      const joined = Array.isArray(data)
+        ? ((data[0] || {}) as { joined?: unknown }).joined === true
+        : false;
+      if (!joined) {
+        toast.error("Invite is no longer available.");
+        return false;
+      }
+      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(invite.chatId)}&name=${encodeURIComponent(invite.chatName)}`);
+      return true;
+    },
+    [fetchExploreGroups, loadConversations, navigate]
+  );
+
+  const requestGroupJoin = useCallback(
+    async (group: Group) => {
+      if (!user?.id) {
+        toast.error("Sign in to join groups.");
+        return false;
+      }
+      const { error } = await supabase
+        .from("group_join_requests")
+        .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
+      if (error && error.code !== "23505") {
+        toast.error("Couldn't send request. Please try again.");
+        return false;
+      }
+      setSentJoinRequests((prev) => new Set([...prev, group.id]));
+      toast.success("Request sent!");
+      return true;
+    },
+    [user?.id]
+  );
+
+  const joinPublicGroupAndOpen = useCallback(
+    async (group: Group) => {
+      if (!user?.id) {
+        toast.error("Sign in to join groups.");
+        return false;
+      }
+      const { error } = await supabase
+        .from("chat_participants")
+        .insert({ chat_id: group.id, user_id: user.id, role: "member" });
+      if (error) {
+        toast.error("Couldn't join. Please try again.");
+        return false;
+      }
+      const { error: memberErr } = await supabase
+        .from("chat_room_members")
+        .insert({ chat_id: group.id, user_id: user.id });
+      if (memberErr) {
+        toast.error("Couldn't join. Please try again.");
+        return false;
+      }
+      void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
+      void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
+      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
+      navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+      return true;
+    },
+    [fetchExploreGroups, loadConversations, navigate, user?.id]
+  );
 
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
@@ -4444,7 +4406,7 @@ const Chats = () => {
         };
       }).filter((row) => row.id);
 
-      const joinedIds = new Set(groups.map((g) => g.id));
+      const joinedIds = new Set(joinedGroupIdsKey ? joinedGroupIdsKey.split(",") : []);
 
       // Client-side ranking: proximity (0|4) + pet relevance (0|1|3)×3 + activity (0–2)
       const userSpecies: string[] = (
@@ -4552,7 +4514,7 @@ const Chats = () => {
       setExploreLoading(false);
     }
   }, [
-    groups,
+    joinedGroupIdsKey,
     profile?.id,
     profile?.location_country,
     profile?.location_district,
@@ -4571,7 +4533,7 @@ const Chats = () => {
     if (groupsPullRefreshing) return;
     setGroupsPullRefreshing(true);
     try {
-      await Promise.all([loadConversations(), fetchExploreGroups()]);
+      await Promise.all([loadConversations("groups"), fetchExploreGroups()]);
     } catch {
       toast.error("Couldn't refresh groups.");
     } finally {
@@ -4955,7 +4917,7 @@ const Chats = () => {
             passIndicatorY={passIndicatorY}
             waveTintOpacity={waveTintOpacity}
             passTintOpacity={passTintOpacity}
-            onOpenLocationSettings={openLocationSettings}
+            onOpenLocationSettings={discoverLocationGate.handleEnableLocation}
             onExpandSearch={handleExpandSearch}
             onResurfacePassedProfiles={resurfacePassedProfiles}
             onWaveFromButton={triggerWaveFromButton}
@@ -5568,40 +5530,11 @@ const Chats = () => {
                               const handleExploreCardCTA = async (e: React.MouseEvent) => {
                                 e.stopPropagation();
                                 try {
-                                  let data: unknown = null;
-                                  let error: { message?: string } | null = null;
-                                  if (group.inviteId) {
-                                    const byId = await (supabase.rpc as (
-                                      fn: string,
-                                      params?: Record<string, unknown>
-                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                      "accept_group_chat_invite_by_id",
-                                      { p_invite_id: group.inviteId }
-                                    );
-                                    data = byId.data;
-                                    error = byId.error;
-                                  } else {
-                                    const byChat = await (supabase.rpc as (
-                                      fn: string,
-                                      params?: Record<string, unknown>
-                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                      "accept_group_chat_invite",
-                                      { p_chat_id: group.id }
-                                    );
-                                    data = byChat.data;
-                                    error = byChat.error;
-                                  }
-                                  if (error) throw error;
-                                  const joined = Array.isArray(data)
-                                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
-                                    : false;
-                                  if (!joined) {
-                                    toast.error("Invite is no longer available.");
-                                    return;
-                                  }
-                                  await loadConversations();
-                                  await fetchExploreGroups();
-                                  navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                                  await acceptGroupInviteAndOpen({
+                                    chatId: group.id,
+                                    chatName: group.name,
+                                    inviteId: group.inviteId,
+                                  });
                                 } catch {
                                   toast.error("Unable to join group right now.");
                                 }
@@ -5688,26 +5621,9 @@ const Chats = () => {
                               return;
                             }
                             if (group.joinMethod === "instant") {
-                              const { error } = await supabase
-                                .from("chat_participants")
-                                .insert({ chat_id: group.id, user_id: user.id, role: "member" });
-                              if (error) { toast.error("Couldn't join. Please try again."); return; }
-                              const { error: memberErr } = await supabase
-                                .from("chat_room_members")
-                                .insert({ chat_id: group.id, user_id: user.id });
-                              if (memberErr) { toast.error("Couldn't join. Please try again."); return; }
-                              void supabase.rpc("post_group_welcome_message", { p_chat_id: group.id, p_user_id: user.id });
-                              void supabase.rpc("notify_group_join", { p_chat_id: group.id, p_user_id: user.id });
-                              await loadConversations();
-                              await fetchExploreGroups();
-                              navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
+                              await joinPublicGroupAndOpen(group);
                             } else {
-                              const { error } = await supabase
-                                .from("group_join_requests")
-                                .insert({ chat_id: group.id, user_id: user.id, status: "pending" });
-                              if (error && error.code !== "23505") { toast.error("Couldn't send request. Please try again."); return; }
-                              setSentJoinRequests((prev) => new Set([...prev, group.id]));
-                              toast.success("Request sent!");
+                              await requestGroupJoin(group);
                             }
                           };
 
@@ -5921,39 +5837,14 @@ const Chats = () => {
                             <button
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                if (!profile?.id) return;
                                 try {
-                                  let data: unknown = null;
-                                  let error: { message?: string } | null = null;
-                                  if (group.inviteId) {
-                                    const byId = await (supabase.rpc as (
-                                      fn: string,
-                                      params?: Record<string, unknown>
-                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                      "accept_group_chat_invite_by_id",
-                                      { p_invite_id: group.inviteId }
-                                    );
-                                    data = byId.data;
-                                    error = byId.error;
-                                  } else {
-                                    const byChat = await (supabase.rpc as (
-                                      fn: string,
-                                      params?: Record<string, unknown>
-                                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                                      "accept_group_chat_invite",
-                                      { p_chat_id: group.id }
-                                    );
-                                    data = byChat.data;
-                                    error = byChat.error;
-                                  }
-                                  if (error) throw error;
-                                  const joined = Array.isArray(data)
-                                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
-                                    : false;
-                                  if (!joined) { toast.error("Invite is no longer available."); return; }
+                                  const joined = await acceptGroupInviteAndOpen({
+                                    chatId: group.id,
+                                    chatName: group.name,
+                                    inviteId: group.inviteId,
+                                  });
+                                  if (!joined) return;
                                   toast.success(`Joined ${group.name}`);
-                                  await loadConversations();
-                                  navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
                                 } catch (err: unknown) {
                                   const msg = err && typeof err === "object" && "message" in err
                                     ? String((err as { message?: string }).message || "")
@@ -6155,7 +6046,7 @@ const Chats = () => {
                         updateAvatar: true,
                       });
                       syncGroupRowIntoState(row);
-                      void loadConversations();
+                      void loadConversations("groups");
                       toast.success(t("Group image updated"));
                     } catch (err) {
                       console.error("Group image upload failed:", err);
@@ -6196,7 +6087,7 @@ const Chats = () => {
                       syncGroupRowIntoState(row);
                       setGroupDescriptionDraft(row.description || "");
                       setGroupDescriptionEditing(false);
-                      void loadConversations();
+                      void loadConversations("groups");
                       toast.success("Group description updated");
                     } catch {
                       toast.error("Couldn't save group description.");
@@ -6266,7 +6157,7 @@ const Chats = () => {
                               setGroupJoinRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
                               setGroupMembers((prev) => [...prev, { id: req.userId, name: req.name, avatarUrl: req.avatarUrl }]);
                               setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: g.memberCount + 1 } : g));
-                              void loadConversations();
+                              void loadConversations("groups");
                               toast.success(`${req.name} approved`);
                             } catch {
                               toast.error("Couldn't approve request.");
@@ -6330,7 +6221,7 @@ const Chats = () => {
                             if (rpcError) throw rpcError;
                             setGroupMembers((prev) => prev.filter((x) => x.id !== m.id));
                             setGroups((prev) => prev.map((g) => g.id === groupManageId ? { ...g, memberCount: Math.max(0, g.memberCount - 1) } : g));
-                            void loadConversations();
+                            void loadConversations("groups");
                             toast.success(`${m.name} removed`);
                           } catch {
                             toast.error(t("Failed to remove member"));
@@ -6428,7 +6319,7 @@ const Chats = () => {
                                   ? prev
                                   : [...prev, { id: u.id, name: u.name, avatarUrl: u.avatarUrl || null }]
                               );
-                              void loadConversations();
+                              void loadConversations("groups");
                               toast.success(`${u.name} invited`);
                             } catch {
                               toast.error("Couldn't invite member.");
@@ -6504,44 +6395,15 @@ const Chats = () => {
               onClick={async () => {
                 if (!pendingGroupInvite || !profile?.id) return;
                 try {
-                  let data: unknown = null;
-                  let error: { message?: string } | null = null;
-                  if (pendingGroupInvite.inviteId) {
-                    const byId = await (supabase.rpc as (
-                      fn: string,
-                      params?: Record<string, unknown>
-                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                      "accept_group_chat_invite_by_id",
-                      {
-                        p_invite_id: pendingGroupInvite.inviteId,
-                      }
-                    );
-                    data = byId.data;
-                    error = byId.error;
-                  } else {
-                    const byChat = await (supabase.rpc as (
-                      fn: string,
-                      params?: Record<string, unknown>
-                    ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-                      "accept_group_chat_invite",
-                      {
-                        p_chat_id: pendingGroupInvite.chatId,
-                      }
-                    );
-                    data = byChat.data;
-                    error = byChat.error;
-                  }
-                  if (error) throw error;
-                  const joined = Array.isArray(data)
-                    ? ((data[0] || {}) as { joined?: unknown }).joined === true
-                    : false;
+                  const joined = await acceptGroupInviteAndOpen({
+                    chatId: pendingGroupInvite.chatId,
+                    chatName: pendingGroupInvite.chatName,
+                    inviteId: pendingGroupInvite.inviteId,
+                  });
                   if (!joined) {
-                    toast.error("Invite is no longer available.");
                     return;
                   }
                   toast.success(`Joined ${pendingGroupInvite.chatName}`);
-                  await loadConversations();
-                  navigate(`/chat-dialogue?room=${encodeURIComponent(pendingGroupInvite.chatId)}&name=${encodeURIComponent(pendingGroupInvite.chatName)}`);
                 } catch (err: unknown) {
                   const msg =
                     err && typeof err === "object" && "message" in err

@@ -513,10 +513,19 @@ const DiscoveryDeckInner = ({
             )}
             {discoveryLocationBlocked && (
               <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
-                <div className="glass-nav w-full rounded-[28px] border border-white/55 bg-white/24 px-6 py-6 shadow-[0_16px_32px_rgba(33,71,201,0.12)]">
-                  <p className="text-sm text-muted-foreground">Enable location to discover people nearby.</p>
-                  <button onClick={onOpenLocationSettings} className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-xs font-semibold text-white shadow-[0_10px_22px_rgba(33,71,201,0.24)]">
-                    Open Location Settings
+                <div className="glass-nav w-full rounded-[30px] border border-white/55 bg-white/24 px-6 py-7 shadow-[0_18px_40px_rgba(33,71,201,0.14)]">
+                  <img
+                    src={emptyChatImage}
+                    alt=""
+                    aria-hidden="true"
+                    className="mx-auto mb-4 w-full max-w-[320px] object-contain opacity-95"
+                    loading="lazy"
+                  />
+                  <p className="text-sm leading-relaxed text-[#4F5677]">
+                    Huddle uses your location to show you pets and people right in your neighborhood. Turn on location to start meeting your local community.
+                  </p>
+                  <button onClick={onOpenLocationSettings} className="mt-4 inline-flex h-11 items-center justify-center rounded-full bg-[rgba(33,71,201,0.92)] px-5 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(33,71,201,0.24)]">
+                    Enable Location
                   </button>
                 </div>
               </div>
