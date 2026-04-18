@@ -47,20 +47,9 @@ export const BottomNav = () => {
           .select("chat_id")
           .eq("user_id", userId);
         if (membershipError) return;
-        const memberRoomIds = Array.from(
+        const roomIds = Array.from(
           new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))
         );
-        const { data: serviceChats, error: serviceError } = await supabase
-          .from("service_chats")
-          .select("chat_id")
-          .or(`requester_id.eq.${userId},provider_id.eq.${userId}`);
-        if (serviceError) return;
-        const serviceRoomIds = new Set(
-          ((serviceChats || []) as Array<{ chat_id?: string | null }>)
-            .map((row) => String(row.chat_id || "").trim())
-            .filter(Boolean)
-        );
-        const roomIds = memberRoomIds.filter((roomId) => !serviceRoomIds.has(roomId));
         if (roomIds.length === 0) {
           setChatUnread(0);
           try {
@@ -87,7 +76,7 @@ export const BottomNav = () => {
         if (messagesError) return;
         let unread = 0;
         for (const message of (messages || []) as Array<{ chat_id: string; sender_id: string; created_at: string | null }>) {
-          if (message.sender_id === userId) continue;
+          if (!message.sender_id || message.sender_id === userId) continue;
           const seenAtRaw = seenByRoom[message.chat_id];
           const seenAtMs = seenAtRaw ? new Date(seenAtRaw).getTime() : Number.NaN;
           const msgMs = message.created_at ? new Date(message.created_at).getTime() : Number.NaN;
