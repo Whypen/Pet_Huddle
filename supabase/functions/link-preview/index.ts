@@ -90,13 +90,17 @@ const normalizeUrl = (value: unknown) => {
 
 const decodeHtml = (value: string) =>
   value
-    .replace(/&amp;/gi, "&")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return _; }
+    })
+    .replace(/&#(\d+);/g, (_, dec) => {
+      try { return String.fromCodePoint(parseInt(dec, 10)); } catch { return _; }
+    })
     .replace(/&quot;/gi, "\"")
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'")
     .replace(/&apos;/gi, "'")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
     .trim();
 
 const parseAttributes = (tag: string) => {
@@ -325,10 +329,10 @@ Deno.serve(async (req) => {
 
     return json({
       url: finalUrl,
-      title,
-      description,
+      title: decodeHtml(title),
+      description: decodeHtml(description),
       image: image || undefined,
-      siteName: siteName.replace(/^@/, ""),
+      siteName: decodeHtml(siteName).replace(/^@/, ""),
     }, 200, SUCCESS_CACHE_HEADERS);
   } catch (error) {
     console.error("[link-preview] failed", error);

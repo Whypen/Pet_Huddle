@@ -3604,8 +3604,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             (() => {
                               const body = notice.content || "";
                               const u = extractFirstHttpUrl(body);
-                              const p = u ? linkPreviewByUrl[u] : null;
-                              if (!u || !p?.resolved || p.failed) return body;
+                              if (!u) return body;
+                              const p = linkPreviewByUrl[u];
+                              // Hide URL optimistically while loading or once resolved.
+                              // Only restore the inline URL if preview definitively failed.
+                              if (p?.failed) return body;
                               return body.replace(u, "").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
                             })(),
                             threadMentionsById[notice.id],
