@@ -287,7 +287,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       attachments?: Array<{ url: string; mime: string; name: string }>,
       options?: { linkPreviewUrl?: string | null }
     ) => {
-      if (!roomId || !userId || (!text.trim() && !(attachments && attachments.length > 0))) return;
+      if (!roomId || !userId || (!text.trim() && !(attachments && attachments.length > 0) && !options?.linkPreviewUrl)) return;
       setSending(true);
       try {
         const content = text.trim();

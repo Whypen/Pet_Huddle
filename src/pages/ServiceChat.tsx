@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowDown, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { useAuth } from "@/contexts/AuthContext";
 import serviceImage from "@/assets/Notifications/Service.jpg";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 import { ChatBubble } from "@/components/chat/ChatBubble";
+import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { useServiceChat } from "@/hooks/useServiceChat";
 import { BookingCard } from "@/components/service-chat/BookingCard";
 import { ActionBar } from "@/components/service-chat/ActionBar";
@@ -34,6 +36,7 @@ import {
   type ExternalLinkPreview,
 } from "@/lib/externalLinkPreview";
 import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
+import { parseChatShareMessage } from "@/lib/shareModel";
 
 type ActiveSheet = "request" | "quote" | "payment" | "review" | "dispute" | null;
 type BlockState = "none" | "blocked_by_me" | "blocked_by_them";
@@ -90,6 +93,7 @@ const ServiceChat = () => {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
+  const topHeaderRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [messageViewportHeight, setMessageViewportHeight] = useState<number>(420);
@@ -216,16 +220,18 @@ const ServiceChat = () => {
 
   useEffect(() => {
     const computeHeight = () => {
+      const appTop = topHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
       const viewport = window.innerHeight;
-      const reserved = stickyTop + bottom;
+      const reserved = appTop + stickyTop + bottom;
       setMessageViewportHeight(Math.max(220, viewport - reserved));
     };
 
     computeHeight();
 
     const observer = new ResizeObserver(() => computeHeight());
+    if (topHeaderRef.current) observer.observe(topHeaderRef.current);
     if (stickyHeaderRef.current) observer.observe(stickyHeaderRef.current);
     if (bottomBarRef.current) observer.observe(bottomBarRef.current);
     window.addEventListener("resize", computeHeight);
@@ -363,6 +369,9 @@ const ServiceChat = () => {
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-hidden">
+      <div ref={topHeaderRef}>
+        <GlobalHeader />
+      </div>
       <div ref={stickyHeaderRef}>
         <ServiceChatHeader
           peerName={peerName}
@@ -435,6 +444,14 @@ const ServiceChat = () => {
               ) : (
                 messages.map((message) => {
                   const me = message.sender_id === userId;
+                  const share = parseChatShareMessage(message.content);
+                  if (share) {
+                    return (
+                      <div key={message.id} className={cn("flex flex-col", me ? "items-end" : "items-start")}>
+                        <SharedContentCard share={share} mine={me} />
+                      </div>
+                    );
+                  }
                   const parsed = parseServiceMessage(message.content);
                   const kind = String(parsed?.kind || "");
                   if (kind) {

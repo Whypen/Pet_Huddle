@@ -12,7 +12,7 @@ import { serializeChatShareMessage } from "@/lib/shareModel";
 type ShareTarget = {
   chatId: string;
   userId: string | null;
-  type: "direct" | "group";
+  type: "direct" | "group" | "service";
   socialId: string | null;
   label: string;
   subtitle: string | null;
@@ -120,6 +120,16 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
         .in("id", chatIds);
       if (chatError) throw chatError;
 
+      const { data: serviceRows } = await supabase
+        .from("service_chats")
+        .select("chat_id")
+        .in("chat_id", chatIds);
+      const serviceChatIds = new Set(
+        ((serviceRows || []) as Array<{ chat_id?: string | null }>)
+          .map((row) => String(row.chat_id || "").trim())
+          .filter(Boolean),
+      );
+
       const { data: messageRows, error: messageError } = await supabase
         .from("chat_messages")
         .select("chat_id,content,created_at")
@@ -206,9 +216,10 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
           new Map(peers.map((row) => [String(row.user_id || "").trim(), row])).values(),
         ).filter((row) => String(row.user_id || "").trim().length > 0);
         const isGroup = chat.type === "group";
+        const isService = serviceChatIds.has(chatId) || chat.type === "service";
         const primaryPeer = uniquePeers[0] || null;
         const userId = primaryPeer?.user_id ? String(primaryPeer.user_id) : null;
-        if (!isGroup) {
+        if (!isGroup && !isService) {
           if (!userId) return;
           if (!matchedPeerIds.has(userId)) return;
           if (blockedByMe.has(userId) || blockedByThem.has(userId) || unmatchedByThem.has(userId)) return;
@@ -219,15 +230,15 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
           ? (chatName || "Group chat")
           : (peerDisplayName || chatName || "Conversation");
         const socialId = String(primaryPeer?.profiles?.social_id || "").trim().replace(/^@+/, "");
-        if (!isGroup && displayName === "Conversation" && !socialId && !primaryPeer?.profiles?.avatar_url) return;
-        const subtitle = isGroup ? "Group chat" : (socialId ? `@${socialId}` : "Chat");
+        if (!isGroup && !isService && displayName === "Conversation" && !socialId && !primaryPeer?.profiles?.avatar_url) return;
+        const subtitle = isGroup ? "Group chat" : isService ? "Service" : (socialId ? `@${socialId}` : "Chat");
         const avatarUrl = isGroup
           ? (chat.avatar_url || null)
           : (primaryPeer?.profiles?.avatar_url || chat.avatar_url || null);
         const target: ShareTarget = {
           chatId,
           userId: isGroup ? null : userId,
-          type: isGroup ? "group" : "direct",
+          type: isGroup ? "group" : isService ? "service" : "direct",
           socialId: isGroup ? null : (socialId || null),
           label: displayName,
           subtitle,
