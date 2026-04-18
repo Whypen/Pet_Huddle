@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -62,7 +62,8 @@ type CounterpartProfile = {
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
-const MESSAGE_PAGE_SIZE = 40;
+const INITIAL_MESSAGE_LOAD_SIZE = 10;
+const OLDER_MESSAGE_PAGE_SIZE = 20;
 const MESSAGE_READ_BUFFER_MS = 100;
 
 const formatMessageTime = (iso: string) => {
@@ -355,16 +356,16 @@ const ChatDialogue = () => {
       .select("id, sender_id, content, created_at")
       .eq("chat_id", nextRoomId)
       .order("created_at", { ascending: false })
-      .limit(MESSAGE_PAGE_SIZE + 1);
+      .limit(INITIAL_MESSAGE_LOAD_SIZE + 1);
     if (error) throw error;
     const rows = (data || []) as ChatMessage[];
-    const nextMessages = rows.slice(0, MESSAGE_PAGE_SIZE).reverse();
-    setHasOlderMessages(rows.length > MESSAGE_PAGE_SIZE);
+    const nextMessages = rows.slice(0, INITIAL_MESSAGE_LOAD_SIZE).reverse();
+    setHasOlderMessages(rows.length > INITIAL_MESSAGE_LOAD_SIZE);
     setMessages(nextMessages);
     void markMessagesAsRead(nextMessages);
   }, [markMessagesAsRead]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!pendingInitialScrollRef.current || loading) return;
     pendingInitialScrollRef.current = false;
     snapToLatestMessage();
@@ -384,11 +385,11 @@ const ChatDialogue = () => {
         .eq("chat_id", roomId)
         .lt("created_at", oldestCreatedAt)
         .order("created_at", { ascending: false })
-        .limit(MESSAGE_PAGE_SIZE + 1);
+        .limit(OLDER_MESSAGE_PAGE_SIZE + 1);
       if (error) throw error;
       const rows = (data || []) as ChatMessage[];
-      const olderMessages = rows.slice(0, MESSAGE_PAGE_SIZE).reverse();
-      setHasOlderMessages(rows.length > MESSAGE_PAGE_SIZE);
+      const olderMessages = rows.slice(0, OLDER_MESSAGE_PAGE_SIZE).reverse();
+      setHasOlderMessages(rows.length > OLDER_MESSAGE_PAGE_SIZE);
       if (olderMessages.length === 0) return;
       setMessages((prev) => [...olderMessages, ...prev]);
       void markMessagesAsRead(olderMessages);
