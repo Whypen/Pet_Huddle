@@ -323,16 +323,26 @@ Deno.serve(async (req) => {
       }
     }
 
-    title = title || finalUrl;
-    siteName = siteName || new URL(finalUrl).hostname.replace(/^www\./, "");
+    const decodedTitle = decodeHtml(title);
+    const decodedDescription = decodeHtml(description);
+    const decodedSite = decodeHtml(siteName).replace(/^@/, "");
     const image = imageRaw ? toAbsoluteUrl(finalUrl, imageRaw) : null;
+
+    // Quality gate: only cache a "success" if we have a real, clean title.
+    // Reject empty, URL-equals-title, or undecoded-entity output so the client
+    // falls back to a plain link instead of rendering a broken card.
+    const hasEntities = /&#x?[0-9a-fA-F]+;/.test(decodedTitle) || /&#x?[0-9a-fA-F]+;/.test(decodedDescription);
+    const titleIsUrl = !decodedTitle || decodedTitle === finalUrl;
+    if (titleIsUrl || hasEntities) {
+      return json({ url: finalUrl, failed: true }, 200, FAILURE_CACHE_HEADERS);
+    }
 
     return json({
       url: finalUrl,
-      title: decodeHtml(title),
-      description: decodeHtml(description),
+      title: decodedTitle,
+      description: decodedDescription,
       image: image || undefined,
-      siteName: decodeHtml(siteName).replace(/^@/, ""),
+      siteName: decodedSite || new URL(finalUrl).hostname.replace(/^www\./, ""),
     }, 200, SUCCESS_CACHE_HEADERS);
   } catch (error) {
     console.error("[link-preview] failed", error);
