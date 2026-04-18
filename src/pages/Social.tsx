@@ -59,7 +59,7 @@ const Social = () => {
 
       {/* Compose FAB */}
       <button
-        className={`fixed right-5 bottom-[calc(64px+env(safe-area-inset-bottom)+35px)] z-30 h-14 w-14 rounded-full border border-white/40 bg-white/30 shadow-md backdrop-blur-md flex items-center justify-center transition-all duration-200 ${hideComposeFab ? "pointer-events-none opacity-0 translate-y-4" : "opacity-100 translate-y-0"}`}
+        className={`fixed right-5 bottom-[calc(64px+env(safe-area-inset-bottom)+35px)] z-30 h-14 w-14 rounded-full border border-white/40 bg-white/85 shadow-md flex items-center justify-center transition-all duration-200 ${hideComposeFab ? "pointer-events-none opacity-0 translate-y-4" : "opacity-100 translate-y-0"}`}
         aria-label="Compose post"
         onClick={() => setComposeSignal((prev) => prev + 1)}
       >

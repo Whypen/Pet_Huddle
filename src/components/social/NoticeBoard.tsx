@@ -3037,20 +3037,25 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           siteName,
         });
       }
-      setLinkPreviewByUrl((prev) => ({
-        ...prev,
-        [url]: {
-          url,
-          title: title || undefined,
-          description: description || undefined,
-          image: image || undefined,
-          siteName: siteName || undefined,
-          loading: false,
-          failed: false,
-          resolved: true,
-          error: undefined,
-        },
-      }));
+      const resolved = {
+        url,
+        title: title || undefined,
+        description: description || undefined,
+        image: image || undefined,
+        siteName: siteName || undefined,
+        loading: false,
+        failed: false,
+        resolved: true,
+        error: undefined,
+      };
+      setLinkPreviewByUrl((prev) => ({ ...prev, [url]: resolved }));
+      // Cache-aside write: persist for instant paint on next mount.
+      void (supabase.from("link_preview_cache" as "profiles") as unknown as {
+        upsert: (row: Record<string, unknown>, opts?: Record<string, unknown>) => Promise<unknown>;
+      }).upsert(
+        { url_hash: url.toLowerCase(), url, payload: { title, description, image, siteName }, fetched_at: new Date().toISOString() },
+        { onConflict: "url_hash" }
+      );
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unexpected_error";
       if (
@@ -3081,7 +3086,52 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       )
     ).slice(0, 20);
     if (urls.length === 0) return;
-    void Promise.all(urls.map((url) => ensureLinkPreview(url)));
+    let cancelled = false;
+    // Batch cache-aside read: hydrate state from server cache before any edge fetch.
+    const hashes = urls.map((u) => u.toLowerCase());
+    void (async () => {
+      try {
+        const { data } = await (supabase.from("link_preview_cache" as "profiles") as unknown as {
+          select: (cols: string) => { in: (col: string, vals: string[]) => Promise<{ data: Array<{ url: string; payload: { title?: string; description?: string; image?: string; siteName?: string } }> | null }> };
+        }).select("url, payload").in("url_hash", hashes);
+        if (cancelled) return;
+        const cachedUrls = new Set<string>();
+        if (data && data.length > 0) {
+          setLinkPreviewByUrl((prev) => {
+            const next = { ...prev };
+            for (const row of data) {
+              if (!row?.url || !row.payload) continue;
+              if (next[row.url]?.resolved) { cachedUrls.add(row.url); continue; }
+              const p = row.payload;
+              const has = Boolean(p.title || p.description || p.image || p.siteName);
+              if (!has) continue;
+              next[row.url] = {
+                url: row.url,
+                title: p.title || undefined,
+                description: p.description || undefined,
+                image: p.image || undefined,
+                siteName: p.siteName || undefined,
+                loading: false,
+                failed: false,
+                resolved: true,
+                error: undefined,
+              };
+              cachedUrls.add(row.url);
+            }
+            return next;
+          });
+        }
+        // Only fetch URLs missing from cache.
+        const misses = urls.filter((u) => !cachedUrls.has(u));
+        if (misses.length > 0) {
+          void Promise.all(misses.map((url) => ensureLinkPreview(url)));
+        }
+      } catch {
+        // Cache lookup failure is non-fatal; fall back to direct fetch.
+        void Promise.all(urls.map((url) => ensureLinkPreview(url)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, [ensureLinkPreview, visibleNotices]);
 
   useEffect(() => {
@@ -3273,7 +3323,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     tabIndex={-1}
                     data-thread-id={notice.id}
                     className={cn(
-                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none",
+                      "w-full max-w-full min-w-0 overflow-hidden py-4 outline-none [content-visibility:auto] [contain-intrinsic-size:0_320px]",
                       focusedThreadId === notice.id && "bg-[#2145CF]/[0.03]"
                     )}
                   >
@@ -3408,7 +3458,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             className="form-field-rest mt-2 block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
                           >
                             {preview?.image ? (
-                              <img src={preview.image} alt={preview.title || "Link preview"} className="h-44 w-full object-cover" />
+                              <img
+                                src={preview.image}
+                                alt={preview.title || "Link preview"}
+                                width={600}
+                                height={314}
+                                loading="lazy"
+                                decoding="async"
+                                className="h-44 w-full object-cover bg-muted/15"
+                              />
+                            ) : preview?.loading ? (
+                              <div className="h-44 w-full bg-muted/20 animate-pulse" aria-hidden="true" />
                             ) : null}
                             <div className="space-y-1.5 px-3 py-2.5">
                               <p className="text-xs text-[rgba(74,73,101,0.62)]">
@@ -3427,9 +3487,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                 <p className="text-xs text-[rgba(74,73,101,0.62)]">
                                   Preview unavailable{import.meta.env.DEV && preview.error ? `: ${preview.error}` : ""}
                                 </p>
-                              ) : null}
-                              {preview?.loading ? (
-                                <p className="text-xs text-[rgba(74,73,101,0.62)]">Loading preview...</p>
                               ) : null}
                             </div>
                           </a>
