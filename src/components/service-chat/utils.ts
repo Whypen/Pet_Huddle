@@ -5,11 +5,20 @@ export type ParsedServiceMessage = {
 
 export const parseServiceMessage = (content: string): ParsedServiceMessage | null => {
   try {
-    const parsed = JSON.parse(content) as ParsedServiceMessage;
-    if (!parsed || typeof parsed !== "object") return null;
-    return parsed;
+    let parsed: unknown = JSON.parse(content);
+    if (typeof parsed === "string") {
+      const nested = String(parsed || "").trim();
+      if (nested.startsWith("{") || nested.startsWith("[")) {
+        try {
+          parsed = JSON.parse(nested);
+        } catch {
+          parsed = nested;
+        }
+      }
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as ParsedServiceMessage;
   } catch {
     return null;
   }
 };
-

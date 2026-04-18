@@ -258,6 +258,7 @@ const App = () => (
                       <ProtectedRoute>
                         <AppShell>
                           <RouteSuspense><ServiceChat /></RouteSuspense>
+                          <BottomNav />
                         </AppShell>
                       </ProtectedRoute>
                     }
