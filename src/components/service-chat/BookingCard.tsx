@@ -66,7 +66,7 @@ export const BookingCard = ({
   }, [requestCard?.suggestedCurrency, requestCard?.suggestedPrice, requestCard?.suggestedRate]);
 
   return (
-    <section className="sticky top-0 z-10 space-y-2">
+    <section className="space-y-2">
       {requestCard ? (
         <div className="rounded-2xl bg-card border border-border/40 p-3 shadow-card">
           <div className="flex items-center justify-between gap-2">

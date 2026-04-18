@@ -33,12 +33,7 @@ export const BottomNav = () => {
     () => `chats_unread_${profile?.id || "anon"}`,
     [profile?.id]
   );
-  const unreadAckKey = useMemo(
-    () => `chats_unread_ack_${profile?.id || "anon"}`,
-    [profile?.id]
-  );
   const [chatUnread, setChatUnread] = useState(0);
-  const [ackUnreadCount, setAckUnreadCount] = useState(0);
   const isChatSurface = location.pathname.startsWith("/chats") || location.pathname.startsWith("/chat-dialogue");
 
   const recalcUnreadFromBackend = useMemo(
@@ -96,22 +91,17 @@ export const BottomNav = () => {
   useEffect(() => {
     if (!profile?.id) {
       setChatUnread(0);
-      setAckUnreadCount(0);
       return;
     }
     try {
       const raw = localStorage.getItem(unreadStorageKey);
       const next = raw ? Number(raw) : 0;
       setChatUnread(Number.isFinite(next) ? Math.max(0, next) : 0);
-      const ackRaw = localStorage.getItem(unreadAckKey);
-      const ack = ackRaw ? Number(ackRaw) : 0;
-      setAckUnreadCount(Number.isFinite(ack) ? Math.max(0, ack) : 0);
     } catch {
       setChatUnread(0);
-      setAckUnreadCount(0);
     }
     void recalcUnreadFromBackend(profile.id);
-  }, [profile?.id, recalcUnreadFromBackend, unreadAckKey, unreadStorageKey]);
+  }, [profile?.id, recalcUnreadFromBackend, unreadStorageKey]);
 
   useEffect(() => {
     const onUnread = (event: Event) => {
@@ -134,30 +124,6 @@ export const BottomNav = () => {
 
   useEffect(() => {
     if (!profile?.id) return;
-    if (!isChatSurface) return;
-    const nextAck = Math.max(ackUnreadCount, chatUnread);
-    setAckUnreadCount(nextAck);
-    try {
-      localStorage.setItem(unreadAckKey, String(nextAck));
-    } catch {
-      // ignore
-    }
-  }, [ackUnreadCount, chatUnread, isChatSurface, profile?.id, unreadAckKey]);
-
-  useEffect(() => {
-    if (chatUnread > 0) return;
-    if (ackUnreadCount === 0) return;
-    setAckUnreadCount(0);
-    try {
-      localStorage.setItem(unreadAckKey, "0");
-      localStorage.setItem(unreadStorageKey, "0");
-    } catch {
-      // ignore
-    }
-  }, [ackUnreadCount, chatUnread, unreadAckKey, unreadStorageKey]);
-
-  useEffect(() => {
-    if (!profile?.id) return;
     const channel = supabase
       .channel(`bottom_nav_unread_${profile.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
@@ -171,6 +137,7 @@ export const BottomNav = () => {
 
   return (
     <nav
+      data-bottom-nav="true"
       className="glass-nav fixed left-4 right-4 z-[2600] h-[64px] rounded-[28px]"
       style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
     >
@@ -214,7 +181,7 @@ export const BottomNav = () => {
                 aria-hidden
               />
               {path === "/chats" &&
-                chatUnread > ackUnreadCount &&
+                chatUnread > 0 &&
                 !isChatSurface && (
                 <span
                   className="absolute right-[6px] top-[3px] z-[2] h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"

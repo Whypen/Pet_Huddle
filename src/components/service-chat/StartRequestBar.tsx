@@ -4,7 +4,7 @@ type Props = {
 
 export const StartRequestBar = ({ onClick }: Props) => {
   return (
-    <div className="border-t border-border/40 bg-background px-4 py-2 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]">
+    <div className="border-t border-border/40 bg-background px-4 py-2 pb-[max(8px,env(safe-area-inset-bottom))]">
       <button
         type="button"
         onClick={onClick}

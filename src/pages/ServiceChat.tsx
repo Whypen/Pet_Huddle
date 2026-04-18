@@ -95,6 +95,7 @@ const ServiceChat = () => {
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const topHeaderRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
+  const bookingCardRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [messageViewportHeight, setMessageViewportHeight] = useState<number>(420);
   const lastStatusRef = useRef<ServiceStatus | null>(null);
@@ -222,9 +223,10 @@ const ServiceChat = () => {
     const computeHeight = () => {
       const appTop = topHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
+      const bookingTop = bookingCardRef.current?.getBoundingClientRect().height ?? 0;
       const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
       const viewport = window.innerHeight;
-      const reserved = appTop + stickyTop + bottom;
+      const reserved = appTop + stickyTop + bookingTop + bottom;
       setMessageViewportHeight(Math.max(220, viewport - reserved));
     };
 
@@ -233,6 +235,7 @@ const ServiceChat = () => {
     const observer = new ResizeObserver(() => computeHeight());
     if (topHeaderRef.current) observer.observe(topHeaderRef.current);
     if (stickyHeaderRef.current) observer.observe(stickyHeaderRef.current);
+    if (bookingCardRef.current) observer.observe(bookingCardRef.current);
     if (bottomBarRef.current) observer.observe(bottomBarRef.current);
     window.addEventListener("resize", computeHeight);
 
@@ -247,9 +250,9 @@ const ServiceChat = () => {
     if (activePreviewUrl) urls.add(activePreviewUrl);
     messages.forEach((message) => {
       const parsed = parseServiceMessage(message.content);
-      const parsedText = String(parsed?.text || message.content || "");
+      const parsedText = parsed.text;
       const previewUrl =
-        (typeof parsed?.linkPreviewUrl === "string" && parsed.linkPreviewUrl) || extractFirstHttpUrl(parsedText);
+        parsed.linkPreviewUrl || extractFirstHttpUrl(parsedText);
       if (previewUrl) urls.add(previewUrl);
     });
     urls.forEach((url) => {
@@ -393,6 +396,24 @@ const ServiceChat = () => {
         />
       </div>
 
+      {!showLoading && serviceChat ? (
+        <div ref={bookingCardRef} className="shrink-0 px-4 pt-3">
+          <BookingCard
+            status={status}
+            isRequester={Boolean(isRequester)}
+            isProvider={Boolean(isProvider)}
+            submittingAction={sending}
+            requestCard={serviceChat.request_card}
+            quoteCard={serviceChat.quote_card}
+            hasQuote={hasQuote}
+            onEditRequest={() => setActiveSheet("request")}
+            onWithdrawRequest={() => setConfirmWithdrawOpen(true)}
+            onEditQuote={() => setActiveSheet("quote")}
+            onWithdrawQuote={() => void withdrawQuote()}
+          />
+        </div>
+      ) : null}
+
       <div
         ref={messageScrollRef}
         onScroll={(event) => {
@@ -401,7 +422,7 @@ const ServiceChat = () => {
           setShowScrollToBottom(distanceToBottom > 120);
         }}
         style={{ height: `${messageViewportHeight}px` }}
-        className="relative overflow-y-auto px-4 pt-3 pb-10 space-y-3"
+        className="relative overflow-y-auto px-4 pt-3 pb-4 space-y-3"
       >
         {showLoading && (
           <div className="h-56 rounded-2xl border border-border/40 bg-card flex items-center justify-center gap-2 text-muted-foreground">
@@ -412,20 +433,6 @@ const ServiceChat = () => {
 
         {!showLoading && serviceChat && (
           <>
-            <BookingCard
-              status={status}
-              isRequester={Boolean(isRequester)}
-              isProvider={Boolean(isProvider)}
-              submittingAction={sending}
-              requestCard={serviceChat.request_card}
-              quoteCard={serviceChat.quote_card}
-              hasQuote={hasQuote}
-              onEditRequest={() => setActiveSheet("request")}
-              onWithdrawRequest={() => setConfirmWithdrawOpen(true)}
-              onEditQuote={() => setActiveSheet("quote")}
-              onWithdrawQuote={() => void withdrawQuote()}
-            />
-
             <section className="space-y-2">
               {isProvider && !hasRequest ? (
                 <div className="rounded-2xl border border-border/40 bg-card p-6 text-center text-sm text-muted-foreground">
@@ -444,7 +451,8 @@ const ServiceChat = () => {
               ) : (
                 messages.map((message) => {
                   const me = message.sender_id === userId;
-                  const share = parseChatShareMessage(message.content);
+                  const parsed = parseServiceMessage(message.content);
+                  const share = parseChatShareMessage(message.content) || parseChatShareMessage(parsed.text);
                   if (share) {
                     return (
                       <div key={message.id} className={cn("flex flex-col", me ? "items-end" : "items-start")}>
@@ -452,8 +460,7 @@ const ServiceChat = () => {
                       </div>
                     );
                   }
-                  const parsed = parseServiceMessage(message.content);
-                  const kind = String(parsed?.kind || "");
+                  const kind = String(parsed.kind || "");
                   if (kind) {
                     if (
                       kind === "service_request_sent" ||
@@ -468,14 +475,11 @@ const ServiceChat = () => {
                       return <SystemEventPill key={message.id} kind={kind as never} />;
                     }
                   }
-                  const text = String(parsed?.text || message.content || "");
-                  const previewUrl =
-                    (typeof parsed?.linkPreviewUrl === "string" && parsed.linkPreviewUrl) || extractFirstHttpUrl(text);
+                  const text = parsed.text;
+                  const previewUrl = parsed.linkPreviewUrl || extractFirstHttpUrl(text);
                   const preview = previewUrl ? linkPreviewByUrl[previewUrl] || null : null;
                   const displayText = previewUrl ? stripExternalUrlFromText(text, previewUrl) : text;
-                  const attachments = Array.isArray(parsed?.attachments)
-                    ? (parsed?.attachments as Array<{ url?: string; mime?: string; name?: string }>).filter((item) => typeof item?.url === "string" && item.url)
-                    : [];
+                  const attachments = parsed.attachments;
                   return (
                     <div key={message.id} className={cn("flex flex-col", me ? "items-end" : "items-start")}>
                       <ChatBubble variant={me ? "sent" : "received"}>
@@ -520,7 +524,7 @@ const ServiceChat = () => {
         ) : null}
       </div>
 
-      <div ref={bottomBarRef}>
+      <div ref={bottomBarRef} className="shrink-0">
         {!showLoading && serviceChat && composerUploads.length > 0 ? (
           <div className="border-t border-border/40 bg-background px-4 pt-2">
             <div className="mb-2 flex gap-2 overflow-x-auto">
@@ -588,8 +592,9 @@ const ServiceChat = () => {
           />
           )
         ) : (
-          <div className="border-t border-border/40 bg-background px-4 py-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]" />
+          <div className="border-t border-border/40 bg-background px-4 py-3 pb-[max(8px,env(safe-area-inset-bottom))]" />
         )}
+        <div className="h-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+8px)]" aria-hidden />
         <input
           ref={imageInputRef}
           type="file"
