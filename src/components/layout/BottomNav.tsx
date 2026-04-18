@@ -34,7 +34,10 @@ export const BottomNav = () => {
     [profile?.id]
   );
   const [chatUnread, setChatUnread] = useState(0);
-  const isChatSurface = location.pathname.startsWith("/chats") || location.pathname.startsWith("/chat-dialogue");
+  const isChatSurface =
+    location.pathname.startsWith("/chats") ||
+    location.pathname.startsWith("/chat-dialogue") ||
+    location.pathname.startsWith("/service-chat");
 
   const recalcUnreadFromBackend = useMemo(
     () =>
@@ -44,7 +47,20 @@ export const BottomNav = () => {
           .select("chat_id")
           .eq("user_id", userId);
         if (membershipError) return;
-        const roomIds = Array.from(new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean)));
+        const memberRoomIds = Array.from(
+          new Set((memberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))
+        );
+        const { data: serviceChats, error: serviceError } = await supabase
+          .from("service_chats")
+          .select("chat_id")
+          .or(`requester_id.eq.${userId},provider_id.eq.${userId}`);
+        if (serviceError) return;
+        const serviceRoomIds = new Set(
+          ((serviceChats || []) as Array<{ chat_id?: string | null }>)
+            .map((row) => String(row.chat_id || "").trim())
+            .filter(Boolean)
+        );
+        const roomIds = memberRoomIds.filter((roomId) => !serviceRoomIds.has(roomId));
         if (roomIds.length === 0) {
           setChatUnread(0);
           try {
