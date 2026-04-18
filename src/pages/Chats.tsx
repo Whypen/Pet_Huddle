@@ -5871,8 +5871,8 @@ const Chats = () => {
                             </button>
                             <div className="min-w-0 flex-1">
                               <div className="relative min-w-0">
-                                <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-1 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                                  <p>{`Members: ${group.memberCount}`}</p>
+                                <div className="absolute right-0 top-1/2 flex w-[78px] -translate-y-1/2 flex-col items-center gap-1 text-center text-[11px] leading-[1.25] text-[#8C93AA]">
+                                  <p className="w-full">{`Members: ${group.memberCount}`}</p>
                                   {group.unread > 0 ? (
                                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted-foreground/70 text-xs font-medium text-white">
                                       {group.unread > 99 ? "9+" : group.unread}
@@ -5881,7 +5881,7 @@ const Chats = () => {
                                 </div>
                                 <button
                                   type="button"
-                                  className="block min-w-0 max-w-full pr-[92px] text-left"
+                                  className="block min-w-0 max-w-full pr-[88px] text-left"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     void openGroupDetailsSheet(group);
