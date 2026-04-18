@@ -62,7 +62,6 @@ type CounterpartProfile = {
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
-type RoomKind = "unknown" | "direct" | "group";
 const MESSAGE_PAGE_SIZE = 40;
 const MESSAGE_READ_BUFFER_MS = 100;
 
@@ -122,7 +121,6 @@ const ChatDialogue = () => {
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [uploadingComposer, setUploadingComposer] = useState(false);
   const [isGroup, setIsGroup] = useState(false);
-  const [roomKind, setRoomKind] = useState<RoomKind>("unknown");
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
   const [groupDescription, setGroupDescription] = useState("");
@@ -302,7 +300,6 @@ const ChatDialogue = () => {
     if (!row || row.type !== "group") return false;
 
     setIsGroup(true);
-    setRoomKind("group");
     setGroupAvatarUrl(row.avatar_url || null);
     setRoomName(row.name || "Group");
     setGroupDescription(String(row.description || ""));
@@ -311,8 +308,7 @@ const ChatDialogue = () => {
     setGroupLocationLabel(row.location_label || null);
     setGroupIsAdmin((row.created_by || null) === profile?.id);
 
-    void (async () => {
-      try {
+    try {
       const [{ data: members }, { data: participantRow }] = await Promise.all([
         supabase
           .from("chat_room_members")
@@ -346,10 +342,9 @@ const ChatDialogue = () => {
         if (p.id && p.display_name) nameMap[p.id] = p.display_name;
       });
       setSenderNames(nameMap);
-      } catch (error) {
-        console.warn("[ChatDialogue] load group details failed", error);
-      }
-    })();
+    } catch (error) {
+      console.warn("[ChatDialogue] load group details failed", error);
+    }
 
     return true;
   }, [profile?.id]);
@@ -573,7 +568,6 @@ const ChatDialogue = () => {
     setLoading(true);
     setRoomName(name);
     setIsGroup(false);
-    setRoomKind("unknown");
     setCounterpart(null);
     setMessages([]);
     setHasOlderMessages(false);
@@ -614,16 +608,12 @@ const ChatDialogue = () => {
                   .find((userId) => Boolean(userId) && userId !== profile.id) || null;
             }
             const nextRoomId = room;
-            if (!grouped) setRoomKind("direct");
             await loadRoomMessages(nextRoomId);
-            setLoading(false);
-            pendingInitialScrollRef.current = true;
-            snapToLatestMessage();
             if (!grouped) {
-              void loadCounterpart(nextRoomId, name, directTargetId).catch((error) => {
-                console.warn("[ChatDialogue] load counterpart failed", error);
-              });
+              await loadCounterpart(nextRoomId, name, directTargetId);
             }
+            pendingInitialScrollRef.current = true;
+            setLoading(false);
             return;
           }
 
@@ -648,16 +638,12 @@ const ChatDialogue = () => {
           const nextRoomId = await ensureDirectChatRoom(supabase, profile.id, fallbackTargetId, name);
           setRoomId(nextRoomId);
           const grouped2 = await loadGroupInfo(nextRoomId);
-          if (!grouped2) setRoomKind("direct");
           await loadRoomMessages(nextRoomId);
-          setLoading(false);
-          pendingInitialScrollRef.current = true;
-          snapToLatestMessage();
           if (!grouped2) {
-            void loadCounterpart(nextRoomId, name, fallbackTargetId).catch((error) => {
-              console.warn("[ChatDialogue] load counterpart failed", error);
-            });
+            await loadCounterpart(nextRoomId, name, fallbackTargetId);
           }
+          pendingInitialScrollRef.current = true;
+          setLoading(false);
           navigate(
             `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}&with=${encodeURIComponent(fallbackTargetId)}`,
             { replace: true }
@@ -683,14 +669,10 @@ const ChatDialogue = () => {
       try {
         const directRoomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
         setRoomId(directRoomId);
-        setRoomKind("direct");
         await loadRoomMessages(directRoomId);
-        setLoading(false);
+        await loadCounterpart(directRoomId, targetName, targetUserId);
         pendingInitialScrollRef.current = true;
-        snapToLatestMessage();
-        void loadCounterpart(directRoomId, targetName, targetUserId).catch((error) => {
-          console.warn("[ChatDialogue] load counterpart failed", error);
-        });
+        setLoading(false);
       } catch {
         toast.error("Unable to open conversation right now.");
         navigate("/chats?tab=chats", { replace: true });
@@ -1044,7 +1026,7 @@ const ChatDialogue = () => {
     setGroupInfoOpen(true);
   }, [messages]);
 
-  if (loading && roomKind === "unknown") {
+  if (loading) {
     return (
       <div className="h-full min-h-0 flex items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
