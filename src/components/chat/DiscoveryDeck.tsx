@@ -183,10 +183,30 @@ const DiscoveryDeckInner = ({
     });
   }, []);
 
-  const renderDiscoveryActionButtons = (variant: "bottom" | "promoted" = "bottom") => {
+  const renderDiscoveryActionButtons = (
+    variant: "bottom" | "promoted" = "bottom",
+    promotedProfile?: DiscoveryDeckProfile | null
+  ) => {
     const isPromoted = variant === "promoted";
     return (
       <div className={cn("flex items-center", isPromoted ? "flex-col gap-2.5" : "gap-3")}>
+        {promotedProfile ? (
+          <motion.button
+            className={cn(
+              isPromoted
+                ? "flex items-center justify-center rounded-full border border-white/80 bg-[rgba(255,255,255,0.97)] text-[#2147C9] shadow-[inset_0_1px_0_rgba(255,255,255,0.98),0_10px_24px_rgba(33,71,201,0.12)] backdrop-blur-[14px] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]"
+                : "flex items-center justify-center rounded-full border border-[#E2B743] bg-[#F5C85C] text-[#2C2A19] shadow-[0_14px_28px_rgba(245,200,92,0.24)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
+              isPromoted ? "h-10 w-10" : "h-12 w-12",
+              ctaDisabled && "cursor-not-allowed opacity-45"
+            )}
+            aria-label={`Star ${promotedProfile.display_name || "profile"}`}
+            disabled={ctaDisabled}
+            whileTap={{ scale: 0.9 }}
+            onClick={(event) => promptStarFromCorner(event, promotedProfile)}
+          >
+            <Star size={isPromoted ? 18 : 22} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+          </motion.button>
+        ) : null}
         <motion.button
           className={cn(
             "group flex items-center justify-center rounded-full bg-[rgba(33,71,201,0.98)] shadow-[0_14px_28px_rgba(33,71,201,0.28)] transition-transform duration-150 hover:scale-[1.02] active:scale-[0.98]",
@@ -419,7 +439,7 @@ const DiscoveryDeckInner = ({
               >
                 <Star size={22} fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
               </motion.button>
-              {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted") : null}
+              {footerCtaMode === "promoted" && !isDiscoverDragging ? renderDiscoveryActionButtons("promoted", profile) : null}
             </div>
           ) : (
             <div />
@@ -547,7 +567,7 @@ const DiscoveryDeckInner = ({
       >
         {showBottomActionBar && footerCtaMode !== "promoted" && !isDiscoverDragging ? (
           <div className="mx-auto flex w-fit items-center rounded-full border border-white/55 bg-[rgba(255,255,255,0.82)] px-4 py-3 shadow-[0_18px_36px_rgba(33,71,201,0.16)] backdrop-blur-[20px]">
-            {renderDiscoveryActionButtons("bottom")}
+            {renderDiscoveryActionButtons("bottom", currentDiscovery)}
           </div>
         ) : showDiscoveryQuotaLock ? (
           <div className="mx-auto flex w-fit items-center rounded-full border border-white/45 bg-[rgba(255,255,255,0.78)] px-4 py-2.5 text-center shadow-[0_16px_32px_rgba(33,71,201,0.12)] backdrop-blur-[20px]">
