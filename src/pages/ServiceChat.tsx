@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, us
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowDown, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { useAuth } from "@/contexts/AuthContext";
 import serviceImage from "@/assets/Notifications/Service.jpg";
@@ -42,6 +41,16 @@ import { markChatRoomSeen } from "@/lib/chatSeen";
 type ActiveSheet = "request" | "quote" | "payment" | "review" | "dispute" | null;
 type BlockState = "none" | "blocked_by_me" | "blocked_by_them";
 
+const formatMessageTime = (iso: string) => {
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(dt);
+};
+
 const ServiceChat = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -54,6 +63,7 @@ const ServiceChat = () => {
   const {
     serviceChat,
     messages,
+    readMessageIds,
     hasOlderMessages,
     loadingOlderMessages,
     counterpart,
@@ -97,7 +107,6 @@ const ServiceChat = () => {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
-  const topHeaderRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const bookingCardRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
@@ -271,19 +280,17 @@ const ServiceChat = () => {
 
   useEffect(() => {
     const computeHeight = () => {
-      const appTop = topHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const bookingTop = bookingCardRef.current?.getBoundingClientRect().height ?? 0;
       const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
       const viewport = window.innerHeight;
-      const reserved = appTop + stickyTop + bookingTop + bottom;
+      const reserved = stickyTop + bookingTop + bottom;
       setMessageViewportHeight(Math.max(220, viewport - reserved));
     };
 
     computeHeight();
 
     const observer = new ResizeObserver(() => computeHeight());
-    if (topHeaderRef.current) observer.observe(topHeaderRef.current);
     if (stickyHeaderRef.current) observer.observe(stickyHeaderRef.current);
     if (bookingCardRef.current) observer.observe(bookingCardRef.current);
     if (bottomBarRef.current) observer.observe(bottomBarRef.current);
@@ -420,9 +427,6 @@ const ServiceChat = () => {
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-hidden">
-      <div ref={topHeaderRef}>
-        <GlobalHeader />
-      </div>
       <div ref={stickyHeaderRef}>
         <ServiceChatHeader
           peerName={peerName}
@@ -569,6 +573,20 @@ const ServiceChat = () => {
                         ) : null}
                         {displayText ? <div className={cn(previewUrl && "mt-2")}>{displayText}</div> : null}
                       </ChatBubble>
+                      <div className={cn("mt-1 flex items-center gap-1 px-1 text-[11px] text-[#9AA0B5]", me ? "justify-end" : "justify-start")}>
+                        <span>{formatMessageTime(message.created_at)}</span>
+                        {me ? (
+                          <span
+                            className={cn(
+                              "font-semibold leading-none",
+                              readMessageIds.has(message.id) ? "text-brandBlue" : "text-[#9AA0B5]"
+                            )}
+                            aria-label={readMessageIds.has(message.id) ? "read" : "sent"}
+                          >
+                            {readMessageIds.has(message.id) ? "✓✓" : "✓"}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })

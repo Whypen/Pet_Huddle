@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -147,6 +147,7 @@ const ChatDialogue = () => {
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   // Inline manage members — stays within ChatDialogue, no navigate-away
   const [groupManageOpen, setGroupManageOpen] = useState(false);
   const [groupManageMembers, setGroupManageMembers] = useState<{ id: string; name: string; avatarUrl: string | null }[]>([]);
@@ -414,6 +415,7 @@ const ChatDialogue = () => {
     pendingInitialScrollRef.current = false;
     snapToLatestMessage();
     markCurrentRoomSeen();
+    setShowScrollToBottom(false);
   }, [loading, markCurrentRoomSeen, messages, snapToLatestMessage]);
 
   useEffect(() => {
@@ -423,6 +425,7 @@ const ChatDialogue = () => {
     if (distanceToBottom <= 120) {
       markCurrentRoomSeen();
     }
+    setShowScrollToBottom(distanceToBottom > 120);
   }, [loading, markCurrentRoomSeen, messages, roomId]);
 
   const loadOlderMessages = useCallback(async () => {
@@ -683,6 +686,7 @@ const ChatDialogue = () => {
     setGroupMuted(false);
     setBlockState("none");
     setUnmatchState("none");
+    setShowScrollToBottom(false);
     if (room) {
       void (async () => {
         try {
@@ -802,7 +806,12 @@ const ChatDialogue = () => {
           const viewport = messagesViewportRef.current;
           if (!viewport) return;
           const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
-          if (nearBottom) viewport.scrollTop = viewport.scrollHeight;
+          if (nearBottom) {
+            viewport.scrollTop = viewport.scrollHeight;
+            setShowScrollToBottom(false);
+          } else {
+            setShowScrollToBottom(true);
+          }
         });
       })
       .subscribe();
@@ -1295,6 +1304,7 @@ const ChatDialogue = () => {
         className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3"
         onScroll={(event) => {
           const distanceToBottom = event.currentTarget.scrollHeight - event.currentTarget.scrollTop - event.currentTarget.clientHeight;
+          setShowScrollToBottom(distanceToBottom > 120);
           if (distanceToBottom <= 120) {
             markCurrentRoomSeen();
           }
@@ -1481,6 +1491,20 @@ const ChatDialogue = () => {
             );
           })}
         </div>
+        {showScrollToBottom ? (
+          <button
+            type="button"
+            onClick={() => {
+              snapToLatestMessage();
+              markCurrentRoomSeen();
+              setShowScrollToBottom(false);
+            }}
+            className="sticky bottom-3 ml-auto mt-3 flex items-center gap-1 rounded-full border border-border/50 bg-background px-3 py-1.5 text-xs text-brandText shadow-sm"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+            Latest
+          </button>
+        ) : null}
       </div>
 
       <div className="border-t border-border bg-white/92 px-3 py-2 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]">

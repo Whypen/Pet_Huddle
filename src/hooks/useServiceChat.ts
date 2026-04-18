@@ -13,6 +13,7 @@ import type {
 type UseServiceChatResult = {
   serviceChat: ServiceChatRow | null;
   messages: ChatMessageRow[];
+  readMessageIds: Set<string>;
   hasOlderMessages: boolean;
   loadingOlderMessages: boolean;
   counterpart: ServiceCounterpart | null;
@@ -52,6 +53,7 @@ const OLDER_MESSAGE_PAGE_SIZE = 20;
 export const useServiceChat = (roomId: string, userId: string): UseServiceChatResult => {
   const [serviceChat, setServiceChat] = useState<ServiceChatRow | null>(null);
   const [messages, setMessages] = useState<ChatMessageRow[]>([]);
+  const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [counterpart, setCounterpart] = useState<ServiceCounterpart | null>(null);
@@ -120,6 +122,36 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     [userId]
   );
 
+  const refreshReadReceipts = useCallback(
+    async (roomMessages?: ChatMessageRow[]) => {
+      if (!roomId || !userId) return;
+      const sourceRows = roomMessages || messages;
+      if (sourceRows.length === 0) {
+        setReadMessageIds(new Set());
+        return;
+      }
+      const myMessageIds = sourceRows
+        .filter((message) => message.sender_id === userId)
+        .map((message) => message.id)
+        .filter(Boolean);
+      if (myMessageIds.length === 0) {
+        setReadMessageIds(new Set());
+        return;
+      }
+      const { data, error } = await supabase
+        .from("message_reads")
+        .select("message_id")
+        .in("message_id", myMessageIds)
+        .neq("user_id", userId);
+      if (error) {
+        console.warn("[service_chat.read_receipts_failed]", error.message);
+        return;
+      }
+      setReadMessageIds(new Set(((data || []) as Array<{ message_id?: string | null }>).map((row) => String(row.message_id || "")).filter(Boolean)));
+    },
+    [messages, roomId, userId]
+  );
+
   const canDispute = useMemo(() => {
     if (!serviceChat) return false;
     if (serviceChat.status === "booked" || serviceChat.status === "in_progress") return true;
@@ -145,6 +177,37 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     return Date.now() >= endAt;
   }, [role, serviceChat]);
 
+  const refreshServiceMeta = useCallback(async () => {
+    if (!roomId || !userId) return null;
+    await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
+    const { data: serviceData, error: serviceErr } = await supabase
+      .from("service_chats")
+      .select(
+        "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
+      )
+      .eq("chat_id", roomId)
+      .maybeSingle();
+    if (serviceErr) throw new Error(asMessage(serviceErr.message, "service_chat_load_failed"));
+    if (!serviceData) throw new Error("service_chat_not_found");
+
+    const row = serviceData as unknown as ServiceChatRow;
+    setServiceChat(row);
+
+    if (row.status === "completed" && row.requester_id === userId) {
+      const { data: reviewRow } = await supabase
+        .from("service_reviews")
+        .select("id")
+        .eq("service_chat_id", row.chat_id)
+        .eq("reviewer_id", userId)
+        .maybeSingle();
+      setHasReviewed(Boolean(reviewRow?.id));
+    } else {
+      setHasReviewed(false);
+    }
+
+    return row;
+  }, [roomId, userId]);
+
   const reload = useCallback(
     async (silent = false) => {
       if (!roomId) {
@@ -153,6 +216,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         hasLoadedRef.current = false;
         setServiceChat(null);
         setMessages([]);
+        setReadMessageIds(new Set());
         setHasOlderMessages(false);
         setCounterpart(null);
         setHasReviewed(false);
@@ -167,15 +231,8 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       const shouldShowLoading = !silent || !hasLoadedRef.current;
       if (shouldShowLoading) setLoading(true);
       try {
-        await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
-        const [{ data: serviceData, error: serviceErr }, { data: messageRows, error: messageErr }] = await Promise.all([
-          supabase
-            .from("service_chats")
-            .select(
-              "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
-            )
-            .eq("chat_id", roomId)
-            .maybeSingle(),
+        const [row, { data: messageRows, error: messageErr }] = await Promise.all([
+          refreshServiceMeta(),
           supabase
             .from("chat_messages")
             .select("id,sender_id,content,created_at")
@@ -183,12 +240,8 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
             .order("created_at", { ascending: false })
             .limit(INITIAL_MESSAGE_PAGE_SIZE + 1),
         ]);
-        if (serviceErr) throw new Error(asMessage(serviceErr.message, "service_chat_load_failed"));
         if (messageErr) throw new Error(asMessage(messageErr.message, "service_chat_messages_failed"));
-        if (!serviceData) throw new Error("service_chat_not_found");
-
-        const row = serviceData as unknown as ServiceChatRow;
-        setServiceChat(row);
+        if (!row) throw new Error("service_chat_not_found");
         const newestFirstMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
         const nextMessages = newestFirstMessages
           .slice(0, INITIAL_MESSAGE_PAGE_SIZE)
@@ -196,6 +249,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         setHasOlderMessages(newestFirstMessages.length > INITIAL_MESSAGE_PAGE_SIZE);
         setMessages(nextMessages);
         void markMessagesRead(nextMessages);
+        void refreshReadReceipts(nextMessages);
 
         const counterpartId = row.requester_id === userId ? row.provider_id : row.requester_id;
         if (counterpartId) {
@@ -229,17 +283,6 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           setCounterpart(null);
         }
 
-        if (row.status === "completed" && row.requester_id === userId) {
-          const { data: reviewRow } = await supabase
-            .from("service_reviews")
-            .select("id")
-            .eq("service_chat_id", row.chat_id)
-            .eq("reviewer_id", userId)
-            .maybeSingle();
-          setHasReviewed(Boolean(reviewRow?.id));
-        } else {
-          setHasReviewed(false);
-        }
         hasLoadedRef.current = true;
         setRoomResolved(true);
       } catch (error) {
@@ -254,7 +297,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         if (shouldShowLoading) setLoading(false);
       }
     },
-    [markMessagesRead, roomId, userId]
+    [markMessagesRead, refreshReadReceipts, refreshServiceMeta, roomId, userId]
   );
 
   useEffect(() => {
@@ -265,6 +308,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       setRoomResolved(true);
       setServiceChat(null);
       setMessages([]);
+      setReadMessageIds(new Set());
       setCounterpart(null);
       setHasReviewed(false);
       return;
@@ -272,6 +316,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     if (!userId) {
         setServiceChat(null);
         setMessages([]);
+        setReadMessageIds(new Set());
         setHasOlderMessages(false);
         setCounterpart(null);
         setHasReviewed(false);
@@ -281,6 +326,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     }
     setServiceChat(null);
     setMessages([]);
+    setReadMessageIds(new Set());
     setHasOlderMessages(false);
     setCounterpart(null);
     setHasReviewed(false);
@@ -290,12 +336,68 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   }, [reload, roomId, userId]);
 
   useEffect(() => {
+    if (!roomId || !userId) return;
+    const roomChannel = supabase
+      .channel(`service_chat_room_${roomId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` },
+        (payload) => {
+          const row = payload.new as ChatMessageRow | null;
+          if (!row?.id) return;
+          setMessages((prev) => {
+            if (prev.some((message) => message.id === row.id)) return prev;
+            const next = [...prev, row];
+            if (prev.length >= INITIAL_MESSAGE_PAGE_SIZE && !hasOlderMessages) {
+              setHasOlderMessages(true);
+            }
+            return next;
+          });
+          if (row.sender_id && row.sender_id !== userId) {
+            void markMessagesRead([row]);
+          }
+          try {
+            const parsed = JSON.parse(row.content) as { kind?: string } | null;
+            if (parsed?.kind?.startsWith("service_")) {
+              void refreshServiceMeta();
+            }
+          } catch {
+            // plain text / share payloads
+          }
+          void refreshReadReceipts();
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(roomChannel);
+    };
+  }, [hasOlderMessages, markMessagesRead, refreshReadReceipts, refreshServiceMeta, roomId, userId]);
+
+  useEffect(() => {
+    if (!roomId || !userId) return;
+    const readChannel = supabase
+      .channel(`service_chat_reads_${roomId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
+        const row = payload.new as { message_id?: string | null; user_id?: string | null } | null;
+        if (!row?.message_id || row.user_id === userId) return;
+        setReadMessageIds((prev) => {
+          if (prev.has(String(row.message_id))) return prev;
+          return new Set([...prev, String(row.message_id)]);
+        });
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(readChannel);
+    };
+  }, [roomId, userId]);
+
+  useEffect(() => {
     if (!roomId) return;
     const tick = window.setInterval(() => {
-      void reload(true);
+      void refreshServiceMeta();
     }, 8000);
     return () => window.clearInterval(tick);
-  }, [reload, roomId]);
+  }, [refreshServiceMeta, roomId]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!roomId || loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
@@ -323,12 +425,13 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         const dedupedChunk = nextChunk.filter((message) => !seen.has(message.id));
         return dedupedChunk.length > 0 ? [...dedupedChunk, ...prev] : prev;
       });
+      void refreshReadReceipts();
     } catch (error) {
       console.warn("[service_chat.load_older_failed]", asMessage((error as { message?: string })?.message, "load_older_failed"));
     } finally {
       setLoadingOlderMessages(false);
     }
-  }, [hasOlderMessages, loading, loadingOlderMessages, messages, roomId]);
+  }, [hasOlderMessages, loading, loadingOlderMessages, messages, refreshReadReceipts, roomId]);
 
   const sendMessage = useCallback(
     async (
@@ -354,14 +457,13 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         });
         if (error) throw error;
         await supabase.from("chats").update({ last_message_at: new Date().toISOString() }).eq("id", roomId);
-        await reload(true);
       } catch (error) {
         toast.error(asMessage((error as { message?: string })?.message, "Unable to send message."));
       } finally {
         setSending(false);
       }
     },
-    [reload, roomId, userId]
+    [roomId, userId]
   );
 
   const rpcVoid = useCallback(
@@ -465,6 +567,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   return {
     serviceChat,
     messages,
+    readMessageIds,
     hasOlderMessages,
     loadingOlderMessages,
     counterpart,
