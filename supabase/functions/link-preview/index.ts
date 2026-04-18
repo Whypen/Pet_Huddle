@@ -256,11 +256,14 @@ Deno.serve(async (req) => {
       if (res == null) res = candidate;
     }
 
-    if (!res || !res.ok) {
+    if (!res) {
       const jina = await tryJinaReader(normalizedUrl);
       if (jina) return json(jina, 200, SUCCESS_CACHE_HEADERS);
       return json({ url: normalizedUrl, failed: true }, 200, FAILURE_CACHE_HEADERS);
     }
+    // Note: do NOT bail on non-2xx — many sites (Rolling Stone, WP VIP) return
+    // a branded 404/410 page with valid og: tags pointing at the site logo,
+    // which still renders as a usable site-card preview.
     const contentType = String(res.headers.get("content-type") || "").toLowerCase();
     const finalUrl = normalizeUrl(res.url) || normalizedUrl;
     if (!contentType.includes("text/html")) {
