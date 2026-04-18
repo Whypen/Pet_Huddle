@@ -531,6 +531,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
+  const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const createInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [createMentions, setCreateMentions] = useState<MentionEntry[]>([]);
   const [createMentionQuery, setCreateMentionQuery] = useState<ActiveMentionQuery | null>(null);
@@ -2050,6 +2051,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setCreateIsSensitive(false);
     setCreateSensitiveSuggested(false);
     setEditingNoticeId(null);
+    setLockedPreviewUrl(null);
+    setDismissedPreviewUrls(new Set());
     setIsCreateOpen(false);
   };
 
@@ -2387,9 +2390,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setSocialRestrictionModalOpen(true);
       return;
     }
+    const composedContent = (() => {
+      const base = content.trim();
+      if (!lockedPreviewUrl || dismissedPreviewUrls.has(lockedPreviewUrl)) return base;
+      if (base.includes(lockedPreviewUrl)) return base;
+      return base ? `${base}\n\n${lockedPreviewUrl}` : lockedPreviewUrl;
+    })();
     const nextErrors: { title?: string; content?: string } = {};
     if (!title.trim()) nextErrors.title = t("Title is required");
-    if (!content.trim()) nextErrors.content = t("Content is required");
+    if (!composedContent.trim()) nextErrors.content = t("Content is required");
     if (createWordsUsed > MAX_COMPOSER_WORDS) nextErrors.content = t("Thread content is too long");
     setCreateErrors(nextErrors);
     if (!user || Object.keys(nextErrors).length > 0) {
@@ -2410,7 +2419,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           .from("threads" as "profiles")
           .update({
             title: title.trim(),
-            content: content.trim(),
+            content: composedContent,
             tags: [category],
             images: mergedImages,
             is_sensitive: createIsSensitive,
@@ -2469,7 +2478,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           .insert({
             user_id: user.id,
             title: title.trim(),
-            content: content.trim(),
+            content: composedContent,
             tags: [category],
             hashtags: [],
             images: uploadedUrls,
@@ -2518,6 +2527,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
       setTitle("");
       setContent("");
+      setLockedPreviewUrl(null);
+      setDismissedPreviewUrls(new Set());
       setCreateMentions([]);
       setCreateMentionQuery(null);
       setCreateMentionSuggestions([]);
@@ -2942,18 +2953,30 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const u = extractFirstHttpUrl(content || "");
     return u && !dismissedPreviewUrls.has(u) ? u : null;
   }, [content, dismissedPreviewUrls]);
-  const createContentPreview = createContentFirstUrl ? linkPreviewByUrl[createContentFirstUrl] : null;
+  const activePreviewUrl = lockedPreviewUrl && !dismissedPreviewUrls.has(lockedPreviewUrl)
+    ? lockedPreviewUrl
+    : createContentFirstUrl;
+  const createContentPreview = activePreviewUrl ? linkPreviewByUrl[activePreviewUrl] : null;
   const dismissCreatePreview = useCallback((url: string) => {
     setDismissedPreviewUrls((prev) => {
       const next = new Set(prev);
       next.add(url);
       return next;
     });
-    setContent((prev) => {
-      const stripped = prev.replace(url, "").replace(/[ \t]{2,}/g, " ").replace(/\s+\n/g, "\n").trim();
-      return stripped;
-    });
+    setLockedPreviewUrl((cur) => (cur === url ? null : cur));
   }, []);
+  // Twitter-style: once a preview resolves, lock it as the active preview and
+  // strip the raw URL from the textarea so the post body stays clean.
+  useEffect(() => {
+    if (!createContentFirstUrl) return;
+    const preview = linkPreviewByUrl[createContentFirstUrl];
+    if (!preview?.resolved || preview.failed) return;
+    setLockedPreviewUrl(createContentFirstUrl);
+    setContent((prev) => {
+      if (!prev.includes(createContentFirstUrl)) return prev;
+      return prev.replace(createContentFirstUrl, "").replace(/[ \t]{2,}/g, " ").replace(/\s+\n/g, "\n").trim();
+    });
+  }, [createContentFirstUrl, linkPreviewByUrl]);
   const COLLAPSED_CONTENT_MAX_HEIGHT = 120;
 
   useEffect(() => {
@@ -3999,18 +4022,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                       />
                     </div>
                   </div>
-                  {createContentFirstUrl ? (
+                  {activePreviewUrl ? (
                     <div className="relative mt-2">
                     <button
                       type="button"
-                      onClick={() => dismissCreatePreview(createContentFirstUrl)}
+                      onClick={() => dismissCreatePreview(activePreviewUrl)}
                       aria-label="Remove link preview"
                       className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-background/90 text-brandText shadow-sm hover:bg-background"
                     >
                       <X className="h-4 w-4" />
                     </button>
                     <a
-                      href={createContentFirstUrl}
+                      href={activePreviewUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="form-field-rest block !h-auto !p-0 overflow-hidden transition-colors hover:bg-muted/20"
@@ -4026,14 +4049,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                         <p className="text-xs text-[rgba(74,73,101,0.62)]">
                           {createContentPreview?.siteName || (() => {
                             try {
-                              return new URL(createContentFirstUrl).hostname.replace(/^www\./, "");
+                              return new URL(activePreviewUrl).hostname.replace(/^www\./, "");
                             } catch {
                               return "External link";
                             }
                           })()}
                         </p>
                         <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-brandText">
-                          {createContentPreview?.title || formatUrlLabel(createContentFirstUrl)}
+                          {createContentPreview?.title || formatUrlLabel(activePreviewUrl)}
                         </p>
                         {createContentPreview?.loading ? (
                           <p className="text-xs text-[rgba(74,73,101,0.62)]">Loading preview...</p>
