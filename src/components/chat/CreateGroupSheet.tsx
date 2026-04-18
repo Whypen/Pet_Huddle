@@ -141,35 +141,36 @@ export function CreateGroupSheet({
       const [{ data: liveLocation }, { data: profileLocation }] = await Promise.all([
         supabase
           .from("user_locations")
-          .select("location_name, location_country, location_pinned_until")
+          .select("location_name")
           .eq("user_id", user.id)
+          .order("updated_at", { ascending: false })
+          .limit(1)
           .maybeSingle(),
         supabase
           .from("profiles")
-          .select("location_country, location_name")
+          .select("location_country, location_name, location_pinned_until")
           .eq("id", user.id)
           .maybeSingle(),
       ]);
       const liveLocationRow = (liveLocation || null) as {
         location_name?: string | null;
-        location_country?: string | null;
-        location_pinned_until?: string | null;
       } | null;
       const profileLocationRow = (profileLocation || null) as {
         location_country?: string | null;
         location_name?: string | null;
+        location_pinned_until?: string | null;
       } | null;
       const pinActive = (() => {
-        const raw = liveLocationRow?.location_pinned_until;
+        const raw = profileLocationRow?.location_pinned_until;
         if (!raw) return false;
         const pinnedUntil = new Date(raw).getTime();
         return Number.isFinite(pinnedUntil) && pinnedUntil > Date.now();
       })();
       const groupCountry = resolveCountryByPrecedence({
-        gpsCountry: liveLocationRow?.location_country || null,
+        gpsCountry: null,
         gpsLocationName: liveLocationRow?.location_name || null,
-        pinCountry: pinActive ? liveLocationRow?.location_country || null : null,
-        pinLocationName: pinActive ? liveLocationRow?.location_name || null : null,
+        pinCountry: pinActive ? profileLocationRow?.location_country || null : null,
+        pinLocationName: pinActive ? profileLocationRow?.location_name || null : null,
         profileCountry: profileLocationRow?.location_country || null,
         profileLocationName: profileLocationRow?.location_name || null,
       });

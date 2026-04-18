@@ -4318,7 +4318,7 @@ const Chats = () => {
         user?.id
           ? supabase
               .from("user_locations")
-              .select("location_name, location_country")
+              .select("location_name")
               .eq("user_id", user.id)
               .order("updated_at", { ascending: false })
               .limit(1)
@@ -4359,7 +4359,7 @@ const Chats = () => {
       const profilePinnedUntilMs = profileLocation?.location_pinned_until ? new Date(profileLocation.location_pinned_until).getTime() : Number.NaN;
       const pinActive = Number.isFinite(profilePinnedUntilMs) && profilePinnedUntilMs > Date.now();
       const viewerCountry = resolveCountryByPrecedence({
-        gpsCountry: (liveLocationResult.data as { location_country?: string | null } | null)?.location_country || null,
+        gpsCountry: null,
         gpsLocationName: (liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null,
         pinCountry: pinActive ? profileLocation?.location_country || null : null,
         pinLocationName: pinActive ? profileLocation?.location_name || null : null,
