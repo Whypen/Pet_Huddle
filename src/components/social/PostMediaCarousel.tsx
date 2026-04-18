@@ -142,7 +142,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
         <div className="overflow-hidden" style={carouselHeight ? { height: `${carouselHeight}px` } : undefined}>
           <div
             ref={scrollRef}
-            className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             onScroll={handleScroll}
           >
             {items.map((item, index) => {
@@ -153,7 +153,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   key={`${item.src}-${index}`}
                   role="button"
                   tabIndex={0}
-                  className="relative shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 touch-pan-x cursor-pointer"
+                  className="relative shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 cursor-pointer"
                   style={{
                     width: slideWidth ? `${slideWidth}px` : undefined,
                     aspectRatio: `${aspect}`,

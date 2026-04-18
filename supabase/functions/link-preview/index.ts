@@ -10,10 +10,26 @@ const json = (body: Record<string, unknown>, status = 200, extraHeaders: Record<
     headers: { ...CORS_HEADERS, "Content-Type": "application/json", ...extraHeaders },
   });
 
-const CACHEABLE_HEADERS = {
-  // Edge/CDN cache for 1 day, browser for 1 hour, stale-while-revalidate for 7 days
+// Successes: edge cache 1d, browser 1h, SWR 7d
+const SUCCESS_CACHE_HEADERS = {
   "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
 };
+
+// Failures: short retry window so transient bot-blocks don't lock for a week
+const FAILURE_CACHE_HEADERS = {
+  "Cache-Control": "public, max-age=60, s-maxage=60",
+};
+
+// UA rotation: Twitterbot is whitelisted by most news sites (NYT, Rolling Stone,
+// WSJ, Bloomberg) which block Facebook/generic crawlers; Slackbot is the
+// next-best fallback; facebookexternalhit handles social-graph content; Chrome
+// desktop is the final catch-all.
+const USER_AGENTS = [
+  "Twitterbot/1.0",
+  "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+];
 
 const tryOEmbed = async (url: string): Promise<Record<string, unknown> | null> => {
   try {
@@ -83,7 +99,7 @@ const decodeHtml = (value: string) =>
     .replace(/&gt;/gi, ">")
     .trim();
 
-const parseMetaAttributes = (tag: string) => {
+const parseAttributes = (tag: string) => {
   const attrs: Record<string, string> = {};
   const pattern = /([A-Za-z_:][A-Za-z0-9_:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
   let match: RegExpExecArray | null;
@@ -101,7 +117,7 @@ const buildMetaMap = (html: string) => {
   const tagPattern = /<meta\b[^>]*>/gi;
   let tagMatch: RegExpExecArray | null;
   while ((tagMatch = tagPattern.exec(html)) !== null) {
-    const attrs = parseMetaAttributes(tagMatch[0]);
+    const attrs = parseAttributes(tagMatch[0]);
     const content = attrs["content"] || "";
     if (!content) continue;
     const property = (attrs["property"] || attrs["name"] || attrs["itemprop"] || "").toLowerCase();
@@ -109,6 +125,42 @@ const buildMetaMap = (html: string) => {
     if (!map.has(property)) map.set(property, content);
   }
   return map;
+};
+
+// Discover an oEmbed JSON endpoint advertised by the page (Vimeo, Twitter/X,
+// Reddit, SoundCloud, TikTok, Flickr, CodePen, Figma, Substack, Medium expose
+// this — bypasses bot-block on the HTML).
+const findOEmbedHref = (html: string): string | null => {
+  const linkPattern = /<link\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = linkPattern.exec(html)) !== null) {
+    const attrs = parseAttributes(match[0]);
+    const rel = (attrs["rel"] || "").toLowerCase();
+    const type = (attrs["type"] || "").toLowerCase();
+    if (rel.includes("alternate") && type.includes("json") && type.includes("oembed")) {
+      return attrs["href"] || null;
+    }
+  }
+  return null;
+};
+
+const fetchOEmbedJson = async (endpoint: string): Promise<Record<string, unknown> | null> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("oembed_timeout"), 4000);
+  try {
+    const r = await fetch(endpoint, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "User-Agent": "Twitterbot/1.0", Accept: "application/json" },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 const readTitle = (html: string) => {
@@ -157,14 +209,10 @@ Deno.serve(async (req) => {
     if (!normalizedUrl) return json({ error: "invalid_url" }, 400);
 
     const oembed = await tryOEmbed(normalizedUrl);
-    if (oembed) return json(oembed, 200, CACHEABLE_HEADERS);
+    if (oembed) return json(oembed, 200, SUCCESS_CACHE_HEADERS);
 
-    const userAgents = [
-      "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    ];
     let res: Response | null = null;
-    for (const ua of userAgents) {
+    for (const ua of USER_AGENTS) {
       const candidate = await fetchPage(normalizedUrl, ua);
       if (candidate.ok) {
         res = candidate;
@@ -173,7 +221,9 @@ Deno.serve(async (req) => {
       if (res == null) res = candidate;
     }
 
-    if (!res || !res.ok) return json({ url: normalizedUrl, failed: true }, 200, CACHEABLE_HEADERS);
+    if (!res || !res.ok) {
+      return json({ url: normalizedUrl, failed: true }, 200, FAILURE_CACHE_HEADERS);
+    }
     const contentType = String(res.headers.get("content-type") || "").toLowerCase();
     const finalUrl = normalizeUrl(res.url) || normalizedUrl;
     if (!contentType.includes("text/html")) {
@@ -181,27 +231,46 @@ Deno.serve(async (req) => {
         url: finalUrl,
         title: finalUrl,
         siteName: new URL(finalUrl).hostname.replace(/^www\./, ""),
-      }, 200, CACHEABLE_HEADERS);
+      }, 200, SUCCESS_CACHE_HEADERS);
     }
 
     const html = await res.text();
     const meta = buildMetaMap(html);
-    const title = meta.get("og:title") || meta.get("twitter:title") || readTitle(html) || finalUrl;
-    const description =
+    let title = meta.get("og:title") || meta.get("twitter:title") || readTitle(html) || "";
+    let description =
       meta.get("og:description") ||
       meta.get("twitter:description") ||
       meta.get("description") ||
       "";
-    const imageRaw =
+    let imageRaw =
       meta.get("og:image") ||
       meta.get("og:image:url") ||
       meta.get("twitter:image") ||
       meta.get("twitter:image:src") ||
       "";
-    const siteName =
+    let siteName =
       meta.get("og:site_name") ||
       meta.get("twitter:site") ||
-      new URL(finalUrl).hostname.replace(/^www\./, "");
+      "";
+
+    // If meta is missing (paywalled, JS-rendered, soft-blocked HTML), try the
+    // page-advertised oEmbed JSON endpoint as a second source.
+    if (!title || !imageRaw) {
+      const oembedHrefRaw = findOEmbedHref(html);
+      const oembedHref = oembedHrefRaw ? toAbsoluteUrl(finalUrl, oembedHrefRaw) : null;
+      if (oembedHref) {
+        const data = await fetchOEmbedJson(oembedHref);
+        if (data) {
+          title = title || (typeof data.title === "string" ? data.title : "");
+          siteName = siteName || (typeof data.provider_name === "string" ? data.provider_name : "");
+          if (!imageRaw && typeof data.thumbnail_url === "string") imageRaw = data.thumbnail_url;
+          if (!description && typeof data.author_name === "string") description = data.author_name;
+        }
+      }
+    }
+
+    title = title || finalUrl;
+    siteName = siteName || new URL(finalUrl).hostname.replace(/^www\./, "");
     const image = imageRaw ? toAbsoluteUrl(finalUrl, imageRaw) : null;
 
     return json({
@@ -210,9 +279,9 @@ Deno.serve(async (req) => {
       description,
       image: image || undefined,
       siteName: siteName.replace(/^@/, ""),
-    }, 200, CACHEABLE_HEADERS);
+    }, 200, SUCCESS_CACHE_HEADERS);
   } catch (error) {
     console.error("[link-preview] failed", error);
-    return json({ failed: true });
+    return json({ failed: true }, 200, FAILURE_CACHE_HEADERS);
   }
 });
