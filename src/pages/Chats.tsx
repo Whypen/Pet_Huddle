@@ -513,6 +513,8 @@ interface Group {
   lastMessage: string;
   lastMessageSender: string;
   time: string;
+  lastMessageFromMe?: boolean;
+  lastMessageReadByOther?: boolean;
   unread: number;
   invitePending?: boolean;
   inviterName?: string | null;
@@ -529,6 +531,8 @@ interface Group {
   createdAt?: string | null;
   _score?: number;
 }
+
+const PULL_REFRESH_THRESHOLD = 54;
 
 interface GroupContactOption {
   id: string;
@@ -659,6 +663,10 @@ const Chats = () => {
   const [exploreGroups, setExploreGroups] = useState<Group[]>([]);
   const [invitedExploreGroups, setInvitedExploreGroups] = useState<Group[]>([]);
   const [exploreLoading, setExploreLoading] = useState(false);
+  const [groupsPullRefreshing, setGroupsPullRefreshing] = useState(false);
+  const [groupsPullOffset, setGroupsPullOffset] = useState(0);
+  const groupsTouchStartYRef = useRef<number | null>(null);
+  const groupsPullEligibleRef = useRef(false);
   // IDs of groups where current user has a pending join request
   const [sentJoinRequests, setSentJoinRequests] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
@@ -2668,6 +2676,8 @@ const Chats = () => {
             lastMessage: parseChatPreviewText(last?.content),
             lastMessageSender: senderName || "",
             time: formatChatTimestamp(last?.created_at),
+            lastMessageFromMe: last?.sender_id === profile.id,
+            lastMessageReadByOther: Boolean(last?.id && lastMessageReadByOther.get(last.id)),
             unread: unreadByRoom.get(roomId) || 0,
             petFocus: Array.isArray(room.pet_focus) ? (room.pet_focus as string[]) : null,
             locationLabel: (room.location_label as string | null) ?? null,
@@ -4552,6 +4562,68 @@ const Chats = () => {
     }
   }, [mainTab, groupSubTab, fetchExploreGroups]);
 
+  const triggerGroupsExploreRefresh = useCallback(async () => {
+    if (groupsPullRefreshing) return;
+    setGroupsPullRefreshing(true);
+    try {
+      await Promise.all([loadConversations(), fetchExploreGroups()]);
+    } catch {
+      toast.error("Couldn't refresh groups.");
+    } finally {
+      setGroupsPullRefreshing(false);
+      setGroupsPullOffset(0);
+      groupsTouchStartYRef.current = null;
+      groupsPullEligibleRef.current = false;
+    }
+  }, [fetchExploreGroups, groupsPullRefreshing, loadConversations]);
+
+  const handleGroupsPullStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (mainTab !== "groups" || groupSubTab !== "explore") {
+      groupsTouchStartYRef.current = null;
+      groupsPullEligibleRef.current = false;
+      return;
+    }
+    const container = event.currentTarget;
+    if ((container.scrollTop ?? 0) > 0 || groupsPullRefreshing) {
+      groupsTouchStartYRef.current = null;
+      groupsPullEligibleRef.current = false;
+      return;
+    }
+    const touchY = event.touches[0]?.clientY;
+    groupsPullEligibleRef.current = typeof touchY === "number" && touchY >= 60;
+    groupsTouchStartYRef.current = groupsPullEligibleRef.current ? touchY : null;
+  }, [groupSubTab, groupsPullRefreshing, mainTab]);
+
+  const handleGroupsPullMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (mainTab !== "groups" || groupSubTab !== "explore" || !groupsPullEligibleRef.current) return;
+    const startY = groupsTouchStartYRef.current;
+    if (startY == null) return;
+    const currentY = event.touches[0]?.clientY;
+    if (typeof currentY !== "number") return;
+    const delta = currentY - startY;
+    if (delta <= 0) {
+      setGroupsPullOffset(0);
+      return;
+    }
+    setGroupsPullOffset(Math.min(84, delta * 0.45));
+  }, [groupSubTab, mainTab]);
+
+  const handleGroupsPullEnd = useCallback(() => {
+    if (mainTab !== "groups" || groupSubTab !== "explore") {
+      groupsTouchStartYRef.current = null;
+      groupsPullEligibleRef.current = false;
+      setGroupsPullOffset(0);
+      return;
+    }
+    if (groupsPullOffset >= PULL_REFRESH_THRESHOLD && !groupsPullRefreshing) {
+      void triggerGroupsExploreRefresh();
+      return;
+    }
+    groupsTouchStartYRef.current = null;
+    groupsPullEligibleRef.current = false;
+    setGroupsPullOffset(0);
+  }, [groupSubTab, groupsPullOffset, groupsPullRefreshing, mainTab, triggerGroupsExploreRefresh]);
+
   const openGroupDetailsSheet = useCallback(async (group: Group) => {
     setGroupDetailsId(group.id);
     try {
@@ -5108,7 +5180,31 @@ const Chats = () => {
           </div>
 
           {/* Chat list */}
-          <div className="flex-1 min-h-0 overflow-y-auto touch-pan-y pb-[calc(64px+env(safe-area-inset-bottom)+20px)]">
+          <div
+            className="flex-1 min-h-0 overflow-y-auto touch-pan-y pb-[calc(64px+env(safe-area-inset-bottom)+20px)]"
+            onTouchStart={handleGroupsPullStart}
+            onTouchMove={handleGroupsPullMove}
+            onTouchEnd={handleGroupsPullEnd}
+            onTouchCancel={handleGroupsPullEnd}
+          >
+            {mainTab === "groups" && groupSubTab === "explore" ? (
+              <div
+                className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground transition-all duration-150"
+                style={{
+                  height: groupsPullRefreshing ? 28 : groupsPullOffset > 0 ? Math.max(14, Math.min(28, groupsPullOffset * 0.55)) : 0,
+                  opacity: groupsPullRefreshing || groupsPullOffset > 0 ? 1 : 0,
+                }}
+              >
+                <Loader2 className={groupsPullRefreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                <span>
+                  {groupsPullRefreshing
+                    ? "Refreshing..."
+                    : groupsPullOffset >= PULL_REFRESH_THRESHOLD
+                      ? "Release to refresh"
+                      : "Pull to refresh"}
+                </span>
+              </div>
+            ) : null}
 
             {/* Chats View (Friends) */}
             {mainTab === "friends" && (
@@ -5782,8 +5878,23 @@ const Chats = () => {
                             </button>
                             <div className="min-w-0 flex-1">
                               <div className="relative min-w-0">
-                                <div className="absolute right-0 top-0 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                                <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-1 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
                                   <p>{`Members: ${group.memberCount}`}</p>
+                                  {group.unread > 0 ? (
+                                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted-foreground/70 text-xs font-medium text-white">
+                                      {group.unread > 99 ? "9+" : group.unread}
+                                    </span>
+                                  ) : group.lastMessageFromMe ? (
+                                    <span
+                                      className={cn(
+                                        "text-[12px] font-semibold leading-none",
+                                        group.lastMessageReadByOther ? "text-[#2145CF]" : "text-[#A3A8BE]"
+                                      )}
+                                      aria-label={group.lastMessageReadByOther ? "read" : "sent"}
+                                    >
+                                      ✓
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <button
                                   type="button"
@@ -5795,13 +5906,6 @@ const Chats = () => {
                                 >
                                   <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
                                 </button>
-                              </div>
-                              <div className="mt-0.5 flex items-center gap-2">
-                                {group.unread > 0 && (
-                                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
-                                    {group.unread > 9 ? "9+" : group.unread}
-                                  </span>
-                                )}
                               </div>
                               {group.locationLabel && (
                                 <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
