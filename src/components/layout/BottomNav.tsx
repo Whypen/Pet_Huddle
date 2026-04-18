@@ -98,13 +98,7 @@ export const BottomNav = () => {
       setChatUnread(0);
       return;
     }
-    try {
-      const raw = localStorage.getItem(unreadStorageKey);
-      const next = raw ? Number(raw) : 0;
-      setChatUnread(Number.isFinite(next) ? Math.max(0, next) : 0);
-    } catch {
-      setChatUnread(0);
-    }
+    setChatUnread(0);
     void recalcUnreadFromBackend(profile.id);
   }, [profile?.id, recalcUnreadFromBackend, unreadStorageKey]);
 

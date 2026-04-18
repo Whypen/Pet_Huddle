@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowDown, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -53,6 +53,8 @@ const ServiceChat = () => {
   const {
     serviceChat,
     messages,
+    hasOlderMessages,
+    loadingOlderMessages,
     counterpart,
     role,
     loading,
@@ -63,6 +65,7 @@ const ServiceChat = () => {
     hasReviewed,
     providerStripeReady,
     reload,
+    loadOlderMessages,
     sendMessage,
     sendRequest,
     withdrawRequest,
@@ -99,6 +102,8 @@ const ServiceChat = () => {
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [messageViewportHeight, setMessageViewportHeight] = useState<number>(420);
   const lastStatusRef = useRef<ServiceStatus | null>(null);
+  const pendingInitialScrollRef = useRef(true);
+  const loadingOlderAnchorRef = useRef<{ top: number; height: number } | null>(null);
   const composerPreviewUrls = useMemo(
     () =>
       composerUploads.map((file) => ({
@@ -212,12 +217,37 @@ const ServiceChat = () => {
   }, [paidFlag, reload, roomId]);
 
   useEffect(() => {
-    if (!loading) {
-      const container = messageScrollRef.current;
-      if (!container) return;
-      container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    pendingInitialScrollRef.current = true;
+  }, [roomId]);
+
+  useLayoutEffect(() => {
+    if (loading || showLoading || messages.length === 0) return;
+    const container = messageScrollRef.current;
+    if (!container) return;
+
+    if (loadingOlderAnchorRef.current) {
+      const { top, height } = loadingOlderAnchorRef.current;
+      const nextHeight = container.scrollHeight;
+      container.scrollTop = top + (nextHeight - height);
+      loadingOlderAnchorRef.current = null;
+      return;
     }
-  }, [loading]);
+
+    if (!pendingInitialScrollRef.current) return;
+    container.scrollTop = container.scrollHeight;
+    pendingInitialScrollRef.current = false;
+    setShowScrollToBottom(false);
+  }, [loading, messages, showLoading]);
+
+  useEffect(() => {
+    if (loading || showLoading || messages.length === 0) return;
+    const container = messageScrollRef.current;
+    const lastMessage = messages[messages.length - 1];
+    if (!container || !lastMessage) return;
+    if (lastMessage.sender_id !== userId) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    setShowScrollToBottom(false);
+  }, [loading, messages, showLoading, userId]);
 
   useEffect(() => {
     const computeHeight = () => {
@@ -420,6 +450,13 @@ const ServiceChat = () => {
           const container = event.currentTarget;
           const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
           setShowScrollToBottom(distanceToBottom > 120);
+          if (container.scrollTop <= 80 && hasOlderMessages && !loadingOlderMessages && !loading && !showLoading) {
+            loadingOlderAnchorRef.current = {
+              top: container.scrollTop,
+              height: container.scrollHeight,
+            };
+            void loadOlderMessages();
+          }
         }}
         style={{ height: `${messageViewportHeight}px` }}
         className="relative overflow-y-auto px-4 pt-3 pb-4 space-y-3"
@@ -434,6 +471,12 @@ const ServiceChat = () => {
         {!showLoading && serviceChat && (
           <>
             <section className="space-y-2">
+              {loadingOlderMessages ? (
+                <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  Loading earlier messages
+                </div>
+              ) : null}
               {isProvider && !hasRequest ? (
                 <div className="rounded-2xl border border-border/40 bg-card p-6 text-center text-sm text-muted-foreground">
                   Waiting for requester to send service request.

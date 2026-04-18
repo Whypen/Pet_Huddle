@@ -13,6 +13,8 @@ import type {
 type UseServiceChatResult = {
   serviceChat: ServiceChatRow | null;
   messages: ChatMessageRow[];
+  hasOlderMessages: boolean;
+  loadingOlderMessages: boolean;
   counterpart: ServiceCounterpart | null;
   role: ServiceRole | null;
   loading: boolean;
@@ -23,6 +25,7 @@ type UseServiceChatResult = {
   hasReviewed: boolean;
   providerStripeReady: boolean;
   reload: (silent?: boolean) => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   sendMessage: (
     text: string,
     attachments?: Array<{ url: string; mime: string; name: string }>,
@@ -43,9 +46,14 @@ const asMessage = (message: string | undefined, fallback: string) => {
   return normalized || fallback;
 };
 
+const INITIAL_MESSAGE_PAGE_SIZE = 10;
+const OLDER_MESSAGE_PAGE_SIZE = 20;
+
 export const useServiceChat = (roomId: string, userId: string): UseServiceChatResult => {
   const [serviceChat, setServiceChat] = useState<ServiceChatRow | null>(null);
   const [messages, setMessages] = useState<ChatMessageRow[]>([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [counterpart, setCounterpart] = useState<ServiceCounterpart | null>(null);
   const [loading, setLoading] = useState(true);
   const [roomResolved, setRoomResolved] = useState(false);
@@ -145,6 +153,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         hasLoadedRef.current = false;
         setServiceChat(null);
         setMessages([]);
+        setHasOlderMessages(false);
         setCounterpart(null);
         setHasReviewed(false);
         return;
@@ -171,7 +180,8 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
             .from("chat_messages")
             .select("id,sender_id,content,created_at")
             .eq("chat_id", roomId)
-            .order("created_at", { ascending: true }),
+            .order("created_at", { ascending: false })
+            .limit(INITIAL_MESSAGE_PAGE_SIZE + 1),
         ]);
         if (serviceErr) throw new Error(asMessage(serviceErr.message, "service_chat_load_failed"));
         if (messageErr) throw new Error(asMessage(messageErr.message, "service_chat_messages_failed"));
@@ -179,7 +189,11 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
 
         const row = serviceData as unknown as ServiceChatRow;
         setServiceChat(row);
-        const nextMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
+        const newestFirstMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
+        const nextMessages = newestFirstMessages
+          .slice(0, INITIAL_MESSAGE_PAGE_SIZE)
+          .reverse();
+        setHasOlderMessages(newestFirstMessages.length > INITIAL_MESSAGE_PAGE_SIZE);
         setMessages(nextMessages);
         void markMessagesRead(nextMessages);
 
@@ -256,16 +270,18 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       return;
     }
     if (!userId) {
-      setServiceChat(null);
-      setMessages([]);
-      setCounterpart(null);
-      setHasReviewed(false);
-      setRoomResolved(false);
+        setServiceChat(null);
+        setMessages([]);
+        setHasOlderMessages(false);
+        setCounterpart(null);
+        setHasReviewed(false);
+        setRoomResolved(false);
       setLoading(true);
       return;
     }
     setServiceChat(null);
     setMessages([]);
+    setHasOlderMessages(false);
     setCounterpart(null);
     setHasReviewed(false);
     setRoomResolved(false);
@@ -280,6 +296,39 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     }, 8000);
     return () => window.clearInterval(tick);
   }, [reload, roomId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!roomId || loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
+    const oldestLoadedMessage = messages[0];
+    const oldestCreatedAt = String(oldestLoadedMessage?.created_at || "").trim();
+    if (!oldestCreatedAt) return;
+
+    setLoadingOlderMessages(true);
+    try {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("id,sender_id,content,created_at")
+        .eq("chat_id", roomId)
+        .lt("created_at", oldestCreatedAt)
+        .order("created_at", { ascending: false })
+        .limit(OLDER_MESSAGE_PAGE_SIZE + 1);
+      if (error) throw error;
+
+      const olderRows = ((data || []) as ChatMessageRow[]).filter(Boolean);
+      const nextChunk = olderRows.slice(0, OLDER_MESSAGE_PAGE_SIZE).reverse();
+      setHasOlderMessages(olderRows.length > OLDER_MESSAGE_PAGE_SIZE);
+      if (nextChunk.length === 0) return;
+      setMessages((prev) => {
+        const seen = new Set(prev.map((message) => message.id));
+        const dedupedChunk = nextChunk.filter((message) => !seen.has(message.id));
+        return dedupedChunk.length > 0 ? [...dedupedChunk, ...prev] : prev;
+      });
+    } catch (error) {
+      console.warn("[service_chat.load_older_failed]", asMessage((error as { message?: string })?.message, "load_older_failed"));
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [hasOlderMessages, loading, loadingOlderMessages, messages, roomId]);
 
   const sendMessage = useCallback(
     async (
@@ -416,6 +465,8 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   return {
     serviceChat,
     messages,
+    hasOlderMessages,
+    loadingOlderMessages,
     counterpart,
     role,
     loading,
@@ -426,6 +477,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     hasReviewed,
     providerStripeReady,
     reload,
+    loadOlderMessages,
     sendMessage,
     sendRequest,
     withdrawRequest,
