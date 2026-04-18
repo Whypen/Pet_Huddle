@@ -669,7 +669,7 @@ const ChatDialogue = () => {
 
   // Initial load of read receipts for my sent messages
   useEffect(() => {
-    if (!roomId || !profile?.id || isGroup || messages.length === 0) return;
+    if (!roomId || !profile?.id || messages.length === 0) return;
     const myMessageIds = messages.filter((m) => m.sender_id === profile.id).map((m) => m.id);
     if (myMessageIds.length === 0) return;
     void (async () => {
@@ -682,11 +682,11 @@ const ChatDialogue = () => {
         setReadMessageIds(new Set((data as { message_id: string }[]).map((r) => r.message_id)));
       }
     })();
-  }, [roomId, profile?.id, isGroup, messages]);
+  }, [roomId, profile?.id, messages]);
 
   // Realtime subscription for blue tick — separate from message reload
   useEffect(() => {
-    if (!roomId || !profile?.id || isGroup) return;
+    if (!roomId || !profile?.id) return;
     const readChannel = supabase
       .channel(`chat_dialogue_reads_${roomId}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
@@ -696,7 +696,7 @@ const ChatDialogue = () => {
       })
       .subscribe();
     return () => { void supabase.removeChannel(readChannel); };
-  }, [roomId, profile?.id, isGroup]);
+  }, [roomId, profile?.id]);
 
   // For group chats: lazily fetch display names for any new sender not yet loaded
   useEffect(() => {
@@ -1253,7 +1253,7 @@ const ChatDialogue = () => {
                     </div>
                     <div className={cn("mt-1 flex items-center gap-1 text-[11px] text-[#9AA0B5]", mine ? "justify-end pr-1" : "justify-start pl-1")}>
                       <span>{formatMessageTime(message.created_at)}</span>
-                      {mine && !isGroup && (
+                      {mine && (
                         <span
                           className={cn(
                             "font-semibold leading-none",

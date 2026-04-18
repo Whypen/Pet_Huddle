@@ -4310,7 +4310,7 @@ const Chats = () => {
   const fetchExploreGroups = useCallback(async () => {
     setExploreLoading(true);
     try {
-      const [{ data: requestRows }, { data: inviteRows }, liveLocationResult, profileLocationResult] = await Promise.all([
+      const [{ data: requestRows }, invitePreviewResult, publicGroupsResult, liveLocationResult, profileLocationResult] = await Promise.all([
         user?.id
           ? supabase
               .from("group_join_requests")
@@ -4319,11 +4319,18 @@ const Chats = () => {
               .eq("status", "pending")
           : Promise.resolve({ data: [] }),
         user?.id
-          ? supabase
-              .from("group_chat_invites")
-              .select("id, chat_id, chat_name, created_at, profiles!group_chat_invites_inviter_user_id_fkey(display_name)")
-              .eq("invitee_user_id", user.id)
-              .eq("status", "pending")
+          ? (supabase.rpc as (
+              fn: string,
+              params?: Record<string, unknown>
+            ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_group_invite_previews", {
+              p_user_id: user.id,
+            })
+          : Promise.resolve({ data: [] as unknown[], error: null }),
+        user?.id
+          ? (supabase.rpc as (
+              fn: string,
+              params?: Record<string, unknown>
+            ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_viewer")
           : Promise.resolve({ data: [] }),
         user?.id
           ? supabase
@@ -4347,15 +4354,22 @@ const Chats = () => {
         setSentJoinRequests(new Set((requestRows as Array<{ chat_id: string }>).map((r) => r.chat_id)));
       }
 
+      if (invitePreviewResult.error) throw invitePreviewResult.error;
+      if (publicGroupsResult.error) throw publicGroupsResult.error;
+
+      const invitePreviewRows = Array.isArray(invitePreviewResult.data)
+        ? (invitePreviewResult.data as Array<Record<string, unknown>>)
+        : [];
+
       const inviteMap = new Map<string, PendingGroupInvite>();
-      for (const row of (inviteRows || []) as Array<Record<string, unknown>>) {
+      for (const row of invitePreviewRows) {
         const chatId = String(row.chat_id || "").trim();
         if (!chatId) continue;
         inviteMap.set(chatId, {
-          inviteId: String(row.id || ""),
+          inviteId: String(row.invite_id || ""),
           chatId,
           chatName: String(row.chat_name || "Group"),
-          inviterName: String((row.profiles as Record<string, unknown> | null)?.display_name || "Someone"),
+          inviterName: String(row.inviter_name || "Someone"),
           createdAt: typeof row.created_at === "string" ? row.created_at : null,
         });
       }
@@ -4383,7 +4397,7 @@ const Chats = () => {
         profileLocationName: profileLocation?.location_name || profile?.location_name || null,
       });
 
-      let rows: Array<{
+      const rows: Array<{
         id: string;
         name: string;
         avatar_url: string | null;
@@ -4396,48 +4410,27 @@ const Chats = () => {
         description: string | null;
         member_count: number | null;
         created_by: string | null;
-      }> = [];
-      if (user?.id && viewerCountry) {
-        const { data, error } = await (supabase.rpc as (
-          fn: string,
-          params?: Record<string, unknown>
-        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_public_groups_for_country", {
-          p_user_id: user.id,
-          p_country: viewerCountry,
-        });
-        if (error) throw error;
-        rows = (Array.isArray(data) ? data : []) as typeof rows;
-      }
+      }> = Array.isArray(publicGroupsResult.data) ? (publicGroupsResult.data as typeof rows) : [];
 
-      let inviteChatRows: typeof rows = [];
-      if (inviteMap.size > 0 && user?.id) {
-        const { data: invitePreviewRows, error: invitePreviewError } = await (supabase.rpc as (
-          fn: string,
-          params?: Record<string, unknown>
-        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_group_invite_previews", {
-          p_user_id: user.id,
-        });
-        if (invitePreviewError) throw invitePreviewError;
-        inviteChatRows = (Array.isArray(invitePreviewRows) ? invitePreviewRows : []).map((row) => {
-          const record = row as Record<string, unknown>;
-          return {
-            id: String(record.chat_id || ""),
-            name: String(record.chat_name || "Group"),
-            avatar_url: (record.avatar_url as string | null) ?? null,
-            location_label: (record.location_label as string | null) ?? null,
-            location_country: normalizeCountryKey((record.location_country as string | null) ?? null) || null,
-            pet_focus: Array.isArray(record.pet_focus) ? (record.pet_focus as string[]) : null,
-            join_method: String(record.join_method || "request"),
-            last_message_at: (record.last_message_at as string | null) ?? null,
-            created_at: String(record.created_at || ""),
-            description: (record.description as string | null) ?? null,
-            member_count: Number(record.member_count ?? 0),
-            created_by: (record.created_by as string | null) ?? null,
-            visibility: ((record.visibility as "public" | "private" | null) ?? null),
-            room_code: (record.room_code as string | null) ?? null,
-          };
-        }).filter((row) => row.id);
-      }
+      const inviteChatRows: typeof rows = invitePreviewRows.map((row) => {
+        const record = row as Record<string, unknown>;
+        return {
+          id: String(record.chat_id || ""),
+          name: String(record.chat_name || "Group"),
+          avatar_url: (record.avatar_url as string | null) ?? null,
+          location_label: (record.location_label as string | null) ?? null,
+          location_country: normalizeCountryKey((record.location_country as string | null) ?? null) || null,
+          pet_focus: Array.isArray(record.pet_focus) ? (record.pet_focus as string[]) : null,
+          join_method: String(record.join_method || "request"),
+          last_message_at: (record.last_message_at as string | null) ?? null,
+          created_at: String(record.created_at || ""),
+          description: (record.description as string | null) ?? null,
+          member_count: Number(record.member_count ?? 0),
+          created_by: (record.created_by as string | null) ?? null,
+          visibility: ((record.visibility as "public" | "private" | null) ?? null),
+          room_code: (record.room_code as string | null) ?? null,
+        };
+      }).filter((row) => row.id);
 
       const joinedIds = new Set(groups.map((g) => g.id));
 
@@ -5883,16 +5876,6 @@ const Chats = () => {
                                   {group.unread > 0 ? (
                                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted-foreground/70 text-xs font-medium text-white">
                                       {group.unread > 99 ? "9+" : group.unread}
-                                    </span>
-                                  ) : group.lastMessageFromMe ? (
-                                    <span
-                                      className={cn(
-                                        "text-[12px] font-semibold leading-none",
-                                        group.lastMessageReadByOther ? "text-[#2145CF]" : "text-[#A3A8BE]"
-                                      )}
-                                      aria-label={group.lastMessageReadByOther ? "read" : "sent"}
-                                    >
-                                      ✓
                                     </span>
                                   ) : null}
                                 </div>
