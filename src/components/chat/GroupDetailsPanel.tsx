@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ImageIcon, Users } from "lucide-react";
 
 type GroupDetailsAction = {
@@ -29,11 +29,24 @@ export function GroupDetailsPanel({
   actions,
 }: GroupDetailsPanelProps) {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const canExpandDescription = useMemo(() => {
-    const value = String(description || "").trim();
-    if (!value) return false;
-    return value.length > 160 || value.split("\n").length > 3;
-  }, [description]);
+  const descriptionRef = useRef<HTMLParagraphElement | null>(null);
+  const [canExpandDescription, setCanExpandDescription] = useState(false);
+
+  useEffect(() => {
+    const node = descriptionRef.current;
+    if (!node || descriptionExpanded) {
+      if (!descriptionExpanded) {
+        setCanExpandDescription(false);
+      }
+      return;
+    }
+    const measure = () => {
+      setCanExpandDescription(node.scrollHeight - node.clientHeight > 1);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [description, descriptionExpanded]);
 
   return (
     <div className="space-y-5">
@@ -56,6 +69,7 @@ export function GroupDetailsPanel({
       {description ? (
         <div className="rounded-[18px] border border-white/60 bg-white px-4 py-3 pr-5 shadow-[0_10px_24px_rgba(66,73,101,0.10)]">
           <p
+            ref={descriptionRef}
             className={
               descriptionExpanded
                 ? "whitespace-pre-wrap break-words text-sm leading-relaxed text-brandText"

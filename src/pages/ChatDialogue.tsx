@@ -142,6 +142,7 @@ const ChatDialogue = () => {
   const [groupManageDescriptionDraft, setGroupManageDescriptionDraft] = useState("");
   const [groupManageDescriptionEditing, setGroupManageDescriptionEditing] = useState(false);
   const [groupManageDescriptionSaving, setGroupManageDescriptionSaving] = useState(false);
+  const [groupManageImageUploading, setGroupManageImageUploading] = useState(false);
   const [groupManageLoading, setGroupManageLoading] = useState(false);
   const [groupManageReturnToInfo, setGroupManageReturnToInfo] = useState(false);
   const [groupVerifyGateOpen, setGroupVerifyGateOpen] = useState(false);
@@ -1504,7 +1505,10 @@ const ChatDialogue = () => {
                   <ChevronLeft className="h-4 w-4 text-brandText/70" />
                 </button>
               ) : null}
-              <SheetTitle className="text-left">Manage Group</SheetTitle>
+              <div>
+                <SheetTitle className="text-left">Manage Group</SheetTitle>
+                <p className="mt-1 text-left text-sm text-muted-foreground">Edit photo, members, and group settings.</p>
+              </div>
             </div>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
@@ -1514,9 +1518,66 @@ const ChatDialogue = () => {
               </div>
             ) : (
               <>
+                <div className="flex items-center gap-3">
+                  {groupAvatarUrl ? (
+                    <img src={groupAvatarUrl} alt={roomName} className="h-14 w-14 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/20 to-accent/20">
+                      <Users className="h-6 w-6 text-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm font-semibold text-brandText">{roomName || "Group"}</div>
+                    <div className="text-[10px] text-muted-foreground">{groupMemberCount} members</div>
+                  </div>
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file || !roomId || !profile?.id) return;
+                        setGroupManageImageUploading(true);
+                        try {
+                          const { default: compress } = await import("browser-image-compression");
+                          const compressed = await compress(file, {
+                            maxSizeMB: 0.5,
+                            maxWidthOrHeight: 800,
+                            useWebWorker: true,
+                          });
+                          const ext = compressed.name.split(".").pop() || "jpg";
+                          const path = `${profile.id}/groups/${roomId}/${Date.now()}.${ext}`;
+                          const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, compressed, { upsert: true });
+                          if (uploadErr) throw uploadErr;
+                          const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+                          const row = await updateGroupChatMetadata({
+                            chatId: roomId,
+                            avatarUrl: pub.publicUrl,
+                            updateAvatar: true,
+                          });
+                          setGroupAvatarUrl(row.avatar_url || null);
+                          setGroupDescription(row.description || "");
+                          setGroupManageDescriptionDraft(row.description || "");
+                          toast.success("Group image updated");
+                        } catch {
+                          toast.error("Couldn't update group image.");
+                        } finally {
+                          setGroupManageImageUploading(false);
+                          event.target.value = "";
+                        }
+                      }}
+                    />
+                    <span className="inline-flex min-h-9 items-center rounded-full bg-white px-4 text-sm font-semibold text-brandText shadow-[0_8px_24px_rgba(66,73,101,0.12)]">
+                      {groupManageImageUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Change Image
+                    </span>
+                  </label>
+                </div>
+
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</p>
+                    <div className="text-xs font-semibold text-brandText/70">Description</div>
                     <button
                       type="button"
                       className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8C93AA] transition-colors hover:bg-muted/50"

@@ -4318,7 +4318,7 @@ const Chats = () => {
         user?.id
           ? supabase
               .from("user_locations")
-              .select("location_name")
+              .select("location_name, location_country")
               .eq("user_id", user.id)
               .order("updated_at", { ascending: false })
               .limit(1)
@@ -4359,6 +4359,7 @@ const Chats = () => {
       const profilePinnedUntilMs = profileLocation?.location_pinned_until ? new Date(profileLocation.location_pinned_until).getTime() : Number.NaN;
       const pinActive = Number.isFinite(profilePinnedUntilMs) && profilePinnedUntilMs > Date.now();
       const viewerCountry = resolveCountryByPrecedence({
+        gpsCountry: (liveLocationResult.data as { location_country?: string | null } | null)?.location_country || null,
         gpsLocationName: (liveLocationResult.data as { location_name?: string | null } | null)?.location_name || null,
         pinCountry: pinActive ? profileLocation?.location_country || null : null,
         pinLocationName: pinActive ? profileLocation?.location_name || null : null,
@@ -4398,39 +4399,34 @@ const Chats = () => {
         rows = (Array.isArray(data) ? data : []) as typeof rows;
       }
 
-      const missingInviteIds = Array.from(inviteMap.keys()).filter((chatId) => !rows.some((row) => row.id === chatId));
       let inviteChatRows: typeof rows = [];
-      if (missingInviteIds.length > 0) {
-        const { data: inviteChats } = await supabase
-          .from("chats")
-          .select("id, name, avatar_url, location_label, location_country, pet_focus, join_method, last_message_at, created_at, description, created_by, visibility, room_code")
-          .in("id", missingInviteIds);
-        if (Array.isArray(inviteChats)) {
-          const { data: inviteMembers } = await supabase
-            .from("chat_room_members")
-            .select("chat_id, user_id")
-            .in("chat_id", missingInviteIds);
-          const counts = new Map<string, number>();
-          for (const member of (inviteMembers || []) as Array<{ chat_id: string }>) {
-            counts.set(member.chat_id, (counts.get(member.chat_id) || 0) + 1);
-          }
-          inviteChatRows = (inviteChats as Array<Record<string, unknown>>).map((row) => ({
-            id: String(row.id || ""),
-            name: String(row.name || "Group"),
-            avatar_url: (row.avatar_url as string | null) ?? null,
-            location_label: (row.location_label as string | null) ?? null,
-            location_country: normalizeCountryKey((row.location_country as string | null) ?? null) || null,
-            pet_focus: Array.isArray(row.pet_focus) ? (row.pet_focus as string[]) : null,
-            join_method: String(row.join_method || "request"),
-            last_message_at: (row.last_message_at as string | null) ?? null,
-            created_at: String(row.created_at || ""),
-            description: (row.description as string | null) ?? null,
-            member_count: counts.get(String(row.id || "")) ?? 0,
-            created_by: (row.created_by as string | null) ?? null,
-            visibility: ((row.visibility as "public" | "private" | null) ?? null),
-            room_code: (row.room_code as string | null) ?? null,
-          }));
-        }
+      if (inviteMap.size > 0 && user?.id) {
+        const { data: invitePreviewRows, error: invitePreviewError } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)("get_group_invite_previews", {
+          p_user_id: user.id,
+        });
+        if (invitePreviewError) throw invitePreviewError;
+        inviteChatRows = (Array.isArray(invitePreviewRows) ? invitePreviewRows : []).map((row) => {
+          const record = row as Record<string, unknown>;
+          return {
+            id: String(record.chat_id || ""),
+            name: String(record.chat_name || "Group"),
+            avatar_url: (record.avatar_url as string | null) ?? null,
+            location_label: (record.location_label as string | null) ?? null,
+            location_country: normalizeCountryKey((record.location_country as string | null) ?? null) || null,
+            pet_focus: Array.isArray(record.pet_focus) ? (record.pet_focus as string[]) : null,
+            join_method: String(record.join_method || "request"),
+            last_message_at: (record.last_message_at as string | null) ?? null,
+            created_at: String(record.created_at || ""),
+            description: (record.description as string | null) ?? null,
+            member_count: Number(record.member_count ?? 0),
+            created_by: (record.created_by as string | null) ?? null,
+            visibility: ((record.visibility as "public" | "private" | null) ?? null),
+            room_code: (record.room_code as string | null) ?? null,
+          };
+        }).filter((row) => row.id);
       }
 
       const joinedIds = new Set(groups.map((g) => g.id));
@@ -5521,12 +5517,12 @@ const Chats = () => {
                                   transition={{ delay: index * 0.04, duration: 0.2 }}
                                   className="relative rounded-xl bg-card p-3 shadow-card"
                                 >
-                                  <div className="flex items-start gap-3">
-                                    <button
-                                      type="button"
-                                      className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                                      onClick={() => void openGroupDetailsSheet(group)}
-                                      aria-label={`Open ${group.name} details`}
+                                <div className="flex items-start gap-3">
+                                  <button
+                                    type="button"
+                                    className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
+                                    onClick={() => void openGroupDetailsSheet(group)}
+                                    aria-label={`Open ${group.name} details`}
                                     >
                                       {group.avatarUrl ? (
                                         <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
@@ -5534,14 +5530,26 @@ const Chats = () => {
                                         <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                                       )}
                                     </button>
-                                    <div className="min-w-0 flex-1 pr-[118px]">
-                                      <button
-                                        type="button"
-                                        className="block min-w-0 text-left"
-                                        onClick={() => void openGroupDetailsSheet(group)}
-                                      >
-                                        <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                                      </button>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="relative min-w-0">
+                                        <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-2 text-right">
+                                          <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
+                                          <button
+                                            onClick={handleExploreCardCTA}
+                                            className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
+                                            style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                                          >
+                                            Join
+                                          </button>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="block min-w-0 max-w-full pr-[104px] text-left"
+                                          onClick={() => void openGroupDetailsSheet(group)}
+                                        >
+                                          <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                                        </button>
+                                      </div>
                                       {group.locationLabel && (
                                         <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
                                           <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
@@ -5563,21 +5571,11 @@ const Chats = () => {
                                         </span>
                                       </div>
                                       {group.description && (
-                                        <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                        <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
                                           {group.description}
                                         </p>
                                       )}
                                     </div>
-                                  </div>
-                                  <div className="absolute right-3 top-3 flex min-w-[96px] flex-col items-end gap-2 text-right">
-                                    <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
-                                    <button
-                                      onClick={handleExploreCardCTA}
-                                      className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
-                                      style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                                    >
-                                      Join
-                                    </button>
                                   </div>
                                 </motion.div>
                               );
@@ -5641,14 +5639,47 @@ const Chats = () => {
                                     <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                                   )}
                                 </button>
-                                <div className="min-w-0 flex-1 pr-[118px]">
-                                  <button
-                                    type="button"
-                                    className="block min-w-0 text-left"
-                                    onClick={() => void openGroupDetailsSheet(group)}
-                                  >
-                                    <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                                  </button>
+                                <div className="min-w-0 flex-1">
+                                  <div className="relative min-w-0">
+                                    <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-2 text-right">
+                                      <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
+                                      {isMember ? (
+                                        <button
+                                          onClick={handleExploreCardCTA}
+                                          className="flex items-center gap-0.5 text-[13px] font-medium text-primary"
+                                        >
+                                          Open <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
+                                        </button>
+                                      ) : hasSentRequest ? (
+                                        <span className="rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
+                                          Requested
+                                        </span>
+                                      ) : group.joinMethod === "instant" ? (
+                                        <button
+                                          onClick={handleExploreCardCTA}
+                                          className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
+                                          style={{ backgroundColor: "var(--blue, #3B82F6)" }}
+                                        >
+                                          Join
+                                        </button>
+                                      ) : (
+                                        <button
+                                          onClick={handleExploreCardCTA}
+                                          className="rounded-full border px-3 py-1 text-[13px] font-semibold"
+                                          style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
+                                        >
+                                          Request
+                                        </button>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="block min-w-0 max-w-full pr-[112px] text-left"
+                                      onClick={() => void openGroupDetailsSheet(group)}
+                                    >
+                                      <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                                    </button>
+                                  </div>
                                   {group.locationLabel && (
                                     <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
                                       <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
@@ -5665,42 +5696,11 @@ const Chats = () => {
                                     </div>
                                   )}
                                   {group.description && (
-                                    <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                    <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
                                       {group.description}
                                     </p>
                                   )}
                                 </div>
-                              </div>
-                              <div className="absolute right-3 top-3 flex min-w-[96px] flex-col items-end gap-2 text-right">
-                                <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
-                                {isMember ? (
-                                  <button
-                                    onClick={handleExploreCardCTA}
-                                    className="flex items-center gap-0.5 text-[13px] font-medium text-primary"
-                                  >
-                                    Open <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
-                                  </button>
-                                ) : hasSentRequest ? (
-                                  <span className="rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
-                                    Requested
-                                  </span>
-                                ) : group.joinMethod === "instant" ? (
-                                  <button
-                                    onClick={handleExploreCardCTA}
-                                    className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
-                                    style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                                  >
-                                    Join
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={handleExploreCardCTA}
-                                    className="rounded-full border px-3 py-1 text-[13px] font-semibold"
-                                    style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
-                                  >
-                                    Request
-                                  </button>
-                                )}
                               </div>
                             </motion.div>
                           );
@@ -5780,18 +5780,22 @@ const Chats = () => {
                                 <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
                               )}
                             </button>
-
-                            <div className="min-w-0 flex-1 pr-[118px]">
-                              <button
-                                type="button"
-                                className="block min-w-0 text-left"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void openGroupDetailsSheet(group);
-                                }}
-                              >
-                                <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                              </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="relative min-w-0">
+                                <div className="absolute right-0 top-0 shrink-0 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
+                                  <p>{`Members: ${group.memberCount}`}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="block min-w-0 max-w-full pr-[92px] text-left"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openGroupDetailsSheet(group);
+                                  }}
+                                >
+                                  <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
+                                </button>
+                              </div>
                               <div className="mt-0.5 flex items-center gap-2">
                                 {group.unread > 0 && (
                                   <span className="flex-shrink-0 w-5 h-5 rounded-full bg-brandBlue text-white text-xs flex items-center justify-center font-medium">
@@ -5814,14 +5818,11 @@ const Chats = () => {
                                 </div>
                               )}
                               {group.description && (
-                                <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                                <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
                                   {group.description}
                                 </p>
                               )}
                             </div>
-                          </div>
-                          <div className="absolute right-3 top-3 text-right text-[11px] leading-[1.25] text-[#8C93AA]">
-                            <p>{`Members: ${group.memberCount}`}</p>
                           </div>
 
                           {/* Invite pending CTA */}
