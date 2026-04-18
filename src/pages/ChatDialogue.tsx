@@ -535,13 +535,40 @@ const ChatDialogue = () => {
             .maybeSingle();
 
           if (membership) {
-            setRoomId(room);
             const grouped = await loadGroupInfo(room);
-            await Promise.all([loadRoomMessages(room), grouped ? Promise.resolve() : loadCounterpart(room, name, hintedUserId)]);
+            let directTargetId = hintedUserId && hintedUserId !== profile.id ? hintedUserId : null;
+            if (!grouped && !directTargetId) {
+              const { data: directMembers } = await supabase
+                .from("chat_room_members")
+                .select("user_id")
+                .eq("chat_id", room);
+              directTargetId =
+                ((directMembers || []) as Array<{ user_id?: string | null }>)
+                  .map((member) => String(member.user_id || "").trim())
+                  .find((userId) => Boolean(userId) && userId !== profile.id) || null;
+            }
+            const canonicalRoomId =
+              !grouped && directTargetId
+                ? await ensureDirectChatRoom(supabase, profile.id, directTargetId, name)
+                : room;
+            const nextRoomId = canonicalRoomId || room;
+            setRoomId(nextRoomId);
+            await Promise.all([
+              loadRoomMessages(nextRoomId),
+              grouped ? Promise.resolve() : loadCounterpart(nextRoomId, name, directTargetId),
+            ]);
             requestAnimationFrame(() => {
               const viewport = messagesViewportRef.current;
               if (viewport) viewport.scrollTop = viewport.scrollHeight;
             });
+            if (nextRoomId !== room) {
+              navigate(
+                `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(name)}${
+                  directTargetId ? `&with=${encodeURIComponent(directTargetId)}` : ""
+                }`,
+                { replace: true }
+              );
+            }
             return;
           }
 

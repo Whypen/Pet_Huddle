@@ -61,14 +61,23 @@ export async function ensureDirectChatRoom(
         .in("chat_id", myRoomIds);
 
       const overlaps = [...new Set((targetMemberships || []).map((m: { chat_id: string }) => m.chat_id).filter(Boolean))];
-      for (const roomId of overlaps) {
-        const { data: members } = await supabase
-          .from("chat_room_members")
-          .select("user_id")
-          .eq("chat_id", roomId);
-        const ids = (members || []).map((m: { user_id: string }) => m.user_id);
-        if (ids.length === 2 && ids.includes(actorId) && ids.includes(targetUserId)) {
-          return roomId;
+      if (overlaps.length) {
+        const { data: overlapChats } = await supabase
+          .from("chats")
+          .select("id, type, last_message_at, created_at")
+          .in("id", overlaps)
+          .eq("type", "direct")
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false });
+        for (const room of (overlapChats || []) as Array<{ id: string }>) {
+          const { data: members } = await supabase
+            .from("chat_room_members")
+            .select("user_id")
+            .eq("chat_id", room.id);
+          const ids = (members || []).map((m: { user_id: string }) => m.user_id);
+          if (ids.length === 2 && ids.includes(actorId) && ids.includes(targetUserId)) {
+            return room.id;
+          }
         }
       }
     }

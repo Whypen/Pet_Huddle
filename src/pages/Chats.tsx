@@ -4214,13 +4214,16 @@ const Chats = () => {
     const openRoomId = searchParams.get("room");
 
     if (openRoomId) {
-      void markChatMessagesRead(openRoomId);
-      navigate(
-        `/chat-dialogue?room=${encodeURIComponent(openRoomId)}&name=${encodeURIComponent(openUserName)}${
-          openUserId ? `&with=${encodeURIComponent(openUserId)}` : ""
-        }`,
-        { replace: true }
-      );
+      void (async () => {
+        const canonicalRoomId = openUserId ? (await ensureDirectRoom(openUserId, openUserName)) || openRoomId : openRoomId;
+        void markChatMessagesRead(canonicalRoomId);
+        navigate(
+          `/chat-dialogue?room=${encodeURIComponent(canonicalRoomId)}&name=${encodeURIComponent(openUserName)}${
+            openUserId ? `&with=${encodeURIComponent(openUserId)}` : ""
+          }`,
+          { replace: true }
+        );
+      })();
       return;
     }
 
@@ -4490,11 +4493,18 @@ const Chats = () => {
       navigate(`/service-chat?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
       return;
     }
-    navigate(
-      `/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}${
-        chat.peerUserId ? `&with=${encodeURIComponent(chat.peerUserId)}` : ""
-      }`
-    );
+    if (chat.peerUserId) {
+      void (async () => {
+        const canonicalRoomId = await ensureDirectRoom(chat.peerUserId!, chat.name || "Conversation");
+        const nextRoomId = canonicalRoomId || chat.id;
+        void markChatMessagesRead(nextRoomId);
+        navigate(
+          `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(chat.name)}&with=${encodeURIComponent(chat.peerUserId!)}`
+        );
+      })();
+      return;
+    }
+    navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
   };
 
   const handleMatchAvatarClick = useCallback((entry: MatchOnlyAvatar) => {

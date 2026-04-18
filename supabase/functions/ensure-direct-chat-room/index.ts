@@ -63,55 +63,14 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: actorMemberships, error: actorMembershipErr } = await supabase
-      .from("chat_room_members")
-      .select("chat_id")
-      .eq("user_id", actorId);
-    if (actorMembershipErr) throw actorMembershipErr;
-    const actorRoomIds = [...new Set((actorMemberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
-
-    if (actorRoomIds.length > 0) {
-      const { data: targetMemberships, error: targetMembershipErr } = await supabase
-        .from("chat_room_members")
-        .select("chat_id")
-        .eq("user_id", targetUserId)
-        .in("chat_id", actorRoomIds);
-      if (targetMembershipErr) throw targetMembershipErr;
-      const overlapIds = [...new Set((targetMemberships || []).map((row: { chat_id: string }) => row.chat_id).filter(Boolean))];
-      if (overlapIds.length > 0) {
-        const { data: overlapChats, error: overlapChatsErr } = await supabase
-          .from("chats")
-          .select("id, type")
-          .in("id", overlapIds)
-          .eq("type", "direct")
-          .limit(1);
-        if (overlapChatsErr) throw overlapChatsErr;
-        const existingId = String((overlapChats || [])[0]?.id || "");
-        if (existingId) {
-          return new Response(JSON.stringify({ roomId: existingId }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      }
-    }
-
-    const { data: chatRow, error: chatErr } = await supabase
-      .from("chats")
-      .insert({ name: targetName, type: "direct", created_by: actorId })
-      .select("id")
-      .single();
-    if (chatErr) throw chatErr;
-    const roomId = String(chatRow?.id || "");
+    const { data: roomData, error: roomError } = await supabase.rpc("ensure_direct_chat_room_for_users", {
+      p_actor_user_id: actorId,
+      p_target_user_id: targetUserId,
+      p_target_name: targetName,
+    });
+    if (roomError) throw roomError;
+    const roomId = String(roomData || "");
     if (!roomId) throw new Error("chat_room_not_created");
-
-    const { error: memberErr } = await supabase
-      .from("chat_room_members")
-      .insert([
-        { chat_id: roomId, user_id: actorId },
-        { chat_id: roomId, user_id: targetUserId },
-      ] as Record<string, unknown>[]);
-    if (memberErr) throw memberErr;
 
     return new Response(JSON.stringify({ roomId }), {
       status: 200,
