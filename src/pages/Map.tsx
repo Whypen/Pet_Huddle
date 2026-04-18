@@ -41,6 +41,7 @@ import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { openExternalUrl } from "@/lib/nativeShell";
 
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
@@ -617,31 +618,25 @@ const MapPage = () => {
   }, [flyToWithDebug, userLocation]);
 
   // ==========================================================================
-  // GPS Required Modal — settings deep-link (pure web PWA, no Capacitor)
+  // GPS Required Modal — same app/device settings deep-link contract as Discover
   // ==========================================================================
   const openDeviceLocationSettings = () => {
-    // iOS Safari: 'app-settings:' opens this app's iOS Settings page.
-    // Android Chrome: no reliable web deep-link to device location settings;
-    // we try anyway and fall back to the helper toast if it does nothing.
     const isIos = /ipad|iphone|ipod/i.test(navigator.userAgent);
     const isAndroid = /android/i.test(navigator.userAgent);
 
     if (isIos) {
-      try {
-        window.location.href = "app-settings:";
-      } catch {
-        toast.info("Please open Settings and enable Location Services for Huddle.");
-      }
+      openExternalUrl("app-settings:", "map-app-settings");
       return;
     }
 
     if (isAndroid) {
-      // Android does not expose a reliable web-to-settings URI; show helper.
-      toast.info("Please open Settings and enable Location Services for Huddle.");
+      openExternalUrl(
+        "intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;end",
+        "map-app-settings"
+      );
       return;
     }
 
-    // Desktop / unknown — nothing meaningful to open; show helper.
     toast.info("Please open Settings and enable Location Services for Huddle.");
   };
 
@@ -1874,11 +1869,11 @@ const MapPage = () => {
               <div className="w-10 h-10 rounded-full bg-brandBlue/10 flex items-center justify-center shrink-0">
                 <MapPin className="w-5 h-5 text-brandBlue" />
               </div>
-              <h3 className="text-lg font-bold text-brandText">Turn on GPS to place your pin</h3>
+              <h3 className="text-lg font-bold text-brandText">Enable Location?</h3>
             </div>
 
             <p className="text-sm text-muted-foreground mb-6">
-              Your pin uses live location to stay accurate on the map.
+              Enable location to see friends and alerts. You can stay incognito in Settings.
             </p>
 
             <div className="flex gap-3">
@@ -1899,7 +1894,7 @@ const MapPage = () => {
                 }}
                 className="flex-1"
               >
-                Open Settings
+                Enable Location
               </NeuControl>
             </div>
           </div>
