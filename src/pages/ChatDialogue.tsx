@@ -62,6 +62,7 @@ type CounterpartProfile = {
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
 type UnmatchState = "none" | "unmatched_by_them";
+type RoomKind = "unknown" | "direct" | "group";
 const MESSAGE_PAGE_SIZE = 40;
 const MESSAGE_READ_BUFFER_MS = 100;
 
@@ -121,6 +122,7 @@ const ChatDialogue = () => {
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [uploadingComposer, setUploadingComposer] = useState(false);
   const [isGroup, setIsGroup] = useState(false);
+  const [roomKind, setRoomKind] = useState<RoomKind>("unknown");
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
   const [groupDescription, setGroupDescription] = useState("");
@@ -309,6 +311,7 @@ const ChatDialogue = () => {
     if (!row || row.type !== "group") return false;
 
     setIsGroup(true);
+    setRoomKind("group");
     setGroupAvatarUrl(row.avatar_url || null);
     setRoomName(row.name || "Group");
     setGroupDescription(String(row.description || ""));
@@ -579,6 +582,7 @@ const ChatDialogue = () => {
     setLoading(true);
     setRoomName(name);
     setIsGroup(false);
+    setRoomKind("unknown");
     setCounterpart(null);
     setMessages([]);
     setHasOlderMessages(false);
@@ -619,6 +623,7 @@ const ChatDialogue = () => {
                   .find((userId) => Boolean(userId) && userId !== profile.id) || null;
             }
             const nextRoomId = room;
+            if (!grouped) setRoomKind("direct");
             await loadRoomMessages(nextRoomId);
             setLoading(false);
             pendingInitialScrollRef.current = true;
@@ -652,6 +657,7 @@ const ChatDialogue = () => {
           const nextRoomId = await ensureDirectChatRoom(supabase, profile.id, fallbackTargetId, name);
           setRoomId(nextRoomId);
           const grouped2 = await loadGroupInfo(nextRoomId);
+          if (!grouped2) setRoomKind("direct");
           await loadRoomMessages(nextRoomId);
           setLoading(false);
           pendingInitialScrollRef.current = true;
@@ -686,6 +692,7 @@ const ChatDialogue = () => {
       try {
         const directRoomId = await ensureDirectChatRoom(supabase, profile.id, targetUserId, targetName);
         setRoomId(directRoomId);
+        setRoomKind("direct");
         await loadRoomMessages(directRoomId);
         setLoading(false);
         pendingInitialScrollRef.current = true;
@@ -1046,7 +1053,7 @@ const ChatDialogue = () => {
     setGroupInfoOpen(true);
   }, [messages]);
 
-  if (loading && !roomId) {
+  if (loading && roomKind === "unknown") {
     return (
       <div className="h-full min-h-0 flex items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
