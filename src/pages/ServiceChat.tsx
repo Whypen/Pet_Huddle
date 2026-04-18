@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowDown, Loader2 } from "lucide-react";
+import { ArrowDown, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { useAuth } from "@/contexts/AuthContext";
 import serviceImage from "@/assets/Notifications/Service.jpg";
@@ -28,6 +27,13 @@ import type { ServiceStatus } from "@/components/service-chat/types";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
+import {
+  extractFirstHttpUrl,
+  fetchExternalLinkPreview,
+  stripExternalUrlFromText,
+  type ExternalLinkPreview,
+} from "@/lib/externalLinkPreview";
+import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
 
 type ActiveSheet = "request" | "quote" | "payment" | "review" | "dispute" | null;
 type BlockState = "none" | "blocked_by_me" | "blocked_by_them";
@@ -78,14 +84,25 @@ const ServiceChat = () => {
   const [blockState, setBlockState] = useState<BlockState>("none");
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [uploadingComposer, setUploadingComposer] = useState(false);
+  const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, ExternalLinkPreview>>({});
+  const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
+  const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
-  const topHeaderRef = useRef<HTMLDivElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
   const [messageViewportHeight, setMessageViewportHeight] = useState<number>(420);
   const lastStatusRef = useRef<ServiceStatus | null>(null);
+  const composerPreviewUrls = useMemo(
+    () =>
+      composerUploads.map((file) => ({
+        key: `${file.name}-${file.size}-${file.lastModified}`,
+        file,
+        url: URL.createObjectURL(file),
+      })),
+    [composerUploads],
+  );
 
   const peerName = counterpart?.displayName || "Service chat";
   const peerAvatar = counterpart?.avatarUrl || profilePlaceholder;
@@ -124,6 +141,20 @@ const ServiceChat = () => {
     if (Number.isNaN(endAt.getTime())) return true;
     return Date.now() >= endAt.getTime();
   }, [serviceChat?.request_card]);
+  const composerFirstUrl = useMemo(() => {
+    const url = extractFirstHttpUrl(composer);
+    return url && !dismissedPreviewUrls.has(url) ? url : null;
+  }, [composer, dismissedPreviewUrls]);
+  const activePreviewUrl = lockedPreviewUrl && !dismissedPreviewUrls.has(lockedPreviewUrl)
+    ? lockedPreviewUrl
+    : composerFirstUrl;
+  const composerPreview = activePreviewUrl ? linkPreviewByUrl[activePreviewUrl] || null : null;
+
+  useEffect(() => {
+    return () => {
+      composerPreviewUrls.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [composerPreviewUrls]);
 
   useEffect(() => {
     if (!serviceChat) return;
@@ -185,18 +216,16 @@ const ServiceChat = () => {
 
   useEffect(() => {
     const computeHeight = () => {
-      const appTop = topHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
       const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
       const viewport = window.innerHeight;
-      const reserved = appTop + stickyTop + bottom;
+      const reserved = stickyTop + bottom;
       setMessageViewportHeight(Math.max(220, viewport - reserved));
     };
 
     computeHeight();
 
     const observer = new ResizeObserver(() => computeHeight());
-    if (topHeaderRef.current) observer.observe(topHeaderRef.current);
     if (stickyHeaderRef.current) observer.observe(stickyHeaderRef.current);
     if (bottomBarRef.current) observer.observe(bottomBarRef.current);
     window.addEventListener("resize", computeHeight);
@@ -206,6 +235,36 @@ const ServiceChat = () => {
       window.removeEventListener("resize", computeHeight);
     };
   }, [status, loading]);
+
+  useEffect(() => {
+    const urls = new Set<string>();
+    if (activePreviewUrl) urls.add(activePreviewUrl);
+    messages.forEach((message) => {
+      const parsed = parseServiceMessage(message.content);
+      const parsedText = String(parsed?.text || message.content || "");
+      const previewUrl =
+        (typeof parsed?.linkPreviewUrl === "string" && parsed.linkPreviewUrl) || extractFirstHttpUrl(parsedText);
+      if (previewUrl) urls.add(previewUrl);
+    });
+    urls.forEach((url) => {
+      if (linkPreviewByUrl[url]?.resolved || linkPreviewByUrl[url]?.failed || linkPreviewByUrl[url]?.loading) return;
+      setLinkPreviewByUrl((prev) => ({ ...prev, [url]: { url, loading: true } }));
+      void fetchExternalLinkPreview(url).then((preview) => {
+        setLinkPreviewByUrl((prev) => ({ ...prev, [url]: preview }));
+      });
+    });
+  }, [activePreviewUrl, linkPreviewByUrl, messages]);
+
+  useEffect(() => {
+    if (!composerFirstUrl) return;
+    const preview = linkPreviewByUrl[composerFirstUrl];
+    if (!preview?.resolved || preview.failed) return;
+    setLockedPreviewUrl(composerFirstUrl);
+    setComposer((prev) => {
+      if (!prev.includes(composerFirstUrl)) return prev;
+      return stripExternalUrlFromText(prev, composerFirstUrl);
+    });
+  }, [composerFirstUrl, linkPreviewByUrl]);
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
     const container = messageScrollRef.current;
@@ -223,7 +282,7 @@ const ServiceChat = () => {
   const handleSendMessage = async (event: FormEvent) => {
     event.preventDefault();
     if (chatDisabledBySafety) return;
-    if (!composer.trim() && composerUploads.length === 0) return;
+    if (!composer.trim() && composerUploads.length === 0 && !activePreviewUrl) return;
     setSendingMessage(true);
     setUploadingComposer(composerUploads.length > 0);
     try {
@@ -248,9 +307,11 @@ const ServiceChat = () => {
           name: file.name,
         });
       }
-      await sendMessage(composer.trim(), attachments);
+      await sendMessage(composer.trim(), attachments, { linkPreviewUrl: activePreviewUrl });
       setComposer("");
       setComposerUploads([]);
+      setLockedPreviewUrl(null);
+      setDismissedPreviewUrls(new Set());
     } finally {
       setSendingMessage(false);
       setUploadingComposer(false);
@@ -302,9 +363,6 @@ const ServiceChat = () => {
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-hidden">
-      <div ref={topHeaderRef}>
-        <GlobalHeader />
-      </div>
       <div ref={stickyHeaderRef}>
         <ServiceChatHeader
           peerName={peerName}
@@ -394,6 +452,10 @@ const ServiceChat = () => {
                     }
                   }
                   const text = String(parsed?.text || message.content || "");
+                  const previewUrl =
+                    (typeof parsed?.linkPreviewUrl === "string" && parsed.linkPreviewUrl) || extractFirstHttpUrl(text);
+                  const preview = previewUrl ? linkPreviewByUrl[previewUrl] || null : null;
+                  const displayText = previewUrl ? stripExternalUrlFromText(text, previewUrl) : text;
                   const attachments = Array.isArray(parsed?.attachments)
                     ? (parsed?.attachments as Array<{ url?: string; mime?: string; name?: string }>).filter((item) => typeof item?.url === "string" && item.url)
                     : [];
@@ -413,7 +475,14 @@ const ServiceChat = () => {
                             ))}
                           </div>
                         ) : null}
-                        {text}
+                        {previewUrl ? (
+                          <ExternalLinkPreviewCard
+                            url={previewUrl}
+                            preview={preview}
+                            className={attachments.length > 0 ? "mt-1" : undefined}
+                          />
+                        ) : null}
+                        {displayText ? <div className={cn(previewUrl && "mt-2")}>{displayText}</div> : null}
                       </ChatBubble>
                     </div>
                   );
@@ -438,13 +507,23 @@ const ServiceChat = () => {
         {!showLoading && serviceChat && composerUploads.length > 0 ? (
           <div className="border-t border-border/40 bg-background px-4 pt-2">
             <div className="mb-2 flex gap-2 overflow-x-auto">
-              {composerUploads.map((file, idx) => (
-                <div key={`${file.name}-${idx}`} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border">
+              {composerPreviewUrls.map(({ key, file, url }, idx) => (
+                <div key={key} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border">
                   {file.type.startsWith("video/") ? (
                     <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">Video</div>
                   ) : (
-                    <img src={URL.createObjectURL(file)} alt={file.name} className="h-full w-full object-cover" />
+                    <img src={url} alt={file.name} className="h-full w-full object-cover" />
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposerUploads((prev) => prev.filter((_, currentIndex) => currentIndex !== idx));
+                    }}
+                    className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                    aria-label={`Remove ${file.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -469,19 +548,30 @@ const ServiceChat = () => {
             submittingAction={sending}
             composer={composer}
             hasUploads={composerUploads.length > 0}
+            hasLinkPreview={Boolean(activePreviewUrl)}
             composerLocked={Boolean(!hasRequest)}
             sendingMessage={sendingMessage || uploadingComposer}
             chatDisabled={chatDisabledBySafety}
             servicePeriodPassed={servicePeriodPassed}
+            activePreviewUrl={activePreviewUrl}
+            composerPreview={composerPreview}
             onComposerChange={setComposer}
             onSendMessage={handleSendMessage}
             onAttachPhoto={() => imageInputRef.current?.click()}
+            onDismissPreview={(url) => {
+              setDismissedPreviewUrls((prev) => {
+                const next = new Set(prev);
+                next.add(url);
+                return next;
+              });
+              setLockedPreviewUrl((prev) => (prev === url ? null : prev));
+            }}
             onOpenDispute={() => setActiveSheet("dispute")}
             onAskRevise={() => setActiveSheet("request")}
           />
           )
         ) : (
-          <div className="border-t border-border/40 bg-background px-4 py-3 pb-[max(8px,env(safe-area-inset-bottom))]" />
+          <div className="border-t border-border/40 bg-background px-4 py-3 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]" />
         )}
         <input
           ref={imageInputRef}

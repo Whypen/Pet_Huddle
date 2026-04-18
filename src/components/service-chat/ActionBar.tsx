@@ -1,6 +1,8 @@
 import { FormEvent } from "react";
 import { ImagePlus, Lock, SendHorizontal } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
+import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
+import type { ExternalLinkPreview } from "@/lib/externalLinkPreview";
 
 type PrimaryAction = {
   label: string;
@@ -18,12 +20,17 @@ type Props = {
   hasQuote: boolean;
   submittingAction: boolean;
   composer: string;
+  hasUploads: boolean;
+  hasLinkPreview: boolean;
   composerLocked: boolean;
   sendingMessage: boolean;
   servicePeriodPassed: boolean;
+  activePreviewUrl: string | null;
+  composerPreview: ExternalLinkPreview | null;
   onComposerChange: (next: string) => void;
   onSendMessage: (event: FormEvent) => void;
   onAttachPhoto: () => void;
+  onDismissPreview: (url: string) => void;
   onOpenDispute: () => void;
   onAskRevise: () => void;
   chatDisabled?: boolean;
@@ -39,20 +46,33 @@ export const ActionBar = ({
   hasQuote,
   submittingAction,
   composer,
+  hasUploads,
+  hasLinkPreview,
   composerLocked,
   sendingMessage,
   servicePeriodPassed,
+  activePreviewUrl,
+  composerPreview,
   onComposerChange,
   onSendMessage,
   onAttachPhoto,
+  onDismissPreview,
   onOpenDispute,
   onAskRevise,
   chatDisabled = false,
 }: Props) => {
   return (
-    <div className="border-t border-border/40 bg-background px-4 py-2 pb-[max(8px,env(safe-area-inset-bottom))] space-y-2">
+    <div className="space-y-2 border-t border-border/40 bg-background px-4 py-2 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]">
       {waitingForCounterparty ? (
         <p className="text-xs text-muted-foreground">Waiting for {peerName} to confirm…</p>
+      ) : null}
+
+      {activePreviewUrl ? (
+        <ExternalLinkPreviewCard
+          url={activePreviewUrl}
+          preview={composerPreview}
+          onRemove={() => onDismissPreview(activePreviewUrl)}
+        />
       ) : null}
 
       <div className="flex items-center gap-2">
@@ -103,7 +123,7 @@ export const ActionBar = ({
         )}
         <button
           type="submit"
-          disabled={chatDisabled || composerLocked || sendingMessage || !composer.trim()}
+          disabled={chatDisabled || composerLocked || sendingMessage || (!composer.trim() && !hasUploads && !hasLinkPreview)}
           className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brandBlue text-white shadow-[0_4px_16px_rgba(33,69,207,0.28)] disabled:opacity-45"
           aria-label="Send message"
         >

@@ -23,7 +23,11 @@ type UseServiceChatResult = {
   hasReviewed: boolean;
   providerStripeReady: boolean;
   reload: (silent?: boolean) => Promise<void>;
-  sendMessage: (text: string, attachments?: Array<{ url: string; mime: string; name: string }>) => Promise<void>;
+  sendMessage: (
+    text: string,
+    attachments?: Array<{ url: string; mime: string; name: string }>,
+    options?: { linkPreviewUrl?: string | null }
+  ) => Promise<void>;
   sendRequest: (card: ServiceRequestCard) => Promise<void>;
   withdrawRequest: () => Promise<void>;
   sendQuote: (card: ServiceQuoteCard) => Promise<void>;
@@ -278,12 +282,19 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   }, [reload, roomId]);
 
   const sendMessage = useCallback(
-    async (text: string, attachments?: Array<{ url: string; mime: string; name: string }>) => {
+    async (
+      text: string,
+      attachments?: Array<{ url: string; mime: string; name: string }>,
+      options?: { linkPreviewUrl?: string | null }
+    ) => {
       if (!roomId || !userId || (!text.trim() && !(attachments && attachments.length > 0))) return;
       setSending(true);
       try {
         const content = text.trim();
         const payload: Record<string, unknown> = { text: content };
+        if (options?.linkPreviewUrl) {
+          payload.linkPreviewUrl = options.linkPreviewUrl;
+        }
         if (attachments && attachments.length > 0) {
           payload.attachments = attachments;
         }

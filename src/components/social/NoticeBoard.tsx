@@ -41,6 +41,8 @@ import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { NoticeBoardComposerModal } from "@/components/social/noticeboard/NoticeBoardComposerModal";
 import { NoticeBoardOverlays } from "@/components/social/noticeboard/NoticeBoardOverlays";
+import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
+import { stripExternalUrlFromText } from "@/lib/externalLinkPreview";
 import {
   fetchFeedPage as fetchFeedPageData,
   fetchFocusedThreadRow as fetchFocusedThreadRowData,
@@ -527,6 +529,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
+  const [replyDismissedPreviewUrls, setReplyDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [replyMentions, setReplyMentions] = useState<MentionEntry[]>([]);
   const [replyMentionQuery, setReplyMentionQuery] = useState<ActiveMentionQuery | null>(null);
   const [replyMentionSuggestions, setReplyMentionSuggestions] = useState<MentionSuggestion[]>([]);
@@ -597,6 +600,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const PULL_REFRESH_THRESHOLD = 44;
   const PULL_REFRESH_DEBOUNCE_MS = 7000;
   const isSocialPostingBlocked = isActive("social_posting_disabled");
+  const replyFirstUrl = useMemo(() => {
+    const url = extractFirstHttpUrl(replyContent || "");
+    return url && !replyDismissedPreviewUrls.has(url) ? url : null;
+  }, [replyContent, replyDismissedPreviewUrls]);
+  const replyContentPreview = replyFirstUrl ? linkPreviewByUrl[replyFirstUrl] || null : null;
 
   useEffect(() => {
     noticesRef.current = notices;
@@ -1943,6 +1951,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
 
       setReplyContent("");
+      setReplyDismissedPreviewUrls(new Set());
       setReplyMentions([]);
       setReplyMentionQuery(null);
       setReplyMentionSuggestions([]);
@@ -3052,6 +3061,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [content, ensureLinkPreview]);
 
   useEffect(() => {
+    if (!replyFirstUrl) return;
+    void ensureLinkPreview(replyFirstUrl);
+  }, [ensureLinkPreview, replyFirstUrl]);
+
+  useEffect(() => {
+    const urls = Array.from(
+      new Set(
+        Object.entries(commentsByThread)
+          .filter(([threadId]) => expandedReplies.has(threadId))
+          .flatMap(([, comments]) => comments.map((comment) => extractFirstHttpUrl(comment.content || "")))
+          .filter((url): url is string => Boolean(url))
+      )
+    ).slice(0, 24);
+    if (urls.length === 0) return;
+    urls.forEach((url) => {
+      void ensureLinkPreview(url);
+    });
+  }, [commentsByThread, ensureLinkPreview, expandedReplies]);
+
+  useEffect(() => {
     if (!import.meta.env.DEV || !createContentFirstUrl) return;
     const preview = linkPreviewByUrl[createContentFirstUrl];
     console.debug("[link-preview] compose:state", {
@@ -3479,6 +3508,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     if (replyFor === notice.id) {
                                       setReplyFor(null);
                                       setReplyContent("");
+                                      setReplyDismissedPreviewUrls(new Set());
                                       setReplyMentions([]);
                                       setReplyMentionQuery(null);
                                       setReplyMentionSuggestions([]);
@@ -3496,6 +3526,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     }
                                     setReplyFor(notice.id);
                                     setReplyContent("");
+                                    setReplyDismissedPreviewUrls(new Set());
                                     setReplyMentions([]);
                                     setReplyMentionQuery(null);
                                     setReplyMentionSuggestions([]);
@@ -3586,8 +3617,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             {replyFor === notice.id && (
                               <div className="form-field-rest relative h-auto min-h-[56px] rounded-[22px] bg-[rgba(33,69,207,0.08)] px-4 py-2 shadow-none">
                                 <div className="relative min-h-[24px]">
-                                  <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
-                                    {renderComposerTextWithMentions(replyContent, replyMentions, "Leave a comment", `reply-composer-${notice.id}`)}
+                              <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
+                                    {renderComposerTextWithMentions(
+                                      replyFirstUrl ? stripExternalUrlFromText(replyContent, replyFirstUrl) : replyContent,
+                                      replyMentions,
+                                      "Leave a comment",
+                                      `reply-composer-${notice.id}`
+                                    )}
                                   </div>
                                   <textarea
                                     ref={replyInputRef}
@@ -3656,6 +3692,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     ))}
                                   </div>
                                 )}
+                                {replyFirstUrl ? (
+                                  <ExternalLinkPreviewCard
+                                    url={replyFirstUrl}
+                                    preview={replyContentPreview}
+                                    className="mt-3"
+                                    onRemove={() => {
+                                      setReplyDismissedPreviewUrls((prev) => {
+                                        const next = new Set(prev);
+                                        next.add(replyFirstUrl);
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                ) : null}
                                 <div className="mt-1.5 flex items-center gap-1.5">
                                   <label className="-ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/40 cursor-pointer">
                                     <Image className="h-4 w-4" />
@@ -3675,7 +3725,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                   <NeuButton
                                     size="sm"
                                     onClick={() => handleReply(notice)}
-                                    disabled={!replyContent.trim() || remainingReplyWords < 0 || replySubmittingByThread.has(notice.id)}
+                                    disabled={(!replyContent.trim() && !replyFirstUrl) || remainingReplyWords < 0 || replySubmittingByThread.has(notice.id)}
                                     className="ml-auto h-8 w-8 min-w-0 rounded-full p-0"
                                     aria-label="Send reply"
                                   >
@@ -3726,8 +3776,27 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                       </span>
                                     </div>
                                     <div className="mt-1 text-sm text-muted-foreground break-words whitespace-pre-wrap">
-                                      {renderTextWithMentions(c.content, replyMentionsById[c.id], `reply-${c.id}`)}
+                                      {renderTextWithMentions(
+                                        (() => {
+                                          const previewUrl = extractFirstHttpUrl(c.content || "");
+                                          return previewUrl ? stripExternalUrlFromText(c.content, previewUrl) : c.content;
+                                        })(),
+                                        replyMentionsById[c.id],
+                                        `reply-${c.id}`
+                                      )}
                                     </div>
+                                    {(() => {
+                                      const previewUrl = extractFirstHttpUrl(c.content || "");
+                                      const preview = previewUrl ? linkPreviewByUrl[previewUrl] || null : null;
+                                      if (!previewUrl) return null;
+                                      return (
+                                        <ExternalLinkPreviewCard
+                                          url={previewUrl}
+                                          preview={preview}
+                                          className="mt-3"
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                                 {c.images && c.images.length > 0 && (

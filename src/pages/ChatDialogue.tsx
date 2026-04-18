@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save } from "lucide-react";
+import { ArrowLeft, BadgeCheck, ChevronLeft, ImagePlus, Loader2, MoreVertical, SendHorizontal, Settings, ShieldAlert, UserX, Users, Bell, BellOff, UserPlus, LogOut, Image as ImageIcon, Lock, Pencil, Save, X } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,6 +18,13 @@ import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { ReportModal } from "@/components/moderation/ReportModal";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { updateGroupChatMetadata } from "@/lib/groupChats";
+import {
+  extractFirstHttpUrl,
+  fetchExternalLinkPreview,
+  stripExternalUrlFromText,
+  type ExternalLinkPreview,
+} from "@/lib/externalLinkPreview";
+import { ExternalLinkPreviewCard } from "@/components/ui/ExternalLinkPreviewCard";
 import {
   TEAM_HUDDLE_AVAILABILITY,
   TEAM_HUDDLE_DISPLAY_NAME,
@@ -42,6 +49,7 @@ type Attachment = {
 type ParsedMessage = {
   text: string;
   attachments: Attachment[];
+  linkPreviewUrl?: string | null;
   kind?: string | null;
   senderId?: string | null;
   recipientId?: string | null;
@@ -120,6 +128,9 @@ const ChatDialogue = () => {
   const [reportOpen, setReportOpen] = useState(false);
   const [composerUploads, setComposerUploads] = useState<File[]>([]);
   const [uploadingComposer, setUploadingComposer] = useState(false);
+  const [linkPreviewByUrl, setLinkPreviewByUrl] = useState<Record<string, ExternalLinkPreview>>({});
+  const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
+  const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
@@ -157,10 +168,28 @@ const ChatDialogue = () => {
   const readFlushInFlightRef = useRef(false);
   const pendingInitialScrollRef = useRef(false);
   const joinedGroupHydrationRef = useRef<string | null>(null);
+  const receiptRefreshTimersRef = useRef<number[]>([]);
+  const composerPreviewUrls = useMemo(
+    () =>
+      composerUploads.map((file) => ({
+        key: `${file.name}-${file.size}-${file.lastModified}`,
+        file,
+        url: URL.createObjectURL(file),
+      })),
+    [composerUploads],
+  );
 
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
   const canSendVideo = tier === "gold";
   const chatDisabledBySafety = isActive("chat_disabled");
+  const composerFirstUrl = useMemo(() => {
+    const url = extractFirstHttpUrl(chatInput);
+    return url && !dismissedPreviewUrls.has(url) ? url : null;
+  }, [chatInput, dismissedPreviewUrls]);
+  const activeComposerPreviewUrl = lockedPreviewUrl && !dismissedPreviewUrls.has(lockedPreviewUrl)
+    ? lockedPreviewUrl
+    : composerFirstUrl;
+  const composerPreview = activeComposerPreviewUrl ? linkPreviewByUrl[activeComposerPreviewUrl] || null : null;
   const parseMessageContent = useCallback((content: string): ParsedMessage => {
     const share = parseChatShareMessage(content);
     if (share) {
@@ -182,16 +211,17 @@ const ChatDialogue = () => {
       };
     }
     try {
-      const parsed = JSON.parse(content) as { text?: string; attachments?: Attachment[]; kind?: string };
+      const parsed = JSON.parse(content) as { text?: string; attachments?: Attachment[]; kind?: string; linkPreviewUrl?: string | null };
       if (parsed && typeof parsed === "object") {
         // System messages: {"kind":"system","text":"..."}
         if (parsed.kind === "system") {
           return { text: String(parsed.text || ""), attachments: [], share: null, kind: "system" };
         }
-        if (Array.isArray(parsed.attachments)) {
+        if (Array.isArray(parsed.attachments) || typeof parsed.text === "string" || typeof parsed.linkPreviewUrl === "string") {
           return {
             text: String(parsed.text || ""),
-            attachments: parsed.attachments
+            linkPreviewUrl: typeof parsed.linkPreviewUrl === "string" ? parsed.linkPreviewUrl : null,
+            attachments: (parsed.attachments || [])
               .filter((item) => item && typeof item.url === "string" && item.url)
               .map((item) => ({
                 url: String(item.url),
@@ -207,6 +237,13 @@ const ChatDialogue = () => {
     }
     return { text: content, attachments: [], share: null };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      composerPreviewUrls.forEach((item) => URL.revokeObjectURL(item.url));
+      receiptRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    };
+  }, [composerPreviewUrls]);
 
   const snapToLatestMessage = useCallback(() => {
     requestAnimationFrame(() => {
@@ -426,6 +463,15 @@ const ChatDialogue = () => {
       setReadMessageIds(new Set((data as { message_id: string }[]).map((row) => row.message_id)));
     }
   }, [messages, profile?.id, roomId]);
+
+  const scheduleReadReceiptRefresh = useCallback((delays: number[] = [80, 420]) => {
+    receiptRefreshTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    receiptRefreshTimersRef.current = delays.map((delay) =>
+      window.setTimeout(() => {
+        void refreshReadReceipts();
+      }, delay),
+    );
+  }, [refreshReadReceipts]);
 
   const openUserProfile = useCallback(async (userId: string, fallbackDisplayName: string) => {
     if (!userId || isTeamHuddleIdentity(fallbackDisplayName, null)) return;
@@ -753,7 +799,8 @@ const ChatDialogue = () => {
   useEffect(() => {
     if (!roomId || !profile?.id || messages.length === 0) return;
     void refreshReadReceipts(messages);
-  }, [messages, profile?.id, refreshReadReceipts, roomId]);
+    scheduleReadReceiptRefresh([140]);
+  }, [messages, profile?.id, refreshReadReceipts, roomId, scheduleReadReceiptRefresh]);
 
   // Realtime subscription for blue tick — separate from message reload
   useEffect(() => {
@@ -763,11 +810,14 @@ const ChatDialogue = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
         const row = payload.new as { message_id?: string; user_id?: string } | null;
         if (!row?.message_id || row.user_id === profile.id) return;
+        const sentIds = new Set(messages.filter((message) => message.sender_id === profile.id).map((message) => message.id));
+        if (!sentIds.has(row.message_id)) return;
         setReadMessageIds((prev) => new Set([...prev, row.message_id!]));
+        scheduleReadReceiptRefresh([60]);
       })
       .subscribe();
     return () => { void supabase.removeChannel(readChannel); };
-  }, [roomId, profile?.id]);
+  }, [messages, profile?.id, roomId, scheduleReadReceiptRefresh]);
 
   useEffect(() => {
     if (!roomId || !isGroup || joinedGroupHydrationRef.current !== roomId) return;
@@ -796,6 +846,34 @@ const ChatDialogue = () => {
       window.clearTimeout(timerB);
     };
   }, [isGroup, loadGroupInfo, loadRoomMessages, refreshReadReceipts, roomId]);
+
+  useEffect(() => {
+    const urls = new Set<string>();
+    if (activeComposerPreviewUrl) urls.add(activeComposerPreviewUrl);
+    messages.forEach((message) => {
+      const parsed = parseMessageContent(message.content);
+      const previewUrl = parsed.linkPreviewUrl || extractFirstHttpUrl(parsed.text);
+      if (previewUrl) urls.add(previewUrl);
+    });
+    urls.forEach((url) => {
+      if (linkPreviewByUrl[url]?.resolved || linkPreviewByUrl[url]?.failed || linkPreviewByUrl[url]?.loading) return;
+      setLinkPreviewByUrl((prev) => ({ ...prev, [url]: { url, loading: true } }));
+      void fetchExternalLinkPreview(url).then((preview) => {
+        setLinkPreviewByUrl((prev) => ({ ...prev, [url]: preview }));
+      });
+    });
+  }, [activeComposerPreviewUrl, linkPreviewByUrl, messages, parseMessageContent]);
+
+  useEffect(() => {
+    if (!composerFirstUrl) return;
+    const preview = linkPreviewByUrl[composerFirstUrl];
+    if (!preview?.resolved || preview.failed) return;
+    setLockedPreviewUrl(composerFirstUrl);
+    setChatInput((prev) => {
+      if (!prev.includes(composerFirstUrl)) return prev;
+      return stripExternalUrlFromText(prev, composerFirstUrl);
+    });
+  }, [composerFirstUrl, linkPreviewByUrl]);
 
   // For group chats: lazily fetch display names for any new sender not yet loaded
   useEffect(() => {
@@ -830,7 +908,7 @@ const ChatDialogue = () => {
       chatDisabledBySafety;
     if (!roomId || !profile?.id || sending || cannotSend) return;
     const text = chatInput.trim();
-    if (!text && composerUploads.length === 0) return;
+    if (!text && composerUploads.length === 0 && !activeComposerPreviewUrl) return;
     setSending(true);
     setUploadingComposer(composerUploads.length > 0);
     const prevText = chatInput;
@@ -840,15 +918,19 @@ const ChatDialogue = () => {
       const payload = JSON.stringify({
         text,
         attachments,
+        linkPreviewUrl: activeComposerPreviewUrl,
       });
       const { error } = await supabase.from("chat_messages").insert({ chat_id: roomId, sender_id: profile.id, content: payload });
       if (error) throw error;
       setChatInput("");
       setComposerUploads([]);
+      setLockedPreviewUrl(null);
+      setDismissedPreviewUrls(new Set());
       if (composerFileInputRef.current) {
         composerFileInputRef.current.value = "";
       }
       await loadRoomMessages(roomId);
+      scheduleReadReceiptRefresh([120, 700]);
     } catch {
       toast.error("Failed to send message");
       setChatInput(prevText);
@@ -857,7 +939,7 @@ const ChatDialogue = () => {
       setSending(false);
       setUploadingComposer(false);
     }
-  }, [blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, sending, unmatchState, uploadFilesToNotices]);
+  }, [activeComposerPreviewUrl, blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, scheduleReadReceiptRefresh, sending, unmatchState, uploadFilesToNotices]);
 
   const attachComposerMedia = useCallback(() => {
     const cannotAttach =
@@ -1341,7 +1423,23 @@ const ChatDialogue = () => {
                           ))}
                         </div>
                       )}
-                      {parsed.text ? <div className="whitespace-pre-wrap break-words">{parsed.text}</div> : null}
+                      {(() => {
+                        const previewUrl = parsed.linkPreviewUrl || extractFirstHttpUrl(parsed.text);
+                        const preview = previewUrl ? linkPreviewByUrl[previewUrl] || null : null;
+                        const displayText = previewUrl ? stripExternalUrlFromText(parsed.text, previewUrl) : parsed.text;
+                        return (
+                          <>
+                            {previewUrl ? (
+                              <ExternalLinkPreviewCard
+                                url={previewUrl}
+                                preview={preview}
+                                className={attachments.length > 0 ? "mt-1" : undefined}
+                              />
+                            ) : null}
+                            {displayText ? <div className={cn("whitespace-pre-wrap break-words", previewUrl && "mt-2")}>{displayText}</div> : null}
+                          </>
+                        );
+                      })()}
                     </div>
                     <div className={cn("mt-1 flex items-center gap-1 text-[11px] text-[#9AA0B5]", mine ? "justify-end pr-1" : "justify-start pl-1")}>
                       <span>{formatMessageTime(message.created_at)}</span>
@@ -1366,15 +1464,40 @@ const ChatDialogue = () => {
       </div>
 
       <div className="border-t border-border bg-white/92 px-3 py-2 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]">
+        {activeComposerPreviewUrl ? (
+          <ExternalLinkPreviewCard
+            url={activeComposerPreviewUrl}
+            preview={composerPreview}
+            className="mb-2"
+            onRemove={() => {
+              setDismissedPreviewUrls((prev) => {
+                const next = new Set(prev);
+                next.add(activeComposerPreviewUrl);
+                return next;
+              });
+              setLockedPreviewUrl((prev) => (prev === activeComposerPreviewUrl ? null : prev));
+            }}
+          />
+        ) : null}
         {composerUploads.length > 0 && (
           <div className="mb-2 flex gap-2 overflow-x-auto">
-            {composerUploads.map((file, idx) => (
-              <div key={`${file.name}-${idx}`} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border">
+            {composerPreviewUrls.map(({ key, file, url }, idx) => (
+              <div key={key} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border">
                 {file.type.startsWith("video/") ? (
                   <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">Video</div>
                 ) : (
-                  <img src={URL.createObjectURL(file)} alt={file.name} className="h-full w-full object-cover" />
+                  <img src={url} alt={file.name} className="h-full w-full object-cover" />
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposerUploads((prev) => prev.filter((_, currentIndex) => currentIndex !== idx));
+                  }}
+                  className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white"
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
             ))}
           </div>
@@ -1444,7 +1567,7 @@ const ChatDialogue = () => {
               blockState === "blocked_by_them" ||
               blockState === "blocked_by_me" ||
               unmatchState === "unmatched_by_them" ||
-              (!chatInput.trim() && composerUploads.length === 0)
+              (!chatInput.trim() && composerUploads.length === 0 && !activeComposerPreviewUrl)
             }
             className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brandBlue text-white disabled:opacity-45"
             aria-label="Send"
