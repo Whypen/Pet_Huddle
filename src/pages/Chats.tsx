@@ -3413,14 +3413,14 @@ const Chats = () => {
       !chat.lastMessageAt &&
       getChatPreview(chat).length === 0
   );
-  const avatarOnlyMatchOnlyAvatars = matchOnlyAvatars.filter(
-    (entry) => !filteredChats.some((chat) => chat.peerUserId === entry.userId)
-  );
   const visibleConversationChats = filteredChats.filter((chat) => {
     const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
     if (!hasConversationActivity) return false;
     return !avatarOnlyMatchedChats.some((avatarOnly) => avatarOnly.id === chat.id);
   });
+  const avatarOnlyMatchOnlyAvatars = matchOnlyAvatars.filter(
+    (entry) => !visibleConversationChats.some((chat) => chat.peerUserId === entry.userId)
+  );
   const priorityStarChats = visibleConversationChats.filter(
     (chat) => isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true
   );
