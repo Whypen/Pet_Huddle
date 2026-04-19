@@ -49,6 +49,26 @@ const asMessage = (message: string | undefined, fallback: string) => {
 
 const INITIAL_MESSAGE_PAGE_SIZE = 10;
 const OLDER_MESSAGE_PAGE_SIZE = 20;
+const MESSAGE_FETCH_RETRY_COUNT = 3;
+const MESSAGE_FETCH_RETRY_DELAY_MS = 350;
+
+const isTransientMessageLoadError = (error: unknown) => {
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message || "").toLowerCase()
+      : String(error || "").toLowerCase();
+  return (
+    message.includes("fetch") ||
+    message.includes("network") ||
+    message.includes("connection") ||
+    message.includes("closed") ||
+    message.includes("timed out")
+  );
+};
+
+const delay = async (ms: number) => {
+  await new Promise((resolve) => window.setTimeout(resolve, ms));
+};
 
 export const useServiceChat = (roomId: string, userId: string): UseServiceChatResult => {
   const [serviceChat, setServiceChat] = useState<ServiceChatRow | null>(null);
@@ -208,6 +228,29 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     return row;
   }, [roomId, userId]);
 
+  const loadLatestMessages = useCallback(async () => {
+    let attempt = 0;
+    while (attempt < MESSAGE_FETCH_RETRY_COUNT) {
+      const { data, error } = await supabase
+        .from("chat_messages")
+        .select("id,sender_id,content,created_at")
+        .eq("chat_id", roomId)
+        .order("created_at", { ascending: false })
+        .limit(INITIAL_MESSAGE_PAGE_SIZE + 1);
+
+      if (!error) {
+        return ((data || []) as ChatMessageRow[]).filter(Boolean);
+      }
+
+      attempt += 1;
+      if (attempt >= MESSAGE_FETCH_RETRY_COUNT || !isTransientMessageLoadError(error)) {
+        throw error;
+      }
+      await delay(MESSAGE_FETCH_RETRY_DELAY_MS * attempt);
+    }
+    return [];
+  }, [roomId]);
+
   const reload = useCallback(
     async (silent = false) => {
       if (!roomId) {
@@ -231,18 +274,15 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       const shouldShowLoading = !silent || !hasLoadedRef.current;
       if (shouldShowLoading) setLoading(true);
       try {
-        const [row, { data: messageRows, error: messageErr }] = await Promise.all([
-          refreshServiceMeta(),
-          supabase
-            .from("chat_messages")
-            .select("id,sender_id,content,created_at")
-            .eq("chat_id", roomId)
-            .order("created_at", { ascending: false })
-            .limit(INITIAL_MESSAGE_PAGE_SIZE + 1),
-        ]);
-        if (messageErr) throw new Error(asMessage(messageErr.message, "service_chat_messages_failed"));
+        const row = await refreshServiceMeta();
         if (!row) throw new Error("service_chat_not_found");
-        const newestFirstMessages = ((messageRows || []) as ChatMessageRow[]).filter(Boolean);
+        let newestFirstMessages: ChatMessageRow[] = [];
+        try {
+          newestFirstMessages = await loadLatestMessages();
+        } catch (messageError) {
+          console.warn("[service_chat.initial_messages_failed]", messageError);
+          toast.error("Unable to load the latest messages right now. Retrying the room data can help.");
+        }
         const nextMessages = newestFirstMessages
           .slice(0, INITIAL_MESSAGE_PAGE_SIZE)
           .reverse();
@@ -297,7 +337,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         if (shouldShowLoading) setLoading(false);
       }
     },
-    [markMessagesRead, refreshReadReceipts, refreshServiceMeta, roomId, userId]
+    [loadLatestMessages, markMessagesRead, refreshReadReceipts, refreshServiceMeta, roomId, userId]
   );
 
   useEffect(() => {
