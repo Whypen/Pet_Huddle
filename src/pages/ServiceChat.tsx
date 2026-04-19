@@ -107,6 +107,7 @@ const ServiceChat = () => {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
+  const messageContentRef = useRef<HTMLElement | null>(null);
   const stickyHeaderRef = useRef<HTMLDivElement | null>(null);
   const bookingCardRef = useRef<HTMLDivElement | null>(null);
   const bottomBarRef = useRef<HTMLDivElement | null>(null);
@@ -115,7 +116,7 @@ const ServiceChat = () => {
   const pendingInitialScrollRef = useRef(true);
   const loadingOlderAnchorRef = useRef<{ top: number; height: number } | null>(null);
   const invalidRoomHandledRef = useRef(false);
-  const initialSnapAttemptsRef = useRef(0);
+  const initialSnapSettleTimerRef = useRef<number | null>(null);
   const composerPreviewUrls = useMemo(
     () =>
       composerUploads.map((file) => ({
@@ -238,30 +239,39 @@ const ServiceChat = () => {
   useEffect(() => {
     pendingInitialScrollRef.current = true;
     invalidRoomHandledRef.current = false;
-    initialSnapAttemptsRef.current = 0;
+    if (initialSnapSettleTimerRef.current !== null) {
+      window.clearTimeout(initialSnapSettleTimerRef.current);
+      initialSnapSettleTimerRef.current = null;
+    }
   }, [roomId]);
 
-  const runInitialSnapToBottom = useCallback(() => {
-    const container = messageScrollRef.current;
-    if (!container) return;
+  const snapToLatestMessage = useCallback((behavior: ScrollBehavior = "auto") => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const container = messageScrollRef.current;
+        if (!container) return;
+        container.scrollTo({ top: container.scrollHeight, behavior });
+      });
+    });
+  }, []);
 
-    const snap = () => {
-      const node = messageScrollRef.current;
-      if (!node) return;
-      node.scrollTop = node.scrollHeight;
-      const distanceToBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
-      if (distanceToBottom <= 2 || initialSnapAttemptsRef.current >= 6) {
-        pendingInitialScrollRef.current = false;
-        initialSnapAttemptsRef.current = 0;
-        setShowScrollToBottom(false);
+  const scheduleInitialSnapSettleCheck = useCallback(() => {
+    if (!pendingInitialScrollRef.current) return;
+    if (initialSnapSettleTimerRef.current !== null) {
+      window.clearTimeout(initialSnapSettleTimerRef.current);
+    }
+    initialSnapSettleTimerRef.current = window.setTimeout(() => {
+      if (!pendingInitialScrollRef.current) return;
+      pendingInitialScrollRef.current = false;
+      initialSnapSettleTimerRef.current = null;
+      const container = messageScrollRef.current;
+      if (!container) return;
+      const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setShowScrollToBottom(distanceToBottom > 120);
+      if (distanceToBottom <= 120) {
         markCurrentRoomSeen();
-        return;
       }
-      initialSnapAttemptsRef.current += 1;
-      window.requestAnimationFrame(snap);
-    };
-
-    snap();
+    }, 140);
   }, [markCurrentRoomSeen]);
 
   useEffect(() => {
@@ -285,14 +295,9 @@ const ServiceChat = () => {
     }
 
     if (!pendingInitialScrollRef.current) return;
-    runInitialSnapToBottom();
-  }, [loading, messages, runInitialSnapToBottom, showLoading]);
-
-  useLayoutEffect(() => {
-    if (loading || showLoading || messages.length === 0) return;
-    if (!pendingInitialScrollRef.current) return;
-    runInitialSnapToBottom();
-  }, [loading, messageViewportHeight, messages.length, runInitialSnapToBottom, showLoading]);
+    snapToLatestMessage("auto");
+    scheduleInitialSnapSettleCheck();
+  }, [loading, messages, scheduleInitialSnapSettleCheck, showLoading, snapToLatestMessage]);
 
   useEffect(() => {
     if (loading || showLoading || messages.length === 0) return;
@@ -300,10 +305,10 @@ const ServiceChat = () => {
     const lastMessage = messages[messages.length - 1];
     if (!container || !lastMessage) return;
     if (lastMessage.sender_id !== userId) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    snapToLatestMessage("auto");
     setShowScrollToBottom(false);
     markCurrentRoomSeen();
-  }, [loading, markCurrentRoomSeen, messages, showLoading, userId]);
+  }, [loading, markCurrentRoomSeen, messages, showLoading, snapToLatestMessage, userId]);
 
   useEffect(() => {
     if (loading || showLoading || messages.length === 0) return;
@@ -340,6 +345,39 @@ const ServiceChat = () => {
   }, [status, loading]);
 
   useEffect(() => {
+    const container = messageScrollRef.current;
+    const content = messageContentRef.current;
+    if (!container || !content) return;
+
+    const handleGeometryChange = () => {
+      const viewport = messageScrollRef.current;
+      if (!viewport) return;
+      const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setShowScrollToBottom(distanceToBottom > 120);
+      if (loading || showLoading || messages.length === 0) return;
+      if (!pendingInitialScrollRef.current) return;
+      snapToLatestMessage("auto");
+      scheduleInitialSnapSettleCheck();
+    };
+
+    handleGeometryChange();
+
+    const observer = new ResizeObserver(() => handleGeometryChange());
+    observer.observe(container);
+    observer.observe(content);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    loading,
+    messages.length,
+    scheduleInitialSnapSettleCheck,
+    showLoading,
+    snapToLatestMessage,
+  ]);
+
+  useEffect(() => {
     const urls = new Set<string>();
     if (activePreviewUrl) urls.add(activePreviewUrl);
     messages.forEach((message) => {
@@ -370,17 +408,16 @@ const ServiceChat = () => {
   }, [composerFirstUrl, linkPreviewByUrl]);
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    const container = messageScrollRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior });
+    snapToLatestMessage(behavior);
   };
 
   useEffect(() => {
-    const container = messageScrollRef.current;
-    if (!container) return;
-    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    setShowScrollToBottom(distanceToBottom > 120);
-  }, [messages.length, serviceChat?.status]);
+    return () => {
+      if (initialSnapSettleTimerRef.current !== null) {
+        window.clearTimeout(initialSnapSettleTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSendMessage = async (event: FormEvent) => {
     event.preventDefault();
@@ -532,7 +569,7 @@ const ServiceChat = () => {
 
         {!showLoading && serviceChat && (
           <>
-            <section className="space-y-2">
+            <section ref={messageContentRef} className="space-y-2">
               {loadingOlderMessages ? (
                 <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
                   <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
