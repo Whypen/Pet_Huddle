@@ -3896,7 +3896,7 @@ const Chats = () => {
     async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
       if (!profile?.id || !target.userId) return null;
       persistMatchedDiscoveryUser(target.userId);
-      markMatchSeen(target.userId);
+      void markMatchSeenPersisted(target.userId);
       const nextModal: MatchModalState = {
         userId: target.userId,
         name: target.name || "Conversation",
@@ -3926,7 +3926,7 @@ const Chats = () => {
         return null;
       }
     },
-    [loadConversations, markMatchSeen, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
+    [loadConversations, markMatchSeenPersisted, persistMatchedDiscoveryUser, profile?.id, rememberDirectPeer]
   );
 
   const finalizeDiscoveryMatch = useCallback(
