@@ -1381,6 +1381,13 @@ const Chats = () => {
     void flushPendingSeenMatches();
   }, [flushPendingSeenMatches, persistPendingSeenMatches, persistSeenMatches, profile?.id]);
 
+  const markMatchSeenPersisted = useCallback(async (userId?: string | null) => {
+    const normalized = String(userId || "").trim();
+    if (!normalized) return;
+    markMatchSeen(normalized);
+    await flushPendingSeenMatches();
+  }, [flushPendingSeenMatches, markMatchSeen]);
+
   const fetchUserMatches = useCallback(async (): Promise<MatchRow[]> => {
     if (!profile?.id) return [];
     const attempts: Array<{ select: string; activeOnly: boolean }> = [
@@ -3845,7 +3852,7 @@ const Chats = () => {
       setMatchModal(null);
       setMatchQuickHello("");
       void markChatMessagesRead(roomId);
-      markMatchSeen(matchModal.userId);
+      await markMatchSeenPersisted(matchModal.userId);
       navigate(
       `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(targetName)}&with=${encodeURIComponent(
           matchModal.userId
@@ -3861,11 +3868,11 @@ const Chats = () => {
     } finally {
       setOpeningMatchChat(false);
     }
-  }, [markChatMessagesRead, markMatchSeen, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.id, rememberDirectPeer]);
+  }, [markChatMessagesRead, markMatchSeenPersisted, matchModal, matchQuickHello, navigate, openingMatchChat, profile?.id, rememberDirectPeer]);
 
-  const closeMatchModal = useCallback(() => {
+  const closeMatchModal = useCallback(async () => {
     if (matchModal?.userId) {
-      markMatchSeen(matchModal.userId);
+      await markMatchSeenPersisted(matchModal.userId);
       setMatchOnlyAvatars((prev) => {
         const exists = prev.some((entry) => entry.userId === matchModal.userId);
         if (exists) return prev;
@@ -3883,7 +3890,7 @@ const Chats = () => {
       });
     }
     setMatchModal(null);
-  }, [markMatchSeen, matchModal]);
+  }, [markMatchSeenPersisted, matchModal]);
 
   const openMatchModalFor = useCallback(
     async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
@@ -4682,9 +4689,6 @@ const Chats = () => {
     setChats(prev => prev.map(c =>
       c.id === chat.id ? { ...c, unread: 0 } : c
     ));
-    if (chat.peerUserId) {
-      setMatchOnlyAvatars((prev) => prev.filter((entry) => entry.userId !== chat.peerUserId));
-    }
     void markChatMessagesRead(chat.id);
     if (chat.type === "service") {
       navigate(`/service-chat?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
@@ -4692,12 +4696,21 @@ const Chats = () => {
     }
     if (chat.peerUserId) {
       void (async () => {
-        const canonicalRoomId = await ensureDirectRoom(chat.peerUserId!, chat.name || "Conversation");
-        const nextRoomId = canonicalRoomId || chat.id;
-        void markChatMessagesRead(nextRoomId);
-        navigate(
-          `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(chat.name)}&with=${encodeURIComponent(chat.peerUserId!)}`
-        );
+        try {
+          const canonicalRoomId = await ensureDirectRoom(chat.peerUserId!, chat.name || "Conversation");
+          const nextRoomId = canonicalRoomId || chat.id;
+          void markChatMessagesRead(nextRoomId);
+          navigate(
+            `/chat-dialogue?room=${encodeURIComponent(nextRoomId)}&name=${encodeURIComponent(chat.name)}&with=${encodeURIComponent(chat.peerUserId!)}`
+          );
+        } catch (error: unknown) {
+          const detail =
+            error && typeof error === "object" && "message" in error
+              ? String((error as { message?: unknown }).message || "")
+              : "";
+          console.error("[chats.direct_room_open_failed]", detail || error);
+          toast.error(detail ? `Unable to open chat right now: ${detail}` : "Unable to open chat right now.");
+        }
       })();
       return;
     }
@@ -4707,18 +4720,25 @@ const Chats = () => {
   const handleMatchAvatarClick = useCallback((entry: MatchOnlyAvatar) => {
     if (!entry.userId) return;
     void (async () => {
-      const roomId = await ensureDirectRoom(entry.userId, entry.name || "Conversation");
-      if (!roomId) return;
-      setMatchOnlyAvatars((prev) => prev.filter((item) => item.userId !== entry.userId));
-      markMatchSeen(entry.userId);
-      void markChatMessagesRead(roomId);
-      navigate(
-        `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(entry.name || "Conversation")}&with=${encodeURIComponent(
-          entry.userId
-        )}`
-      );
+      try {
+        const roomId = await ensureDirectRoom(entry.userId, entry.name || "Conversation");
+        if (!roomId) return;
+        void markChatMessagesRead(roomId);
+        navigate(
+          `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(entry.name || "Conversation")}&with=${encodeURIComponent(
+            entry.userId
+          )}`
+        );
+      } catch (error: unknown) {
+        const detail =
+          error && typeof error === "object" && "message" in error
+            ? String((error as { message?: unknown }).message || "")
+            : "";
+        console.error("[chats.match_avatar_open_failed]", detail || error);
+        toast.error(detail ? `Unable to open chat right now: ${detail}` : "Unable to open chat right now.");
+      }
     })();
-  }, [ensureDirectRoom, markChatMessagesRead, markMatchSeen, navigate]);
+  }, [ensureDirectRoom, markChatMessagesRead, navigate]);
 
   const handleRemoveChat = (chat: ChatUser) => {
     if (chat.hasTransaction) {
