@@ -2422,8 +2422,13 @@ const Chats = () => {
             typeof row.service_request_card === "object" &&
             Object.keys(row.service_request_card as Record<string, unknown>).length > 0
         );
+      const shapeIssue = String(row.shape_issue || "").trim();
       const isMalformedServiceRoom =
-        roomType === "service" && !hasServiceContract && String(row.shape_issue || "").trim() === "service_missing_service_row";
+        roomType === "service" &&
+        (
+          shapeIssue === "service_missing_service_row" ||
+          shapeIssue === "service_member_count_invalid"
+        );
       const isService = !isMalformedServiceRoom && (roomType === "service" || hasServiceContract);
       const counterpartUserId = String(row.peer_user_id || "").trim() || null;
       if (!counterpartUserId) {
@@ -2435,7 +2440,7 @@ const Chats = () => {
         console.warn("[chats.inbox.shape_issue]", roomId, row.shape_issue);
       }
       if (isMalformedServiceRoom) {
-        console.warn("[chats.inbox.service_fallback]", roomId, row.shape_issue);
+        console.warn("[chats.inbox.service_fallback]", roomId, shapeIssue);
       }
       const fallbackName = String(row.peer_name || row.chat_name || "Conversation").trim() || "Conversation";
       const counterpartSocialId = String(row.peer_social_id || "").trim() || null;

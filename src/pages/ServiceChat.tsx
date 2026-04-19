@@ -114,6 +114,7 @@ const ServiceChat = () => {
   const lastStatusRef = useRef<ServiceStatus | null>(null);
   const pendingInitialScrollRef = useRef(true);
   const loadingOlderAnchorRef = useRef<{ top: number; height: number } | null>(null);
+  const invalidRoomHandledRef = useRef(false);
   const composerPreviewUrls = useMemo(
     () =>
       composerUploads.map((file) => ({
@@ -235,7 +236,15 @@ const ServiceChat = () => {
 
   useEffect(() => {
     pendingInitialScrollRef.current = true;
+    invalidRoomHandledRef.current = false;
   }, [roomId]);
+
+  useEffect(() => {
+    if (showLoading || !roomId || !roomResolved || serviceChat || invalidRoomHandledRef.current) return;
+    invalidRoomHandledRef.current = true;
+    toast.error("This service chat is unavailable. Returning to your chats.");
+    navigate("/chats?tab=service", { replace: true });
+  }, [navigate, roomId, roomResolved, serviceChat, showLoading]);
 
   useLayoutEffect(() => {
     if (loading || showLoading || messages.length === 0) return;
