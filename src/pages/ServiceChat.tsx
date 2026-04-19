@@ -115,6 +115,7 @@ const ServiceChat = () => {
   const pendingInitialScrollRef = useRef(true);
   const loadingOlderAnchorRef = useRef<{ top: number; height: number } | null>(null);
   const invalidRoomHandledRef = useRef(false);
+  const initialSnapAttemptsRef = useRef(0);
   const composerPreviewUrls = useMemo(
     () =>
       composerUploads.map((file) => ({
@@ -237,7 +238,31 @@ const ServiceChat = () => {
   useEffect(() => {
     pendingInitialScrollRef.current = true;
     invalidRoomHandledRef.current = false;
+    initialSnapAttemptsRef.current = 0;
   }, [roomId]);
+
+  const runInitialSnapToBottom = useCallback(() => {
+    const container = messageScrollRef.current;
+    if (!container) return;
+
+    const snap = () => {
+      const node = messageScrollRef.current;
+      if (!node) return;
+      node.scrollTop = node.scrollHeight;
+      const distanceToBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+      if (distanceToBottom <= 2 || initialSnapAttemptsRef.current >= 6) {
+        pendingInitialScrollRef.current = false;
+        initialSnapAttemptsRef.current = 0;
+        setShowScrollToBottom(false);
+        markCurrentRoomSeen();
+        return;
+      }
+      initialSnapAttemptsRef.current += 1;
+      window.requestAnimationFrame(snap);
+    };
+
+    snap();
+  }, [markCurrentRoomSeen]);
 
   useEffect(() => {
     if (showLoading || !roomId || !roomResolved || serviceChat || invalidRoomHandledRef.current) return;
@@ -260,11 +285,14 @@ const ServiceChat = () => {
     }
 
     if (!pendingInitialScrollRef.current) return;
-    container.scrollTop = container.scrollHeight;
-    pendingInitialScrollRef.current = false;
-    setShowScrollToBottom(false);
-    markCurrentRoomSeen();
-  }, [loading, markCurrentRoomSeen, messages, showLoading]);
+    runInitialSnapToBottom();
+  }, [loading, messages, runInitialSnapToBottom, showLoading]);
+
+  useLayoutEffect(() => {
+    if (loading || showLoading || messages.length === 0) return;
+    if (!pendingInitialScrollRef.current) return;
+    runInitialSnapToBottom();
+  }, [loading, messageViewportHeight, messages.length, runInitialSnapToBottom, showLoading]);
 
   useEffect(() => {
     if (loading || showLoading || messages.length === 0) return;
