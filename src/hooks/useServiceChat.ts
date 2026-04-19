@@ -199,7 +199,10 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
 
   const refreshServiceMeta = useCallback(async () => {
     if (!roomId || !userId) return null;
-    await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
+    const { error: refreshError } = await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
+    if (refreshError) {
+      console.warn("[service_chat.refresh_status_failed]", refreshError.message);
+    }
     const { data: serviceData, error: serviceErr } = await supabase
       .from("service_chats")
       .select(
