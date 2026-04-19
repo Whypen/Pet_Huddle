@@ -858,6 +858,7 @@ const Chats = () => {
   const [seenMatchesHydrated, setSeenMatchesHydrated] = useState(false);
   const [seenMatchesServerState, setSeenMatchesServerState] = useState<"idle" | "ready" | "failed">("idle");
   const directPeerByRoomRef = useRef<Record<string, string>>({});
+  const subscribedInboxRoomIdsRef = useRef<Set<string>>(new Set());
   const conversationsHydratedRef = useRef(false);
   const conversationsRetryTimerRef = useRef<number | null>(null);
 
@@ -3346,22 +3347,23 @@ const Chats = () => {
       ).sort(),
     [chats, groups]
   );
-  const subscribedInboxRoomFilter = useMemo(() => {
-    if (subscribedInboxRoomIds.length === 0) return null;
-    return `chat_id=in.(${subscribedInboxRoomIds.join(",")})`;
+
+  useEffect(() => {
+    subscribedInboxRoomIdsRef.current = new Set(subscribedInboxRoomIds);
   }, [subscribedInboxRoomIds]);
 
   useEffect(() => {
-    if (!profile?.id || !subscribedInboxRoomFilter) return;
+    if (!profile?.id) return;
     const channel = supabase
       .channel(`chats_messages_${profile.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "chat_messages", filter: subscribedInboxRoomFilter },
+        { event: "*", schema: "public", table: "chat_messages" },
         (payload) => {
           const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
           const roomId = String(row?.chat_id || "").trim();
           if (!roomId) return;
+          if (!subscribedInboxRoomIdsRef.current.has(roomId)) return;
           queueDirtyRoomSummaryRefresh(roomId);
         }
       );
@@ -3370,7 +3372,7 @@ const Chats = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomFilter]);
+  }, [profile?.id, queueDirtyRoomSummaryRefresh]);
 
   useEffect(() => {
     if (!activeRoomId) return;
