@@ -3346,27 +3346,31 @@ const Chats = () => {
       ).sort(),
     [chats, groups]
   );
+  const subscribedInboxRoomFilter = useMemo(() => {
+    if (subscribedInboxRoomIds.length === 0) return null;
+    return `chat_id=in.(${subscribedInboxRoomIds.join(",")})`;
+  }, [subscribedInboxRoomIds]);
 
   useEffect(() => {
-    if (!profile?.id || subscribedInboxRoomIds.length === 0) return;
+    if (!profile?.id || !subscribedInboxRoomFilter) return;
     const channel = supabase
-      .channel(`chats_messages_${profile.id}`);
-    subscribedInboxRoomIds.forEach((roomId) => {
-      channel.on(
+      .channel(`chats_messages_${profile.id}`)
+      .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${roomId}` },
+        { event: "*", schema: "public", table: "chat_messages", filter: subscribedInboxRoomFilter },
         (payload) => {
           const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
-          queueDirtyRoomSummaryRefresh(row?.chat_id || roomId);
+          const roomId = String(row?.chat_id || "").trim();
+          if (!roomId) return;
+          queueDirtyRoomSummaryRefresh(roomId);
         }
       );
-    });
     channel.subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomIds]);
+  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomFilter]);
 
   useEffect(() => {
     if (!activeRoomId) return;
@@ -3857,17 +3861,19 @@ const Chats = () => {
     const text = matchQuickHello.trim();
     setOpeningMatchChat(true);
     try {
-      const roomId =
-        matchModal.roomId ||
-        (await ensureDirectChatRoom(supabase, profile.id, matchModal.userId, targetName));
+      const rpc = supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>;
+      const { data: roomData, error: roomError } = await rpc("send_match_first_message", {
+        p_target_user_id: matchModal.userId,
+        p_target_name: targetName,
+        p_body: text,
+      });
+      if (roomError) throw roomError;
+      const roomId = String(roomData || "").trim();
       if (!roomId) throw new Error("room_not_created");
       rememberDirectPeer(roomId, matchModal.userId);
-      if (text) {
-        const { error: messageErr } = await supabase
-          .from("chat_messages")
-          .insert({ chat_id: roomId, sender_id: profile.id, content: text });
-        if (messageErr) throw messageErr;
-      }
       setMatchModal(null);
       setMatchQuickHello("");
       void markChatMessagesRead(roomId);
@@ -4153,8 +4159,10 @@ const Chats = () => {
 
     const channel = supabase
       .channel(`matches_feed_${profile.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches" }, onMatchChange)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches" }, onMatchChange)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
       .subscribe();
 
     return () => {
