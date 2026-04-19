@@ -2413,7 +2413,18 @@ const Chats = () => {
       const roomId = String(row.chat_id || "").trim();
       if (!roomId) return null;
       const roomType = String(row.room_type || "").trim();
-      const isService = roomType === "service" || Boolean(row.service_status);
+      const hasServiceContract =
+        Boolean(row.service_status) ||
+        Boolean(row.service_requester_id) ||
+        Boolean(row.service_provider_id) ||
+        Boolean(
+          row.service_request_card &&
+            typeof row.service_request_card === "object" &&
+            Object.keys(row.service_request_card as Record<string, unknown>).length > 0
+        );
+      const isMalformedServiceRoom =
+        roomType === "service" && !hasServiceContract && String(row.shape_issue || "").trim() === "service_missing_service_row";
+      const isService = !isMalformedServiceRoom && (roomType === "service" || hasServiceContract);
       const counterpartUserId = String(row.peer_user_id || "").trim() || null;
       if (!counterpartUserId) {
         console.warn("[chats.inbox] missing counterpart", roomId, row.shape_issue || null);
@@ -2422,6 +2433,9 @@ const Chats = () => {
       rememberDirectPeer(roomId, counterpartUserId);
       if (row.shape_issue) {
         console.warn("[chats.inbox.shape_issue]", roomId, row.shape_issue);
+      }
+      if (isMalformedServiceRoom) {
+        console.warn("[chats.inbox.service_fallback]", roomId, row.shape_issue);
       }
       const fallbackName = String(row.peer_name || row.chat_name || "Conversation").trim() || "Conversation";
       const counterpartSocialId = String(row.peer_social_id || "").trim() || null;
