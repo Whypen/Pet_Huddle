@@ -105,6 +105,8 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   const hasLoadedRef = useRef(false);
   const reloadInFlightRef = useRef(false);
   const refreshMetaPromiseRef = useRef<Promise<ServiceChatRow | null> | null>(null);
+  const messagesRef = useRef<ChatMessageRow[]>([]);
+  const loadErrorToastRef = useRef<string | null>(null);
 
   const role: ServiceRole | null = useMemo(() => {
     if (!serviceChat || !userId) return null;
@@ -114,6 +116,10 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   }, [serviceChat, userId]);
 
   const providerStripeReady = Boolean(counterpart?.stripePayoutStatus === "complete" && counterpart?.stripeAccountId);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const markMessagesRead = useCallback(
     async (roomMessages: ChatMessageRow[]) => {
@@ -167,7 +173,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   const refreshReadReceipts = useCallback(
     async (roomMessages?: ChatMessageRow[]) => {
       if (!roomId || !userId) return;
-      const sourceRows = roomMessages || messages;
+      const sourceRows = roomMessages || messagesRef.current;
       if (sourceRows.length === 0) {
         setReadMessageIds(new Set());
         return;
@@ -191,7 +197,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       }
       setReadMessageIds(new Set(((data || []) as Array<{ message_id?: string | null }>).map((row) => String(row.message_id || "")).filter(Boolean)));
     },
-    [messages, roomId, userId]
+    [roomId, userId]
   );
 
   const canDispute = useMemo(() => {
@@ -377,14 +383,17 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         }
 
         hasLoadedRef.current = true;
+        loadErrorToastRef.current = null;
         setRoomResolved(true);
       } catch (error) {
         setRoomResolved(true);
-        toast.error(
-          String((error as { message?: string })?.message || "").includes("not_found")
-            ? "Service chat not found."
-            : "Unable to load service chat."
-        );
+        const message = String((error as { message?: string })?.message || "").includes("not_found")
+          ? "Service chat not found."
+          : "Unable to load service chat.";
+        if (loadErrorToastRef.current !== `${roomId}:${message}`) {
+          loadErrorToastRef.current = `${roomId}:${message}`;
+          toast.error(message);
+        }
       } finally {
         reloadInFlightRef.current = false;
         if (shouldShowLoading) setLoading(false);
@@ -397,6 +406,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     hasLoadedRef.current = false;
     reloadInFlightRef.current = false;
     refreshMetaPromiseRef.current = null;
+    loadErrorToastRef.current = null;
     if (!roomId) {
       setLoading(false);
       setRoomResolved(true);
