@@ -66,6 +66,27 @@ const isTransientMessageLoadError = (error: unknown) => {
   );
 };
 
+const isAbortLikeError = (error: unknown) => {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name || "").toLowerCase()
+      : "";
+  const message =
+    error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message || "").toLowerCase()
+      : String(error || "").toLowerCase();
+  return (
+    name === "aborterror" ||
+    message.includes("aborterror") ||
+    message.includes("signal is aborted") ||
+    message.includes("aborted")
+  );
+};
+
+const shouldRefreshServiceStatus = (status: string | null | undefined) => {
+  return status === "pending" || status === "quoted" || status === "booked" || status === "in_progress";
+};
+
 const delay = async (ms: number) => {
   await new Promise((resolve) => window.setTimeout(resolve, ms));
 };
@@ -83,6 +104,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   const [hasReviewed, setHasReviewed] = useState(false);
   const hasLoadedRef = useRef(false);
   const reloadInFlightRef = useRef(false);
+  const refreshMetaPromiseRef = useRef<Promise<ServiceChatRow | null> | null>(null);
 
   const role: ServiceRole | null = useMemo(() => {
     if (!serviceChat || !userId) return null;
@@ -197,39 +219,67 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     return Date.now() >= endAt;
   }, [role, serviceChat]);
 
-  const refreshServiceMeta = useCallback(async () => {
-    if (!roomId || !userId) return null;
-    const { error: refreshError } = await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
-    if (refreshError) {
-      console.warn("[service_chat.refresh_status_failed]", refreshError.message);
-    }
-    const { data: serviceData, error: serviceErr } = await supabase
-      .from("service_chats")
-      .select(
-        "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
-      )
-      .eq("chat_id", roomId)
-      .maybeSingle();
-    if (serviceErr) throw new Error(asMessage(serviceErr.message, "service_chat_load_failed"));
-    if (!serviceData) throw new Error("service_chat_not_found");
+  const refreshServiceMeta = useCallback(
+    async (options?: { allowStatusRefresh?: boolean }) => {
+      if (!roomId || !userId) return null;
+      if (refreshMetaPromiseRef.current) {
+        return refreshMetaPromiseRef.current;
+      }
 
-    const row = serviceData as unknown as ServiceChatRow;
-    setServiceChat(row);
+      const promise = (async () => {
+        const loadServiceRow = async () => {
+          const { data, error } = await supabase
+            .from("service_chats")
+            .select(
+              "chat_id,requester_id,provider_id,status,request_card,quote_card,request_sent_at,quote_sent_at,booked_at,in_progress_at,completed_at,disputed_at,requester_mark_finished,provider_mark_finished"
+            )
+            .eq("chat_id", roomId)
+            .maybeSingle();
+          if (error) throw new Error(asMessage(error.message, "service_chat_load_failed"));
+          if (!data) throw new Error("service_chat_not_found");
+          return data as unknown as ServiceChatRow;
+        };
 
-    if (row.status === "completed" && row.requester_id === userId) {
-      const { data: reviewRow } = await supabase
-        .from("service_reviews")
-        .select("id")
-        .eq("service_chat_id", row.chat_id)
-        .eq("reviewer_id", userId)
-        .maybeSingle();
-      setHasReviewed(Boolean(reviewRow?.id));
-    } else {
-      setHasReviewed(false);
-    }
+        let row = await loadServiceRow();
 
-    return row;
-  }, [roomId, userId]);
+        if ((options?.allowStatusRefresh ?? true) && shouldRefreshServiceStatus(row.status)) {
+          const { error: refreshError } = await supabase.rpc("refresh_service_chat_status", { p_chat_id: roomId });
+          if (refreshError && !isAbortLikeError(refreshError)) {
+            console.warn("[service_chat.refresh_status_failed]", refreshError.message);
+          }
+          if (!refreshError) {
+            row = await loadServiceRow();
+          }
+        }
+
+        setServiceChat(row);
+
+        if (row.status === "completed" && row.requester_id === userId) {
+          const { data: reviewRow } = await supabase
+            .from("service_reviews")
+            .select("id")
+            .eq("service_chat_id", row.chat_id)
+            .eq("reviewer_id", userId)
+            .maybeSingle();
+          setHasReviewed(Boolean(reviewRow?.id));
+        } else {
+          setHasReviewed(false);
+        }
+
+        return row;
+      })();
+
+      refreshMetaPromiseRef.current = promise;
+      try {
+        return await promise;
+      } finally {
+        if (refreshMetaPromiseRef.current === promise) {
+          refreshMetaPromiseRef.current = null;
+        }
+      }
+    },
+    [roomId, userId]
+  );
 
   const loadLatestMessages = useCallback(async () => {
     let attempt = 0;
@@ -277,7 +327,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
       const shouldShowLoading = !silent || !hasLoadedRef.current;
       if (shouldShowLoading) setLoading(true);
       try {
-        const row = await refreshServiceMeta();
+        const row = await refreshServiceMeta({ allowStatusRefresh: true });
         if (!row) throw new Error("service_chat_not_found");
         let newestFirstMessages: ChatMessageRow[] = [];
         try {
@@ -346,6 +396,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   useEffect(() => {
     hasLoadedRef.current = false;
     reloadInFlightRef.current = false;
+    refreshMetaPromiseRef.current = null;
     if (!roomId) {
       setLoading(false);
       setRoomResolved(true);
@@ -402,7 +453,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           try {
             const parsed = JSON.parse(row.content) as { kind?: string } | null;
             if (parsed?.kind?.startsWith("service_")) {
-              void refreshServiceMeta();
+              void refreshServiceMeta({ allowStatusRefresh: true });
             }
           } catch {
             // plain text / share payloads
@@ -437,10 +488,11 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
   useEffect(() => {
     if (!roomId) return;
     const tick = window.setInterval(() => {
-      void refreshServiceMeta();
+      if (!serviceChat) return;
+      void refreshServiceMeta({ allowStatusRefresh: true });
     }, 8000);
     return () => window.clearInterval(tick);
-  }, [refreshServiceMeta, roomId]);
+  }, [refreshServiceMeta, roomId, serviceChat]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!roomId || loading || loadingOlderMessages || !hasOlderMessages || messages.length === 0) return;
