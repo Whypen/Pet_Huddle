@@ -1,3 +1,5 @@
+import { pickFiles } from "@/lib/nativeShell";
+
 export type HumanChallenge = {
   challengeType: string;
   instruction: string;
@@ -155,16 +157,35 @@ export async function runHumanVerificationChallenge(
   challenge: HumanChallenge,
   options: HumanVerificationRunOptions = {},
 ): Promise<HumanVerificationRunResult> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user" },
-    audio: false,
-  });
-  options.onPreviewStream?.(stream);
+  let stream: MediaStream | null = null;
+  let previewUrl: string | null = null;
   let detector: MediaPipeFaceLandmarker | null = null;
+  const video = document.createElement("video");
 
   try {
-    const video = document.createElement("video");
-    video.srcObject = stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      options.onPreviewStream?.(stream);
+      video.srcObject = stream;
+    } catch (cameraError) {
+      options.onPreviewStream?.(null);
+      const picked = await pickFiles({
+        accept: "video/*,image/*",
+        multiple: false,
+        source: "camera",
+      });
+      const fallbackFile = picked[0] || null;
+      if (!fallbackFile) throw cameraError;
+      if (!fallbackFile.type.startsWith("video/")) {
+        throw new Error("native_camera_still_image_only");
+      }
+      previewUrl = URL.createObjectURL(fallbackFile);
+      video.src = previewUrl;
+    }
+
     video.playsInline = true;
     video.muted = true;
     await video.play();
@@ -222,6 +243,7 @@ export async function runHumanVerificationChallenge(
         previousFrame = new Uint8ClampedArray(frame);
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (!stream && video.ended) break;
     }
 
     const width = Math.max(320, video.videoWidth || 320);
@@ -262,7 +284,11 @@ export async function runHumanVerificationChallenge(
       };
     }
 
-    const minSamples = 4;
+    // Keep browser pass criteria aligned with the verify-human-challenge backend.
+    // If the client soft-passes with looser thresholds than the server accepts,
+    // completion fails with "invalid_verification_result" and the user sees a
+    // generic "couldn't complete verification" error after doing the challenge.
+    const minSamples = 6;
     if (centers.length < minSamples) {
       return {
         passed: false,
@@ -300,13 +326,13 @@ export async function runHumanVerificationChallenge(
 
     let passed = false;
     if (challenge.challengeType === "turn_left_right") {
-      passed = horizontalShift >= 0.25 && leftTravel >= 0.08 && rightTravel >= 0.08;
+      passed = horizontalShift >= 0.36 && leftTravel >= 0.12 && rightTravel >= 0.12;
     } else if (challenge.challengeType === "look_up_down") {
-      passed = verticalShift >= 0.20 && upTravel >= 0.07 && downTravel >= 0.07;
+      passed = verticalShift >= 0.30 && upTravel >= 0.10 && downTravel >= 0.10;
     } else {
       passed =
-        (horizontalShift >= 0.25 && leftTravel >= 0.08 && rightTravel >= 0.08)
-        || (verticalShift >= 0.20 && upTravel >= 0.07 && downTravel >= 0.07);
+        (horizontalShift >= 0.36 && leftTravel >= 0.12 && rightTravel >= 0.12)
+        || (verticalShift >= 0.30 && upTravel >= 0.10 && downTravel >= 0.10);
     }
 
     return {
@@ -335,6 +361,11 @@ export async function runHumanVerificationChallenge(
       // no-op
     }
     options.onPreviewStream?.(null);
-    stream.getTracks().forEach((track) => track.stop());
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
   }
 }

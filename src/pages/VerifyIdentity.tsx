@@ -883,13 +883,13 @@ const describeHumanFailure = (
   if (reason === "face_detector_unsupported" || reason === "mediapipe_unavailable") {
     return "We couldn't initialize face detection. Check camera permission and internet connection, then try again.";
   }
-  if (reason === "face_not_stably_detected" || detectedFrames < 4) {
+  if (reason === "face_not_stably_detected" || detectedFrames < 6) {
     return "We couldn't detect your face steadily. Keep your whole face inside the oval in a well-lit place.";
   }
-  if (challengeType === "turn_left_right" && (leftTravel < 0.08 || rightTravel < 0.08 || horizontalShift < 0.25)) {
+  if (challengeType === "turn_left_right" && (leftTravel < 0.12 || rightTravel < 0.12 || horizontalShift < 0.36)) {
     return "Move your head left and right while staying inside the oval.";
   }
-  if (challengeType === "look_up_down" && (upTravel < 0.07 || downTravel < 0.07 || verticalShift < 0.20)) {
+  if (challengeType === "look_up_down" && (upTravel < 0.10 || downTravel < 0.10 || verticalShift < 0.30)) {
     return "Move your head up and down while staying inside the oval.";
   }
   return challengeInstruction
