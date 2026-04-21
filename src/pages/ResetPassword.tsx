@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +10,7 @@ import { authResetPassword } from "@/lib/publicAuthApi";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 const schema = z.object({
   email: z.string().trim().email("Invalid email format"),
@@ -18,6 +20,10 @@ type FormData = z.infer<typeof schema>;
 
 const ResetPassword = () => {
   const navigate = useNavigate();
+  const [registeredEmail, setRegisteredEmail] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  const [emailCheckError, setEmailCheckError] = useState<string | null>(null);
+  const duplicateCheckRef = useRef(0);
   const showTurnstileDiag =
     typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("turnstile_diag") === "1";
@@ -29,10 +35,58 @@ const ResetPassword = () => {
     }
     return String((resetTurnstile as { token?: string | null }).token || "").trim();
   };
-  const { register, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
+  const { register, watch, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
   });
+  const email = watch("email") || "";
+
+  useEffect(() => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!schema.safeParse({ email: trimmedEmail }).success) {
+      setRegisteredEmail(false);
+      setCheckingEmail(false);
+      setEmailCheckError(null);
+      return;
+    }
+    const checkId = ++duplicateCheckRef.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        setCheckingEmail(true);
+        setEmailCheckError(null);
+        const { data, error } = await supabase.rpc("check_identifier_registered", {
+          p_email: trimmedEmail,
+          p_phone: "",
+        });
+        if (checkId !== duplicateCheckRef.current) return;
+        if (error) {
+          setRegisteredEmail(false);
+          setEmailCheckError("Could not verify this email right now. Please retry.");
+          return;
+        }
+        if (data?.blocked) {
+          setRegisteredEmail(false);
+          setEmailCheckError(String(data?.public_message || "This account is unavailable."));
+          return;
+        }
+        if (data?.review_required) {
+          setRegisteredEmail(false);
+          setEmailCheckError("This account is temporarily unavailable.");
+          return;
+        }
+        const exists = Boolean(data?.registered);
+        setRegisteredEmail(exists);
+        setEmailCheckError(exists ? null : "No account found for this email.");
+      } catch {
+        if (checkId !== duplicateCheckRef.current) return;
+        setRegisteredEmail(false);
+        setEmailCheckError("Could not verify this email right now. Please retry.");
+      } finally {
+        if (checkId === duplicateCheckRef.current) setCheckingEmail(false);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [email]);
 
   const onSubmit = async (values: FormData) => {
     const normalizedEmail = values.email.trim().toLowerCase();
@@ -70,13 +124,20 @@ const ResetPassword = () => {
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">
         <Input type="email" autoComplete="email" className={`h-9 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
         {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+        {!errors.email && emailCheckError && <p className="text-xs text-red-500">{emailCheckError}</p>}
         <TurnstileWidget
           siteKeyMissing={resetTurnstile.siteKeyMissing}
           setContainer={resetTurnstile.setContainer}
           className="min-h-[65px]"
         />
         <TurnstileDebugPanel visible={showTurnstileDiag} diag={resetTurnstile.diag} />
-        <Button type="submit" className="w-full h-10" disabled={!isValid || !resetTurnstile.isTokenUsable}>Send reset link</Button>
+        <Button
+          type="submit"
+          className="w-full h-10"
+          disabled={!isValid || !registeredEmail || checkingEmail || !resetTurnstile.isTokenUsable}
+        >
+          {checkingEmail ? "Checking…" : "Send reset link"}
+        </Button>
       </form>
     </div>
   );

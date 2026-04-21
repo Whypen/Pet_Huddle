@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { authResetPassword } from "@/lib/publicAuthApi";
 import { getClientEnv } from "@/lib/env";
+import { supabase } from "@/integrations/supabase/client";
 
 declare global {
   interface Window {
@@ -74,10 +75,15 @@ const ResetPasswordInline = () => {
   const [token, setToken] = useState("");
   const [widgetReady, setWidgetReady] = useState(false);
   const [widgetError, setWidgetError] = useState<string | null>(null);
-  const { register, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
+  const [registeredEmail, setRegisteredEmail] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+  const [emailCheckError, setEmailCheckError] = useState<string | null>(null);
+  const duplicateCheckRef = useRef(0);
+  const { register, watch, handleSubmit, formState: { errors, isValid } } = useForm<FormData>({
     resolver: zodResolver(schema),
     mode: "onChange",
   });
+  const email = watch("email") || "";
 
   useEffect(() => {
     if (!siteKey || !containerRef.current) return;
@@ -128,6 +134,53 @@ const ResetPasswordInline = () => {
     };
   }, [siteKey]);
 
+  useEffect(() => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!schema.safeParse({ email: trimmedEmail }).success) {
+      setRegisteredEmail(false);
+      setCheckingEmail(false);
+      setEmailCheckError(null);
+      return;
+    }
+    const checkId = ++duplicateCheckRef.current;
+    const timer = window.setTimeout(async () => {
+      try {
+        setCheckingEmail(true);
+        setEmailCheckError(null);
+        const { data, error } = await supabase.rpc("check_identifier_registered", {
+          p_email: trimmedEmail,
+          p_phone: "",
+        });
+        if (checkId !== duplicateCheckRef.current) return;
+        if (error) {
+          setRegisteredEmail(false);
+          setEmailCheckError("Could not verify this email right now. Please retry.");
+          return;
+        }
+        if (data?.blocked) {
+          setRegisteredEmail(false);
+          setEmailCheckError(String(data?.public_message || "This account is unavailable."));
+          return;
+        }
+        if (data?.review_required) {
+          setRegisteredEmail(false);
+          setEmailCheckError("This account is temporarily unavailable.");
+          return;
+        }
+        const exists = Boolean(data?.registered);
+        setRegisteredEmail(exists);
+        setEmailCheckError(exists ? null : "No account found for this email.");
+      } catch {
+        if (checkId !== duplicateCheckRef.current) return;
+        setRegisteredEmail(false);
+        setEmailCheckError("Could not verify this email right now. Please retry.");
+      } finally {
+        if (checkId === duplicateCheckRef.current) setCheckingEmail(false);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [email]);
+
   const onSubmit = async (values: FormData) => {
     const normalizedEmail = values.email.trim().toLowerCase();
     if (!token) {
@@ -168,13 +221,25 @@ const ResetPasswordInline = () => {
       <h1 className="text-xl font-bold text-brandText">Reset Password</h1>
       <p className="text-sm text-muted-foreground">Enter your email to receive a reset link.</p>
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">
-        <Input type="email" className={`h-9 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
+        <Input
+          type="email"
+          autoComplete="email"
+          className={`h-9 ${errors.email ? "border-red-500" : ""}`}
+          {...register("email")}
+        />
         {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+        {!errors.email && emailCheckError && <p className="text-xs text-red-500">{emailCheckError}</p>}
         <div className="min-h-[65px]">
           {siteKey ? <div ref={containerRef} className="min-h-[65px]" /> : <p className="text-xs text-muted-foreground">Human verification unavailable.</p>}
         </div>
         {widgetError && <p className="text-xs text-red-500">{widgetError}</p>}
-        <Button type="submit" className="w-full h-10" disabled={!isValid || !widgetReady || !token}>Send reset link</Button>
+        <Button
+          type="submit"
+          className="w-full h-10"
+          disabled={!isValid || !registeredEmail || checkingEmail || !widgetReady || !token}
+        >
+          {checkingEmail ? "Checking…" : "Send reset link"}
+        </Button>
       </form>
     </div>
   );

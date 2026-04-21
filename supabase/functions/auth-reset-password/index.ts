@@ -60,12 +60,9 @@ Deno.serve(async (req: Request) => {
     return json(400, { error: "invalid_json" });
   }
 
-  const email = String(body.email || "").trim();
+  const email = String(body.email || "").trim().toLowerCase();
   const redirectTo = normalizeRedirectTo(String(body.redirectTo || "").trim() || DEFAULT_RESET_REDIRECT);
-  if (!email) {
-    console.warn("[auth-reset-password] missing email in request body");
-    return json(200, { data: null });
-  }
+  if (!email) return json(400, { error: "email_required" });
 
   const turnstile = await validateTurnstile(
     body.turnstile_token ?? null,
@@ -85,7 +82,7 @@ Deno.serve(async (req: Request) => {
       redirectTo,
       message: res.error.message || "reset_failed",
     });
-    return json(200, { data: null });
+    return json(400, { error: "reset_password_failed", message: res.error.message || "Failed to send reset link" });
   }
 
   return json(200, { data: null });
