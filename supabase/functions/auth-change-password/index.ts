@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
 
 type ChangePasswordBody = {
   password?: string;
+  access_token?: string;
   turnstile_token?: string;
   turnstile_action?: string;
 };
@@ -20,16 +21,17 @@ const json = (status: number, body: unknown) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
-const extractToken = (req: Request) => {
+const extractToken = (req: Request, body?: ChangePasswordBody | null) => {
   const huddleToken = (req.headers.get("x-huddle-access-token") ?? "").replace(/^Bearer\s+/i, "").trim();
   const bearerToken = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const bodyToken = String(body?.access_token || "").replace(/^Bearer\s+/i, "").trim();
   const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
   const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
   const isUserJwt = (token: string) =>
     token.split(".").length === 3 &&
     token !== anonKey &&
     token !== serviceRole;
-  return [huddleToken, bearerToken].find(isUserJwt) ?? null;
+  return [huddleToken, bearerToken, bodyToken].find(isUserJwt) ?? null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -53,7 +55,7 @@ Deno.serve(async (req: Request) => {
     return json(400, { error: "password_min_8_chars" });
   }
 
-  const accessToken = extractToken(req);
+  const accessToken = extractToken(req, body);
   if (!accessToken) return json(401, { error: "unauthorized" });
 
   // Validate the JWT and confirm the user exists before proceeding.
@@ -66,16 +68,18 @@ Deno.serve(async (req: Request) => {
     return json(401, { error: "unauthorized" });
   }
 
-  // Use a user-scoped client so Supabase fires the built-in "Password Changed"
-  // security notification email. Admin API (updateUserById) bypasses that hook.
-  const userClient = createClient(supabaseUrl, anonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  const updateRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password }),
   });
-
-  const update = await userClient.auth.updateUser({ password });
-  if (update.error) {
-    return json(400, { error: update.error.message || "password_change_failed" });
+  if (!updateRes.ok) {
+    const payload = await updateRes.json().catch(() => null) as { msg?: string; error?: string } | null;
+    return json(400, { error: payload?.msg || payload?.error || "password_change_failed" });
   }
 
   return json(200, { data: null });
