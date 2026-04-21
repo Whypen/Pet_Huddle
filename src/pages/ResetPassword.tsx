@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ChevronLeft } from "lucide-react";
+import { CheckCircle2, ChevronLeft, Mail } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -13,16 +13,19 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 
 const schema = z.object({
-  email: z.string().trim().email("Invalid email format"),
+  email: z.string().trim().email("Enter a valid email address."),
 });
 
 type FormData = z.infer<typeof schema>;
+type RequestState = "idle" | "sending" | "sent";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
   const [registeredEmail, setRegisteredEmail] = useState(false);
   const [checkingEmail, setCheckingEmail] = useState(false);
   const [emailCheckError, setEmailCheckError] = useState<string | null>(null);
+  const [requestState, setRequestState] = useState<RequestState>("idle");
+  const [submittedEmail, setSubmittedEmail] = useState("");
   const duplicateCheckRef = useRef(0);
   const showTurnstileDiag =
     typeof window !== "undefined"
@@ -43,6 +46,8 @@ const ResetPassword = () => {
 
   useEffect(() => {
     const trimmedEmail = email.trim().toLowerCase();
+    setRequestState("idle");
+    setSubmittedEmail("");
     if (!schema.safeParse({ email: trimmedEmail }).success) {
       setRegisteredEmail(false);
       setCheckingEmail(false);
@@ -61,7 +66,7 @@ const ResetPassword = () => {
         if (checkId !== duplicateCheckRef.current) return;
         if (error) {
           setRegisteredEmail(false);
-          setEmailCheckError("Could not verify this email right now. Please retry.");
+          setEmailCheckError("We couldn't check this email right now. Please try again.");
           return;
         }
         if (data?.blocked) {
@@ -76,11 +81,11 @@ const ResetPassword = () => {
         }
         const exists = Boolean(data?.registered);
         setRegisteredEmail(exists);
-        setEmailCheckError(exists ? null : "No account found for this email.");
+        setEmailCheckError(exists ? null : "We couldn't find an account with that email.");
       } catch {
         if (checkId !== duplicateCheckRef.current) return;
         setRegisteredEmail(false);
-        setEmailCheckError("Could not verify this email right now. Please retry.");
+        setEmailCheckError("We couldn't check this email right now. Please try again.");
       } finally {
         if (checkId === duplicateCheckRef.current) setCheckingEmail(false);
       }
@@ -92,9 +97,10 @@ const ResetPassword = () => {
     const normalizedEmail = values.email.trim().toLowerCase();
     const token = readTurnstileToken();
     if (!token) {
-      toast.error("Complete human verification first.");
+      toast.error("Please complete verification first.");
       return;
     }
+    setRequestState("sending");
     const { error } = await authResetPassword({
       email: normalizedEmail,
       redirectTo: `${window.location.origin}/update-password`,
@@ -103,10 +109,13 @@ const ResetPassword = () => {
     });
     resetTurnstile.reset();
     if (error) {
-      toast.error(error.message || "Failed to send reset link");
+      setRequestState("idle");
+      setEmailCheckError("We couldn't send that reset email just now. Please try again in a moment.");
       return;
     }
-    toast.success("Password reset link sent to your email");
+    setSubmittedEmail(normalizedEmail);
+    setEmailCheckError(null);
+    setRequestState("sent");
   };
 
   return (
@@ -121,6 +130,22 @@ const ResetPassword = () => {
       </button>
       <h1 className="text-xl font-bold text-brandText">Reset Password</h1>
       <p className="text-sm text-muted-foreground">Enter your email to receive a reset link.</p>
+
+      {requestState === "sent" && (
+        <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <div>
+              <p className="font-medium">Check your inbox</p>
+              <p className="mt-1 leading-6 text-emerald-800">
+                We&apos;ve sent a password reset link to <span className="font-medium">{submittedEmail}</span>.
+                If it doesn&apos;t arrive in a few minutes, check your spam folder or try again.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-3">
         <Input type="email" autoComplete="email" className={`h-9 ${errors.email ? "border-red-500" : ""}`} {...register("email")} />
         {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
@@ -133,12 +158,23 @@ const ResetPassword = () => {
         <TurnstileDebugPanel visible={showTurnstileDiag} diag={resetTurnstile.diag} />
         <Button
           type="submit"
-          className="w-full h-10"
-          disabled={!isValid || !registeredEmail || checkingEmail || !resetTurnstile.isTokenUsable}
+          className="h-10 w-full"
+          disabled={!isValid || !registeredEmail || checkingEmail || requestState === "sending" || !resetTurnstile.isTokenUsable}
         >
-          {checkingEmail ? "Checking…" : "Send reset link"}
+          {checkingEmail ? "Checking…" : requestState === "sending" ? "Sending…" : "Send reset link"}
         </Button>
       </form>
+
+      {requestState === "sent" && (
+        <button
+          type="button"
+          onClick={() => setRequestState("idle")}
+          className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-primary"
+        >
+          <Mail size={16} strokeWidth={1.75} />
+          Send another link
+        </button>
+      )}
     </div>
   );
 };

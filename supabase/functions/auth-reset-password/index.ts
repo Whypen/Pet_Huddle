@@ -82,7 +82,10 @@ Deno.serve(async (req: Request) => {
       redirectTo,
       message: res.error.message || "reset_failed",
     });
-    return json(400, { error: "reset_password_failed", message: res.error.message || "Failed to send reset link" });
+    // Keep the browser-facing response generic for password reset requests.
+    // This avoids leaking reset delivery state and prevents UX dead-ends on
+    // provider-side send errors after we have already validated the address.
+    return json(200, { data: null });
   }
 
   return json(200, { data: null });

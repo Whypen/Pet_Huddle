@@ -52,6 +52,10 @@ export function mapAuthFailureMessage(error: ErrorLike | string | null | undefin
     return "Please complete verification first.";
   }
 
+  if (normalizedMessage.includes("reset_password_failed") || normalizedCode.includes("reset_password_failed")) {
+    return "We couldn't send that reset email just now. Please try again in a moment.";
+  }
+
   return rawMessage || "Couldn't sign you in.";
 }
 
