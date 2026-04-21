@@ -75,34 +75,34 @@ const AuthCallback = () => {
       }
 
       const isOAuth = user.app_metadata?.provider !== "email";
-      if (isOAuth) {
-        const { data: profileRow } = await supabase
-          .from("profiles")
-          .select("id, email")
-          .eq("id", user.id)
-          .maybeSingle();
+      const { data: profileRow } = await supabase
+        .from("profiles")
+        .select("id, email")
+        .eq("id", user.id)
+        .maybeSingle();
 
-        if (!profileRow) {
-          const fullName =
-            (user.user_metadata?.full_name as string | undefined) ||
-            (user.user_metadata?.name as string | undefined) ||
-            "";
-          const email = user.email || "";
-          try {
-            const owner = normalizeStorageOwner(email);
-            localStorage.setItem(
-              buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner),
-              JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "", email }),
-            );
-            localStorage.setItem("auth_login_identifier", email);
-          } catch {
-            // best-effort
-          }
-          setFlowState("signup");
-          navigate("/signup/dob?oauth_onboarding=1");
-          return;
+      if (!profileRow) {
+        const fullName =
+          (user.user_metadata?.full_name as string | undefined) ||
+          (user.user_metadata?.name as string | undefined) ||
+          "";
+        const nextEmail = user.email || "";
+        try {
+          const owner = normalizeStorageOwner(nextEmail);
+          localStorage.setItem(
+            buildScopedStorageKey(SETPROFILE_PREFILL_KEY, owner),
+            JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "", email: nextEmail }),
+          );
+          localStorage.setItem("auth_login_identifier", nextEmail);
+        } catch {
+          // best-effort
         }
+        setFlowState("signup");
+        navigate(`/signup/dob${isOAuth ? "?oauth_onboarding=1" : ""}`);
+        return;
+      }
 
+      if (isOAuth) {
         const profileEmail = normalizeEmail(profileRow.email);
         if (email && profileEmail !== email) {
           const { error: repairError } = await supabase
@@ -119,6 +119,7 @@ const AuthCallback = () => {
     };
     void run();
   }, [navigate, setFlowState]);
+
   return null;
 };
 
