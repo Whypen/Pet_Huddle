@@ -269,6 +269,7 @@ const MapPage = () => {
   const [alertFocusId, setAlertFocusId] = useState<string | null>(null);
   const [alertFocusThreadId, setAlertFocusThreadId] = useState<string | null>(null);
   const alertFocusRetriesRef = useRef(0);
+  const alertCameraLockRef = useRef(false);
   const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
   const [publicProfileOpen, setPublicProfileOpen] = useState(false);
   const [publicProfileLoading, setPublicProfileLoading] = useState(false);
@@ -554,6 +555,10 @@ const MapPage = () => {
     setAlertFocusId(alertIdFromUrl && alertIdFromUrl.trim() ? alertIdFromUrl.trim() : null);
     setAlertFocusThreadId(alertThreadFromUrl && alertThreadFromUrl.trim() ? alertThreadFromUrl.trim() : null);
     alertFocusRetriesRef.current = 0;
+    alertCameraLockRef.current = Boolean(
+      (alertIdFromUrl && alertIdFromUrl.trim()) ||
+      (alertThreadFromUrl && alertThreadFromUrl.trim()),
+    );
   }, [location.search]);
 
   // Default center (Hong Kong)
@@ -697,7 +702,7 @@ const MapPage = () => {
     setIsInvisible(false);
     setPinning(false);
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
-    toast.success(`Location pinned (${source})`);
+    toast.success("Pin is live!");
   }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, user?.id]);
 
   const requestPinFromLiveGps = useCallback(() => {
@@ -936,7 +941,7 @@ const MapPage = () => {
 
       map.current.on("load", () => {
         setMapLoaded(true);
-        if (!hasInitialized.current && userLocation) {
+        if (!hasInitialized.current && userLocation && !alertCameraLockRef.current) {
           flyToWithDebug("map.load.initialSnap", {
             center: [userLocation.lng, userLocation.lat],
             zoom: PROXIMITY_ZOOM,
@@ -1019,6 +1024,7 @@ const MapPage = () => {
     if (!map.current || !mapLoaded) return;
     const apply = async () => {
       if (!map.current) return;
+      if (alertCameraLockRef.current) return;
       // Pin snap always wins — overrides any previously applied fallback
       if (userLocation && !pinSnapAppliedRef.current) {
         flyToWithDebug("init.userPin", { center: [userLocation.lng, userLocation.lat], zoom: 15.5 });
@@ -1290,6 +1296,11 @@ const MapPage = () => {
   }, [flyToWithDebug]);
 
   useEffect(() => {
+    if (!user?.id) return;
+    void fetchCurrentPinState();
+  }, [fetchCurrentPinState, user?.id]);
+
+  useEffect(() => {
     if (!alertFocusId && !alertFocusThreadId) return;
     const focusKey = alertFocusId || alertFocusThreadId || "";
     if (!focusKey) return;
@@ -1298,6 +1309,7 @@ const MapPage = () => {
       setShowAlerts(true);
       focusMapTarget("deeplink.alert", target.latitude, target.longitude);
       setSelectedAlert(target);
+      alertCameraLockRef.current = false;
       setAlertFocusId(null);
       setAlertFocusThreadId(null);
       return;
@@ -1312,11 +1324,13 @@ const MapPage = () => {
           setShowAlerts(true);
           focusMapTarget("deeplink.alert.resolved", resolved.latitude, resolved.longitude);
           setSelectedAlert(resolved);
+          alertCameraLockRef.current = false;
           setAlertFocusId(null);
           setAlertFocusThreadId(null);
           return;
         }
         toast.info("That alert is no longer available.");
+        alertCameraLockRef.current = false;
         setAlertFocusId(null);
         setAlertFocusThreadId(null);
       })();
@@ -1333,6 +1347,7 @@ const MapPage = () => {
           setShowAlerts(true);
           focusMapTarget("deeplink.alert.retry", resolved.latitude, resolved.longitude);
           setSelectedAlert(resolved);
+          alertCameraLockRef.current = false;
           setAlertFocusId(null);
           setAlertFocusThreadId(null);
           return;
@@ -1361,6 +1376,7 @@ const MapPage = () => {
 
   useEffect(() => {
     if (!selectedAlert) return;
+    alertCameraLockRef.current = false;
     const updated = dbAlerts.find((row) => row.id === selectedAlert.id) || null;
     if (updated) {
       if (updated !== selectedAlert) setSelectedAlert(updated);
