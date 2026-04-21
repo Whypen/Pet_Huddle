@@ -29,6 +29,9 @@ const clientIp = (req: Request) =>
 
 const DEFAULT_RESET_REDIRECT =
   "https://huddle.pet/auth/callback?type=recovery&next=/update-password";
+const BREVO_API_KEY = String(Deno.env.get("BREVO_API_KEY") || "").trim();
+const BREVO_FROM_EMAIL = String(Deno.env.get("BREVO_FROM_EMAIL") || "noreply@huddle.pet").trim();
+const BREVO_FROM_NAME = "huddle";
 
 const normalizeRedirectTo = (value: string) => {
   try {
@@ -45,13 +48,90 @@ const normalizeRedirectTo = (value: string) => {
   }
 };
 
+const isMissingUserError = (message: string) => {
+  const normalized = message.trim().toLowerCase();
+  return normalized.includes("not found") || normalized.includes("user not found");
+};
+
+async function sendResetEmail(to: string, resetUrl: string): Promise<{ ok: boolean; error: string | null }> {
+  if (!BREVO_API_KEY) {
+    return { ok: false, error: "brevo_not_configured" };
+  }
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6fb;padding:40px 0;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:#C8FF00;padding:18px 32px;">
+          <span style="font-size:20px;font-weight:700;color:#1a1a1a;">huddle</span>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#414141;">Reset your password</h2>
+          <p style="margin:0 0 12px;font-size:15px;color:#545454;line-height:1.7;">
+            We received a request to reset your huddle password.
+          </p>
+          <p style="margin:0 0 28px;font-size:15px;color:#545454;line-height:1.7;">
+            Use the button below to choose a new password. This link expires in 24 hours.
+          </p>
+          <table cellpadding="0" cellspacing="0"><tr><td>
+            <a href="${resetUrl}"
+               style="display:inline-block;padding:14px 32px;background:#2145CF;color:#ffffff;
+                      font-size:15px;font-weight:600;border-radius:8px;text-decoration:none;">
+              Reset my password
+            </a>
+          </td></tr></table>
+          <p style="margin:28px 0 0;font-size:13px;color:#888888;line-height:1.5;">
+            If you didn&apos;t request this, you can safely ignore this email.
+          </p>
+        </td></tr>
+        <tr><td style="padding:16px 32px;border-top:1px solid #f0f0f0;">
+          <p style="margin:0;font-size:12px;color:#aaaaaa;">
+            &copy; huddle &nbsp;·&nbsp;
+            <a href="https://huddle.pet" style="color:#aaaaaa;">huddle.pet</a>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+  const text =
+    `Reset your huddle password\n\n` +
+    `Open this link to choose a new password:\n${resetUrl}\n\n` +
+    `This link expires in 24 hours. If you didn't request this, you can ignore this email.`;
+
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": BREVO_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: { name: BREVO_FROM_NAME, email: BREVO_FROM_EMAIL },
+      to: [{ email: to }],
+      subject: "Reset your huddle password",
+      htmlContent: html,
+      textContent: text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    return { ok: false, error: errorText || `brevo_${res.status}` };
+  }
+
+  return { ok: true, error: null };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
 
   const supabaseUrl = String(Deno.env.get("SUPABASE_URL") || "").trim();
-  const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
-  if (!supabaseUrl || !anonKey) return json(500, { error: "server_misconfigured" });
+  const serviceRoleKey = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  if (!supabaseUrl || !serviceRoleKey) return json(500, { error: "server_misconfigured" });
 
   let body: ResetBody;
   try {
@@ -74,18 +154,36 @@ Deno.serve(async (req: Request) => {
     return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
   }
 
-  const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
-  const res = await authClient.auth.resetPasswordForEmail(email, { redirectTo });
-  if (res.error) {
-    console.warn("[auth-reset-password] resetPasswordForEmail returned error", {
+  const authAdmin = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const generated = await authAdmin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  });
+
+  if (generated.error) {
+    const message = generated.error.message || "generate_link_failed";
+    console.warn("[auth-reset-password] generateLink returned error", {
       email_domain: email.includes("@") ? email.split("@").slice(-1)[0] : "invalid",
       redirectTo,
-      message: res.error.message || "reset_failed",
+      message,
     });
-    // Keep the browser-facing response generic for password reset requests.
-    // This avoids leaking reset delivery state and prevents UX dead-ends on
-    // provider-side send errors after we have already validated the address.
-    return json(200, { data: null });
+    if (isMissingUserError(message)) {
+      return json(200, { data: null });
+    }
+    return json(500, { error: "reset_password_failed" });
+  }
+
+  const actionLink = String(generated.data?.properties?.action_link || "").trim();
+  if (!actionLink) {
+    console.error("[auth-reset-password] generateLink returned no action_link");
+    return json(500, { error: "reset_password_failed" });
+  }
+
+  const sent = await sendResetEmail(email, actionLink);
+  if (!sent.ok) {
+    console.error("[auth-reset-password] brevo send failed", sent.error || "unknown");
+    return json(500, { error: "reset_password_failed" });
   }
 
   return json(200, { data: null });

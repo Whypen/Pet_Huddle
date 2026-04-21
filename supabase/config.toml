@@ -62,6 +62,16 @@ verify_jwt = false
 [functions.send-pre-signup-verify]
 verify_jwt = false
 
+# confirm-pre-signup-verify: browser callback from /verify email links.
+# Token in URL is the auth, so gateway JWT verification must stay off.
+[functions.confirm-pre-signup-verify]
+verify_jwt = false
+
+# get-pre-signup-verify-status: polled from the public signup verify-email page.
+# Browser callers use the publishable key and no user session yet.
+[functions.get-pre-signup-verify-status]
+verify_jwt = false
+
 [functions.auth-protection-health]
 verify_jwt = false
 
@@ -130,6 +140,11 @@ verify_jwt = false
 # send-signup-verify-email: called from signup flow with user session JWT.
 # Internal gate: requires valid user JWT + JWT sub must match body user_id.
 [functions.send-signup-verify-email]
+verify_jwt = false
+
+# confirm-signup-email: browser callback from signup verification email links.
+# The uid+token in the URL is the verifier; no session exists yet.
+[functions.confirm-signup-email]
 verify_jwt = false
 
 # delete-account: called from authenticated app flow.
