@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
 import { LegalModal } from "@/components/modals/LegalModal";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 import { useTurnstile } from "@/hooks/useTurnstile";
@@ -56,6 +57,7 @@ const Auth = () => {
   const [authDebugReason, setAuthDebugReason] = useState("");
   const [authDebugCodes, setAuthDebugCodes] = useState<string[]>([]);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(showTurnstileDiag);
   const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>(showTurnstileDiag ? "signin" : "choice");
 
@@ -390,19 +392,26 @@ const Auth = () => {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 bg-[#D5DFEF] pt-4 pb-[calc(16px+env(safe-area-inset-bottom))] text-center text-[10px] text-brandSubtext">
-        By continuing, you agree to huddle&apos;s{" "}
-        <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("terms")}>
-          Terms
-        </button>{" "}
-        and{" "}
-        <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("privacy")}>
-          Privacy Policy
-        </button>
-        .
+        <div>
+          By continuing, you agree to huddle&apos;s{" "}
+          <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("terms")}>
+            Terms
+          </button>{" "}
+          and{" "}
+          <button type="button" className="text-brandBlue underline" onClick={() => setLegalModal("privacy")}>
+            Privacy Policy
+          </button>
+          {" "}
+          <button type="button" className="text-brandBlue underline" onClick={() => setSupportOpen(true)}>
+            Need help?
+          </button>
+          .
+        </div>
       </div>
 
       <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
       <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
+      <HelpSupportDialog open={supportOpen} onOpenChange={setSupportOpen} />
 
       <Dialog
         open={emailModalOpen}
