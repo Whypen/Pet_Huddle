@@ -897,6 +897,19 @@ const describeHumanFailure = (
     : "Face verification failed. Keep your face centered in the oval and try again.";
 };
 
+const mergeHumanUiState = (
+  current: HumanVerificationState,
+  next: HumanVerificationState,
+): HumanVerificationState => {
+  // Background snapshot/profile refreshes must never knock the UI out of the
+  // live capture shell mid-challenge. That remounts the video subtree and
+  // looks like the preview is blinking/restarting itself.
+  if (current === "capturing" && (next === "ready" || next === "pending")) {
+    return current;
+  }
+  return next;
+};
+
 export function VerifyIdentity({
   humanVerificationState: humanVerificationStateOverride,
   cardVerificationState: cardVerificationStateOverride,
@@ -1331,9 +1344,9 @@ export function VerifyIdentity({
     if (hasPendingAttempt) {
       setHumanAttemptId(snapshot.humanAttemptId || null);
       setHumanChallenge(snapshot.humanChallenge || null);
-      setHumanVerificationState("ready");
+      setHumanVerificationState((prev) => mergeHumanUiState(prev, "ready"));
     } else {
-      setHumanVerificationState(toHumanUiState(snapshot.humanStatus));
+      setHumanVerificationState((prev) => mergeHumanUiState(prev, toHumanUiState(snapshot.humanStatus)));
     }
     syncCardUiFromResolvedStatus({
       cardStatus: snapshot.cardStatus,
@@ -1737,7 +1750,10 @@ export function VerifyIdentity({
       setHumanVerificationState("passed");
       setHumanErrorMessage(null);
     } else if (profileHuman === "pending") {
-      setHumanVerificationState((prev) => (prev === "passed" ? prev : "pending"));
+      setHumanVerificationState((prev) => {
+        if (prev === "passed") return prev;
+        return mergeHumanUiState(prev, "pending");
+      });
     }
 
     const profileCard = String(profile.card_verification_status || "").toLowerCase();
