@@ -67,6 +67,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLIC_KEY
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
+    detectSessionInUrl: false,
   },
   global: {
     fetch: rewrittenFetch,
