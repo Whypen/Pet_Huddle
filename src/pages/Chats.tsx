@@ -854,6 +854,8 @@ const Chats = () => {
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const pendingSeenMatchWritesRef = useRef<Set<string>>(new Set());
+  const matchesCacheRef = useRef<MatchRow[] | null>(null);
+  const matchesInFlightRef = useRef<Promise<MatchRow[]> | null>(null);
   const [localSeenMatchesHydrated, setLocalSeenMatchesHydrated] = useState(false);
   const [seenMatchesHydrated, setSeenMatchesHydrated] = useState(false);
   const [seenMatchesServerState, setSeenMatchesServerState] = useState<"idle" | "ready" | "failed">("idle");
@@ -861,6 +863,14 @@ const Chats = () => {
   const subscribedInboxRoomIdsRef = useRef<Set<string>>(new Set());
   const conversationsHydratedRef = useRef(false);
   const conversationsRetryTimerRef = useRef<number | null>(null);
+  const chatsPerfRef = useRef({
+    routeMountedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
+    firstDiscoverReadyAt: null as number | null,
+    inboxHydrationStartedAt: null as number | null,
+    inboxHydrationCompletedAt: null as number | null,
+    discoveryStartedAt: null as number | null,
+    discoveryCompletedAt: null as number | null,
+  });
 
   // Nanny Booking modal state
   const [nannyBookingOpen, setNannyBookingOpen] = useState(false);
@@ -899,6 +909,25 @@ const Chats = () => {
       setTopTab("discover");
     }
   }, [searchParams]);
+
+  const logChatsPerfMetric = useCallback(
+    (
+      label: string,
+      startedAt: number | null | undefined,
+      endedAt?: number | null,
+      extra?: Record<string, unknown>
+    ) => {
+      if (!import.meta.env.DEV) return;
+      const end = endedAt ?? (typeof performance !== "undefined" ? performance.now() : Date.now());
+      const durationMs = typeof startedAt === "number" ? Math.max(0, Math.round(end - startedAt)) : null;
+      console.debug("[ChatsPerf]", label, {
+        durationMs,
+        sinceRouteMountMs: Math.max(0, Math.round(end - chatsPerfRef.current.routeMountedAt)),
+        ...(extra || {}),
+      });
+    },
+    []
+  );
 
   const isVerified = profile?.is_verified === true;
   const userAge = profile?.dob
@@ -1389,8 +1418,19 @@ const Chats = () => {
     await flushPendingSeenMatches();
   }, [flushPendingSeenMatches, markMatchSeen]);
 
-  const fetchUserMatches = useCallback(async (): Promise<MatchRow[]> => {
+  const invalidateMatchesCache = useCallback(() => {
+    matchesCacheRef.current = null;
+    matchesInFlightRef.current = null;
+  }, []);
+
+  const fetchUserMatches = useCallback(async (options?: { force?: boolean }): Promise<MatchRow[]> => {
     if (!profile?.id) return [];
+    if (options?.force) {
+      invalidateMatchesCache();
+    } else {
+      if (matchesCacheRef.current) return matchesCacheRef.current;
+      if (matchesInFlightRef.current) return matchesInFlightRef.current;
+    }
     const attempts: Array<{ select: string; activeOnly: boolean }> = [
       { select: "chat_id,user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
       { select: "user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
@@ -1400,51 +1440,69 @@ const Chats = () => {
       { select: "user1_id,user2_id", activeOnly: false },
     ];
 
-    let lastErrorMessage = "";
-    for (const attempt of attempts) {
-      let query = supabase
-        .from("matches")
-        .select(attempt.select)
-        .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
-        .limit(500);
-      if (attempt.select.includes("matched_at")) {
-        query = query.order("matched_at", { ascending: false, nullsFirst: false });
+    const request = (async () => {
+      let lastErrorMessage = "";
+      for (const attempt of attempts) {
+        let query = supabase
+          .from("matches")
+          .select(attempt.select)
+          .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+          .limit(500);
+        if (attempt.select.includes("matched_at")) {
+          query = query.order("matched_at", { ascending: false, nullsFirst: false });
+        }
+        if (attempt.activeOnly) {
+          query = query.eq("is_active", true);
+        }
+        const result = await query;
+        if (result.error) {
+          lastErrorMessage = result.error.message || lastErrorMessage;
+          continue;
+        }
+        if (attempt.activeOnly && Array.isArray(result.data) && result.data.length === 0) {
+          // Some environments keep legacy rows where is_active is null/false.
+          // Fall through to non-active query attempts before concluding no matches.
+          continue;
+        }
+        const rows = ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
+          user1_id: String(row.user1_id || ""),
+          user2_id: String(row.user2_id || ""),
+          chat_id: typeof row.chat_id === "string" ? row.chat_id : null,
+          matched_at:
+            typeof row.matched_at === "string"
+              ? row.matched_at
+              : typeof row.last_interaction_at === "string"
+                ? row.last_interaction_at
+                : null,
+          created_at:
+            typeof row.matched_at === "string"
+              ? row.matched_at
+              : typeof row.last_interaction_at === "string"
+                ? row.last_interaction_at
+                : null,
+        }));
+        matchesCacheRef.current = rows;
+        return rows;
       }
-      if (attempt.activeOnly) {
-        query = query.eq("is_active", true);
-      }
-      const result = await query;
-      if (result.error) {
-        lastErrorMessage = result.error.message || lastErrorMessage;
-        continue;
-      }
-      if (attempt.activeOnly && Array.isArray(result.data) && result.data.length === 0) {
-        // Some environments keep legacy rows where is_active is null/false.
-        // Fall through to non-active query attempts before concluding no matches.
-        continue;
-      }
-      return ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
-        user1_id: String(row.user1_id || ""),
-        user2_id: String(row.user2_id || ""),
-        chat_id: typeof row.chat_id === "string" ? row.chat_id : null,
-        matched_at:
-          typeof row.matched_at === "string"
-            ? row.matched_at
-            : typeof row.last_interaction_at === "string"
-              ? row.last_interaction_at
-              : null,
-        created_at:
-          typeof row.matched_at === "string"
-            ? row.matched_at
-            : typeof row.last_interaction_at === "string"
-              ? row.last_interaction_at
-              : null,
-      }));
-    }
 
-    console.warn("[chats.matches] failed to fetch matches", { error: lastErrorMessage || "unknown_error" });
-    return [];
-  }, [profile?.id]);
+      console.warn("[chats.matches] failed to fetch matches", { error: lastErrorMessage || "unknown_error" });
+      matchesCacheRef.current = [];
+      return [];
+    })();
+
+    matchesInFlightRef.current = request;
+    try {
+      return await request;
+    } finally {
+      if (matchesInFlightRef.current === request) {
+        matchesInFlightRef.current = null;
+      }
+    }
+  }, [invalidateMatchesCache, profile?.id]);
+
+  useEffect(() => {
+    invalidateMatchesCache();
+  }, [invalidateMatchesCache, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) {
@@ -1656,7 +1714,11 @@ const Chats = () => {
         }
         if (Array.isArray(data) && data.length > 0) {
           const first = (data[0] || {}) as { match_created?: unknown };
-          return first.match_created === true;
+          const matchCreated = first.match_created === true;
+          if (matchCreated) {
+            invalidateMatchesCache();
+          }
+          return matchCreated;
         }
       } catch {
         // non-blocking: UI should still continue.
@@ -1664,7 +1726,7 @@ const Chats = () => {
       }
       return false;
     },
-    [profile?.id]
+    [invalidateMatchesCache, profile?.id]
   );
 
   const sendDiscoveryWave = useCallback(
@@ -2792,8 +2854,18 @@ const Chats = () => {
 
   useEffect(() => {
     if (authLoading || !profile?.id) return;
+    if (topTab === "discover" && !discoverBootstrapReady) return;
+    const inboxHydrationStartAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (chatsPerfRef.current.inboxHydrationStartedAt === null) {
+      chatsPerfRef.current.inboxHydrationStartedAt = inboxHydrationStartAt;
+      logChatsPerfMetric("inbox_hydration_started", chatsPerfRef.current.routeMountedAt, inboxHydrationStartAt, {
+        topTab,
+        mainTab,
+      });
+    }
     const shouldHydrateDiscoverInbox =
       topTab !== "chats" &&
+      discoverBootstrapReady &&
       (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
     if (shouldHydrateDiscoverInbox) {
       void loadConversations("all");
@@ -2827,7 +2899,18 @@ const Chats = () => {
         dirtyRoomFlushTimerRef.current = null;
       }
     };
-  }, [authLoading, loadConversations, mainTab, profile?.id, topTab]);
+  }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
+
+  useEffect(() => {
+    if (!conversationsHydratedRef.current) return;
+    if (chatsPerfRef.current.inboxHydrationStartedAt === null) return;
+    if (chatsPerfRef.current.inboxHydrationCompletedAt !== null) return;
+    const completedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    chatsPerfRef.current.inboxHydrationCompletedAt = completedAt;
+    logChatsPerfMetric("inbox_hydration_completed", chatsPerfRef.current.inboxHydrationStartedAt, completedAt, {
+      loadedScopes: Array.from(inboxLoadedScopesRef.current),
+    });
+  }, [chats, groups, logChatsPerfMetric]);
 
   // Check for pending group invites when opening Groups tab
   useEffect(() => {
@@ -2887,6 +2970,8 @@ const Chats = () => {
   useEffect(() => {
     const runDiscovery = async () => {
       if (!profile?.id || !discoveryHistoryHydrated) return;
+      const discoveryStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      chatsPerfRef.current.discoveryStartedAt = discoveryStartedAt;
       setDiscoveryLoadSettled(false);
       if (!discoverLocationGate.canShowDiscover || !discoverLocationGate.anchor) {
         setDiscoveryAnchor(null);
@@ -3184,6 +3269,11 @@ const Chats = () => {
         console.warn("[Chats] Discovery failed", err);
         setDiscoveryProfiles([]);
       } finally {
+        const discoveryCompletedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+        chatsPerfRef.current.discoveryCompletedAt = discoveryCompletedAt;
+        logChatsPerfMetric("discover_bootstrap", discoveryStartedAt, discoveryCompletedAt, {
+          locationGateReady: discoverLocationGate.canShowDiscover,
+        });
         setDiscoveryLoading(false);
         setDiscoveryLoadSettled(true);
       }
@@ -3205,6 +3295,7 @@ const Chats = () => {
     passedDiscoveryKey,
     passedDiscoverySessionKey,
     matchedDiscoveryKey,
+    logChatsPerfMetric,
   ]);
 
   useEffect(() => {
@@ -3235,9 +3326,9 @@ const Chats = () => {
 
   useEffect(() => {
     const loadAlbums = async () => {
-      if (discoveryProfiles.length === 0) return;
+      if (discoveryPrefetchBuffer.length === 0) return;
       const resolved = await Promise.all(
-        discoveryProfiles.map(async (profile) => {
+        discoveryPrefetchBuffer.map(async (profile) => {
           const album = canonicalizeSocialAlbumEntries(Array.isArray(profile?.social_album) ? profile.social_album : []);
           if (!album.length) {
             markDiscoveryMediaReady(profile.id, { urlsReady: true });
@@ -3256,7 +3347,7 @@ const Chats = () => {
       }
     };
     void loadAlbums();
-  }, [discoveryProfiles, markDiscoveryMediaReady]);
+  }, [discoveryPrefetchBuffer, markDiscoveryMediaReady]);
 
   const markChatMessagesRead = useCallback(
     async (
@@ -3392,7 +3483,7 @@ const Chats = () => {
     };
   }, [activeRoomId, loadRoomMessages]);
 
-  const getChatPreview = (chat: ChatUser) => {
+  const getChatPreview = useCallback((chat: ChatUser) => {
     const override = String(chat.previewOverride || "").trim();
     if (override) return override;
     if (isStarIntroKind(chat.lastMessageKind || null)) {
@@ -3400,7 +3491,7 @@ const Chats = () => {
       return isSender ? "You sent a Star ⭐" : "New Star Connection ⭐";
     }
     return parseChatPreviewText(chat.lastMessage);
-  };
+  }, [profile?.id]);
 
   const getServiceStatusLabel = (chat: ChatUser) => {
     switch (chat.serviceStatus) {
@@ -3418,39 +3509,70 @@ const Chats = () => {
   };
 
   // Filter chats based on active tab and search (unified tab system)
-  const filteredChats = chats.filter(chat => {
-    if (chat.peerUserId && chat.peerUserId === profile?.id) return false;
-    const matchesTab =
-      mainTab === "friends"
-        ? chat.type === "friend" && !chat.hasTransaction
-        : mainTab === "service"
-          ? chat.type === "service"
-          : false;
-    const matchesSearch = !searchQuery ||
-      chat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      getChatPreview(chat).toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
-  const avatarOnlyMatchedChats = filteredChats.filter(
-    (chat) =>
-      Boolean(chat.peerUserId) &&
-      chat.peerUserId !== profile?.id &&
-      !chat.lastMessageAt &&
-      getChatPreview(chat).length === 0
+  const filteredChats = useMemo(() => {
+    const loweredQuery = searchQuery.trim().toLowerCase();
+    return chats.filter((chat) => {
+      if (chat.peerUserId && chat.peerUserId === profile?.id) return false;
+      const matchesTab =
+        mainTab === "friends"
+          ? chat.type === "friend" && !chat.hasTransaction
+          : mainTab === "service"
+            ? chat.type === "service"
+            : false;
+      if (!matchesTab) return false;
+      if (!loweredQuery) return true;
+      const preview = getChatPreview(chat).toLowerCase();
+      return (
+        chat.name.toLowerCase().includes(loweredQuery) ||
+        preview.includes(loweredQuery)
+      );
+    });
+  }, [chats, getChatPreview, mainTab, profile?.id, searchQuery]);
+  const avatarOnlyMatchedChats = useMemo(
+    () =>
+      filteredChats.filter(
+        (chat) =>
+          Boolean(chat.peerUserId) &&
+          chat.peerUserId !== profile?.id &&
+          !chat.lastMessageAt &&
+          getChatPreview(chat).length === 0
+      ),
+    [filteredChats, getChatPreview, profile?.id]
   );
-  const visibleConversationChats = filteredChats.filter((chat) => {
-    const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
-    if (!hasConversationActivity) return false;
-    return !avatarOnlyMatchedChats.some((avatarOnly) => avatarOnly.id === chat.id);
-  });
-  const avatarOnlyMatchOnlyAvatars = matchOnlyAvatars.filter(
-    (entry) => !visibleConversationChats.some((chat) => chat.peerUserId === entry.userId)
+  const avatarOnlyMatchedChatIds = useMemo(
+    () => new Set(avatarOnlyMatchedChats.map((chat) => chat.id)),
+    [avatarOnlyMatchedChats]
   );
-  const priorityStarChats = visibleConversationChats.filter(
-    (chat) => isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true
+  const visibleConversationChats = useMemo(
+    () =>
+      filteredChats.filter((chat) => {
+        const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
+        if (!hasConversationActivity) return false;
+        return !avatarOnlyMatchedChatIds.has(chat.id);
+      }),
+    [avatarOnlyMatchedChatIds, filteredChats, getChatPreview]
   );
-  const regularConversationChats = visibleConversationChats.filter(
-    (chat) => !priorityStarChats.some((priorityChat) => priorityChat.id === chat.id)
+  const visibleConversationPeerIds = useMemo(
+    () => new Set(visibleConversationChats.map((chat) => String(chat.peerUserId || "").trim()).filter(Boolean)),
+    [visibleConversationChats]
+  );
+  const avatarOnlyMatchOnlyAvatars = useMemo(
+    () => matchOnlyAvatars.filter((entry) => !visibleConversationPeerIds.has(entry.userId)),
+    [matchOnlyAvatars, visibleConversationPeerIds]
+  );
+  const priorityStarChats = useMemo(
+    () => visibleConversationChats.filter(
+      (chat) => isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true
+    ),
+    [visibleConversationChats]
+  );
+  const priorityStarChatIds = useMemo(
+    () => new Set(priorityStarChats.map((chat) => chat.id)),
+    [priorityStarChats]
+  );
+  const regularConversationChats = useMemo(
+    () => visibleConversationChats.filter((chat) => !priorityStarChatIds.has(chat.id)),
+    [priorityStarChatIds, visibleConversationChats]
   );
   const filteredServiceChats = filteredChats;
   const strictMatchedDiscoveryIds = useMemo(() => {
@@ -3587,6 +3709,10 @@ const Chats = () => {
     () => (silentGoldDiscoveryCapReached ? [] : [...primaryQueue, ...carryoverQueue]),
     [carryoverQueue, primaryQueue, silentGoldDiscoveryCapReached]
   );
+  const discoveryPrefetchBuffer = useMemo(
+    () => discoverySource.slice(0, 4),
+    [discoverySource]
+  );
   const discoveryDeck = useMemo(
     () => discoverySource.slice(0, discoveryVisibleCount),
     [discoverySource, discoveryVisibleCount]
@@ -3604,6 +3730,38 @@ const Chats = () => {
       swipeDir
   );
   const renderDiscoverEmpty = showDiscoverEmpty || pendingDiscoverEmpty;
+  const discoverBootstrapReady = useMemo(
+    () =>
+      discoverChatAgeBlocked ||
+      topTab !== "discover" ||
+      discoveryLocationBlocked ||
+      showDiscoveryQuotaLock ||
+      Boolean(currentDiscovery) ||
+      showDiscoverEmpty,
+    [currentDiscovery, discoverChatAgeBlocked, discoveryLocationBlocked, showDiscoverEmpty, showDiscoveryQuotaLock, topTab]
+  );
+
+  useEffect(() => {
+    if (!discoverBootstrapReady) return;
+    if (chatsPerfRef.current.firstDiscoverReadyAt !== null) return;
+    const endedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    chatsPerfRef.current.firstDiscoverReadyAt = endedAt;
+    logChatsPerfMetric("discover_first_ready", chatsPerfRef.current.routeMountedAt, endedAt, {
+      topTab,
+      currentDiscoveryId: currentDiscovery?.id || null,
+      blocked: discoveryLocationBlocked,
+      empty: showDiscoverEmpty,
+      quotaLocked: showDiscoveryQuotaLock,
+    });
+  }, [
+    currentDiscovery?.id,
+    discoverBootstrapReady,
+    discoveryLocationBlocked,
+    logChatsPerfMetric,
+    showDiscoverEmpty,
+    showDiscoveryQuotaLock,
+    topTab,
+  ]);
 
   useEffect(() => {
     if (discoveryLoading || discoveryLocationBlocked) return;
@@ -4155,6 +4313,7 @@ const Chats = () => {
       const user1 = String(row.user1_id || "");
       const user2 = String(row.user2_id || "");
       if (user1 !== profile.id && user2 !== profile.id) return;
+      invalidateMatchesCache();
       setMatchesFeedTick((prev) => prev + 1);
       void loadConversations("friends");
     };
@@ -4170,7 +4329,7 @@ const Chats = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadConversations, profile?.id]);
+  }, [invalidateMatchesCache, loadConversations, profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) return;
