@@ -123,14 +123,8 @@ const SignupName = () => {
             .invoke("send-marketing-doi-email", { body: { user_id: (createdUser as { id?: string } | null)?.id } })
             .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
         }
-        if (data.email_opt_in) {
-          toast.message("We’ll send you a separate email to confirm your subscription.");
-        }
         navigate("/signup/verify", { replace: true });
         return;
-      }
-      if (data.email_opt_in) {
-        toast.message("We’ll send you a separate email to confirm your subscription.");
       }
       goTo("/signup/verify");
     } catch {
