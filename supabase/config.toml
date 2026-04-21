@@ -1,5 +1,18 @@
 project_id = "ztrbourwcnhrpmzwlrcn"
 
+[auth]
+site_url = "https://huddle.pet"
+additional_redirect_urls = [
+  "https://huddle.pet/auth/callback",
+  "https://huddle.pet/update-password",
+  "https://huddle-huddleapp.vercel.app/auth/callback",
+  "https://huddle-huddleapp.vercel.app/update-password",
+  "https://huddle-git-main-huddleapp.vercel.app/auth/callback",
+  "https://huddle-git-main-huddleapp.vercel.app/update-password",
+  "http://localhost:8080/auth/callback",
+  "http://localhost:8080/update-password",
+]
+
 # Pre-auth functions: gateway JWT verification disabled.
 # verify_jwt = true expects legacy JWT-shaped API keys and is incompatible
 # with sb_publishable/sb_secret keys. These are called before a user session
