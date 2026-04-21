@@ -16,7 +16,8 @@ import { launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
-const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
+const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
+const LEGACY_PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 const RESEND_COOLDOWN_SECS = 60;
 const POLL_INTERVAL_MS = 3_000;
 type SendState = "idle" | "sending" | "sent" | "error";
@@ -74,7 +75,11 @@ const SignupVerifyEmail = () => {
   const statusInFlight = useRef(false);
 
   const readTurnstileToken = useCallback(() => {
-    return String(sessionStorage.getItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) || "").trim();
+    return String(
+      sessionStorage.getItem(SIGNUP_TURNSTILE_TOKEN_KEY) ||
+      sessionStorage.getItem(LEGACY_PRESIGNUP_CREDENTIALS_TURNSTILE_KEY) ||
+      "",
+    ).trim();
   }, []);
 
   const readStoredPresignupToken = useCallback((email: string) => {
@@ -106,7 +111,8 @@ const SignupVerifyEmail = () => {
     try {
       sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
       sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
-      sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
+      sessionStorage.removeItem(SIGNUP_TURNSTILE_TOKEN_KEY);
+      sessionStorage.removeItem(LEGACY_PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
     } catch {
       // best-effort storage cleanup only
     }
@@ -204,19 +210,25 @@ const SignupVerifyEmail = () => {
     }
   }, [applyResolvedStatus, draftEmail, incomingEmail, readStoredPresignupToken]);
 
-  const sendEmail = useCallback(async (turnstileToken: string, forceNewToken = false) => {
-    if (!draftEmail || !turnstileToken) return false;
+  const sendEmail = useCallback(async (forceNewToken = false) => {
+    if (!draftEmail) return false;
     if (sendInFlight.current) return false;
     sendInFlight.current = true;
     setSendState("sending");
     update({ signup_proof: "" });
 
     try {
+      const currentToken = readStoredPresignupToken(draftEmail);
+      const turnstileToken = readTurnstileToken();
+      if (!currentToken && !turnstileToken) {
+        throw new Error("send_requires_active_signup");
+      }
       const { data: resp, error } = await postPublicFunction<SendVerifyResponse>(
         "send-pre-signup-verify",
         {
           email: draftEmail,
-          turnstile_token: turnstileToken,
+          current_token: currentToken || undefined,
+          turnstile_token: currentToken ? undefined : turnstileToken,
           force_new_token: forceNewToken,
         },
       );
@@ -242,7 +254,7 @@ const SignupVerifyEmail = () => {
     } finally {
       sendInFlight.current = false;
     }
-  }, [draftEmail, persistPresignupIdentity, update]);
+  }, [draftEmail, persistPresignupIdentity, readStoredPresignupToken, readTurnstileToken, update]);
 
   useEffect(() => {
     autoSendStarted.current = false;
@@ -277,18 +289,19 @@ const SignupVerifyEmail = () => {
 
   useEffect(() => {
     if (!draftEmail || verified || incomingExpired || incomingInvalid) return;
+    const storedToken = readStoredPresignupToken(draftEmail);
     const turnstileToken = readTurnstileToken();
-    if (!turnstileToken) return;
+    if (!storedToken && !turnstileToken) return;
     if (incomingFromCredentials && !credentialEntryHandled.current && sendState !== "sending") {
       credentialEntryHandled.current = true;
       autoSendStarted.current = true;
-      void sendEmail(turnstileToken, true);
+      void sendEmail(true);
       return;
     }
     if (!recoveryReady || token || sendState === "sending" || autoSendStarted.current) return;
     autoSendStarted.current = true;
-    void sendEmail(turnstileToken, false);
-  }, [draftEmail, incomingExpired, incomingFromCredentials, incomingInvalid, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
+    void sendEmail(false);
+  }, [draftEmail, incomingExpired, incomingFromCredentials, incomingInvalid, readStoredPresignupToken, readTurnstileToken, recoveryReady, sendEmail, sendState, token, verified]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -315,13 +328,14 @@ const SignupVerifyEmail = () => {
 
   const handleResend = () => {
     if (cooldown > 0 || sendState === "sending") return;
+    const currentToken = readStoredPresignupToken(draftEmail);
     const turnstileToken = readTurnstileToken();
-    if (!turnstileToken) {
-      toast.error("Complete human verification first.");
+    if (!currentToken && !turnstileToken) {
+      toast.error("Please go back and restart email verification.");
       return;
     }
     autoSendStarted.current = true;
-    void sendEmail(turnstileToken, true);
+    void sendEmail(true);
   };
 
   const handleChangeEmail = () => {
@@ -368,7 +382,10 @@ const SignupVerifyEmail = () => {
     : sendState === "sending"
       ? "Sending…"
       : "Resend link";
-  const resendDisabled = cooldown > 0 || sendState === "sending" || !readTurnstileToken();
+  const resendDisabled =
+    cooldown > 0 ||
+    sendState === "sending" ||
+    (!readStoredPresignupToken(draftEmail) && !readTurnstileToken());
   const manualLabel = manualCheck === "checking"
     ? "Checking…"
     : manualCheck === "not_yet"

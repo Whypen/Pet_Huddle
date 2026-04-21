@@ -39,7 +39,7 @@ serve(async (req: Request) => {
   try {
     let body: {
       email?: string;
-      token?: string;
+      current_token?: string;
       turnstile_token?: string;
       force_new_token?: boolean;
       device_id?: string;
@@ -47,7 +47,7 @@ serve(async (req: Request) => {
     };
     try { body = await req.json(); } catch { return json({ error: "invalid_json" }, 400); }
 
-    const { email, token, turnstile_token, force_new_token } = body;
+    const { email, current_token, turnstile_token, force_new_token } = body;
     if (!email) return json({ error: "email_required" }, 400);
     const normalizedEmail = String(email).trim().toLowerCase();
     const ACCOUNT_UNAVAILABLE_MESSAGE =
@@ -109,6 +109,17 @@ serve(async (req: Request) => {
       const expiresAtMs = new Date(String(row.expires_at || "")).getTime();
       return !row.verified && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
     });
+    const currentTokenValue = String(current_token || "").trim();
+    const currentPendingRow = (existingRows || []).find((row) => {
+      const expiresAtMs = new Date(String(row.expires_at || "")).getTime();
+      return (
+        currentTokenValue &&
+        row.token === currentTokenValue &&
+        !row.verified &&
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs > nowMs
+      );
+    });
 
     if (!force_new_token && activePendingRow) {
       return json({
@@ -120,34 +131,59 @@ serve(async (req: Request) => {
       });
     }
 
-    const clientIp =
-      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-      req.headers.get("x-real-ip") ||
-      "unknown";
-    const turnstile = await validateTurnstile(
-      turnstile_token ?? null,
-      clientIp,
-      "send_pre_signup_verify",
-      getExpectedTurnstileHostnames(),
-    );
-    if (!turnstile.valid) {
-      console.warn("[send-pre-signup-verify] turnstile rejected", {
-        reason: turnstile.reason,
-        error_codes: turnstile.error_codes,
-        action: turnstile.action,
-        hostname: turnstile.hostname,
-        challenge_ts: turnstile.challenge_ts,
-        ip: clientIp,
-      });
-      return json({
-        error: "human_verification_failed",
-        turnstile_reason: turnstile.reason,
-      }, 403);
+    if (!currentPendingRow) {
+      const clientIp =
+        req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+        req.headers.get("x-real-ip") ||
+        "unknown";
+      const turnstile = await validateTurnstile(
+        turnstile_token ?? null,
+        clientIp,
+        "send_pre_signup_verify",
+        getExpectedTurnstileHostnames(),
+      );
+      if (!turnstile.valid) {
+        console.warn("[send-pre-signup-verify] turnstile rejected", {
+          reason: turnstile.reason,
+          error_codes: turnstile.error_codes,
+          action: turnstile.action,
+          hostname: turnstile.hostname,
+          challenge_ts: turnstile.challenge_ts,
+          ip: clientIp,
+        });
+        return json({
+          error: "human_verification_failed",
+          turnstile_reason: turnstile.reason,
+        }, 403);
+      }
+    }
+
+    if (force_new_token) {
+      const activeTokenValues = (existingRows || [])
+        .filter((row) => {
+          const expiresAtMs = new Date(String(row.expires_at || "")).getTime();
+          return !row.verified && Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
+        })
+        .map((row) => String(row.token || "").trim())
+        .filter(Boolean);
+
+      if (activeTokenValues.length > 0) {
+        const { error: deleteError } = await supabase
+          .from("presignup_tokens")
+          .delete()
+          .eq("email", normalizedEmail)
+          .in("token", activeTokenValues);
+
+        if (deleteError) {
+          console.error("[send-pre-signup-verify] active token cleanup failed", deleteError.message);
+          return json({ error: "db_error" }, 500);
+        }
+      }
     }
 
     // Insert token row — fail hard if this fails (no token = no verify path)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const nextToken = String(token || crypto.randomUUID());
+    const nextToken = crypto.randomUUID();
     const { error: insertError } = await supabase.from("presignup_tokens").insert({
       token: nextToken,
       email: normalizedEmail,

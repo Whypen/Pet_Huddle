@@ -23,7 +23,8 @@ import { loadSignupDraft } from "@/lib/signupOnboarding";
 
 const PRESIGNUP_TOKEN_KEY = "huddle_presignup_token";
 const PRESIGNUP_EMAIL_KEY = "huddle_presignup_email";
-const PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
+const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
+const LEGACY_PRESIGNUP_CREDENTIALS_TURNSTILE_KEY = "huddle_presignup_turnstile_token";
 
 const VerifyCallback = () => {
   const navigate = useNavigate();
@@ -70,7 +71,8 @@ const VerifyCallback = () => {
           try {
             sessionStorage.removeItem(PRESIGNUP_TOKEN_KEY);
             sessionStorage.removeItem(PRESIGNUP_EMAIL_KEY);
-            sessionStorage.removeItem(PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
+            sessionStorage.removeItem(SIGNUP_TURNSTILE_TOKEN_KEY);
+            sessionStorage.removeItem(LEGACY_PRESIGNUP_CREDENTIALS_TURNSTILE_KEY);
           } catch { /* best-effort */ }
           update({
             ...(restoredDraft?.data as Record<string, unknown> | undefined),
