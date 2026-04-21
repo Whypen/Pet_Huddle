@@ -69,6 +69,32 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
         "",
     );
 
+  const restoreFromDraft = useCallback((ownerHint?: string | null) => {
+    const draft = loadSignupDraft(ownerHint);
+    if (!draft) return false;
+    const parsed = draft.data as Partial<PersistedSignupData>;
+    setData({
+      ...defaultData,
+      ...parsed,
+      password: draft.password,
+      signup_proof: draft.signupProof || "",
+    });
+    return true;
+  }, []);
+
+  const hasMeaningfulDraftData = useCallback((value: SignupData) => {
+    return Boolean(
+      value.email ||
+      value.phone ||
+      value.dob ||
+      value.display_name ||
+      value.social_id ||
+      value.legal_name ||
+      value.password ||
+      value.signup_proof,
+    );
+  }, []);
+
   const [data, setData] = useState<SignupData>(() => {
     try {
       const signupProof =
@@ -112,8 +138,11 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     const draftOwner = normalizeStorageOwner(data.email || resolveRememberedOwner());
     const emailOwner = normalizeStorageOwner(sessionEmail || "");
     const idOwner = normalizeStorageOwner(sessionUserId || "");
+    const matchingDraft = loadSignupDraft(sessionEmail || sessionUserId || draftOwner);
     if (!draftOwner) return false;
-    return (emailOwner && draftOwner === emailOwner) || (idOwner && draftOwner === idOwner);
+    if ((emailOwner && draftOwner === emailOwner) || (idOwner && draftOwner === idOwner)) return true;
+    if (!matchingDraft) return false;
+    return (emailOwner && matchingDraft.owner === emailOwner) || (idOwner && matchingDraft.owner === idOwner);
   }, [data.email, flowState]);
 
   const resetDraftState = useCallback((ownerHints: Array<string | null | undefined> = []) => {
@@ -148,6 +177,9 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       const nextAuthenticated = Boolean(sessionData.session?.user?.id);
       setIsAuthenticated(nextAuthenticated);
       if (nextAuthenticated) {
+        if (!hasMeaningfulDraftData(data)) {
+          restoreFromDraft(sessionData.session?.user?.email || sessionData.session?.user?.id || null);
+        }
         if (!shouldKeepDraftForSession(sessionData.session?.user?.email, sessionData.session?.user?.id)) {
           resetDraftState([sessionData.session?.user?.id, sessionData.session?.user?.email, data.email]);
         }
@@ -157,6 +189,9 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       const nextAuthenticated = Boolean(session?.user?.id);
       setIsAuthenticated(nextAuthenticated);
       if (nextAuthenticated) {
+        if (!hasMeaningfulDraftData(data)) {
+          restoreFromDraft(session?.user?.email || session?.user?.id || null);
+        }
         if (!shouldKeepDraftForSession(session?.user?.email, session?.user?.id)) {
           resetDraftState([session?.user?.id, session?.user?.email, data.email]);
         }
@@ -166,10 +201,11 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       mounted = false;
       authSubscription.subscription.unsubscribe();
     };
-  }, [data.email, resetDraftState, shouldKeepDraftForSession]);
+  }, [data, hasMeaningfulDraftData, resetDraftState, restoreFromDraft, shouldKeepDraftForSession]);
 
   useEffect(() => {
-    if (isAuthenticated) return;
+    const shouldPersistWhileAuthenticated = flowState !== "idle";
+    if (isAuthenticated && !shouldPersistWhileAuthenticated) return;
     const owner = normalizeStorageOwner(data.email || resolveRememberedOwner());
     const draftKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, owner);
     const passwordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, owner);
@@ -213,7 +249,7 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       sessionStorage.removeItem(signupProofKey);
       localStorage.removeItem(signupProofKey);
     }
-  }, [data, isAuthenticated]);
+  }, [data, flowState, isAuthenticated]);
 
   const update = useCallback((next: Partial<SignupData>) => {
     setData((prev) => {

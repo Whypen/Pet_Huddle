@@ -4,7 +4,7 @@
  * Two CTAs: "Start Verification" (primary) + "Skip for now" (ghost).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -50,7 +50,7 @@ const SignupVerify = () => {
 
   // ── Prefill snapshot for /set-profile ────────────────────────────────────────
 
-  const snapshotSetProfilePrefill = () => {
+  const snapshotSetProfilePrefill = useCallback(() => {
     try {
       const owner = normalizeStorageOwner(data.email || "");
       const payload = {
@@ -76,7 +76,11 @@ const SignupVerify = () => {
     } catch {
       // no-op
     }
-  };
+  }, [data.dob, data.display_name, data.email, data.legal_name, data.phone, data.social_id]);
+
+  useEffect(() => {
+    snapshotSetProfilePrefill();
+  }, [snapshotSetProfilePrefill]);
 
   // ── Start verification ───────────────────────────────────────────────────────
   // signUp() was called at step 2 (SignupCredentials). The auto_confirm trigger
