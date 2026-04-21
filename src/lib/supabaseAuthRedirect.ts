@@ -60,6 +60,11 @@ const trimOrNull = (value: string | null) => {
   return normalized || null;
 };
 
+const normalizeVerifyOtpType = (type: SupportedRedirectType): SupportedRedirectType => {
+  if (type === "magiclink" || type === "signup") return "email";
+  return type;
+};
+
 const cleanAuthUrl = (url: URL) => {
   const nextSearch = new URLSearchParams(url.search);
   for (const key of AUTH_PARAM_KEYS) nextSearch.delete(key);
@@ -100,7 +105,10 @@ export async function consumeSupabaseAuthRedirect(): Promise<ConsumeAuthRedirect
 
   const tokenHash = trimOrNull(url.searchParams.get("token_hash") || hashParams.get("token_hash"));
   if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: normalizeVerifyOtpType(type),
+    });
     if (error) return { ok: false, type, next, error: error.message || "verify_otp_failed" };
     cleanAuthUrl(url);
     return { ok: true, type, next, method: "verifyOtp" };

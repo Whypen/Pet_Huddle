@@ -1,5 +1,4 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.0";
-import { getExpectedTurnstileHostnames, validateTurnstile } from "../_shared/turnstile.ts";
 
 type ChangePasswordBody = {
   password?: string;
@@ -20,11 +19,6 @@ const json = (status: number, body: unknown) =>
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
-
-const clientIp = (req: Request) =>
-  req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
-  req.headers.get("x-real-ip") ||
-  "unknown";
 
 const extractToken = (req: Request) => {
   const huddleToken = (req.headers.get("x-huddle-access-token") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -61,16 +55,6 @@ Deno.serve(async (req: Request) => {
 
   const accessToken = extractToken(req);
   if (!accessToken) return json(401, { error: "unauthorized" });
-
-  const turnstile = await validateTurnstile(
-    body.turnstile_token ?? null,
-    clientIp(req),
-    "change_password",
-    getExpectedTurnstileHostnames(),
-  );
-  if (!turnstile.valid) {
-    return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
-  }
 
   // Validate the JWT and confirm the user exists before proceeding.
   const verifyClient = createClient(supabaseUrl, anonKey, {

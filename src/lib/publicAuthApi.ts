@@ -42,8 +42,8 @@ type ResetPayload = {
 
 type ChangePasswordPayload = {
   password: string;
-  turnstile_token: string;
-  turnstile_action: "change_password";
+  turnstile_token?: string;
+  turnstile_action?: "change_password";
 };
 
 type LoginResponse = {
