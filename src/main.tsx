@@ -25,9 +25,28 @@ if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
 createRoot(document.getElementById("root")!).render(<App />);
 
 const SW_RESET_GUARD = "huddle:sw-reset-v2";
+const hasAuthRedirectParams = () => {
+  const url = new URL(window.location.href);
+  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+  return Boolean(
+    url.searchParams.get("code")
+    || url.searchParams.get("token_hash")
+    || url.searchParams.get("access_token")
+    || hashParams.get("code")
+    || hashParams.get("token_hash")
+    || hashParams.get("access_token")
+    || hashParams.get("refresh_token"),
+  );
+};
+const shouldSkipServiceWorkerResetReload = () =>
+  window.location.pathname === "/auth/callback"
+  || window.location.pathname === "/update-password"
+  || hasAuthRedirectParams();
+
 const resetServiceWorkerCachesOnce = async () => {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   try {
+    if (shouldSkipServiceWorkerResetReload()) return;
     if (sessionStorage.getItem(SW_RESET_GUARD) === "1") return;
     sessionStorage.setItem(SW_RESET_GUARD, "1");
     const registrations = await navigator.serviceWorker.getRegistrations();

@@ -65,6 +65,39 @@ const normalizeVerifyOtpType = (type: SupportedRedirectType): SupportedRedirectT
   return type;
 };
 
+const REDIRECT_CONSUME_KEY = "huddle:auth-redirect-consumed";
+
+let inFlightConsumeFingerprint: string | null = null;
+let inFlightConsumePromise: Promise<ConsumeAuthRedirectResult> | null = null;
+
+const getRedirectFingerprint = (url: URL) => {
+  const hashParams = readHashParams(url.hash);
+  return trimOrNull(
+    url.searchParams.get("code")
+    || hashParams.get("code")
+    || url.searchParams.get("token_hash")
+    || hashParams.get("token_hash")
+    || url.searchParams.get("access_token")
+    || hashParams.get("access_token"),
+  );
+};
+
+const wasFingerprintConsumed = (fingerprint: string) => {
+  try {
+    return sessionStorage.getItem(`${REDIRECT_CONSUME_KEY}:${fingerprint}`) === "1";
+  } catch {
+    return false;
+  }
+};
+
+const markFingerprintConsumed = (fingerprint: string) => {
+  try {
+    sessionStorage.setItem(`${REDIRECT_CONSUME_KEY}:${fingerprint}`, "1");
+  } catch {
+    // best-effort only
+  }
+};
+
 const cleanAuthUrl = (url: URL) => {
   const nextSearch = new URLSearchParams(url.search);
   for (const key of AUTH_PARAM_KEYS) nextSearch.delete(key);
@@ -84,6 +117,7 @@ export async function consumeSupabaseAuthRedirect(): Promise<ConsumeAuthRedirect
   const hashParams = readHashParams(url.hash);
   const type = asSupportedType(url.searchParams.get("type") || hashParams.get("type"));
   const next = trimOrNull(url.searchParams.get("next") || hashParams.get("next"));
+  const fingerprint = getRedirectFingerprint(url);
   const authError = trimOrNull(
     url.searchParams.get("error_description")
       || hashParams.get("error_description")
@@ -95,41 +129,70 @@ export async function consumeSupabaseAuthRedirect(): Promise<ConsumeAuthRedirect
     return { ok: false, type, next, error: authError };
   }
 
-  const code = trimOrNull(url.searchParams.get("code") || hashParams.get("code"));
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) return { ok: false, type, next, error: error.message || "exchange_code_failed" };
+  if (fingerprint && wasFingerprintConsumed(fingerprint)) {
     cleanAuthUrl(url);
-    return { ok: true, type, next, method: "code" };
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      return { ok: true, type, next, method: "existing_session" };
+    }
+    return { ok: false, type, next, error: "redirect_already_consumed" };
   }
 
-  const tokenHash = trimOrNull(url.searchParams.get("token_hash") || hashParams.get("token_hash"));
-  if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: normalizeVerifyOtpType(type),
+  if (fingerprint && inFlightConsumeFingerprint === fingerprint && inFlightConsumePromise) {
+    return inFlightConsumePromise;
+  }
+
+  const executeConsume = async (): Promise<ConsumeAuthRedirectResult> => {
+    const code = trimOrNull(url.searchParams.get("code") || hashParams.get("code"));
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) return { ok: false, type, next, error: error.message || "exchange_code_failed" };
+      cleanAuthUrl(url);
+      if (fingerprint) markFingerprintConsumed(fingerprint);
+      return { ok: true, type, next, method: "code" };
+    }
+
+    const tokenHash = trimOrNull(url.searchParams.get("token_hash") || hashParams.get("token_hash"));
+    if (tokenHash && type) {
+      const { error } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: normalizeVerifyOtpType(type),
+      });
+      if (error) return { ok: false, type, next, error: error.message || "verify_otp_failed" };
+      cleanAuthUrl(url);
+      if (fingerprint) markFingerprintConsumed(fingerprint);
+      return { ok: true, type, next, method: "verifyOtp" };
+    }
+
+    const accessToken = trimOrNull(hashParams.get("access_token") || url.searchParams.get("access_token"));
+    const refreshToken = trimOrNull(hashParams.get("refresh_token") || url.searchParams.get("refresh_token"));
+    if (accessToken && refreshToken) {
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) return { ok: false, type, next, error: error.message || "set_session_failed" };
+      cleanAuthUrl(url);
+      if (fingerprint) markFingerprintConsumed(fingerprint);
+      return { ok: true, type, next, method: "setSession" };
+    }
+
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      return { ok: true, type, next, method: "existing_session" };
+    }
+
+    return { ok: true, type, next, method: "none" };
+  };
+
+  if (fingerprint) {
+    inFlightConsumeFingerprint = fingerprint;
+    inFlightConsumePromise = executeConsume().finally(() => {
+      inFlightConsumeFingerprint = null;
+      inFlightConsumePromise = null;
     });
-    if (error) return { ok: false, type, next, error: error.message || "verify_otp_failed" };
-    cleanAuthUrl(url);
-    return { ok: true, type, next, method: "verifyOtp" };
+    return inFlightConsumePromise;
   }
 
-  const accessToken = trimOrNull(hashParams.get("access_token") || url.searchParams.get("access_token"));
-  const refreshToken = trimOrNull(hashParams.get("refresh_token") || url.searchParams.get("refresh_token"));
-  if (accessToken && refreshToken) {
-    const { error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (error) return { ok: false, type, next, error: error.message || "set_session_failed" };
-    cleanAuthUrl(url);
-    return { ok: true, type, next, method: "setSession" };
-  }
-
-  const { data } = await supabase.auth.getSession();
-  if (data.session?.access_token) {
-    return { ok: true, type, next, method: "existing_session" };
-  }
-
-  return { ok: true, type, next, method: "none" };
+  return executeConsume();
 }
