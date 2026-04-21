@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 
 export type VetClinicOverlay = {
@@ -19,14 +19,6 @@ type Props = {
 
 const VetMarkersOverlay = ({ map, vets, onSelect }: Props) => {
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
-
-  const vetsById = useMemo(() => {
-    const next: Record<string, VetClinicOverlay> = {};
-    vets.forEach((v) => {
-      next[v.id] = v;
-    });
-    return next;
-  }, [vets]);
 
   useEffect(() => {
     if (!map || vets.length === 0) {
@@ -50,14 +42,12 @@ const VetMarkersOverlay = ({ map, vets, onSelect }: Props) => {
     map.on("rotate", sync);
     map.on("pitch", sync);
     map.on("resize", sync);
-    map.on("render", sync);
     return () => {
       map.off("move", sync);
       map.off("zoom", sync);
       map.off("rotate", sync);
       map.off("pitch", sync);
       map.off("resize", sync);
-      map.off("render", sync);
     };
   }, [map, vets]);
 
@@ -101,4 +91,3 @@ const VetMarkersOverlay = ({ map, vets, onSelect }: Props) => {
 };
 
 export default VetMarkersOverlay;
-

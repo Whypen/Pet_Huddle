@@ -43,7 +43,6 @@ const BlueDotMarker = ({
     map.on("rotate", syncToMap);
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
-    map.on("render", syncToMap);
 
     if (import.meta.env.DEV) console.debug("[MARKER_MOUNT]", { type: "gps", hasMap: true });
 
@@ -53,7 +52,6 @@ const BlueDotMarker = ({
       map.off("rotate", syncToMap);
       map.off("pitch", syncToMap);
       map.off("resize", syncToMap);
-      map.off("render", syncToMap);
     };
   }, [coords, map]);
 

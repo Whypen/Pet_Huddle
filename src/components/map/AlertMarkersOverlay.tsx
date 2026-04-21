@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import AlertPinMarker from "@/components/map/AlertPinMarker";
 
@@ -19,14 +19,6 @@ interface AlertMarkersOverlayProps {
 
 const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps) => {
   const [screenPoints, setScreenPoints] = useState<Record<string, { x: number; y: number }>>({});
-
-  const alertsById = useMemo(() => {
-    const next: Record<string, OverlayAlert> = {};
-    alerts.forEach((alert) => {
-      next[alert.id] = alert;
-    });
-    return next;
-  }, [alerts]);
 
   useEffect(() => {
     if (!map || alerts.length === 0) {
@@ -49,7 +41,6 @@ const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps
     map.on("rotate", syncToMap);
     map.on("pitch", syncToMap);
     map.on("resize", syncToMap);
-    map.on("render", syncToMap);
 
     return () => {
       map.off("move", syncToMap);
@@ -57,7 +48,6 @@ const AlertMarkersOverlay = ({ map, alerts, onSelect }: AlertMarkersOverlayProps
       map.off("rotate", syncToMap);
       map.off("pitch", syncToMap);
       map.off("resize", syncToMap);
-      map.off("render", syncToMap);
     };
   }, [alerts, map]);
 

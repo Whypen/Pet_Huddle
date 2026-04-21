@@ -208,6 +208,8 @@ type OwnPinState = {
   isInvisible: boolean;
 };
 
+type CameraState = "idle" | "initializing" | "deeplink_focusing" | "user_controlled";
+
 const UUID_V4ISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_PIN_ACTIVE_HOURS = 24;
 const USER_PIN_RETENTION_HOURS = 24 * 7;
@@ -245,12 +247,13 @@ const MapPage = () => {
   const map = useRef<mapboxgl.Map | null>(null);
   const [mapFallback, setMapFallback] = useState(false);
   const [mapInitNonce, setMapInitNonce] = useState(0);
-  const hasInitialized = useRef(false);
   const lastMoveendRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
   const isPickingBroadcastLocationRef = useRef(false);
   const isBroadcastOpenRef = useRef(false);
-  const initialViewportAppliedRef = useRef(false);
-  const pinSnapAppliedRef = useRef(false);
+  const entryCameraResolvedRef = useRef(false);
+  const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const pinAddressSnapshotRef = useRef<string | null>(null);
+  const cameraStateRef = useRef<CameraState>("idle");
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
   const [showAlerts, setShowAlerts] = useState(true);
@@ -269,7 +272,6 @@ const MapPage = () => {
   const [alertFocusId, setAlertFocusId] = useState<string | null>(null);
   const [alertFocusThreadId, setAlertFocusThreadId] = useState<string | null>(null);
   const alertFocusRetriesRef = useRef(0);
-  const alertCameraLockRef = useRef(false);
   const [selectedVet, setSelectedVet] = useState<VetClinic | null>(null);
   const [publicProfileOpen, setPublicProfileOpen] = useState(false);
   const [publicProfileLoading, setPublicProfileLoading] = useState(false);
@@ -299,6 +301,35 @@ const MapPage = () => {
   const ownMarkerCacheKey = useMemo(() => (user?.id ? `huddle:last-own-coords:${user.id}` : null), [user?.id]);
   const alertsCacheKey = useMemo(() => (user?.id ? `huddle:map-alerts:${user.id}` : null), [user?.id]);
 
+  const hasDeepLinkEntry = Boolean(alertFocusId || alertFocusThreadId);
+
+  const coordsEqual = useCallback(
+    (left: { lat: number; lng: number } | null, right: { lat: number; lng: number } | null) => {
+      if (!left && !right) return true;
+      if (!left || !right) return false;
+      return Math.abs(left.lat - right.lat) < 0.000001 && Math.abs(left.lng - right.lng) < 0.000001;
+    },
+    [],
+  );
+
+  const setUserLocationIfChanged = useCallback(
+    (next: { lat: number; lng: number } | null) => {
+      if (coordsEqual(userLocationRef.current, next)) return false;
+      userLocationRef.current = next;
+      setUserLocation(next);
+      return true;
+    },
+    [coordsEqual],
+  );
+
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
+
+  useEffect(() => {
+    pinAddressSnapshotRef.current = pinAddressSnapshot;
+  }, [pinAddressSnapshot]);
+
   useEffect(() => {
     if (!ownMarkerCacheKey) {
       setLastKnownOwnCoords(null);
@@ -317,21 +348,27 @@ const MapPage = () => {
         setLastKnownOwnCoords(null);
         return;
       }
-      setLastKnownOwnCoords({ lat, lng });
+      setLastKnownOwnCoords((prev) => {
+        if (prev && coordsEqual(prev, { lat, lng })) return prev;
+        return { lat, lng };
+      });
     } catch {
       setLastKnownOwnCoords(null);
     }
-  }, [ownMarkerCacheKey]);
+  }, [coordsEqual, ownMarkerCacheKey]);
 
   const persistOwnMarkerCoords = useCallback((coords: { lat: number; lng: number }) => {
-    setLastKnownOwnCoords(coords);
+    setLastKnownOwnCoords((prev) => {
+      if (prev && coordsEqual(prev, coords)) return prev;
+      return coords;
+    });
     if (!ownMarkerCacheKey) return;
     try {
       localStorage.setItem(ownMarkerCacheKey, JSON.stringify(coords));
     } catch {
       // best-effort cache only
     }
-  }, [ownMarkerCacheKey]);
+  }, [coordsEqual, ownMarkerCacheKey]);
 
   const clearOwnMarkerCoordsCache = useCallback(() => {
     setLastKnownOwnCoords(null);
@@ -407,6 +444,38 @@ const MapPage = () => {
     return deriveOwnPinState((profile || null) as Record<string, unknown> | null);
   }, [deriveOwnPinState, profile]);
 
+  const syncOwnPinState = useCallback((retainedPin: OwnPinState | null, options?: { allowFallback?: boolean }) => {
+    if (!retainedPin) {
+      if (options?.allowFallback) {
+        if (userLocationRef.current) {
+          setVisibleEnabled(true);
+          setIsInvisible(hideFromMap);
+          return userLocationRef.current;
+        }
+        if (lastKnownOwnCoords) {
+          setVisibleEnabled(true);
+          setIsInvisible(hideFromMap);
+          return lastKnownOwnCoords;
+        }
+      }
+      setUserLocationIfChanged(null);
+      setVisibleEnabled(false);
+      setPinPersistedAt(null);
+      setOwnMarkerState(null);
+      setPinAddressSnapshot(null);
+      setIsInvisible(false);
+      return null;
+    }
+    const next = { lat: retainedPin.lat, lng: retainedPin.lng };
+    setUserLocationIfChanged(next);
+    persistOwnMarkerCoords(next);
+    setVisibleEnabled(true);
+    setIsInvisible(retainedPin.isInvisible);
+    setPinPersistedAt(retainedPin.pinnedAt);
+    setOwnMarkerState(retainedPin.markerState);
+    return next;
+  }, [hideFromMap, lastKnownOwnCoords, persistOwnMarkerCoords, setUserLocationIfChanged]);
+
   useEffect(() => {
     dbAlertsRef.current = dbAlerts;
   }, [dbAlerts]);
@@ -471,18 +540,9 @@ const MapPage = () => {
   // Restore persisted pin only from DB for authenticated sessions.
   useEffect(() => {
     if (!user) return;
-    (async () => {
-      const retainedPin = getProfileRetainedPin();
-      if (!retainedPin) return;
-      const next = { lat: retainedPin.lat, lng: retainedPin.lng };
-      setUserLocation(next);
-      persistOwnMarkerCoords(next);
-      setVisibleEnabled(true);
-      setIsInvisible(retainedPin.isInvisible);
-      setPinPersistedAt(retainedPin.pinnedAt);
-      setOwnMarkerState(retainedPin.markerState);
-    })();
-  }, [getProfileRetainedPin, persistOwnMarkerCoords, user]);
+    const retainedPin = getProfileRetainedPin();
+    void syncOwnPinState(retainedPin, { allowFallback: true });
+  }, [getProfileRetainedPin, syncOwnPinState, user]);
 
   const effectiveTier = profile?.effective_tier || profile?.tier || "free";
   const isPremium = effectiveTier === "plus" || effectiveTier === "gold";
@@ -530,15 +590,6 @@ const MapPage = () => {
     if (import.meta.env.DEV) console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
   }, [defaultCenter, isPickingBroadcastLocation, mapFallback, userLocation]);
 
-  // Sync pin-visible state from whether we currently have a self location/pin.
-  useEffect(() => {
-    if (userLocation) {
-      setVisibleEnabled(true);
-      return;
-    }
-    setVisibleEnabled(false);
-  }, [userLocation]);
-
   // Privacy is an independent flag and must not drive pin/unpin state.
   useEffect(() => {
     setIsInvisible(hideFromMap);
@@ -555,10 +606,10 @@ const MapPage = () => {
     setAlertFocusId(alertIdFromUrl && alertIdFromUrl.trim() ? alertIdFromUrl.trim() : null);
     setAlertFocusThreadId(alertThreadFromUrl && alertThreadFromUrl.trim() ? alertThreadFromUrl.trim() : null);
     alertFocusRetriesRef.current = 0;
-    alertCameraLockRef.current = Boolean(
-      (alertIdFromUrl && alertIdFromUrl.trim()) ||
-      (alertThreadFromUrl && alertThreadFromUrl.trim()),
-    );
+    entryCameraResolvedRef.current = false;
+    cameraStateRef.current = (alertIdFromUrl && alertIdFromUrl.trim()) || (alertThreadFromUrl && alertThreadFromUrl.trim())
+      ? "deeplink_focusing"
+      : "initializing";
   }, [location.search]);
 
   // Default center (Hong Kong)
@@ -569,8 +620,24 @@ const MapPage = () => {
         source.startsWith("marker.") ||
         source.startsWith("refresh.") ||
         source.startsWith("reCenterOnGPS.") ||
-        source === "manual.findOnMap";
+        source === "manual.findOnMap" ||
+        source === "pin.apply";
+      if (source.startsWith("deeplink.")) {
+        cameraStateRef.current = "deeplink_focusing";
+      } else if (source.startsWith("init.")) {
+        cameraStateRef.current = "initializing";
+      } else if (isLikelyUserAction) {
+        cameraStateRef.current = "user_controlled";
+      }
       if ((isBroadcastOpenRef.current || isPickingBroadcastLocationRef.current) && !isLikelyUserAction) return;
+      if (import.meta.env.DEV) {
+        console.debug("[MAP_CAMERA]", {
+          source,
+          center: Array.isArray(options.center) ? options.center : null,
+          zoom: typeof options.zoom === "number" ? options.zoom : null,
+          state: cameraStateRef.current,
+        });
+      }
       map.current?.flyTo(options);
     },
     []
@@ -660,7 +727,7 @@ const MapPage = () => {
       return;
     }
 
-    const resolvedAddress = pinAddressSnapshot || (await lookupBroadcastAddress(lat, lng)) || null;
+    const resolvedAddress = pinAddressSnapshotRef.current || (await lookupBroadcastAddress(lat, lng)) || null;
     if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
 
     if (import.meta.env.DEV) console.debug("[PIN] Saving to DB — set_user_location RPC...");
@@ -690,7 +757,7 @@ const MapPage = () => {
     }
 
     const pinnedAt = new Date().toISOString();
-    setUserLocation({ lat, lng });
+    setUserLocationIfChanged({ lat, lng });
     setOwnMarkerState("active");
     setPinPersistedAt(pinnedAt);
     if (import.meta.env.DEV) console.debug("[PIN] Pin State Updated: pinPersistedAt=", pinnedAt);
@@ -703,7 +770,7 @@ const MapPage = () => {
     setPinning(false);
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success("Pin is live!");
-  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, user?.id]);
+  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, setUserLocationIfChanged, user?.id]);
 
   const requestPinFromLiveGps = useCallback(() => {
     // No secure context — GPS cannot work at all.
@@ -788,7 +855,7 @@ const MapPage = () => {
     setPinPersistedAt(null);
     setOwnMarkerState(null);
     setIsInvisible(false);
-    setUserLocation(null);
+    setUserLocationIfChanged(null);
     clearOwnMarkerCoordsCache();
     setFriendPins([]);
     setSelectedAlert(null);
@@ -899,8 +966,8 @@ const MapPage = () => {
       const rect = mapContainer.current.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
-      const initialCenter: [number, number] = userLocation
-        ? [userLocation.lng, userLocation.lat]
+      const initialCenter: [number, number] = userLocationRef.current
+        ? [userLocationRef.current.lng, userLocationRef.current.lat]
         : defaultCenter;
 
       if (import.meta.env.DEV) console.debug("[MAP_INIT] mapboxgl.Map typeof =", typeof mapboxgl?.Map);
@@ -926,6 +993,7 @@ const MapPage = () => {
           zoom: PROXIMITY_ZOOM,
           failIfMajorPerformanceCaveat: false,
         });
+        if (import.meta.env.DEV) console.debug("[MAP_LIFECYCLE]", "mount", { nonce: mapInitNonce });
         setMapFallback(false);
       } catch (error) {
         if (import.meta.env.DEV) console.error("[MAP_INIT] mapboxgl init failed", error);
@@ -941,15 +1009,6 @@ const MapPage = () => {
 
       map.current.on("load", () => {
         setMapLoaded(true);
-        if (!hasInitialized.current && userLocation && !alertCameraLockRef.current) {
-          flyToWithDebug("map.load.initialSnap", {
-            center: [userLocation.lng, userLocation.lat],
-            zoom: PROXIMITY_ZOOM,
-            essential: true,
-            duration: 2000,
-          });
-          hasInitialized.current = true;
-        }
         requestAnimationFrame(() => map.current?.resize());
       });
       map.current.on("moveend", () => {
@@ -970,7 +1029,7 @@ const MapPage = () => {
         const next = { lat: event.lngLat.lat, lng: event.lngLat.lng };
         setBroadcastPreviewPin(next);
         void lookupBroadcastAddress(next.lat, next.lng).then((address) => {
-          setBroadcastPreviewAddress(address || pinAddressSnapshot || null);
+          setBroadcastPreviewAddress(address || pinAddressSnapshotRef.current || null);
         });
         setIsPickingBroadcastLocation(false);
         setIsBroadcastOpen(true);
@@ -993,11 +1052,12 @@ const MapPage = () => {
     return () => {
       cancelled = true;
       observer?.disconnect();
+      if (import.meta.env.DEV && map.current) console.debug("[MAP_LIFECYCLE]", "remove", { nonce: mapInitNonce });
       map.current?.remove();
       map.current = null;
       setMapLoaded(false);
     };
-  }, [defaultCenter, flyToWithDebug, lookupBroadcastAddress, mapInitNonce, pinAddressSnapshot, userLocation]);
+  }, [defaultCenter, flyToWithDebug, lookupBroadcastAddress, mapInitNonce]);
 
   const handleFallbackClick = useCallback(() => {
     if (!isPickingBroadcastLocation) return;
@@ -1024,31 +1084,38 @@ const MapPage = () => {
     if (!map.current || !mapLoaded) return;
     const apply = async () => {
       if (!map.current) return;
-      if (alertCameraLockRef.current) return;
+      if (entryCameraResolvedRef.current) return;
+      if (cameraStateRef.current !== "initializing" && !hasDeepLinkEntry) return;
+      if (cameraStateRef.current === "deeplink_focusing" || hasDeepLinkEntry) return;
       // Pin snap always wins — overrides any previously applied fallback
-      if (userLocation && !pinSnapAppliedRef.current) {
-        flyToWithDebug("init.userPin", { center: [userLocation.lng, userLocation.lat], zoom: 15.5 });
-        pinSnapAppliedRef.current = true;
-        initialViewportAppliedRef.current = true;
+      const entryOwnPin = userLocationRef.current ?? lastKnownOwnCoords;
+      if (entryOwnPin) {
+        flyToWithDebug("init.userPin", { center: [entryOwnPin.lng, entryOwnPin.lat], zoom: 15.5 });
+        entryCameraResolvedRef.current = true;
+        cameraStateRef.current = "idle";
         return;
       }
-      // Fallback: only apply once, while pin hasn't arrived yet
-      if (initialViewportAppliedRef.current) return;
       if (typeof profile?.last_lat === "number" && typeof profile?.last_lng === "number") {
         flyToWithDebug("init.profileLast", { center: [profile.last_lng, profile.last_lat], zoom: 14.5 });
-        initialViewportAppliedRef.current = true;
+        entryCameraResolvedRef.current = true;
+        cameraStateRef.current = "idle";
         return;
       }
       const geocoded = await resolveProfileLocationCenter();
       if (geocoded) {
         flyToWithDebug("init.profileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
-        initialViewportAppliedRef.current = true;
+      }
+      entryCameraResolvedRef.current = true;
+      if (cameraStateRef.current !== "user_controlled") {
+        cameraStateRef.current = "idle";
       }
     };
     void apply();
   }, [
+    hasDeepLinkEntry,
     flyToWithDebug,
     mapLoaded,
+    lastKnownOwnCoords,
     profile?.last_lat,
     profile?.last_lng,
     resolveProfileLocationCenter,
@@ -1056,15 +1123,26 @@ const MapPage = () => {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
+    let attempts = 0;
+    let timeoutId: number | null = null;
     const applyControlOffset = () => {
+      if (cancelled) return;
       const node = document.querySelector<HTMLElement>(".mapboxgl-ctrl-bottom-right");
-      if (!node) return;
-      node.style.right = "12px";
-      node.style.bottom = `calc(var(--nav-height,64px) + env(safe-area-inset-bottom) + 120px)`;
+      if (node) {
+        node.style.right = "12px";
+        node.style.bottom = `calc(var(--nav-height,64px) + env(safe-area-inset-bottom) + 120px)`;
+        return;
+      }
+      if (attempts >= 8) return;
+      attempts += 1;
+      timeoutId = window.setTimeout(applyControlOffset, 150);
     };
     applyControlOffset();
-    const id = window.setInterval(applyControlOffset, 500);
-    return () => window.clearInterval(id);
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, [isBroadcastOpen, mapLoaded]);
 
   // NOTE: Do not auto-fly on userLocation changes to prevent map blinking.
@@ -1243,7 +1321,7 @@ const MapPage = () => {
 
   const fetchCurrentPinState = useCallback(async () => {
     if (!user?.id) {
-      setUserLocation(null);
+      setUserLocationIfChanged(null);
       clearOwnMarkerCoordsCache();
       setVisibleEnabled(false);
       setPinPersistedAt(null);
@@ -1259,37 +1337,11 @@ const MapPage = () => {
       .maybeSingle();
     if (error) {
       // Keep current UI pin state on transient fetch failure.
-      return userLocation;
+      return userLocationRef.current;
     }
     const retainedPin = deriveOwnPinState((data || null) as Record<string, unknown> | null);
-    if (!retainedPin) {
-      if (userLocation) {
-        setVisibleEnabled(true);
-        setIsInvisible(hideFromMap);
-        return userLocation;
-      }
-      if (lastKnownOwnCoords) {
-        setVisibleEnabled(true);
-        setIsInvisible(hideFromMap);
-        return lastKnownOwnCoords;
-      }
-      setUserLocation(null);
-      setVisibleEnabled(false);
-      setPinPersistedAt(null);
-      setOwnMarkerState(null);
-      setPinAddressSnapshot(null);
-      setIsInvisible(false);
-      return null;
-    }
-    const next = { lat: retainedPin.lat, lng: retainedPin.lng };
-    setUserLocation(next);
-    persistOwnMarkerCoords(next);
-    setVisibleEnabled(true);
-    setIsInvisible(retainedPin.isInvisible);
-    setPinPersistedAt(retainedPin.pinnedAt);
-    setOwnMarkerState(retainedPin.markerState);
-    return next;
-  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, hideFromMap, lastKnownOwnCoords, persistOwnMarkerCoords, user?.id, userLocation]);
+    return syncOwnPinState(retainedPin, { allowFallback: true });
+  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, setUserLocationIfChanged, syncOwnPinState, user?.id]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1309,7 +1361,8 @@ const MapPage = () => {
       setShowAlerts(true);
       focusMapTarget("deeplink.alert", target.latitude, target.longitude);
       setSelectedAlert(target);
-      alertCameraLockRef.current = false;
+      entryCameraResolvedRef.current = true;
+      cameraStateRef.current = "idle";
       setAlertFocusId(null);
       setAlertFocusThreadId(null);
       return;
@@ -1324,13 +1377,14 @@ const MapPage = () => {
           setShowAlerts(true);
           focusMapTarget("deeplink.alert.resolved", resolved.latitude, resolved.longitude);
           setSelectedAlert(resolved);
-          alertCameraLockRef.current = false;
+          entryCameraResolvedRef.current = true;
+          cameraStateRef.current = "idle";
           setAlertFocusId(null);
           setAlertFocusThreadId(null);
           return;
         }
         toast.info("That alert is no longer available.");
-        alertCameraLockRef.current = false;
+        cameraStateRef.current = "initializing";
         setAlertFocusId(null);
         setAlertFocusThreadId(null);
       })();
@@ -1347,7 +1401,8 @@ const MapPage = () => {
           setShowAlerts(true);
           focusMapTarget("deeplink.alert.retry", resolved.latitude, resolved.longitude);
           setSelectedAlert(resolved);
-          alertCameraLockRef.current = false;
+          entryCameraResolvedRef.current = true;
+          cameraStateRef.current = "idle";
           setAlertFocusId(null);
           setAlertFocusThreadId(null);
           return;
@@ -1376,7 +1431,6 @@ const MapPage = () => {
 
   useEffect(() => {
     if (!selectedAlert) return;
-    alertCameraLockRef.current = false;
     const updated = dbAlerts.find((row) => row.id === selectedAlert.id) || null;
     if (updated) {
       if (updated !== selectedAlert) setSelectedAlert(updated);
@@ -1386,6 +1440,7 @@ const MapPage = () => {
   const refreshMapData = useCallback(async () => {
     setPullRefreshing(true);
     try {
+      cameraStateRef.current = "user_controlled";
       const localPinSnapshot = userLocation;
       setBroadcastPreviewPin(null);
       setSelectedAlert(null);
@@ -1413,7 +1468,7 @@ const MapPage = () => {
       } else {
         const geocoded = await resolveProfileLocationCenter();
         if (geocoded) {
-          flyToWithDebug("refresh.profileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
+        flyToWithDebug("refresh.profileStreet", { center: [geocoded.lng, geocoded.lat], zoom: 14.5 });
         }
       }
     } finally {
@@ -1675,6 +1730,7 @@ const MapPage = () => {
             map={map.current}
             vets={vetClinics}
             onSelect={(id) => {
+              cameraStateRef.current = "user_controlled";
               const vet = vetClinics.find((v) => v.id === id);
               if (!vet) return;
               focusMapTarget("marker.vet.click", vet.lat, vet.lng);
@@ -1688,6 +1744,7 @@ const MapPage = () => {
             map={map.current}
             friends={friendOverlayPins}
             onSelect={(id) => {
+              cameraStateRef.current = "user_controlled";
               const friend = friendOverlayPins.find((f) => f.id === id);
               if (!friend) return;
               focusMapTarget("marker.friend.click", friend.lat, friend.lng);
@@ -1721,6 +1778,7 @@ const MapPage = () => {
             map={map.current}
             alerts={filteredPins}
             onSelect={(alertId) => {
+              cameraStateRef.current = "user_controlled";
               const alert = filteredPins.find((pin) => pin.id === alertId);
               if (!alert) return;
               focusMapTarget(alert.is_demo ? "marker.demoAlert.click" : "marker.alert.click", alert.latitude, alert.longitude);
