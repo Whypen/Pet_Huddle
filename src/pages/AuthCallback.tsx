@@ -6,6 +6,7 @@ import { useSignup } from "@/contexts/SignupContext";
 import { consumeSupabaseAuthRedirect } from "@/lib/supabaseAuthRedirect";
 import {
   SETPROFILE_PREFILL_KEY,
+  loadSignupDraft,
   buildScopedStorageKey,
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
@@ -24,7 +25,7 @@ const AuthCallback = () => {
         toast.error(
           isRecovery
             ? "That reset link is no longer valid. Please request a new one."
-            : "That sign-in link is no longer valid. Please request a new one.",
+            : "That verification link is no longer valid. Please request a new one.",
         );
         navigate(isRecovery ? "/reset-password" : "/auth", { replace: true });
         return;
@@ -39,12 +40,20 @@ const AuthCallback = () => {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user?.id) {
-        toast.error("That sign-in link is no longer valid. Please request a new one.");
+        toast.error("That verification link is no longer valid. Please request a new one.");
         navigate("/auth", { replace: true });
         return;
       }
 
       const email = normalizeEmail(user.email);
+      if (callbackResult.type === "email") {
+        const hasSignupDraft = Boolean(loadSignupDraft(email));
+        if (hasSignupDraft) {
+          setFlowState("signup");
+          navigate(`/signup/email-confirmation?confirmed=1&email=${encodeURIComponent(email)}`, { replace: true });
+          return;
+        }
+      }
       const phone = String((user.user_metadata as { phone?: string } | null)?.phone || user.phone || "").trim();
       const { data: signupGateStatus, error: signupGateError } = await supabase.rpc("check_identifier_registered", {
         p_email: email || "",

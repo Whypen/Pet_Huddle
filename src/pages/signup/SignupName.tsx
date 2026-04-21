@@ -21,6 +21,7 @@ const FORM_ID = "signup-name-form";
 const ACCOUNT_UNAVAILABLE_MESSAGE =
   "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
 const SIGNUP_REVIEW_MESSAGE = "Signup is temporarily unavailable. Please try again later.";
+const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -85,72 +86,47 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
-        const signupProof = String(data.signup_proof || "").trim();
-        if (!signupProof) {
-          toast.error("Email verification is required. Please resend your verification link.");
+        const signupTurnstileToken = String(
+          sessionStorage.getItem(SIGNUP_TURNSTILE_TOKEN_KEY) || "",
+        ).trim();
+        if (!signupTurnstileToken) {
+          toast.error("Please go back and complete verification again.");
           return;
         }
-        // Assert signup flow state synchronously before creating the session.
-        // SignupContext.onAuthStateChange fires inside setSession() — having
-        // "signup" in sessionStorage before that call is the only race-free guarantee
-        // that shouldKeepDraftForSession returns true and the draft is not reset.
         setFlowState("signup");
 
-        // New user — create account now that we have display name + social ID
-        const { error: signUpError } = await authSignup({
+        const { user: createdUser, error: signUpError } = await authSignup({
           email: data.email.trim(),
           password: data.password,
           options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
             data: {
               phone: data.phone?.trim(),
               dob: data.dob,
               marketing_email_opt_in: data.email_opt_in,
             },
           },
-          signup_proof: signupProof,
+          turnstile_token: signupTurnstileToken,
+          turnstile_action: "signup",
         });
         if (signUpError) {
           toast.error(resolveSignupError(signUpError));
           return;
         }
 
-        // Re-assert flow state: onAuthStateChange may have reset it to "idle"
-        // during the setSession() call inside authSignup. Writing it again here
-        // restores sessionStorage so PublicRoute’s next render allows the route.
         setFlowState("signup");
-
-        // Verify the session was actually established before navigating.
-        // auth-signup may return session:null for deleted-account re-registration
-        // (delete+recreate race in Supabase). Retry up to 3 s to absorb it.
-        let newUserId: string | undefined;
-        for (let attempt = 0; attempt < 6; attempt++) {
-          const { data: sessionData } = await supabase.auth.getSession();
-          newUserId = sessionData.session?.user?.id;
-          if (newUserId) break;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-        if (!newUserId) {
-          toast.error("Session not ready yet. Please continue from credentials.");
-          navigate("/signup/credentials", {
-            replace: true,
-            state: { email: data.email?.trim() || "" },
-          });
-          return;
-        }
-
-        // Fire account verify email + optional marketing DOI email (both fire-and-forget)
-        void supabase.functions
-          .invoke("send-signup-verify-email", { body: { user_id: newUserId } })
-          .catch((err) => console.warn("[signup-name] verify email failed silently", err));
+        sessionStorage.removeItem(SIGNUP_TURNSTILE_TOKEN_KEY);
         if (data.email_opt_in) {
           void supabase.functions
-            .invoke("send-marketing-doi-email", { body: { user_id: newUserId } })
+            .invoke("send-marketing-doi-email", { body: { user_id: (createdUser as { id?: string } | null)?.id } })
             .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
         }
         if (data.email_opt_in) {
           toast.message("We’ll send you a separate email to confirm your subscription.");
         }
-        goTo("/signup/verify");
+        navigate(`/signup/email-confirmation?email=${encodeURIComponent(data.email.trim().toLowerCase())}`, {
+          replace: true,
+        });
         return;
       }
       if (data.email_opt_in) {
@@ -215,8 +191,7 @@ const SignupName = () => {
     Boolean(displayName.trim()) &&
     Boolean(normalizedSocialId) &&
     SOCIAL_ID_REGEX.test(normalizedSocialId) &&
-    (user ? availabilityState !== "checking" : availabilityState === "available") &&
-    (user ? true : Boolean(String(data.signup_proof || "").trim()));
+    (user ? availabilityState !== "checking" : availabilityState === "available");
 
   return (
     <SignupShell

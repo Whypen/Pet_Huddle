@@ -32,7 +32,7 @@ import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessio
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
-const PRESIGNUP_TURNSTILE_TOKEN_KEY = "huddle_presignup_turnstile_token";
+const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
 const emailSchema = z.string().trim().email();
 const ACCOUNT_UNAVAILABLE_MESSAGE =
   "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
@@ -445,27 +445,16 @@ const SignupCredentials = () => {
         setShowSignInModal(true);
         return;
       }
-      const normalizedEmail = values.email.trim().toLowerCase();
-      // preVerifiedProof is populated by the debounced email-change effect above.
-      // No sessionStorage token required — backend resolved it from the email alone.
-      const signupProof = preVerifiedProof || "";
       update({
         email: values.email.trim(),
         password: values.password ?? "",
         phone: values.phone.trim(),
         email_opt_in: emailOptIn,
-        signup_proof: signupProof,
+        signup_proof: "",
       });
       setFlowState("signup");
-      if (signupProof) {
-        goTo("/signup/name");
-        return;
-      }
-      sessionStorage.setItem(PRESIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
-      goTo("/signup/verify-email", {
-        from_credentials: true,
-        email: normalizedEmail,
-      });
+      sessionStorage.setItem(SIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
+      goTo("/signup/name");
     } catch (err) {
       console.error("Signup failed:", err);
       setFlowState("idle");

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Mail, CheckCircle, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSignup } from "@/contexts/SignupContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { launchEmailInboxBestEffort } from "@/lib/emailInboxLauncher";
@@ -15,12 +16,15 @@ const SignupEmailConfirmation = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, refreshProfile } = useAuth();
+  const { data, setFlowState } = useSignup();
   const [pageState, setPageState] = useState<PageState>("waiting");
   const [resending, setResending] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
   const token = searchParams.get("token");
   const uid = searchParams.get("uid");
+  const confirmed = searchParams.get("confirmed") === "1";
+  const waitingEmail = String(searchParams.get("email") || data.email || user?.email || "").trim().toLowerCase();
 
   const goTo = (path: string) => {
     setIsExiting(true);
@@ -29,6 +33,11 @@ const SignupEmailConfirmation = () => {
 
   // Auto-confirm when token + uid are present in URL
   useEffect(() => {
+    if (confirmed) {
+      setFlowState("signup");
+      setPageState("success");
+      return;
+    }
     if (!token || !uid) return;
     setPageState("confirming");
 
@@ -48,22 +57,23 @@ const SignupEmailConfirmation = () => {
         console.error("[email-confirmation] unexpected error", err);
         setPageState("error");
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, uid]);
+  }, [confirmed, refreshProfile, setFlowState, token, uid]);
 
   const handleResend = async () => {
-    const userId = uid ?? user?.id;
-    if (!userId) {
-      toast.error("Please sign in to resend the verification email.");
+    if (!waitingEmail) {
+      toast.error("Please go back and enter your email again.");
       return;
     }
     setResending(true);
     try {
-      const { data, error } = await supabase.functions.invoke(
-        "send-signup-verify-email",
-        { body: { user_id: userId } },
-      );
-      if (error || !data?.ok) throw new Error("send_failed");
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: waitingEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+      if (error) throw error;
       toast.success("Verification email sent again");
       setPageState("waiting");
     } catch {
@@ -118,7 +128,7 @@ const SignupEmailConfirmation = () => {
           <NeuButton
             variant="primary"
             className="w-full h-12"
-            onClick={() => goTo("/set-profile")}
+            onClick={() => goTo("/signup/verify")}
           >
             Continue
           </NeuButton>
@@ -171,13 +181,6 @@ const SignupEmailConfirmation = () => {
           >
             I've verified my email
           </NeuButton>
-          <NeuButton
-            variant="ghost"
-            className="w-full h-11 text-[rgba(74,73,101,0.40)]"
-            onClick={() => goTo("/signup/name")}
-          >
-            I'll do it later
-          </NeuButton>
         </div>
       }
     >
@@ -187,7 +190,7 @@ const SignupEmailConfirmation = () => {
       <p className="text-[15px] text-[rgba(74,73,101,0.70)] leading-relaxed mt-3">
         {isError
           ? "This verification link has expired or is invalid. Request a new one below."
-          : "Open your mail app manually and tap the latest verification email link."}
+          : `Open your mail app manually and tap the latest verification email link sent to ${waitingEmail || "your inbox"}.`}
       </p>
     </SignupShell>
   );
