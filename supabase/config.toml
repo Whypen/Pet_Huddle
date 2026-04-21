@@ -3,7 +3,15 @@ project_id = "ztrbourwcnhrpmzwlrcn"
 [auth]
 site_url = "https://huddle.pet"
 additional_redirect_urls = [
+  "https://huddle.pet/**",
+  "http://localhost:5173/**",
+  "http://localhost:8080/**",
+  "http://localhost:8081/**",
+  "http://localhost:8082/**",
+  "http://localhost:8083/**",
+  "https://*-huddleapp.vercel.app/**",
   "https://huddle.pet/auth/callback",
+  "https://www.huddle.pet/auth/callback",
   "https://huddle.pet/update-password",
   "https://huddle-huddleapp.vercel.app/auth/callback",
   "https://huddle-huddleapp.vercel.app/update-password",
@@ -12,6 +20,28 @@ additional_redirect_urls = [
   "http://localhost:8080/auth/callback",
   "http://localhost:8080/update-password",
 ]
+minimum_password_length = 8
+password_requirements = "lower_upper_letters_digits_symbols"
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[auth.email]
+enable_confirmations = true
+secure_password_change = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.sms]
+enable_signup = true
+template = "Your Verification code is {{ .Code }}. Drop it in and join the Huddle community!"
+
+[auth.sms.twilio]
+enabled = true
+
+[auth.sms.test_otp]
+85264148332 = "498005"
 
 # Pre-auth functions: gateway JWT verification disabled.
 # verify_jwt = true expects legacy JWT-shaped API keys and is incompatible
