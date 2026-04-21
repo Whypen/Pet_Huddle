@@ -27,6 +27,9 @@ const clientIp = (req: Request) =>
   req.headers.get("x-real-ip") ||
   "unknown";
 
+const DEFAULT_RESET_REDIRECT =
+  "https://huddle.pet/auth/callback?type=recovery&next=/update-password";
+
 const normalizeRedirectTo = (value: string) => {
   try {
     const url = new URL(value);
@@ -58,9 +61,10 @@ Deno.serve(async (req: Request) => {
   }
 
   const email = String(body.email || "").trim();
-  const redirectTo = normalizeRedirectTo(String(body.redirectTo || "").trim());
-  if (!email || !redirectTo) {
-    return json(400, { error: "email_and_redirect_required" });
+  const redirectTo = normalizeRedirectTo(String(body.redirectTo || "").trim() || DEFAULT_RESET_REDIRECT);
+  if (!email) {
+    console.warn("[auth-reset-password] missing email in request body");
+    return json(200, { data: null });
   }
 
   const turnstile = await validateTurnstile(
