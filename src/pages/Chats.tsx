@@ -2852,66 +2852,6 @@ const Chats = () => {
     [flushDirtyRoomSummaries]
   );
 
-  useEffect(() => {
-    if (authLoading || !profile?.id) return;
-    if (topTab === "discover" && !discoverBootstrapReady) return;
-    const inboxHydrationStartAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (chatsPerfRef.current.inboxHydrationStartedAt === null) {
-      chatsPerfRef.current.inboxHydrationStartedAt = inboxHydrationStartAt;
-      logChatsPerfMetric("inbox_hydration_started", chatsPerfRef.current.routeMountedAt, inboxHydrationStartAt, {
-        topTab,
-        mainTab,
-      });
-    }
-    const shouldHydrateDiscoverInbox =
-      topTab !== "chats" &&
-      discoverBootstrapReady &&
-      (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
-    if (shouldHydrateDiscoverInbox) {
-      void loadConversations("all");
-    } else if (!inboxLoadedScopesRef.current.has(mainTab)) {
-      void loadConversations(mainTab);
-    }
-    if (inboxWarmTimerRef.current != null) {
-      window.clearTimeout(inboxWarmTimerRef.current);
-    }
-    inboxWarmTimerRef.current = window.setTimeout(() => {
-      const inactiveScopes = (["friends", "groups", "service"] as const).filter(
-        (scope) => (topTab !== "chats" || scope !== mainTab) && !inboxLoadedScopesRef.current.has(scope)
-      );
-      void (async () => {
-        for (const scope of inactiveScopes) {
-          await loadConversations(scope);
-        }
-      })();
-    }, 260);
-    return () => {
-      if (conversationsRetryTimerRef.current != null) {
-        window.clearTimeout(conversationsRetryTimerRef.current);
-        conversationsRetryTimerRef.current = null;
-      }
-      if (inboxWarmTimerRef.current != null) {
-        window.clearTimeout(inboxWarmTimerRef.current);
-        inboxWarmTimerRef.current = null;
-      }
-      if (dirtyRoomFlushTimerRef.current != null) {
-        window.clearTimeout(dirtyRoomFlushTimerRef.current);
-        dirtyRoomFlushTimerRef.current = null;
-      }
-    };
-  }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
-
-  useEffect(() => {
-    if (!conversationsHydratedRef.current) return;
-    if (chatsPerfRef.current.inboxHydrationStartedAt === null) return;
-    if (chatsPerfRef.current.inboxHydrationCompletedAt !== null) return;
-    const completedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-    chatsPerfRef.current.inboxHydrationCompletedAt = completedAt;
-    logChatsPerfMetric("inbox_hydration_completed", chatsPerfRef.current.inboxHydrationStartedAt, completedAt, {
-      loadedScopes: Array.from(inboxLoadedScopesRef.current),
-    });
-  }, [chats, groups, logChatsPerfMetric]);
-
   // Check for pending group invites when opening Groups tab
   useEffect(() => {
     if (!profile?.id) return;
@@ -3323,31 +3263,6 @@ const Chats = () => {
     handledDiscoveryIds,
     hiddenDiscoveryIds,
   ]);
-
-  useEffect(() => {
-    const loadAlbums = async () => {
-      if (discoveryPrefetchBuffer.length === 0) return;
-      const resolved = await Promise.all(
-        discoveryPrefetchBuffer.map(async (profile) => {
-          const album = canonicalizeSocialAlbumEntries(Array.isArray(profile?.social_album) ? profile.social_album : []);
-          if (!album.length) {
-            markDiscoveryMediaReady(profile.id, { urlsReady: true });
-            return [profile.id, []] as const;
-          }
-          const urls = await resolveSocialAlbumUrlList(album, 60 * 60);
-          markDiscoveryMediaReady(profile.id, { urlsReady: true });
-          return [profile.id, urls] as const;
-        })
-      );
-      const next: Record<string, string[]> = Object.fromEntries(
-        resolved.filter(([, urls]) => Array.isArray(urls) && urls.length > 0)
-      );
-      if (Object.keys(next).length > 0) {
-        setAlbumUrls((prev) => ({ ...prev, ...next }));
-      }
-    };
-    void loadAlbums();
-  }, [discoveryPrefetchBuffer, markDiscoveryMediaReady]);
 
   const markChatMessagesRead = useCallback(
     async (
@@ -3762,6 +3677,91 @@ const Chats = () => {
     showDiscoveryQuotaLock,
     topTab,
   ]);
+
+  useEffect(() => {
+    if (authLoading || !profile?.id) return;
+    if (topTab === "discover" && !discoverBootstrapReady) return;
+    const inboxHydrationStartAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (chatsPerfRef.current.inboxHydrationStartedAt === null) {
+      chatsPerfRef.current.inboxHydrationStartedAt = inboxHydrationStartAt;
+      logChatsPerfMetric("inbox_hydration_started", chatsPerfRef.current.routeMountedAt, inboxHydrationStartAt, {
+        topTab,
+        mainTab,
+      });
+    }
+    const shouldHydrateDiscoverInbox =
+      topTab !== "chats" &&
+      discoverBootstrapReady &&
+      (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
+    if (shouldHydrateDiscoverInbox) {
+      void loadConversations("all");
+    } else if (!inboxLoadedScopesRef.current.has(mainTab)) {
+      void loadConversations(mainTab);
+    }
+    if (inboxWarmTimerRef.current != null) {
+      window.clearTimeout(inboxWarmTimerRef.current);
+    }
+    inboxWarmTimerRef.current = window.setTimeout(() => {
+      const inactiveScopes = (["friends", "groups", "service"] as const).filter(
+        (scope) => (topTab !== "chats" || scope !== mainTab) && !inboxLoadedScopesRef.current.has(scope)
+      );
+      void (async () => {
+        for (const scope of inactiveScopes) {
+          await loadConversations(scope);
+        }
+      })();
+    }, 260);
+    return () => {
+      if (conversationsRetryTimerRef.current != null) {
+        window.clearTimeout(conversationsRetryTimerRef.current);
+        conversationsRetryTimerRef.current = null;
+      }
+      if (inboxWarmTimerRef.current != null) {
+        window.clearTimeout(inboxWarmTimerRef.current);
+        inboxWarmTimerRef.current = null;
+      }
+      if (dirtyRoomFlushTimerRef.current != null) {
+        window.clearTimeout(dirtyRoomFlushTimerRef.current);
+        dirtyRoomFlushTimerRef.current = null;
+      }
+    };
+  }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
+
+  useEffect(() => {
+    if (!conversationsHydratedRef.current) return;
+    if (chatsPerfRef.current.inboxHydrationStartedAt === null) return;
+    if (chatsPerfRef.current.inboxHydrationCompletedAt !== null) return;
+    const completedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    chatsPerfRef.current.inboxHydrationCompletedAt = completedAt;
+    logChatsPerfMetric("inbox_hydration_completed", chatsPerfRef.current.inboxHydrationStartedAt, completedAt, {
+      loadedScopes: Array.from(inboxLoadedScopesRef.current),
+    });
+  }, [chats, groups, logChatsPerfMetric]);
+
+  useEffect(() => {
+    const loadAlbums = async () => {
+      if (discoveryPrefetchBuffer.length === 0) return;
+      const resolved = await Promise.all(
+        discoveryPrefetchBuffer.map(async (profile) => {
+          const album = canonicalizeSocialAlbumEntries(Array.isArray(profile?.social_album) ? profile.social_album : []);
+          if (!album.length) {
+            markDiscoveryMediaReady(profile.id, { urlsReady: true });
+            return [profile.id, []] as const;
+          }
+          const urls = await resolveSocialAlbumUrlList(album, 60 * 60);
+          markDiscoveryMediaReady(profile.id, { urlsReady: true });
+          return [profile.id, urls] as const;
+        })
+      );
+      const next: Record<string, string[]> = Object.fromEntries(
+        resolved.filter(([, urls]) => Array.isArray(urls) && urls.length > 0)
+      );
+      if (Object.keys(next).length > 0) {
+        setAlbumUrls((prev) => ({ ...prev, ...next }));
+      }
+    };
+    void loadAlbums();
+  }, [discoveryPrefetchBuffer, markDiscoveryMediaReady]);
 
   useEffect(() => {
     if (discoveryLoading || discoveryLocationBlocked) return;
