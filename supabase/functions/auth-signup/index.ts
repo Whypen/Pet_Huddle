@@ -158,6 +158,39 @@ const repairProfileEmail = async (
   console.warn("[auth-signup] profile row not ready for email repair", uid);
 };
 
+const ensureSessionForVerifiedSignup = async (
+  authClient: ReturnType<typeof createClient>,
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  email: string,
+  password: string,
+  signupProof: string,
+) => {
+  if (!signupProof) return { session: null, error: null as string | null };
+  const uid = String(userId || "").trim();
+  if (!uid) return { session: null, error: "signup_user_missing" };
+
+  const confirm = await serviceClient.auth.admin.updateUserById(uid, {
+    email_confirm: true,
+  });
+  if (confirm.error) {
+    return { session: null, error: confirm.error.message || "signup_confirm_failed" };
+  }
+
+  const signIn = await authClient.auth.signInWithPassword({ email, password });
+  if (signIn.error || !signIn.data.session) {
+    return { session: null, error: signIn.error?.message || "signup_session_missing" };
+  }
+
+  return {
+    session: {
+      access_token: signIn.data.session.access_token,
+      refresh_token: signIn.data.session.refresh_token,
+    },
+    error: null as string | null,
+  };
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
@@ -328,12 +361,27 @@ Deno.serve(async (req: Request) => {
         .eq("signup_proof", signupProof);
     }
 
-    const retrySession = retrySignUp.data.session
+    let retrySession = retrySignUp.data.session
       ? {
           access_token: retrySignUp.data.session.access_token,
           refresh_token: retrySignUp.data.session.refresh_token,
         }
       : null;
+
+    if (!retrySession && signupProof) {
+      const recoveredSession = await ensureSessionForVerifiedSignup(
+        authClient,
+        serviceClient,
+        retrySignUp.data.user?.id,
+        email,
+        password,
+        signupProof,
+      );
+      if (recoveredSession.error) {
+        return json(400, { error: recoveredSession.error });
+      }
+      retrySession = recoveredSession.session;
+    }
 
     await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
     void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, retrySignUp.data.user?.id);
@@ -353,12 +401,27 @@ Deno.serve(async (req: Request) => {
       .eq("signup_proof", signupProof);
   }
 
-  const session = signUp.data.session
+  let session = signUp.data.session
     ? {
         access_token: signUp.data.session.access_token,
         refresh_token: signUp.data.session.refresh_token,
       }
     : null;
+
+  if (!session && signupProof) {
+    const recoveredSession = await ensureSessionForVerifiedSignup(
+      authClient,
+      serviceClient,
+      signUp.data.user?.id,
+      email,
+      password,
+      signupProof,
+    );
+    if (recoveredSession.error) {
+      return json(400, { error: recoveredSession.error });
+    }
+    session = recoveredSession.session;
+  }
 
   await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
   void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, signUp.data.user?.id);

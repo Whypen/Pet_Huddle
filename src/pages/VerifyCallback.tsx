@@ -7,8 +7,8 @@
  * Calls confirm-pre-signup-verify edge function to mark the token verified.
  * Routes:
  *   success  → /signup/name  (flow continues; no auth user created yet)
- *   expired  → /signup/verify-email  with { state: { expired: true } }
- *   invalid  → /signup/verify-email with { state: { invalid_link: true } }
+ *   expired  → /signup/email-confirmation with { state: { expired: true } }
+ *   invalid  → /signup/email-confirmation with { state: { invalid_link: true } }
  *
  * No user-facing error text on this page — all error paths redirect with state.
  * Old presignup links (to /signup/verify-email?token=) won't hit this route.
@@ -41,7 +41,7 @@ const VerifyCallback = () => {
 
     if (!token) {
       // No token — malformed link
-      navigate("/signup/verify-email", {
+      navigate("/signup/email-confirmation", {
         replace: true,
         state: { invalid_link: true, email: emailHint },
       });
@@ -56,7 +56,7 @@ const VerifyCallback = () => {
         );
 
         if (error) {
-          navigate("/signup/verify-email", {
+          navigate("/signup/email-confirmation", {
             replace: true,
             state: { invalid_link: true, email: emailHint },
           });
@@ -85,14 +85,14 @@ const VerifyCallback = () => {
         }
 
         if (data?.expired) {
-          navigate("/signup/verify-email", {
+          navigate("/signup/email-confirmation", {
             replace: true,
             state: { expired: true, email: String(data?.email || emailHint || "").trim().toLowerCase() },
           });
           return;
         }
 
-        navigate("/signup/verify-email", {
+        navigate("/signup/email-confirmation", {
           replace: true,
           state: {
             invalid_link: true,
@@ -100,7 +100,7 @@ const VerifyCallback = () => {
           },
         });
       } catch {
-        navigate("/signup/verify-email", {
+        navigate("/signup/email-confirmation", {
           replace: true,
           state: { invalid_link: true, email: emailHint },
         });

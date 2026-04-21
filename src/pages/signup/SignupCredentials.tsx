@@ -408,10 +408,9 @@ const SignupCredentials = () => {
       return;
     }
     // Email signup path — credentialsSchema validated all fields including password.
-    // Store credentials in flow state — signUp() is deferred to /signup/name so
-    // the user's display name and social ID are collected before account creation.
-    // This prevents orphaned accounts when users abandon mid-flow.
-    // Email verification is handled by /signup/verify-email (presignup_tokens system).
+    // Step order is:
+    // credentials -> email-confirmation -> name -> create auth user -> verify identity
+    // Skip the email-confirmation gate only if a usable pre-signup proof already exists.
     setSubmitting(true);
     try {
       const presignupToken = readTurnstileToken(presignupTurnstile);
@@ -450,11 +449,18 @@ const SignupCredentials = () => {
         password: values.password ?? "",
         phone: values.phone.trim(),
         email_opt_in: emailOptIn,
-        signup_proof: "",
+        signup_proof: preVerifiedProof ?? "",
       });
       setFlowState("signup");
       sessionStorage.setItem(SIGNUP_TURNSTILE_TOKEN_KEY, presignupToken);
-      goTo("/signup/name");
+      if (preVerifiedProof) {
+        goTo("/signup/name");
+        return;
+      }
+      goTo("/signup/email-confirmation", {
+        email: values.email.trim().toLowerCase(),
+        from_credentials: true,
+      });
     } catch (err) {
       console.error("Signup failed:", err);
       setFlowState("idle");

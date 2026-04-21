@@ -86,11 +86,12 @@ const SignupName = () => {
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
       if (!user) {
+        const signupProof = String(data.signup_proof || "").trim();
         const signupTurnstileToken = String(
           sessionStorage.getItem(SIGNUP_TURNSTILE_TOKEN_KEY) || "",
         ).trim();
-        if (!signupTurnstileToken) {
-          toast.error("Please go back and complete verification again.");
+        if (!signupProof && !signupTurnstileToken) {
+          toast.error("Please go back and complete email verification again.");
           return;
         }
         setFlowState("signup");
@@ -106,8 +107,9 @@ const SignupName = () => {
               marketing_email_opt_in: data.email_opt_in,
             },
           },
-          turnstile_token: signupTurnstileToken,
-          turnstile_action: "signup",
+          turnstile_token: signupProof ? undefined : signupTurnstileToken,
+          turnstile_action: signupProof ? undefined : "signup",
+          signup_proof: signupProof || undefined,
         });
         if (signUpError) {
           toast.error(resolveSignupError(signUpError));
@@ -124,9 +126,7 @@ const SignupName = () => {
         if (data.email_opt_in) {
           toast.message("We’ll send you a separate email to confirm your subscription.");
         }
-        navigate(`/signup/email-confirmation?email=${encodeURIComponent(data.email.trim().toLowerCase())}`, {
-          replace: true,
-        });
+        navigate("/signup/verify", { replace: true });
         return;
       }
       if (data.email_opt_in) {
