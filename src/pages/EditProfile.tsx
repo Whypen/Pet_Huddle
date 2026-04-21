@@ -37,6 +37,15 @@ import {
   buildScopedStorageKey,
   normalizeStorageOwner,
 } from "@/lib/signupOnboarding";
+import { useFormDraftAutosave } from "@/hooks/useFormDraftAutosave";
+import {
+  draftKeys,
+  isPersistableImageUrl,
+  isPersistableStoragePath,
+  type DraftMode,
+  type StoredFormDraft,
+} from "@/lib/formDraftConfigs";
+import { FormDraftStatus } from "@/components/ui/FormDraftStatus";
 
 // Option constants matching database schema
 const genderOptions = CANONICAL_GENDER_OPTIONS.filter(o => o !== "Prefer not to say");
@@ -259,7 +268,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const socialAlbumRef = useRef<string[]>([]);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const [prefillHydrated, setPrefillHydrated] = useState(false);
 
   const resolveSetProfilePrefillKey = useCallback(() => {
     if (!onboardingMode) return null;
@@ -369,6 +377,54 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_languages: false,
     show_location: false,
   });
+  const profileDraftMode: DraftMode = onboardingMode ? "local-only" : "local-and-remote";
+  const resolveProfileDraftKey = useCallback(() => (
+    onboardingMode
+      ? draftKeys.setProfile(user?.id || signupData.email || "")
+      : draftKeys.editProfile(user?.id || "")
+  ), [onboardingMode, signupData.email, user?.id]);
+  const getProfileDraftValue = useCallback((value: typeof formData) => ({
+    display_name: value.display_name,
+    legal_name: value.legal_name,
+    phone: value.phone,
+    dob: value.dob,
+    bio: value.bio,
+    social_id: value.social_id,
+    gender_genre: value.gender_genre,
+    orientation: value.orientation,
+    height: value.height,
+    weight: value.weight,
+    weight_unit: value.weight_unit,
+    degree: value.degree,
+    school: value.school,
+    major: value.major,
+    affiliation: value.affiliation,
+    occupation: value.occupation,
+    relationship_status: value.relationship_status,
+    has_car: value.has_car,
+    languages: value.languages,
+    location_name: value.location_name,
+    location_country: value.location_country,
+    location_district: value.location_district,
+    social_album: canonicalizeSocialAlbumEntries(value.social_album.filter((entry) => isPersistableStoragePath(entry))),
+    pet_experience: value.pet_experience,
+    experience_years: value.experience_years,
+    owns_pets: value.owns_pets,
+    availability_status: value.availability_status,
+    show_gender: value.show_gender,
+    show_orientation: value.show_orientation,
+    show_age: value.show_age,
+    show_height: value.show_height,
+    show_weight: value.show_weight,
+    show_academic: value.show_academic,
+    show_affiliation: value.show_affiliation,
+    show_occupation: value.show_occupation,
+    show_bio: value.show_bio,
+    show_relationship_status: value.show_relationship_status,
+    show_languages: value.show_languages,
+    show_location: value.show_location,
+    avatar_url: isPersistableImageUrl(photoPreview) ? photoPreview : "",
+  }), [photoPreview]);
   const hasVerifiedLegalName = Boolean(formData.legal_name?.trim()) && (
     profile?.is_verified === true
     || String(profile?.verification_status || "").toLowerCase() === "verified"
@@ -817,19 +873,25 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     const signupSeedOwner = normalizeStorageOwner(signupData.email || "");
     const authSeedOwner = normalizeStorageOwner(user?.email || user?.id || "");
     const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
-    const authPhoneSeed = String(user?.phone || "").trim();
+    const authMetadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
+    const authDisplayNameSeed = typeof authMetadata.display_name === "string" ? authMetadata.display_name.trim() : "";
+    const authLegalNameSeed = typeof authMetadata.legal_name === "string" ? authMetadata.legal_name.trim() : "";
+    const authSocialIdSeed = typeof authMetadata.social_id === "string" ? authMetadata.social_id.trim() : "";
+    const authPhoneMetadataSeed = typeof authMetadata.phone === "string" ? authMetadata.phone.trim() : "";
+    const authDobSeed = typeof authMetadata.dob === "string" ? authMetadata.dob.trim() : "";
+    const authPhoneSeed = String(user?.phone || authPhoneMetadataSeed || "").trim();
     const signupDob = allowSignupSeed ? signupData.dob : "";
     const signupDisplayName = allowSignupSeed ? signupData.display_name : "";
     const signupSocialId = allowSignupSeed ? signupData.social_id : "";
     const signupPhone = allowSignupSeed ? signupData.phone : "";
     const signupLegalName = allowSignupSeed ? signupData.legal_name : "";
-    const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name");
-    const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name");
+    const displayName = profile?.display_name || signupDisplayName || cachedValue("display_name") || authDisplayNameSeed;
+    const legalName = profile?.legal_name || signupLegalName || cachedValue("legal_name") || authLegalNameSeed;
     const phone = profile?.phone || signupPhone || cachedValue("phone") || authPhoneSeed;
-    const dob = profile?.dob || signupDob || cachedValue("dob");
+    const dob = profile?.dob || signupDob || cachedValue("dob") || authDobSeed;
     const bio = profile?.bio || cachedValue("bio");
     // Normalise to DB constraint: lowercase, only a-z 0-9 . _
-    const socialId = (profile?.social_id || signupSocialId || cachedValue("social_id"))
+    const socialId = (profile?.social_id || signupSocialId || cachedValue("social_id") || authSocialIdSeed)
       .toLowerCase().replace(/[^a-z0-9._]/g, "");
     const genderGenre = profile?.gender_genre || cachedValue("gender_genre");
     const orientation = profile?.orientation || cachedValue("orientation");
@@ -866,7 +928,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       ? countryOptions.find((country) => country.label.toLowerCase() === parsedCountry.toLowerCase())
       : null;
 
-    setFormData({
+    const nextForm = {
       display_name: displayName,
       legal_name: legalName,
       phone,
@@ -907,7 +969,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       show_languages: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? safeCachedDraft?.show_languages ?? false),
       show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false),
       social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
-    });
+    };
     socialAlbumRef.current = canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum);
     setSelectedCountry(matchedCountry?.code || "");
     if (profile?.avatar_url) {
@@ -933,10 +995,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     });
     setLocationQuery(locationName);
     setResolvedLocationCountry(extractCountryFromPlaceLabel(locationName) || locationCountry || "");
-    setPrefillHydrated(true);
+    hydrateProfileDraftFromBaseline({
+      baselineValue: nextForm,
+      baselineUpdatedAt: String((profile as { updated_at?: string } | null)?.updated_at || null),
+      legacyDraft: readLegacySetProfileDraft(),
+    });
   }, [
+    hydrateProfileDraftFromBaseline,
     onboardingMode,
     profile,
+    readLegacySetProfileDraft,
     resolveSetProfilePrefillKey,
     signupData.display_name,
     signupData.dob,
@@ -948,46 +1016,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     resolvePhoneVerifiedForValue,
     user?.email,
     user?.id,
+    user?.user_metadata,
     user?.phone,
   ]);
 
   useEffect(() => {
     socialAlbumRef.current = canonicalizeSocialAlbumEntries(formData.social_album);
   }, [formData.social_album]);
-
-  useEffect(() => {
-    if (!onboardingMode || user?.id) return;
-    if (!prefillHydrated) return;
-    const prefillKey = resolveSetProfilePrefillKey();
-    if (!prefillKey) return;
-    try {
-      localStorage.setItem(
-        prefillKey,
-        JSON.stringify({
-          prefill_owner: (signupData.email || user?.id || "").trim().toLowerCase(),
-          form_data: formData,
-          display_name: formData.display_name,
-          social_id: formData.social_id,
-          phone: formData.phone,
-          dob: formData.dob,
-          location_country: formData.location_country,
-          location_district: formData.location_district,
-          avatar_url: photoPreview || "",
-          social_album: JSON.stringify(formData.social_album),
-        }),
-      );
-    } catch {
-      // no-op
-    }
-  }, [
-    onboardingMode,
-    prefillHydrated,
-    formData,
-    photoPreview,
-    resolveSetProfilePrefillKey,
-    signupData.email,
-    user?.id,
-  ]);
 
   useEffect(() => {
     if (!onboardingMode) return;
@@ -1586,76 +1621,143 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     [profile],
   );
 
+  const readLegacySetProfileDraft = useCallback((): StoredFormDraft<ReturnType<typeof getProfileDraftValue>> | null => {
+    if (!onboardingMode) return null;
+    const prefillKey = resolveSetProfilePrefillKey();
+    if (!prefillKey) return null;
+    try {
+      const raw = localStorage.getItem(prefillKey) || localStorage.getItem(SETPROFILE_PREFILL_KEY) || "{}";
+      const cachedPrefill = JSON.parse(raw) as Record<string, unknown>;
+      const draftRaw = cachedPrefill.form_data;
+      const parsedDraft = draftRaw
+        ? (typeof draftRaw === "string" ? JSON.parse(draftRaw) : draftRaw)
+        : null;
+      if (!parsedDraft || typeof parsedDraft !== "object") return null;
+      const draft = parsedDraft as typeof formData;
+      return {
+        version: 1,
+        form: {
+          ...getProfileDraftValue(draft),
+          avatar_url: typeof cachedPrefill.avatar_url === "string" && isPersistableImageUrl(cachedPrefill.avatar_url)
+            ? cachedPrefill.avatar_url
+            : "",
+        },
+        draft_updated_at: String(cachedPrefill.updated_at || new Date().toISOString()),
+        baseline_updated_at: null,
+        baseline_hash: null,
+      };
+    } catch {
+      return null;
+    }
+  }, [getProfileDraftValue, onboardingMode, resolveSetProfilePrefillKey]);
+
+  const profileDraftAutosave = useFormDraftAutosave({
+    draftKey: resolveProfileDraftKey(),
+    enabled: Boolean(resolveProfileDraftKey()),
+    mode: profileDraftMode,
+    value: formData,
+    setValue: setFormData,
+    getDraftValue: getProfileDraftValue,
+    debounceMs: 1000,
+    saveRemote: async ({ changedFields, draft }) => {
+      if (profileDraftMode !== "local-and-remote" || !user?.id) return;
+      const payload: Record<string, unknown> = {
+        id: user.id,
+        updated_at: new Date().toISOString(),
+      };
+      const fieldSet = new Set(changedFields as string[]);
+      const hasPets = petsProfileCount > 0 || draft.owns_pets;
+      const persistedPhone = String(draft.phone || "").trim() || null;
+      const shouldRevokePhoneVerification =
+        normalizePhoneForCompare(draft.phone) !== normalizePhoneForCompare(phoneOriginalValue) &&
+        !phoneOtpVerified;
+
+      if (fieldSet.has("display_name")) payload.display_name = draft.display_name;
+      if (fieldSet.has("legal_name")) payload.legal_name = draft.legal_name || null;
+      if (fieldSet.has("phone")) {
+        payload.phone = persistedPhone;
+        if (shouldRevokePhoneVerification) {
+          payload.phone_verification_status = "unverified";
+          payload.phone_verified_at = null;
+        }
+      }
+      if (fieldSet.has("dob")) payload.dob = draft.dob || null;
+      if (fieldSet.has("bio")) payload.bio = draft.bio;
+      if (fieldSet.has("social_id")) payload.social_id = draft.social_id || null;
+      if (fieldSet.has("gender_genre")) payload.gender_genre = draft.gender_genre || null;
+      if (fieldSet.has("orientation")) payload.orientation = draft.orientation || null;
+      if (fieldSet.has("height")) payload.height = draft.height ? parseInt(draft.height, 10) : null;
+      if (fieldSet.has("weight")) payload.weight = draft.weight ? parseFloat(draft.weight) : null;
+      if (fieldSet.has("weight_unit")) payload.weight_unit = draft.weight_unit;
+      if (fieldSet.has("degree")) payload.degree = draft.degree || null;
+      if (fieldSet.has("school")) payload.school = draft.school || null;
+      if (fieldSet.has("major")) payload.major = draft.major || null;
+      if (fieldSet.has("affiliation")) payload.affiliation = draft.affiliation || null;
+      if (fieldSet.has("occupation")) payload.occupation = draft.occupation || null;
+      if (fieldSet.has("relationship_status")) payload.relationship_status = draft.relationship_status || null;
+      if (fieldSet.has("has_car")) payload.has_car = draft.has_car;
+      if (fieldSet.has("languages")) payload.languages = draft.languages.length > 0 ? draft.languages : null;
+      if (fieldSet.has("location_name")) payload.location_name = draft.location_name || null;
+      if (fieldSet.has("location_country")) payload.location_country = draft.location_country || null;
+      if (fieldSet.has("location_district")) payload.location_district = draft.location_district || null;
+      if (fieldSet.has("social_album")) payload.social_album = canonicalizeSocialAlbumEntries(draft.social_album);
+      if (fieldSet.has("avatar_url")) payload.avatar_url = draft.avatar_url || null;
+      if (fieldSet.has("pet_experience")) payload.pet_experience = draft.pet_experience.length > 0 ? draft.pet_experience : null;
+      if (fieldSet.has("experience_years") || fieldSet.has("pet_experience")) {
+        payload.experience_years =
+          draft.pet_experience.includes("None") || !draft.experience_years
+            ? null
+            : parseFloat(draft.experience_years);
+      }
+      if (fieldSet.has("owns_pets")) payload.owns_pets = petsProfileCount > 0 ? true : draft.owns_pets;
+      if (fieldSet.has("availability_status") || fieldSet.has("owns_pets")) {
+        payload.non_social = draft.availability_status.length === 0;
+        payload.availability_status = enforceAvailabilityDefaults(draft.availability_status, hasPets);
+      }
+      if (fieldSet.has("show_gender")) payload.show_gender = draft.show_gender;
+      if (fieldSet.has("show_orientation")) payload.show_orientation = draft.show_orientation;
+      if (fieldSet.has("show_age")) payload.show_age = draft.show_age;
+      if (fieldSet.has("show_height")) payload.show_height = draft.show_height;
+      if (fieldSet.has("show_weight")) payload.show_weight = draft.show_weight;
+      if (fieldSet.has("show_academic")) payload.show_academic = draft.show_academic;
+      if (fieldSet.has("show_affiliation")) payload.show_affiliation = draft.show_affiliation;
+      if (fieldSet.has("show_occupation")) payload.show_occupation = draft.show_occupation;
+      if (fieldSet.has("show_bio")) payload.show_bio = draft.show_bio;
+      if (fieldSet.has("show_relationship_status")) payload.show_relationship_status = draft.show_relationship_status;
+      if (fieldSet.has("show_languages") || fieldSet.has("show_location")) {
+        payload.prefs = {
+          ...((profile?.prefs as Record<string, unknown> | null) || {}),
+          show_languages: draft.show_languages,
+          show_location: draft.show_location,
+        };
+      }
+      payload.email = getCanonicalProfileEmail(user);
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .upsert(payload, { onConflict: "id" })
+        .select("updated_at")
+        .single();
+      if (error) throw error;
+      return {
+        baselineUpdatedAt: String((data as { updated_at?: string } | null)?.updated_at || new Date().toISOString()),
+      };
+    },
+  });
+  const {
+    status: profileDraftStatus,
+    hydrateFromBaseline: hydrateProfileDraftFromBaseline,
+    flushLocalDraftNow: flushProfileLocalDraftNow,
+    flushRemoteNow: flushProfileRemoteDraftNow,
+    discardDraft: discardProfileDraft,
+    commitLatestDraftAsBaseline: commitProfileDraftAsBaseline,
+  } = profileDraftAutosave;
+
   // ── Silent draft save (View tab) ────────────────────────────────────────────
   const silentSave = async () => {
-    if (!user) return;
-    try {
-      const hasPets = petsProfileCount > 0 || formData.owns_pets;
-      const persistedPhone = getPersistedPhoneValue();
-      const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
-      await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          email: getCanonicalProfileEmail(user),
-          display_name: formData.display_name,
-          phone: persistedPhone,
-          ...(shouldRevokePhoneVerification
-            ? {
-                phone_verification_status: "unverified" as const,
-                phone_verified_at: null,
-              }
-            : {}),
-          social_id: formData.social_id || null,
-          bio: formData.bio,
-          gender_genre: formData.gender_genre || null,
-          orientation: formData.orientation || null,
-          dob: formData.dob || null,
-          height: formData.height ? parseInt(formData.height) : null,
-          weight: formData.weight ? parseFloat(formData.weight) : null,
-          weight_unit: formData.weight_unit,
-          degree: formData.degree || null,
-          school: formData.school || null,
-          major: formData.major || null,
-          affiliation: formData.affiliation || null,
-          occupation: formData.occupation || null,
-          relationship_status: formData.relationship_status || null,
-          has_car: formData.has_car,
-          languages: formData.languages.length > 0 ? formData.languages : null,
-          location_name: formData.location_name || null,
-          location_country: formData.location_country || null,
-          location_district: formData.location_district || null,
-          last_lat: locationCoords?.lat ?? (profile?.last_lat ?? null),
-          last_lng: locationCoords?.lng ?? (profile?.last_lng ?? null),
-          pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
-          experience_years:
-            formData.pet_experience.includes("None") || !formData.experience_years
-              ? null
-              : parseFloat(formData.experience_years),
-          owns_pets: petsProfileCount > 0 ? true : formData.owns_pets,
-          non_social: formData.availability_status.length === 0,
-          availability_status: enforceAvailabilityDefaults(formData.availability_status, hasPets),
-          show_gender: formData.show_gender,
-          show_orientation: formData.show_orientation,
-          show_age: true,
-          show_height: formData.show_height,
-          show_weight: formData.show_weight,
-          show_academic: formData.show_academic,
-          show_affiliation: formData.show_affiliation,
-          show_occupation: formData.show_occupation,
-          show_bio: formData.show_bio,
-          show_relationship_status: formData.show_relationship_status,
-          prefs: {
-            ...((profile?.prefs as Record<string, unknown> | null) || {}),
-            show_languages: formData.show_languages,
-            show_location: formData.show_location,
-          },
-          social_album: canonicalizeSocialAlbumEntries(formData.social_album),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
-    } catch (err) {
-      console.warn("[EditProfile.silentSave]", err);
+    flushProfileLocalDraftNow();
+    if (profileDraftMode === "local-and-remote") {
+      await flushProfileRemoteDraftNow();
     }
   };
 
@@ -1891,7 +1993,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
           },
           { onConflict: "id" },
-        );
+        )
+        .select("updated_at");
 
       if (
         profileWrite.error?.code === "PGRST204" &&
@@ -1908,7 +2011,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               email_verified: onboardingMode ? emailVerifiedByAuth : profile?.email_verified ?? emailVerifiedByAuth,
             },
             { onConflict: "id" },
-          );
+          )
+          .select("updated_at");
         if (!profileWrite.error) toast.info(PROFILE_WRITE_SCHEMA_DRIFT_ERROR);
       }
 
@@ -1982,6 +2086,16 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
 
       await refreshProfile();
+      if (avatarUrl && isPersistableImageUrl(avatarUrl)) {
+        setPhotoPreview(avatarUrl);
+      }
+      commitProfileDraftAsBaseline(
+        String((profileWrite.data?.[0] as { updated_at?: string } | undefined)?.updated_at || new Date().toISOString()),
+        {
+          ...getProfileDraftValue(formData),
+          avatar_url: avatarUrl && isPersistableImageUrl(avatarUrl) ? avatarUrl : "",
+        },
+      );
       try {
         const prefillKey = resolveSetProfilePrefillKey();
         if (prefillKey) {
@@ -2023,87 +2137,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   };
 
   const handleSaveDraft = async () => {
-    // Same as handleSave but does NOT set onboarding_completed = true.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const activeUser = user ?? sessionData.session?.user ?? null;
-    if (!activeUser?.id) return;
-
+    flushProfileLocalDraftNow();
+    if (profileDraftMode === "local-only") {
+      toast.success("Draft saved");
+      return;
+    }
     setLoading(true);
     try {
-      await waitForMediaUploads();
-      let avatarUrl = photoPreview || profile?.avatar_url || null;
-      if (pendingPhotoUploadRef.current) {
-        avatarUrl = await pendingPhotoUploadRef.current;
-      } else if (photoFile) {
-        avatarUrl = await uploadProfilePhotoFile(photoFile, activeUser.id);
-      }
-      const hasPets = petsProfileCount > 0 || formData.owns_pets;
-      const persistedPhone = getPersistedPhoneValue();
-      const shouldRevokePhoneVerification = shouldRevokePhoneVerificationOnSave();
-      await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: activeUser.id,
-            email: getCanonicalProfileEmail(activeUser),
-            display_name: formData.display_name || null,
-            avatar_url: avatarUrl || null,
-            bio: formData.bio || null,
-            gender_genre: formData.gender_genre || null,
-            orientation: formData.orientation || null,
-            dob: formData.dob || null,
-            height: formData.height ? parseInt(formData.height, 10) : null,
-            weight: formData.weight ? parseFloat(formData.weight) : null,
-            weight_unit: formData.weight_unit || "kg",
-            phone: persistedPhone,
-            ...(shouldRevokePhoneVerification
-              ? {
-                  phone_verification_status: "unverified" as const,
-                  phone_verified_at: null,
-                }
-              : {}),
-            relationship_status: formData.relationship_status || null,
-            has_car: formData.has_car,
-            languages: formData.languages.length > 0 ? formData.languages : null,
-            location_name: formData.location_name || null,
-            location_country: formData.location_country || null,
-            location_district: formData.location_district || null,
-            legal_name: formData.legal_name || null,
-            degree: formData.degree || null,
-            school: formData.school || null,
-            major: formData.major || null,
-            affiliation: formData.affiliation || null,
-            occupation: formData.occupation || null,
-            social_id: formData.social_id || null,
-            social_album: canonicalizeSocialAlbumEntries(formData.social_album),
-            pet_experience: formData.pet_experience.length > 0 ? formData.pet_experience : null,
-            experience_years:
-              formData.pet_experience.includes("None") || !formData.experience_years
-                ? null
-                : parseFloat(formData.experience_years),
-            owns_pets: petsProfileCount > 0 ? true : formData.owns_pets,
-            non_social: formData.availability_status.length === 0,
-            availability_status: enforceAvailabilityDefaults(formData.availability_status, hasPets),
-            show_gender: formData.show_gender,
-            show_orientation: formData.show_orientation,
-            show_age: formData.show_age,
-            show_height: formData.show_height,
-            show_weight: formData.show_weight,
-            show_academic: formData.show_academic,
-            show_affiliation: formData.show_affiliation,
-            show_occupation: formData.show_occupation,
-            show_bio: formData.show_bio,
-            show_relationship_status: formData.show_relationship_status,
-            prefs: {
-              ...((profile?.prefs as Record<string, unknown> | null) || {}),
-              show_languages: formData.show_languages,
-              show_location: formData.show_location,
-            },
-            updated_at: new Date().toISOString(),
-            // onboarding_completed intentionally NOT set here
-          },
-          { onConflict: "id" },
-        );
+      await flushProfileRemoteDraftNow();
       toast.success("Draft saved");
       await refreshProfile();
     } catch (err) {
@@ -2155,6 +2196,23 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       </header>
 
       <div className="px-4 pt-2">
+        <FormDraftStatus
+          mode={profileDraftMode}
+          status={profileDraftStatus}
+          onDiscard={
+            profileDraftMode === "local-and-remote"
+              ? () => discardProfileDraft({ restoreBaseline: true })
+              : undefined
+          }
+          onReload={
+            profileDraftMode === "local-and-remote"
+              ? () => {
+                  discardProfileDraft({ restoreBaseline: false });
+                  void refreshProfile();
+                }
+              : undefined
+          }
+        />
         <div className="grid grid-cols-2 border-b border-border">
           <button
             type="button"

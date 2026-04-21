@@ -13,6 +13,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { SignupShell } from "@/components/signup/SignupShell";
 import signupNameImg from "@/assets/Sign up/Signup_Name.png";
 import { authSignup } from "@/lib/publicAuthApi";
+import {
+  SETPROFILE_PREFILL_KEY,
+  buildScopedStorageKey,
+  normalizeStorageOwner,
+} from "@/lib/signupOnboarding";
 
 // ─── Validation (unchanged) ───────────────────────────────────────────────────
 
@@ -85,6 +90,34 @@ const SignupName = () => {
       }
       setAvailabilityState("available");
       update({ display_name: name, social_id: social });
+      const emailOwner = normalizeStorageOwner(data.email?.trim() || "");
+      try {
+        const setProfilePayload = {
+          prefill_owner: emailOwner,
+          form_data: {
+            display_name: name,
+            social_id: social,
+            phone: data.phone || "",
+            dob: data.dob || "",
+            legal_name: data.legal_name || "",
+          },
+          display_name: name,
+          social_id: social,
+          phone: data.phone || "",
+          dob: data.dob || "",
+          legal_name: data.legal_name || "",
+        };
+        if (data.email?.trim()) {
+          localStorage.setItem("auth_login_identifier", data.email.trim().toLowerCase());
+        }
+        localStorage.setItem(
+          emailOwner ? buildScopedStorageKey(SETPROFILE_PREFILL_KEY, emailOwner) : SETPROFILE_PREFILL_KEY,
+          JSON.stringify(setProfilePayload),
+        );
+        localStorage.setItem(SETPROFILE_PREFILL_KEY, JSON.stringify(setProfilePayload));
+      } catch {
+        // best-effort only
+      }
       if (!user) {
         const signupProof = String(data.signup_proof || "").trim();
         const signupTurnstileToken = String(
@@ -102,6 +135,9 @@ const SignupName = () => {
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback`,
             data: {
+              display_name: name,
+              social_id: social,
+              legal_name: data.legal_name || "",
               phone: data.phone?.trim(),
               dob: data.dob,
               marketing_email_opt_in: data.email_opt_in,

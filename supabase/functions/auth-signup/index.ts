@@ -17,6 +17,15 @@ type SignupBody = {
   install_id?: string;
 };
 
+type SignupSeed = {
+  email: string;
+  display_name: string | null;
+  legal_name: string | null;
+  social_id: string | null;
+  phone: string | null;
+  dob: string | null;
+};
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -191,6 +200,51 @@ const ensureSessionForVerifiedSignup = async (
   };
 };
 
+const normalizeOptionalText = (value: unknown): string | null => {
+  const normalized = String(value || "").trim();
+  return normalized ? normalized : null;
+};
+
+const normalizeOptionalDate = (value: unknown): string | null => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+};
+
+const seedIncompleteProfile = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  seed: SignupSeed,
+) => {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+
+  const payload: Record<string, unknown> = {
+    id: uid,
+    email: seed.email.toLowerCase(),
+    onboarding_completed: false,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (seed.display_name) payload.display_name = seed.display_name;
+  if (seed.legal_name) payload.legal_name = seed.legal_name;
+  if (seed.social_id) payload.social_id = seed.social_id.toLowerCase();
+  if (seed.phone) payload.phone = seed.phone;
+  if (seed.dob) payload.dob = seed.dob;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { error } = await serviceClient
+      .from("profiles")
+      .upsert(payload, { onConflict: "id" });
+    if (!error) return;
+    if (attempt === 7) {
+      console.warn("[auth-signup] profile seed upsert failed", uid, error.message);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
@@ -216,6 +270,14 @@ Deno.serve(async (req: Request) => {
   const phoneFromBody = String(body.phone || "").trim();
   const phoneFromOptions = String(body.options?.data?.phone || "").trim();
   const phone = phoneFromBody || phoneFromOptions || null;
+  const signupSeed: SignupSeed = {
+    email,
+    display_name: normalizeOptionalText(body.options?.data?.display_name),
+    legal_name: normalizeOptionalText(body.options?.data?.legal_name),
+    social_id: normalizeOptionalText(body.options?.data?.social_id),
+    phone,
+    dob: normalizeOptionalDate(body.options?.data?.dob),
+  };
 
   const { data: blockStatus, error: blockStatusError } = await serviceClient.rpc("lookup_signup_blocks", {
     p_email: email,
@@ -382,7 +444,7 @@ Deno.serve(async (req: Request) => {
       }
       retrySession = recoveredSession.session;
     }
-
+    await seedIncompleteProfile(serviceClient, retrySignUp.data.user?.id, signupSeed);
     await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
     void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, retrySignUp.data.user?.id);
 
@@ -422,7 +484,7 @@ Deno.serve(async (req: Request) => {
     }
     session = recoveredSession.session;
   }
-
+  await seedIncompleteProfile(serviceClient, signUp.data.user?.id, signupSeed);
   await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
   void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, signUp.data.user?.id);
 

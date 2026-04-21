@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   clearSignupScopedStorage,
   loadSignupDraft,
+  SETPROFILE_PREFILL_KEY,
   SIGNUP_PASSWORD_SESSION_KEY,
   SIGNUP_PROOF_STORAGE_KEY,
   SIGNUP_STORAGE_KEY,
@@ -124,6 +125,24 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
       return "idle";
     }
   });
+  const resolveStoredSignupOwner = useCallback((ownerHints: Array<string | null | undefined>) => {
+    for (const ownerHint of ownerHints) {
+      const normalizedOwner = normalizeStorageOwner(ownerHint);
+      if (!normalizedOwner) continue;
+      const scopedDraftKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, normalizedOwner);
+      const scopedPrefillKey = buildScopedStorageKey(SETPROFILE_PREFILL_KEY, normalizedOwner);
+      try {
+        if (localStorage.getItem(scopedDraftKey) || localStorage.getItem(scopedPrefillKey)) {
+          return normalizedOwner;
+        }
+      } catch {
+        // best-effort only
+      }
+      const restoredDraft = loadSignupDraft(normalizedOwner);
+      if (restoredDraft?.owner) return normalizeStorageOwner(restoredDraft.owner);
+    }
+    return "";
+  }, []);
   const shouldKeepDraftForSession = useCallback((sessionEmail?: string | null, sessionUserId?: string | null) => {
     if (flowState !== "idle") return true;
     // sessionStorage is written synchronously by setFlowState — use it as an
@@ -135,7 +154,12 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     } catch {
       // best-effort only
     }
-    const draftOwner = normalizeStorageOwner(data.email || resolveRememberedOwner());
+    const draftOwner = resolveStoredSignupOwner([
+      data.email,
+      resolveRememberedOwner(),
+      sessionEmail,
+      sessionUserId,
+    ]);
     const emailOwner = normalizeStorageOwner(sessionEmail || "");
     const idOwner = normalizeStorageOwner(sessionUserId || "");
     const matchingDraft = loadSignupDraft(sessionEmail || sessionUserId || draftOwner);
@@ -143,7 +167,7 @@ export const SignupProvider = ({ children }: { children: React.ReactNode }) => {
     if ((emailOwner && draftOwner === emailOwner) || (idOwner && draftOwner === idOwner)) return true;
     if (!matchingDraft) return false;
     return (emailOwner && matchingDraft.owner === emailOwner) || (idOwner && matchingDraft.owner === idOwner);
-  }, [data.email, flowState]);
+  }, [data.email, flowState, resolveStoredSignupOwner]);
 
   const resetDraftState = useCallback((ownerHints: Array<string | null | undefined> = []) => {
     setData(defaultData);
