@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useSignup } from "@/contexts/SignupContext";
+import { consumeSupabaseAuthRedirect } from "@/lib/supabaseAuthRedirect";
 import {
   SETPROFILE_PREFILL_KEY,
   buildScopedStorageKey,
@@ -17,27 +18,29 @@ const AuthCallback = () => {
 
   useEffect(() => {
     const run = async () => {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
-      const type = url.searchParams.get("type");
-      const next = url.searchParams.get("next");
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          toast.error(type === "recovery" ? "Invalid reset link" : "Sign-in failed. Please try again.");
-          navigate(type === "recovery" ? "/reset-password" : "/auth");
-          return;
-        }
-      }
-      if (type === "recovery") {
-        navigate(next === "/update-password" ? "/update-password" : "/reset-password", { replace: true });
+      const callbackResult = await consumeSupabaseAuthRedirect();
+      if (!callbackResult.ok) {
+        const isRecovery = callbackResult.type === "recovery";
+        toast.error(
+          isRecovery
+            ? "That reset link is no longer valid. Please request a new one."
+            : "That sign-in link is no longer valid. Please request a new one.",
+        );
+        navigate(isRecovery ? "/reset-password" : "/auth", { replace: true });
         return;
       }
+
+      if (callbackResult.type === "recovery") {
+        navigate(callbackResult.next || "/update-password", { replace: true });
+        return;
+      }
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user?.id) {
-        navigate("/auth");
+        toast.error("That sign-in link is no longer valid. Please request a new one.");
+        navigate("/auth", { replace: true });
         return;
       }
 
@@ -71,7 +74,6 @@ const AuthCallback = () => {
         return;
       }
 
-      // Check if this is a brand-new OAuth user (no profile row yet).
       const isOAuth = user.app_metadata?.provider !== "email";
       if (isOAuth) {
         const { data: profileRow } = await supabase
@@ -113,7 +115,7 @@ const AuthCallback = () => {
         }
       }
 
-      navigate("/");
+      navigate("/", { replace: true });
     };
     void run();
   }, [navigate, setFlowState]);

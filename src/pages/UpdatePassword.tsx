@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -8,13 +8,13 @@ import { NeuButton } from "@/components/ui/NeuButton";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { authChangePassword } from "@/lib/publicAuthApi";
+import { consumeSupabaseAuthRedirect } from "@/lib/supabaseAuthRedirect";
 
 const UpdatePassword = () => {
   const [ready, setReady] = useState(false);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const handledInvalidLinkRef = useRef(false);
   const recoveryTurnstile = useTurnstile("change_password");
   const showTurnstileDiag =
     typeof window !== "undefined"
@@ -30,32 +30,22 @@ const UpdatePassword = () => {
 
   useEffect(() => {
     const run = async () => {
-      const url = new URL(window.location.href);
-      const code = url.searchParams.get("code");
-      if (!code) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          setReady(true);
-          return;
-        }
-        if (!handledInvalidLinkRef.current) {
-          handledInvalidLinkRef.current = true;
-          toast.error("Invalid reset link");
-        }
+      const callbackResult = await consumeSupabaseAuthRedirect();
+      if (!callbackResult.ok || (callbackResult.type && callbackResult.type !== "recovery")) {
+        toast.error("That reset link is no longer valid. Please request a new one.");
         navigate("/reset-password", { replace: true });
         return;
       }
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) {
-        if (!handledInvalidLinkRef.current) {
-          handledInvalidLinkRef.current = true;
-          toast.error("Invalid reset link");
-        }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error("That reset link is no longer valid. Please request a new one.");
         navigate("/reset-password", { replace: true });
         return;
       }
+
       setReady(true);
     };
     void run();
