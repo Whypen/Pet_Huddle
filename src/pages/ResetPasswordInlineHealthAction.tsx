@@ -135,7 +135,7 @@ const ResetPasswordInlineHealthAction = () => {
     }
     const { error } = await authResetPassword({
       email: values.email,
-      redirectTo: `${window.location.origin}/auth/callback`,
+      redirectTo: `${window.location.origin}/update-password`,
       turnstile_token: token,
       turnstile_action: "reset_password",
     });

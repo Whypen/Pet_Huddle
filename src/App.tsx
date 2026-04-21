@@ -28,6 +28,7 @@ import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordDirect from "./pages/ResetPasswordDirect";
 import ResetPasswordInline from "./pages/ResetPasswordInline";
 import ResetPasswordInlineHealthAction from "./pages/ResetPasswordInlineHealthAction";
+import UpdatePassword from "./pages/UpdatePassword";
 import AuthCallback from "./pages/AuthCallback";
 import TurnstileHealth from "./pages/TurnstileHealth";
 import TurnstileHealthResetAction from "./pages/TurnstileHealthResetAction";
@@ -172,6 +173,7 @@ const App = () => (
                   <Route path="/reset-password-direct" element={<ResetPasswordDirect />} />
                   <Route path="/reset-password-inline" element={<ResetPasswordInline />} />
                   <Route path="/reset-password-inline-healthaction" element={<ResetPasswordInlineHealthAction />} />
+                  <Route path="/update-password" element={<PublicRoute><UpdatePassword /></PublicRoute>} />
                   <Route path="/auth/callback" element={<PublicRoute><AuthCallback /></PublicRoute>} />
                   <Route path="/signup/dob" element={<PublicRoute><SignupDob /></PublicRoute>} />
                   <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />

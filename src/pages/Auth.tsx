@@ -20,10 +20,8 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
 import { challengeAndVerifyTotp, getAuthenticatorAssurance, mapMfaError } from "@/lib/mfa";
 import { SIGNUP_STORAGE_KEY, buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
-import { useTurnstile } from "@/hooks/useTurnstile";
-import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
-import { mapAuthFailureMessage, shouldResetTurnstileForAuthError } from "@/lib/authErrorMessages";
+import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
 
 const emailSchema = z.string().email("Invalid email format");
 const passwordSchema = z.string().min(8, "Minimum 8 characters");
@@ -49,17 +47,11 @@ const Auth = () => {
   const blockedMessageFromState = String(
     ((location.state as { blocked_message?: string } | null)?.blocked_message || ""),
   ).trim();
-  const showTurnstileDiag = useMemo(
-    () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
-    [location.search],
-  );
   const [authError, setAuthError] = useState("");
-  const [authDebugReason, setAuthDebugReason] = useState("");
-  const [authDebugCodes, setAuthDebugCodes] = useState<string[]>([]);
   const [legalModal, setLegalModal] = useState<"terms" | "privacy" | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
-  const [emailModalOpen, setEmailModalOpen] = useState(showTurnstileDiag);
-  const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>(showTurnstileDiag ? "signin" : "choice");
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailModalStep, setEmailModalStep] = useState<EmailModalStep>("choice");
 
   // ── MFA challenge state ────────────────────────────────────────────────────
   const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
@@ -71,30 +63,6 @@ const Auth = () => {
   const [videoStarted, setVideoStarted] = useState(false);
   const [useStaticLogo, setUseStaticLogo] = useState(false);
   const logoVideoRef = useRef<HTMLVideoElement | null>(null);
-  const loginTurnstile = useTurnstile("login");
-  const readLoginTurnstileToken = () => {
-    const maybeGetToken = (loginTurnstile as { getToken?: unknown }).getToken;
-    if (typeof maybeGetToken === "function") {
-      return String((maybeGetToken as () => string)() || "").trim();
-    }
-    return String((loginTurnstile as { token?: string | null }).token || "").trim();
-  };
-
-  useEffect(() => {
-    if (showTurnstileDiag) {
-      setEmailModalOpen(true);
-      setEmailModalStep("signin");
-    }
-  }, [showTurnstileDiag]);
-
-  useEffect(() => {
-    if (loginTurnstile.isTokenUsable || loginTurnstile.error) {
-      setAuthError((current) => (
-        current === "Complete human verification first." ? "" : current
-      ));
-    }
-  }, [loginTurnstile.error, loginTurnstile.isTokenUsable]);
-
   useEffect(() => {
     if (!blockedMessageFromState) return;
     setAuthError(blockedMessageFromState);
@@ -149,44 +117,16 @@ const Auth = () => {
 
   const onSubmit = async (values: LoginForm) => {
     setAuthError("");
-    setAuthDebugReason("");
-    setAuthDebugCodes([]);
     if (!values.email) return;
     if (signInPendingRef.current) return;
-    const turnstileToken = readLoginTurnstileToken();
-    if (!turnstileToken) {
-      loginTurnstile.reset();
-      if (loginTurnstile.error) {
-        setAuthError(mapAuthFailureMessage(loginTurnstile.error));
-      } else {
-        setAuthError("Verification is temporarily unavailable. Please try again later.");
-      }
-      return;
-    }
     signInPendingRef.current = true;
     setSignInLoading(true);
     try {
-      const result = await signIn(values.email, values.password, undefined, turnstileToken);
+      const result = await signIn(values.email, values.password);
       if (result.error) {
-        const debugDetails = (result.error as { details?: { turnstile_reason?: string; turnstile_error_codes?: unknown } }).details;
-        const debugReason = typeof debugDetails?.turnstile_reason === "string"
-          ? String(debugDetails?.turnstile_reason || "")
-          : "";
-        const debugCodes = Array.isArray(debugDetails?.turnstile_error_codes)
-          ? debugDetails.turnstile_error_codes.map((value) => String(value || "").trim()).filter(Boolean)
-          : [];
-        if (shouldResetTurnstileForAuthError(result.error.message)) {
-          loginTurnstile.reset();
-        }
-        if (showTurnstileDiag && (debugReason || debugCodes.length)) {
-          setAuthDebugReason(debugReason);
-          setAuthDebugCodes(debugCodes);
-          console.debug("[auth.turnstile]", { reason: debugReason, errorCodes: debugCodes, details: debugDetails ?? null });
-        }
         setAuthError(mapAuthFailureMessage(result.error.message));
         return;
       }
-      loginTurnstile.reset();
 
       if (values.remember) {
         localStorage.setItem("auth_login_identifier", values.email);
@@ -263,16 +203,13 @@ const Auth = () => {
 
   const openEmailChoice = () => {
     setAuthError("");
-    setAuthDebugReason("");
     setEmailModalStep("choice");
     setEmailModalOpen(true);
   };
 
   const openSignInModal = () => {
     setAuthError("");
-    setAuthDebugReason("");
     setEmailModalStep("signin");
-    loginTurnstile.reset();
   };
 
   const handleOAuthLogin = async (provider: "apple" | "google") => {
@@ -421,7 +358,6 @@ const Auth = () => {
             setMfaError("");
             setMfaOtpCode("");
             setMfaFactorId(null);
-            setAuthDebugReason("");
             setEmailModalStep("choice");
           }
         }}
@@ -477,19 +413,6 @@ const Auth = () => {
                 />
                 <Link to="/reset-password" className="text-xs text-brandBlue">Forgot password?</Link>
               </div>
-
-              <TurnstileWidget
-                siteKeyMissing={loginTurnstile.siteKeyMissing}
-                setContainer={loginTurnstile.setContainer}
-                className="min-h-[65px]"
-              />
-              <TurnstileDebugPanel visible={showTurnstileDiag} diag={loginTurnstile.diag} />
-              {showTurnstileDiag && (authDebugReason || authDebugCodes.length) ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <div>turnstile reason: {authDebugReason || "none"}</div>
-                  <div>turnstile codes: {authDebugCodes.length ? authDebugCodes.join(", ") : "none"}</div>
-                </div>
-              ) : null}
               <NeuButton type="submit" className="w-full h-10" disabled={!isValid || mfaLoading || signInLoading} loading={signInLoading}>
                 Sign in
               </NeuButton>

@@ -50,14 +50,21 @@ Deno.serve(async (req: Request) => {
     return json(400, { error: "email_or_phone_and_password_required" });
   }
 
-  const turnstile = await validateTurnstile(
-    body.turnstile_token ?? null,
-    clientIp(req),
-    "login",
-    getExpectedTurnstileHostnames(),
-  );
-  if (!turnstile.valid) {
-    return json(403, { error: "human_verification_failed", turnstile_reason: turnstile.reason });
+  const turnstileToken = String(body.turnstile_token || "").trim();
+  if (turnstileToken) {
+    const turnstile = await validateTurnstile(
+      turnstileToken,
+      clientIp(req),
+      "login",
+      getExpectedTurnstileHostnames(),
+    );
+    if (!turnstile.valid) {
+      return json(403, {
+        error: "human_verification_failed",
+        turnstile_reason: turnstile.reason,
+        turnstile_error_codes: turnstile.error_codes,
+      });
+    }
   }
 
   const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });

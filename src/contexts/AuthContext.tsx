@@ -700,20 +700,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
     }
     try {
-      if (!String(turnstileToken || "").trim()) {
-        return {
-          error: buildAuthUiError("Please complete verification first."),
-          mfaRequired: false,
-          mfaFactorId: null,
-          mfaMethod: null,
-        };
-      }
       const loginResult = await withTimeout(authLogin({
         email: phone ? undefined : email,
         phone: phone || undefined,
         password,
-        turnstile_token: String(turnstileToken || "").trim(),
-        turnstile_action: "login",
+        turnstile_token: String(turnstileToken || "").trim() || undefined,
+        turnstile_action: String(turnstileToken || "").trim() ? "login" : undefined,
       }), "sign_in_timeout");
       if (loginResult.error) {
         return {

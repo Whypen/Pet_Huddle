@@ -17,8 +17,8 @@ type LoginPayload = {
   email?: string;
   phone?: string;
   password: string;
-  turnstile_token: string;
-  turnstile_action: "login";
+  turnstile_token?: string;
+  turnstile_action?: "login";
 };
 
 type SignupPayload = {

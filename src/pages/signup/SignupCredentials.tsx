@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/compone
 import { SignupShell } from "@/components/signup/SignupShell";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useTurnstile } from "@/hooks/useTurnstile";
+import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
 import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -97,7 +98,6 @@ const SignupCredentials = () => {
   const [signinRemember, setSigninRemember] = useState(true);
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const duplicateCheckRef = useRef(0);
-  const loginTurnstile = useTurnstile("login");
   const presignupTurnstile = useTurnstile("send_pre_signup_verify");
   const readTurnstileToken = (turnstileState: { getToken?: unknown; token?: string | null }) => {
     const maybeGetToken = turnstileState.getToken;
@@ -667,12 +667,6 @@ const SignupCredentials = () => {
               </span>
             </label>
 
-            {emailOptIn && (
-              <p className="text-[12px] text-[rgba(74,73,101,0.55)] pl-6">
-                We'll send you a separate email to confirm your subscription.
-              </p>
-            )}
-
             <p className="text-[12px] text-[rgba(74,73,101,0.60)] leading-relaxed">
               By tapping Continue, you agree to our{" "}
               <button
@@ -756,11 +750,6 @@ const SignupCredentials = () => {
             {signinError && (
               <p className="text-[12px] text-[#EF4444]">{signinError}</p>
             )}
-            <TurnstileWidget
-              siteKeyMissing={loginTurnstile.siteKeyMissing}
-              setContainer={loginTurnstile.setContainer}
-              className="min-h-[65px]"
-            />
 
             <NeuButton
               className="w-full"
@@ -769,11 +758,10 @@ const SignupCredentials = () => {
                 setSigninLoading(true);
                 setSigninError("");
                 try {
-                  const token = readTurnstileToken(loginTurnstile);
-                  if (!token) throw new Error("Complete human verification first.");
-                  const result = await signIn(signinEmail, signinPassword, undefined, token);
-                  loginTurnstile.reset();
-                  if (result.error) throw result.error;
+                  const result = await signIn(signinEmail, signinPassword);
+                  if (result.error) {
+                    throw new Error(mapAuthFailureMessage(result.error.message));
+                  }
                   if (result.mfaRequired) {
                     throw new Error("Two-step verification is required. Please continue from the Sign in screen.");
                   }
@@ -790,7 +778,7 @@ const SignupCredentials = () => {
                   setShowSignInModal(false);
                   goTo("/");
                 } catch (err: unknown) {
-                  setSigninError(err instanceof Error ? err.message : "Couldn’t sign you in.");
+                  setSigninError(mapAuthFailureMessage(err instanceof Error ? err.message : "Couldn’t sign you in."));
                 } finally {
                   setSigninLoading(false);
                 }
