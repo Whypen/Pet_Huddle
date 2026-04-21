@@ -94,11 +94,12 @@ const AuthCallback = () => {
             JSON.stringify({ display_name: fullName, dob: "", phone: "", social_id: "", email: nextEmail }),
           );
           localStorage.setItem("auth_login_identifier", nextEmail);
+          sessionStorage.setItem("huddle_signup_flow_state_v1", "signup");
         } catch {
           // best-effort
         }
         setFlowState("signup");
-        navigate(`/signup/dob${isOAuth ? "?oauth_onboarding=1" : ""}`);
+        navigate("/signup/dob?oauth_onboarding=1");
         return;
       }
 
