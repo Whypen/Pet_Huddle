@@ -21,6 +21,7 @@ import SignupDob from "./pages/signup/SignupDob";
 import SignupName from "./pages/signup/SignupName";
 import SignupCredentials from "./pages/signup/SignupCredentials";
 import SignupVerify from "./pages/signup/SignupVerify";
+import SignupEmailConfirmation from "./pages/signup/SignupEmailConfirmation";
 import SignupMarketingConfirmed from "./pages/signup/SignupMarketingConfirmed";
 import SignupVerifyEmail from "./pages/signup/SignupVerifyEmail";
 import VerifyCallback from "./pages/VerifyCallback";
@@ -179,7 +180,7 @@ const App = () => (
                   <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />
                   <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
                   <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
-                  <Route path="/signup/email-confirmation" element={<Navigate to="/signup/verify-email" replace />} />
+                  <Route path="/signup/email-confirmation" element={<PublicRoute><SignupEmailConfirmation /></PublicRoute>} />
                   <Route path="/signup/marketing-confirmed" element={<PublicRoute><SignupMarketingConfirmed /></PublicRoute>} />
                   {/* No PublicRoute wrapper — accessible from email client in-app browsers without a session */}
                   <Route path="/signup/verify-email" element={<SignupVerifyEmail />} />
