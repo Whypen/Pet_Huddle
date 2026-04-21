@@ -12,6 +12,13 @@ import {
 } from "@/lib/signupOnboarding";
 
 const normalizeEmail = (value: string | null | undefined) => String(value || "").trim().toLowerCase();
+const readRememberedIdentifier = () => {
+  try {
+    return normalizeEmail(localStorage.getItem("auth_login_identifier"));
+  } catch {
+    return "";
+  }
+};
 
 const AuthCallback = () => {
   const navigate = useNavigate();
@@ -48,7 +55,17 @@ const AuthCallback = () => {
       const email = normalizeEmail(user.email);
       if (callbackResult.type === "email") {
         const hasSignupDraft = Boolean(loadSignupDraft(email));
-        if (hasSignupDraft) {
+        const rememberedIdentifier = readRememberedIdentifier();
+        const signupFlowActive =
+          typeof window !== "undefined" &&
+          (() => {
+            try {
+              return sessionStorage.getItem("huddle_signup_flow_state_v1") === "signup";
+            } catch {
+              return false;
+            }
+          })();
+        if (hasSignupDraft || (signupFlowActive && rememberedIdentifier === email)) {
           setFlowState("signup");
           navigate(`/signup/email-confirmation?confirmed=1&email=${encodeURIComponent(email)}`, { replace: true });
           return;

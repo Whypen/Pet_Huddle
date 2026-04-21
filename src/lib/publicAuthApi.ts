@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
 import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
+import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
 
 type ApiError = {
   message: string;
@@ -111,8 +112,14 @@ export async function authChangePassword(payload: ChangePasswordPayload): Promis
   if (!accessToken) {
     return { error: { message: "auth_required" } };
   }
-  const res = await postPublicFunction<null>("auth-change-password", payload, { accessToken });
-  if (res.error) return { error: res.error };
+  const res = await invokeAuthedFunction<null>("auth-change-password", { body: payload });
+  if (res.error) {
+    return {
+      error: {
+        message: mapAuthFailureMessage(res.error.message || "password_change_failed"),
+      },
+    };
+  }
   return {
     error: null,
   };
