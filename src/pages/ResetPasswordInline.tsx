@@ -35,7 +35,7 @@ declare global {
 }
 
 const schema = z.object({
-  email: z.string().email("Invalid email format"),
+  email: z.string().trim().email("Invalid email format"),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -129,12 +129,13 @@ const ResetPasswordInline = () => {
   }, [siteKey]);
 
   const onSubmit = async (values: FormData) => {
+    const normalizedEmail = values.email.trim().toLowerCase();
     if (!token) {
       toast.error("Complete human verification first.");
       return;
     }
     const { error } = await authResetPassword({
-      email: values.email,
+      email: normalizedEmail,
       redirectTo: `${window.location.origin}/update-password`,
       turnstile_token: token,
       turnstile_action: "reset_password",

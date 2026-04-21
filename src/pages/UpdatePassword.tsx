@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ const UpdatePassword = () => {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
+  const handledInvalidLinkRef = useRef(false);
   const recoveryTurnstile = useTurnstile("change_password");
   const showTurnstileDiag =
     typeof window !== "undefined"
@@ -32,13 +33,19 @@ const UpdatePassword = () => {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
       if (!code) {
-        toast.error("Invalid reset link");
+        if (!handledInvalidLinkRef.current) {
+          handledInvalidLinkRef.current = true;
+          toast.error("Invalid reset link");
+        }
         navigate("/reset-password", { replace: true });
         return;
       }
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
-        toast.error("Invalid reset link");
+        if (!handledInvalidLinkRef.current) {
+          handledInvalidLinkRef.current = true;
+          toast.error("Invalid reset link");
+        }
         navigate("/reset-password", { replace: true });
         return;
       }
