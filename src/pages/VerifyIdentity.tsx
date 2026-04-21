@@ -527,15 +527,15 @@ function HumanVerificationCard({
             {state === "capturing" && (
               <>
                 <div className="relative flex items-center justify-center">
-                  <div className="absolute w-[208px] h-[256px] rounded-full border-2 border-brandBlue animate-pulse pointer-events-none z-10" />
-                  <div className="w-[200px] h-[248px] rounded-full border-2 border-brandBlue bg-[rgba(33,69,207,0.06)] overflow-hidden flex items-center justify-center">
+                  <div className="pointer-events-none absolute inset-[10px] rounded-full border border-[rgba(33,69,207,0.18)]" />
+                  <div className="w-[200px] h-[248px] rounded-full border-2 border-brandBlue bg-[linear-gradient(180deg,rgba(33,69,207,0.08)_0%,rgba(33,69,207,0.03)_100%)] shadow-[0_18px_40px_rgba(33,69,207,0.10)] overflow-hidden flex items-center justify-center">
                     {hasLivePreview && previewVideoRef ? (
                       <video
                         ref={previewVideoRef}
                         autoPlay
                         muted
                         playsInline
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover object-center scale-x-[-1] bg-[rgba(245,247,255,0.92)]"
                       />
                     ) : (
                       <UserRound
@@ -975,7 +975,6 @@ export function VerifyIdentity({
   const [cardExpiryContainerId] = useState(cardExpiryContainerIdOverride || "verify-card-expiry-element");
   const [cardCvcContainerId] = useState(cardCvcContainerIdOverride || "verify-card-cvc-element");
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
-  const [hasLivePreview, setHasLivePreview] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   const stripeRef = useRef<Stripe | null>(null);
@@ -1559,7 +1558,9 @@ export function VerifyIdentity({
   useEffect(() => {
     const video = previewVideoRef.current;
     if (!video) return;
-    video.srcObject = previewStream;
+    if (video.srcObject !== previewStream) {
+      video.srcObject = previewStream;
+    }
     const ensurePlayback = async () => {
       if (!previewStream) return;
       try {
@@ -1574,7 +1575,7 @@ export function VerifyIdentity({
         video.srcObject = null;
       }
     };
-  }, [previewStream, humanVerificationState]);
+  }, [previewStream]);
 
   const onStartHumanVerification = async () => {
     if (onStartHumanVerificationOverride) {
@@ -1632,7 +1633,6 @@ export function VerifyIdentity({
         minDurationMs: 4000,
         onPreviewStream: (stream) => {
           setPreviewStream(stream);
-          setHasLivePreview(Boolean(stream));
         },
       });
 
@@ -1684,6 +1684,8 @@ export function VerifyIdentity({
         message = "Camera access is required. Please allow camera permission and try again.";
       } else if (lowered.includes("notfounderror") || lowered.includes("no camera")) {
         message = "No camera was detected on this device.";
+      } else if (lowered.includes("native_camera_still_image_only")) {
+        message = "Native shell camera fallback returned a still image. Use live camera mode or enable native video capture for verification.";
       } else if (raw.trim()) {
         message = raw;
       }
@@ -1698,7 +1700,6 @@ export function VerifyIdentity({
       }
     } finally {
       setPreviewStream(null);
-      setHasLivePreview(false);
     }
   };
 
@@ -2413,7 +2414,7 @@ export function VerifyIdentity({
             errorMessage={humanErrorMessageOverride || humanErrorMessage}
             challengeInstruction={humanChallenge?.instruction || null}
             previewVideoRef={previewVideoRef}
-            hasLivePreview={hasLivePreview}
+            hasLivePreview={Boolean(previewStream)}
           />
 
           <CardVerificationCard
