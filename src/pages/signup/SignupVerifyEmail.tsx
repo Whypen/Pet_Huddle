@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
 import { useSignup } from "@/contexts/SignupContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { SignupShell } from "@/components/signup/SignupShell";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
@@ -35,6 +36,8 @@ type VerifyStatusResponse = {
   signup_proof_expires_at?: string | null;
   email?: string | null;
   token?: string | null;
+  auth_confirmed?: boolean;
+  confirmation_mode?: "presignup" | "auth" | null;
 };
 type SendVerifyResponse = {
   ok?: boolean;
@@ -44,13 +47,17 @@ type SendVerifyResponse = {
   email_sent?: boolean;
 };
 
-type StatusOutcome = "verified" | "pending" | "expired" | "missing" | "error";
+type StatusOutcome = "verified" | "auth_confirmed" | "pending" | "expired" | "missing" | "error";
 
 const SignupVerifyEmail = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { data, setFlowState, update } = useSignup();
+  const { signIn } = useAuth();
   const incomingState = location.state as VerifyRouteState;
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const queryEmail = String(searchParams.get("email") || "").trim().toLowerCase();
+  const queryConfirmed = searchParams.get("confirmed") === "1";
 
   const draftEmail = data.email?.trim().toLowerCase() ?? "";
   const incomingExpired = incomingState?.expired === true;
@@ -73,6 +80,7 @@ const SignupVerifyEmail = () => {
   const autoSendStarted = useRef(false);
   const credentialEntryHandled = useRef(false);
   const statusInFlight = useRef(false);
+  const recoveryInFlight = useRef(false);
 
   const readTurnstileToken = useCallback(() => {
     return String(
@@ -121,6 +129,7 @@ const SignupVerifyEmail = () => {
   useEffect(() => {
     if (draftEmail) return;
     const fallbackEmail =
+      queryEmail ||
       incomingEmail ||
       String(sessionStorage.getItem(PRESIGNUP_EMAIL_KEY) || "").trim().toLowerCase();
     if (!fallbackEmail) {
@@ -139,12 +148,21 @@ const SignupVerifyEmail = () => {
       update({ email: fallbackEmail });
     }
     setFlowState("signup");
-  }, [draftEmail, incomingEmail, navigate, setFlowState, update]);
+  }, [draftEmail, incomingEmail, navigate, queryEmail, setFlowState, update]);
 
   const applyResolvedStatus = useCallback((resp: VerifyStatusResponse | null | undefined): StatusOutcome => {
     const canonicalEmail = String(resp?.email || draftEmail || incomingEmail || "").trim().toLowerCase();
     const canonicalToken = String(resp?.token || "").trim();
     const signupProof = String(resp?.signup_proof || "").trim();
+
+    if (resp?.auth_confirmed) {
+      update({
+        email: canonicalEmail || draftEmail,
+        signup_proof: "",
+      });
+      setSendState("sent");
+      return "auth_confirmed";
+    }
 
     if (canonicalEmail && canonicalToken) {
       persistPresignupIdentity(canonicalToken, canonicalEmail);
@@ -209,6 +227,55 @@ const SignupVerifyEmail = () => {
       statusInFlight.current = false;
     }
   }, [applyResolvedStatus, draftEmail, incomingEmail, readStoredPresignupToken]);
+
+  const recoverConfirmedSignup = useCallback(async (manual = false): Promise<boolean> => {
+    const canonicalEmail = String(draftEmail || queryEmail || incomingEmail || "").trim().toLowerCase();
+    if (!canonicalEmail || recoveryInFlight.current) return false;
+
+    recoveryInFlight.current = true;
+    try {
+      let outcome = await lookupStatus(canonicalEmail);
+      if (outcome !== "verified" && outcome !== "auth_confirmed" && manual) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+        outcome = await lookupStatus(canonicalEmail);
+      }
+
+      if (outcome === "verified") {
+        proceedAfterVerification();
+        return true;
+      }
+
+      if (outcome === "auth_confirmed") {
+        const restoredDraft = loadSignupDraft(canonicalEmail);
+        const password = String(data.password || restoredDraft?.password || "").trim();
+        if (!password) {
+          if (manual) toast.error("Please go back and re-enter your signup details.");
+          return false;
+        }
+
+        setFlowState("signup");
+        const result = await signIn(canonicalEmail, password);
+        if (result.error) {
+          if (manual) toast.error(result.error.message || "Could not continue sign up in this browser.");
+          return false;
+        }
+
+        clearPresignupIdentity();
+        update({
+          ...(restoredDraft?.data as Record<string, unknown> | undefined),
+          email: canonicalEmail,
+          password,
+          signup_proof: "",
+        });
+        proceedAfterVerification();
+        return true;
+      }
+
+      return false;
+    } finally {
+      recoveryInFlight.current = false;
+    }
+  }, [clearPresignupIdentity, data.password, draftEmail, incomingEmail, lookupStatus, proceedAfterVerification, queryEmail, setFlowState, signIn, update]);
 
   const sendEmail = useCallback(async (forceNewToken = false) => {
     if (!draftEmail) return false;
@@ -276,16 +343,32 @@ const SignupVerifyEmail = () => {
     if (!draftEmail) return;
     let cancelled = false;
     const recover = async () => {
-      const outcome = await lookupStatus(draftEmail);
-      if (cancelled) return;
-      if (outcome === "verified") return;
+      const recovered = await recoverConfirmedSignup(queryConfirmed);
+      if (cancelled || recovered) return;
       setRecoveryReady(true);
     };
     void recover();
     return () => {
       cancelled = true;
     };
-  }, [draftEmail, lookupStatus]);
+  }, [draftEmail, queryConfirmed, recoverConfirmedSignup]);
+
+  useEffect(() => {
+    if (!draftEmail && !queryEmail) return;
+    const recheck = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void recoverConfirmedSignup(false);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") recheck();
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [draftEmail, queryEmail, recoverConfirmedSignup]);
 
   useEffect(() => {
     if (!draftEmail || verified || incomingExpired || incomingInvalid) return;
@@ -345,19 +428,17 @@ const SignupVerifyEmail = () => {
   };
 
   const handleManualContinue = async () => {
+    if (verified || queryConfirmed) {
+      const recovered = await recoverConfirmedSignup(true);
+      if (recovered) return;
+    }
     if (verified) {
       proceedAfterVerification();
       return;
     }
     setManualCheck("checking");
-    let outcome = await lookupStatus(draftEmail);
-    if (outcome !== "verified") {
-      // One retry after a short pause — handles DB propagation lag and cross-tab timing.
-      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-      outcome = await lookupStatus(draftEmail);
-    }
-    if (outcome === "verified") {
-      proceedAfterVerification();
+    const recovered = await recoverConfirmedSignup(true);
+    if (recovered) {
       return;
     }
     setManualCheck("not_yet");
