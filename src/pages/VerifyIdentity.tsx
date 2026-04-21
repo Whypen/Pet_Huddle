@@ -1139,8 +1139,17 @@ export function VerifyIdentity({
 
   const resolveHumanVerificationState = useCallback(async () => {
     const snapshot = await fetchVerifyIdentitySnapshot();
-    const humanUi = toHumanUiState(snapshot.humanStatus);
-    setHumanVerificationState((prev) => (humanUi === "pending" && prev === "capturing" ? prev : humanUi));
+    const hasPendingAttempt =
+      snapshot.humanStatus === "pending"
+      && Boolean(snapshot.humanAttemptId)
+      && !snapshot.humanAttemptCompletedAt
+      && Boolean(snapshot.humanChallenge);
+    const humanUi = hasPendingAttempt ? "ready" : toHumanUiState(snapshot.humanStatus);
+    setHumanVerificationState((prev) => mergeHumanUiState(prev, humanUi));
+    if (humanUi === "ready") {
+      setHumanAttemptId(snapshot.humanAttemptId || null);
+      setHumanChallenge(snapshot.humanChallenge || null);
+    }
     if (humanUi === "passed") {
       setHumanErrorMessage(null);
     }
@@ -1517,9 +1526,8 @@ export function VerifyIdentity({
           await resolvePhoneVerificationStateRef.current(liveSession.user.id);
         }
         await trackDeviceFingerprint("verify_identity_entry");
-        const snapshot = await refreshVerificationRuntimeRef.current();
+        await refreshVerificationRuntimeRef.current();
         if (!isMounted) return;
-        applySnapshotRef.current(snapshot);
       } catch (error) {
         if (import.meta.env.DEV) {
           console.debug("[VerifyIdentity] bootstrap waiting", error);
@@ -1543,6 +1551,7 @@ export function VerifyIdentity({
     if (authLoading || !user?.id) return;
     let inFlight = false;
     const syncNow = async () => {
+      if (humanVerificationState === "capturing" || previewStream) return;
       if (inFlight) return;
       inFlight = true;
       try {
@@ -1566,7 +1575,7 @@ export function VerifyIdentity({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onFocus);
     };
-  }, [authLoading, refreshVerificationRuntime, user?.id]);
+  }, [authLoading, humanVerificationState, previewStream, refreshVerificationRuntime, user?.id]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -1749,11 +1758,8 @@ export function VerifyIdentity({
     if (profileHuman === "passed") {
       setHumanVerificationState("passed");
       setHumanErrorMessage(null);
-    } else if (profileHuman === "pending") {
-      setHumanVerificationState((prev) => {
-        if (prev === "passed") return prev;
-        return mergeHumanUiState(prev, "pending");
-      });
+    } else if (profileHuman === "failed") {
+      setHumanVerificationState((prev) => (prev === "passed" ? prev : "failed"));
     }
 
     const profileCard = String(profile.card_verification_status || "").toLowerCase();
@@ -2285,10 +2291,6 @@ export function VerifyIdentity({
       try {
         const snapshot = await refreshVerificationSnapshot();
         if (cancelled) return;
-        applySnapshot(snapshot);
-        if (snapshot.humanStatus === "pending") {
-          await resolveHumanVerificationState();
-        }
         if (snapshot.cardStatus === "pending") {
           await resolveCardVerificationState();
         }
