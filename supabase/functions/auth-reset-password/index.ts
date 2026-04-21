@@ -76,7 +76,12 @@ Deno.serve(async (req: Request) => {
   const authClient = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } });
   const res = await authClient.auth.resetPasswordForEmail(email, { redirectTo });
   if (res.error) {
-    return json(400, { error: res.error.message || "reset_failed" });
+    console.warn("[auth-reset-password] resetPasswordForEmail returned error", {
+      email_domain: email.includes("@") ? email.split("@").slice(-1)[0] : "invalid",
+      redirectTo,
+      message: res.error.message || "reset_failed",
+    });
+    return json(200, { data: null });
   }
 
   return json(200, { data: null });
