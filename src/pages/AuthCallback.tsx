@@ -19,13 +19,19 @@ const AuthCallback = () => {
     const run = async () => {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
+      const type = url.searchParams.get("type");
+      const next = url.searchParams.get("next");
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
-          toast.error("Sign-in failed. Please try again.");
-          navigate("/auth");
+          toast.error(type === "recovery" ? "Invalid reset link" : "Sign-in failed. Please try again.");
+          navigate(type === "recovery" ? "/reset-password" : "/auth");
           return;
         }
+      }
+      if (type === "recovery") {
+        navigate(next === "/update-password" ? "/update-password" : "/reset-password", { replace: true });
+        return;
       }
       const {
         data: { user },

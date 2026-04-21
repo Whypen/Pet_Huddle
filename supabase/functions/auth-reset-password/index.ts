@@ -27,6 +27,21 @@ const clientIp = (req: Request) =>
   req.headers.get("x-real-ip") ||
   "unknown";
 
+const normalizeRedirectTo = (value: string) => {
+  try {
+    const url = new URL(value);
+    if (url.pathname === "/update-password") {
+      url.pathname = "/auth/callback";
+      url.searchParams.set("type", "recovery");
+      url.searchParams.set("next", "/update-password");
+      return url.toString();
+    }
+    return value;
+  } catch {
+    return value;
+  }
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: CORS });
   if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
@@ -43,7 +58,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const email = String(body.email || "").trim();
-  const redirectTo = String(body.redirectTo || "").trim();
+  const redirectTo = normalizeRedirectTo(String(body.redirectTo || "").trim());
   if (!email || !redirectTo) {
     return json(400, { error: "email_and_redirect_required" });
   }

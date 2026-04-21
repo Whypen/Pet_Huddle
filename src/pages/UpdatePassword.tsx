@@ -33,6 +33,13 @@ const UpdatePassword = () => {
       const url = new URL(window.location.href);
       const code = url.searchParams.get("code");
       if (!code) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          setReady(true);
+          return;
+        }
         if (!handledInvalidLinkRef.current) {
           handledInvalidLinkRef.current = true;
           toast.error("Invalid reset link");
