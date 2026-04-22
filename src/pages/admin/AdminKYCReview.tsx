@@ -21,6 +21,7 @@ type VerificationUpload = {
 };
 
 const ADMIN_EMAIL_ALLOWLIST = new Set([
+  "huddle.pet@icloud.com",
   "twenty_illkid@msn.com",
   "fongpoman114@gmail.com",
   "kuriocollectives@gmail.com",
