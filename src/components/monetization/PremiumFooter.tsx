@@ -1,6 +1,6 @@
 // =====================================================
 // PREMIUM FOOTER — Huddle Blue slide-up upsell strip
-// Triggers: NoticeBoard 'Create', Mesh-Alert slider > 1km/12h,
+// Triggers: NoticeBoard 'Create', Mesh-Alert slider beyond base cap,
 //           Chat Media click, 3rd Mesh-Alert broadcast
 // Brand: premium surfaces use Premium Gold #CFAB21
 // =====================================================
@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Crown, X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { getBroadcastCapsForTier } from "@/config/quotaConfig";
 
 interface PremiumFooterProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
   },
   mesh_alert: {
     title: "Extended Broadcast needs Huddle+",
-    body: "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.",
+    body: "Free users broadcast within {freeRadius} km. Upgrade for up to {plusRadius} km broadcasts.",
   },
   broadcast_alert: {
     title: "Broadcast limit reached",
@@ -46,7 +47,7 @@ const TRIGGER_MESSAGES: Record<string, { title: string; body: string }> = {
 // Feature checklist — rendered inside every footer instance
 const PREMIUM_FEATURES = [
   "Verified Status",
-  "5 km Broadcast Radius",
+  "{radius} km Broadcast Radius",
   "Notice Board Access",
   "Chat Image Access",
   "Priority Visibility",
@@ -57,6 +58,8 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
   const navigate = useNavigate();
   const { t } = useLanguage();
   const msg = TRIGGER_MESSAGES[triggerReason] || TRIGGER_MESSAGES.default;
+  const plusBroadcastCaps = getBroadcastCapsForTier("plus");
+  const freeBroadcastCaps = getBroadcastCapsForTier("free");
 
   return (
     <AnimatePresence>
@@ -100,14 +103,19 @@ export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: Pr
 
               {/* Contextual trigger message */}
               <h3 className="text-lg font-bold text-brandText mb-1">{t(msg.title)}</h3>
-              <p className="text-sm text-brandText/90 mb-3">{t(msg.body)}</p>
+              <p className="text-sm text-brandText/90 mb-3">
+                {t(msg.body, {
+                  freeRadius: freeBroadcastCaps.radiusKm,
+                  plusRadius: plusBroadcastCaps.radiusKm,
+                })}
+              </p>
 
               {/* Feature checklist — always visible */}
               <div className="flex flex-wrap gap-x-3 gap-y-1.5 mb-4">
                 {PREMIUM_FEATURES.map((feature) => (
                   <span key={feature} className="flex items-center gap-1 text-xs text-brandText/90">
                     <Check className="w-3 h-3 text-brandText flex-shrink-0" />
-                    {t(feature)}
+                    {t(feature, { radius: plusBroadcastCaps.radiusKm })}
                   </span>
                 ))}
               </div>

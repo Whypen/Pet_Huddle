@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { getBroadcastPinStyle, normalizeBroadcastAlertType } from "@/lib/broadcastPinStyle";
-import { quotaConfig } from "@/config/quotaConfig";
+import { getBroadcastCapsForTier, getSuperBroadcastCaps, quotaConfig } from "@/config/quotaConfig";
 import { humanError } from "@/lib/humanError";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { toast } from "sonner";
@@ -65,6 +65,8 @@ interface BroadcastModalProps {
   onError: () => void;
 }
 
+const BROADCAST_RANGE_STEPS = [1, 3, 5, 10, 20, 50] as const;
+
 const BroadcastModal = ({
   isOpen,
   onClose,
@@ -91,18 +93,19 @@ const BroadcastModal = ({
   const normalizedType = useMemo(() => normalizeBroadcastAlertType(alertType), [alertType]);
   const pinStyle = useMemo(() => getBroadcastPinStyle(normalizedType), [normalizedType]);
   const tier = String(profile?.effective_tier || profile?.tier || "free").toLowerCase();
-  const baseRangeKm = tier === "gold" ? 50 : tier === "plus" ? 25 : 10;
-  const baseDurationHours = tier === "gold" ? 48 : tier === "plus" ? 24 : 12;
+  const baseBroadcastCaps = getBroadcastCapsForTier(tier);
+  const superBroadcastCaps = getSuperBroadcastCaps();
+  const baseRangeKm = baseBroadcastCaps.radiusKm;
+  const baseDurationHours = baseBroadcastCaps.durationHours;
   const [extraBroadcast72h, setExtraBroadcast72h] = useState<number>(0);
-  const capRangeKm = extraBroadcast72h > 0 ? 150 : baseRangeKm;
-  const capDurationHours = extraBroadcast72h > 0 ? 72 : baseDurationHours;
+  const capRangeKm = extraBroadcast72h > 0 ? superBroadcastCaps.radiusKm : baseRangeKm;
+  const capDurationHours = extraBroadcast72h > 0 ? superBroadcastCaps.durationHours : baseDurationHours;
   const [rangeKm, setRangeKm] = useState<number>(baseRangeKm);
   const [durationHours, setDurationHours] = useState<number>(baseDurationHours);
   const [showUpsell, setShowUpsell] = useState(false);
   const upsellOnceRef = useRef(false);
   const upsellResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mediaFilesRef = useRef<BroadcastMedia[]>([]);
-  const RANGE_STEPS = [1, 5, 10, 25, 50, 100, 150];
   const DURATION_STEPS = [1, 3, 6, 12, 24, 48, 72];
 
   useEffect(() => {
@@ -516,12 +519,12 @@ const BroadcastModal = ({
                 <NeuSlider
                   label="Reach"
                   showValue
-                  formatValue={(v) => `${RANGE_STEPS[v] ?? rangeKm} km`}
+                  formatValue={(v) => `${BROADCAST_RANGE_STEPS[v] ?? rangeKm} km`}
                   min={0}
-                  max={RANGE_STEPS.length - 1}
+                  max={BROADCAST_RANGE_STEPS.length - 1}
                   step={1}
-                  value={[Math.max(0, RANGE_STEPS.indexOf(rangeKm))]}
-                  onValueChange={([idx = 0]) => handleRangeChange(RANGE_STEPS[idx] ?? rangeKm)}
+                  value={[Math.max(0, BROADCAST_RANGE_STEPS.indexOf(rangeKm as (typeof BROADCAST_RANGE_STEPS)[number]))]}
+                  onValueChange={([idx = 0]) => handleRangeChange(BROADCAST_RANGE_STEPS[idx] ?? rangeKm)}
                 />
                 <NeuSlider
                   label="Duration"

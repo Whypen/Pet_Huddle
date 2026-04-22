@@ -21,7 +21,7 @@ export interface FilterState {
   commonFriends: boolean;
 }
 
-// SPRINT 3: Default filters with 150km max distance, ±3 year age range
+// SPRINT 3: Default filters with expanded distance support, ±3 year age range
 export const defaultFilters: FilterState = {
   role: CANONICAL_SOCIAL_ROLE_OPTIONS[0],
   species: [],

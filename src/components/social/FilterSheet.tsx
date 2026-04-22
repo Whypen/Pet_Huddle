@@ -187,7 +187,7 @@ export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick 
                   </div>
                 </div>
 
-                {/* Distance Slider - SPRINT 3: 150km max, See Further toggle */}
+                {/* Distance Slider - SPRINT 3: expanded range with See Further toggle */}
                 <div className="mb-5">
                   <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-medium">{t("Distance")}</label>

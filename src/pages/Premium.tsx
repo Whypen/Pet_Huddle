@@ -27,7 +27,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { toast } from "sonner";
-import { normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
+import { formatBroadcastPlanLabel, formatSuperBroadcastLabel, getBroadcastCapsForTier, quotaConfig, normalizeQuotaTier } from "@/config/quotaConfig";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
 import { invokeAuthedFunction } from "@/lib/invokeAuthedFunction";
@@ -76,7 +76,7 @@ const PLUS_FEATURES: FeatureRow[] = [
   { icon: Users,             label: "Open Discovery",           sublabel: "Double the chances. Better matches." },
   { icon: TrendingUp,        label: "Profile Boost",            sublabel: "Get seen earlier in Discover and Services." },
   { icon: Star,              label: "4 Stars / month",          sublabel: "Reach out without waiting." },
-  { icon: Radio,             label: "Broadcasts · 25km · 24h", sublabel: "Reach more nearby members for longer." },
+  { icon: Radio,             label: formatBroadcastPlanLabel(getBroadcastCapsForTier("plus").radiusKm, getBroadcastCapsForTier("plus").durationHours), sublabel: "Reach more nearby members for longer." },
   { icon: SlidersHorizontal, label: "Advanced Filters",         sublabel: "Sharper search. Better fit." },
   { icon: Heart,             label: "Family Sharing",           sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
@@ -85,7 +85,7 @@ const GOLD_FEATURES: FeatureRow[] = [
   { icon: Globe,             label: "Max Discovery",            sublabel: "Keep discovering without the usual limits." },
   { icon: TrendingUp,        label: "Top Profile Boost",        sublabel: "Priority placement in Discover and Services." },
   { icon: Star,              label: "10 Stars / month",         sublabel: "Your fastest way to connect." },
-  { icon: Radio,             label: "Broadcasts · 50km · 48h",  sublabel: "Your widest reach, for even longer." },
+  { icon: Radio,             label: formatBroadcastPlanLabel(getBroadcastCapsForTier("gold").radiusKm, getBroadcastCapsForTier("gold").durationHours),  sublabel: "Your widest reach, for even longer." },
   { icon: SlidersHorizontal, label: "All Filters",              sublabel: "Every filter unlocked. Less noise, better matches." },
   { icon: Video,             label: "Video Uploads",            sublabel: "Gold exclusive." },
   { icon: Users2,            label: "Family Sharing",           sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
@@ -95,7 +95,7 @@ const ADD_ONS: AddOnItem[] = [
   {
     id: "superBroadcast",
     icon: Megaphone,
-    title: "Super Broadcast · 150km · 72h",
+    title: formatSuperBroadcastLabel(),
     subtitle: "Ultra-wide reach. Stay visible the longest.",
     price: 4.99,
   },

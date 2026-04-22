@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Radio, Star, TrendingUp, Users } from "lucide-react";
 import { createPortal } from "react-dom";
-import { QuotaBillingCycle, quotaConfig } from "@/config/quotaConfig";
+import { QuotaBillingCycle, formatBroadcastPlanLabel, getBroadcastCapsForTier, quotaConfig } from "@/config/quotaConfig";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchLivePrices, FALLBACK_PRICES, getCachedLivePrices, getLastLivePricesSnapshot, resolvePricingHints, type LivePriceMap } from "@/lib/stripePrices";
 import { PriceDisplay } from "@/components/ui/PriceDisplay";
@@ -53,7 +53,7 @@ const PLUS_HIGHLIGHTS: FeatureItem[] = [
   { icon: Users, label: "Open Discovery", sublabel: "Double the chances. Better matches." },
   { icon: TrendingUp, label: "Profile Boost", sublabel: "Get seen earlier in Discover and Services." },
   { icon: Star, label: "4 Stars / month", sublabel: "Reach out without waiting." },
-  { icon: Radio, label: "Broadcasts · 25km · 24h", sublabel: "Reach more nearby members for longer." },
+  { icon: Radio, label: formatBroadcastPlanLabel(getBroadcastCapsForTier("plus").radiusKm, getBroadcastCapsForTier("plus").durationHours), sublabel: "Reach more nearby members for longer." },
   { icon: Globe, label: "Advanced Filters", sublabel: "Sharper search. Better fit." },
   { icon: Users, label: "Family Sharing", sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },
 ];
@@ -62,7 +62,7 @@ const GOLD_HIGHLIGHTS: FeatureItem[] = [
   { icon: Globe, label: "Max Discovery", sublabel: "Keep discovering without the usual limits." },
   { icon: TrendingUp, label: "Top Profile Boost", sublabel: "Priority placement in Discover and Services." },
   { icon: Star, label: "10 Stars / month", sublabel: "Your fastest way to connect." },
-  { icon: Radio, label: "Broadcasts · 50km · 48h", sublabel: "Your widest reach, for even longer." },
+  { icon: Radio, label: formatBroadcastPlanLabel(getBroadcastCapsForTier("gold").radiusKm, getBroadcastCapsForTier("gold").durationHours), sublabel: "Your widest reach, for even longer." },
   { icon: Globe, label: "All Filters", sublabel: "Every filter unlocked. Less noise, better matches." },
   { icon: Users, label: "Video Uploads", sublabel: "Gold exclusive." },
   { icon: Users, label: "Family Sharing", sublabel: "Extend your plan benefits to one other account", sublabelNote: "(except Stars)" },

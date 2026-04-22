@@ -102,10 +102,40 @@ export type QuotaResetRules = {
   broadcastActiveSlots: "realtime";
 };
 
+export type BroadcastPlanCaps = {
+  radiusKm: number;
+  durationHours: number;
+};
+
+export type BroadcastAddOnCaps = {
+  radiusKm: number;
+  durationHours: number;
+};
+
 const TIER_LABELS: Record<QuotaTier, string> = {
   free: "Free",
   plus: "Huddle+",
   gold: "Gold",
+};
+
+export const BROADCAST_CAPS_BY_TIER: Record<QuotaTier, BroadcastPlanCaps> = {
+  free: {
+    radiusKm: 5,
+    durationHours: 12,
+  },
+  plus: {
+    radiusKm: 10,
+    durationHours: 24,
+  },
+  gold: {
+    radiusKm: 20,
+    durationHours: 48,
+  },
+};
+
+export const SUPER_BROADCAST_CAPS: BroadcastAddOnCaps = {
+  radiusKm: 50,
+  durationHours: 72,
 };
 
 const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
@@ -120,8 +150,8 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     starsWalletCap: 0,
     broadcastAlertsPerMonth: 10,
     broadcastMaxActiveSlots: 10,
-    broadcastDurationHours: 12,
-    broadcastRadiusKm: 10,
+    broadcastDurationHours: BROADCAST_CAPS_BY_TIER.free.durationHours,
+    broadcastRadiusKm: BROADCAST_CAPS_BY_TIER.free.radiusKm,
     hasAdvancedFilters: false,
     hasActiveNowFilter: false,
     hasSameEnergyFilter: false,
@@ -141,8 +171,8 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     starsWalletCap: 4,
     broadcastAlertsPerMonth: 40,
     broadcastMaxActiveSlots: 20,
-    broadcastDurationHours: 24,
-    broadcastRadiusKm: 25,
+    broadcastDurationHours: BROADCAST_CAPS_BY_TIER.plus.durationHours,
+    broadcastRadiusKm: BROADCAST_CAPS_BY_TIER.plus.radiusKm,
     hasAdvancedFilters: true,
     hasActiveNowFilter: false,
     hasSameEnergyFilter: false,
@@ -162,8 +192,8 @@ const CAPS_BY_TIER: Record<QuotaTier, QuotaCaps> = {
     starsWalletCap: 10,
     broadcastAlertsPerMonth: 80,
     broadcastMaxActiveSlots: 20,
-    broadcastDurationHours: 48,
-    broadcastRadiusKm: 50,
+    broadcastDurationHours: BROADCAST_CAPS_BY_TIER.gold.durationHours,
+    broadcastRadiusKm: BROADCAST_CAPS_BY_TIER.gold.radiusKm,
     hasAdvancedFilters: true,
     hasActiveNowFilter: true,
     hasSameEnergyFilter: true,
@@ -276,6 +306,10 @@ const STRIPE_PLANS: StripePlansByTier = {
 export const quotaConfig = {
   tierLabels: TIER_LABELS,
   capsByTier: CAPS_BY_TIER,
+  broadcastCapsByTier: BROADCAST_CAPS_BY_TIER,
+  broadcastAddOns: {
+    superBroadcast: SUPER_BROADCAST_CAPS,
+  },
   copy: COPY,
   resetRules: RESET_RULES,
   stripePlans: STRIPE_PLANS,
@@ -297,6 +331,18 @@ export const normalizeQuotaTier = (tierRaw?: string | null): QuotaTier => {
 
 export const getQuotaCapsForTier = (tierRaw?: string | null): QuotaCaps =>
   quotaConfig.capsByTier[normalizeQuotaTier(tierRaw)];
+
+export const getBroadcastCapsForTier = (tierRaw?: string | null): BroadcastPlanCaps =>
+  quotaConfig.broadcastCapsByTier[normalizeQuotaTier(tierRaw)];
+
+export const getSuperBroadcastCaps = (): BroadcastAddOnCaps =>
+  quotaConfig.broadcastAddOns.superBroadcast;
+
+export const formatBroadcastPlanLabel = (radiusKm: number, durationHours: number): string =>
+  `Broadcasts · ${radiusKm}km · ${durationHours}h`;
+
+export const formatSuperBroadcastLabel = (): string =>
+  `Super Broadcast · ${SUPER_BROADCAST_CAPS.radiusKm}km · ${SUPER_BROADCAST_CAPS.durationHours}h`;
 
 export const getTierLabel = (tierRaw?: string | null): string =>
   quotaConfig.tierLabels[normalizeQuotaTier(tierRaw)];

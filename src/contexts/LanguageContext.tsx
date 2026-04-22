@@ -5,7 +5,7 @@ export type Language = "en" | "zh-TW" | "zh-CN";
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: string) => string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
 export const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -116,7 +116,7 @@ const translations: Record<Language, Record<string, string>> = {
     "map.filter_others": "Others",
     "map.go_online": "Go Online",
     "map.broadcast": "Broadcast Alert",
-    "map.broadcast_remark": "Broadcasts to online users within {distance} miles; active for 48 hours.",
+    "map.broadcast_remark": "Broadcasts to online users within {distance} km; active for {duration} hours.",
     "map.call_now": "Call Now",
     "map.navigate": "Navigate",
     "map.found_btn": "Found",
@@ -547,7 +547,7 @@ const translations: Record<Language, Record<string, string>> = {
     "Notice Board is Premium only": "Threads are Plus only",
     "Upgrade to post notices, share updates, and connect with your huddle community.": "Upgrade to post notices, share updates, and connect with your huddle community.",
     "Extended Broadcast needs Premium": "Extended Broadcast needs Plus",
-    "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.": "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.",
+    "Free users broadcast within {freeRadius} km. Upgrade for up to {plusRadius} km broadcasts.": "Free users broadcast within {freeRadius} km. Upgrade for up to {plusRadius} km broadcasts.",
     "Media sharing is a Premium perk": "Media sharing is a Plus feature",
     "Send photos & files in chats. Unlock unlimited media with Premium.": "Send photos & files in chats. Available on Plus.",
     "Alert limit reached": "Alert limit reached",
@@ -555,7 +555,7 @@ const translations: Record<Language, Record<string, string>> = {
     "Unlock the full huddle experience": "Everything you need for your pet",
     "Premium gives you access to all features — starting at just $8.99/month.": "Plus gives you access to all features — starting at $8.99/month.",
     "Verified Status": "Verified Status",
-    "5 km Broadcast Radius": "5 km Broadcast Radius",
+    "{radius} km Broadcast Radius": "{radius} km Broadcast Radius",
     "Notice Board Access": "Threads Access",
     "Chat Image Access": "Chat Image Access",
     "Priority Visibility": "Priority Visibility",
@@ -671,7 +671,7 @@ const translations: Record<Language, Record<string, string>> = {
     "Basic Filters": "Basic Filters",
     "Looking for": "Looking for",
     "Distance": "Distance",
-    "Extend search beyond 150km": "Extend search beyond 150km",
+    "Extend search beyond 150km": "Extend search farther",
     "Age Range": "Age Range",
     "Pet Height": "Pet Height",
     "Premium Filters": "Plus Filters",
@@ -852,7 +852,7 @@ const translations: Record<Language, Record<string, string>> = {
     "map.filter_others": "其他",
     "map.go_online": "上線",
     "map.broadcast": "緊急通報",
-    "map.broadcast_remark": "通報將發送給{distance}英里內的線上用戶；有效期48小時。",
+    "map.broadcast_remark": "通報將發送給{distance}公里內的線上用戶；有效期{duration}小時。",
     "map.call_now": "立即撥打",
     "map.navigate": "導航",
     "map.found_btn": "已找到",
@@ -1277,7 +1277,7 @@ const translations: Record<Language, Record<string, string>> = {
     "Notice Board is Premium only": "Threads 僅限高級會員",
     "Upgrade to post notices, share updates, and connect with your huddle community.": "升級即可發布公告、分享更新並與社群互動。",
     "Extended Broadcast needs Premium": "擴大廣播需要高級會員",
-    "Free users broadcast within 1 km. Upgrade for up to 5 km mesh alerts.": "免費用戶僅限 1 公里廣播。升級可達 5 公里。",
+    "Free users broadcast within {freeRadius} km. Upgrade for up to {plusRadius} km broadcasts.": "免費用戶僅限 {freeRadius} 公里廣播。升級可達 {plusRadius} 公里。",
     "Media sharing is a Premium perk": "媒體分享是高級會員功能",
     "Send photos & files in chats. Unlock unlimited media with Premium.": "在聊天中分享照片與檔案。升級享有無限媒體。",
     "Alert limit reached": "警報次數已達上限",
@@ -1285,7 +1285,7 @@ const translations: Record<Language, Record<string, string>> = {
     "Unlock the full huddle experience": "解鎖完整 huddle 體驗",
     "Premium gives you access to all features — starting at just $8.99/month.": "高級會員提供完整功能，月費僅 $8.99 起。",
     "Verified Status": "已驗證狀態",
-    "5 km Broadcast Radius": "5 公里廣播範圍",
+    "{radius} km Broadcast Radius": "{radius} 公里廣播範圍",
     "Notice Board Access": "Threads 權限",
     "Chat Image Access": "聊天圖片權限",
     "Priority Visibility": "優先曝光",
@@ -1513,7 +1513,7 @@ const translations: Record<Language, Record<string, string>> = {
     "map.filter_others": "其他",
     "map.go_online": "上线",
     "map.broadcast": "紧急通报",
-    "map.broadcast_remark": "通报将发送给{distance}英里内的在线用户；有效期48小时。",
+    "map.broadcast_remark": "通报将发送给{distance}公里内的在线用户；有效期{duration}小时。",
     "map.call_now": "立即拨打",
     "map.navigate": "导航",
     "map.found_btn": "已找到",
@@ -1846,8 +1846,12 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem("huddle_language", lang);
   };
 
-  const t = (key: string): string => {
-    return translations[language][key] || translations.en[key] || key;
+  const t = (key: string, vars?: Record<string, string | number>): string => {
+    const template = translations[language][key] || translations.en[key] || key;
+    if (!vars) return template;
+    return Object.entries(vars).reduce((value, [name, replacement]) => (
+      value.replaceAll(`{${name}}`, String(replacement))
+    ), template);
   };
 
   useEffect(() => {

@@ -10,7 +10,7 @@ Profile photos and Identity Verification documents (Identity docs purged 7 days 
 Pet names, species, breeds, and health/vaccination records.
 Photos and behavioral notes.
 1.3 Location Data
-GPS coordinates for map features and "Discovery" (0–150km radius).
+GPS coordinates for map features and "Discovery" within applicable distance limits.
 Broadcast alert locations and veterinary clinic searches.
 2. How We Use Your Information 
 Provide, maintain, and improve our services (Marketplace, Social, and AI).

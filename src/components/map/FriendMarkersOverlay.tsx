@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import { User } from "lucide-react";
 
@@ -22,14 +22,7 @@ type Props = {
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
   const [avatarErrorsById, setAvatarErrorsById] = useState<Record<string, boolean>>({});
-
-  const friendsById = useMemo(() => {
-    const next: Record<string, FriendOverlayPin> = {};
-    friends.forEach((f) => {
-      next[f.id] = f;
-    });
-    return next;
-  }, [friends]);
+  const [showAvatarMarkers, setShowAvatarMarkers] = useState(true);
 
   useEffect(() => {
     if (!map || friends.length === 0) {
@@ -38,6 +31,12 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
     }
 
     const sync = () => {
+      const zoom = map.getZoom();
+      setShowAvatarMarkers((current) => {
+        if (zoom >= 14) return true;
+        if (zoom <= 13.5) return false;
+        return current;
+      });
       const next: Record<string, { x: number; y: number }> = {};
       friends.forEach((f) => {
         if (!Number.isFinite(f.lat) || !Number.isFinite(f.lng)) return;
@@ -129,11 +128,12 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
           >
             <span
               className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
-              style={{ border: `1.5px solid ${ringColor}` }}
+              style={{ border: `1.5px solid ${showAvatarMarkers ? ringColor : "#C9CEDA"}` }}
             >
               {(() => {
                 const normalizedAvatarUrl = String(friend.avatarUrl || "").trim();
                 const canRenderAvatar =
+                  showAvatarMarkers &&
                   !avatarErrorsById[friend.id] &&
                   normalizedAvatarUrl.length > 0 &&
                   (/^https?:\/\//i.test(normalizedAvatarUrl) ||
@@ -141,20 +141,27 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                     normalizedAvatarUrl.startsWith("data:"));
                 const normalizedName = String(friend.name || "").trim();
                 const initial = (normalizedName.charAt(0) || "F").toUpperCase();
+                if (!showAvatarMarkers) {
+                  return (
+                    <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-[#EEF1F5] text-[#737A8C]">
+                      <User className="h-4 w-4" strokeWidth={2.2} />
+                    </span>
+                  );
+                }
                 return canRenderAvatar ? (
-                <img
-                  src={normalizedAvatarUrl}
-                  alt={friend.name}
-                  className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
-                  onError={() =>
-                    setAvatarErrorsById((prev) => ({ ...prev, [friend.id]: true }))
-                  }
-                />
-              ) : (
-                <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
-                  {initial}
-                </span>
-              );
+                  <img
+                    src={normalizedAvatarUrl}
+                    alt={friend.name}
+                    className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
+                    onError={() =>
+                      setAvatarErrorsById((prev) => ({ ...prev, [friend.id]: true }))
+                    }
+                  />
+                ) : (
+                  <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
+                    {initial}
+                  </span>
+                );
               })()}
             </span>
           </button>

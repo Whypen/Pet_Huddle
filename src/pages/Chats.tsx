@@ -7164,10 +7164,10 @@ const Chats = () => {
                   {activeFilterRow.key === "maxDistanceKm" && (
                     <div className="space-y-4">
                       <div className="text-center text-2xl font-bold text-brandBlue">{filters.maxDistanceKm} km</div>
-                      <input type="range" min={0} max={150} value={filters.maxDistanceKm}
+                      <input type="range" min={0} max={DISCOVERY_MAX_RADIUS_KM} value={filters.maxDistanceKm}
                         onChange={(e) => setFilters((f) => ({ ...f, maxDistanceKm: Number(e.target.value) }))}
                         className="w-full accent-primary" />
-                      <div className="flex justify-between text-xs text-muted-foreground"><span>0 km</span><span>150 km</span></div>
+                      <div className="flex justify-between text-xs text-muted-foreground"><span>0 km</span><span>{DISCOVERY_MAX_RADIUS_KM} km</span></div>
                     </div>
                   )}
                   {/* Multi-select: Gender */}
