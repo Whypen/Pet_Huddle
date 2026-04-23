@@ -167,7 +167,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 }}
                 aria-label={`${group.ids.length} nearby users`}
               >
-                <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-full bg-[#E3E7EF]">
+                <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-full border border-white/80 bg-[#E3E7EF]">
                   <QuietGroupGlyph />
                   <span
                     className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full px-1 text-[8px] font-semibold leading-none text-[#4E5565]"
@@ -232,7 +232,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
               const initial = (normalizedName.charAt(0) || "F").toUpperCase();
               if (isCompressedMode) {
                 return (
-                  <span className="flex h-[24px] w-[24px] items-center justify-center rounded-full bg-[#E3E7EF]">
+                  <span className="flex h-[24px] w-[24px] items-center justify-center rounded-full border border-white/80 bg-[#E3E7EF]">
                     <QuietUserGlyph isVerified={friend.isVerified === true} />
                   </span>
                 );
