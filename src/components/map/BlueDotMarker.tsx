@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import { User } from "lucide-react";
 
-const COMPRESSED_MODE_ENTER_ZOOM = 14;
-const COMPRESSED_MODE_EXIT_ZOOM = 14.5;
+const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
+const COMPRESSED_MODE_EXIT_ZOOM = 15;
 
 type Coords = { lat: number; lng: number };
 
@@ -87,7 +87,7 @@ const BlueDotMarker = ({
       style={{
         left: `${screenPoint.x}px`,
         top: `${screenPoint.y}px`,
-        transform: isCompressedMode ? "translate(-50%, -50%) scale(0.5)" : "translate(-50%, -50%)",
+        transform: isCompressedMode ? "translate(-50%, -50%) scale(0.75)" : "translate(-50%, -50%)",
       }}
     >
       {markerState === "expired_dot" ? (

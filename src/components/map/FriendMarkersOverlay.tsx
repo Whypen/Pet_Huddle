@@ -19,27 +19,23 @@ type Props = {
   onSelect: (id: string) => void;
 };
 
-const COMPRESSED_MODE_ENTER_ZOOM = 14;
-const COMPRESSED_MODE_EXIT_ZOOM = 14.5;
+const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
+const COMPRESSED_MODE_EXIT_ZOOM = 15;
 const COMPRESSED_GROUP_DISTANCE_PX = 18;
 
 const QuietUserGlyph = ({ isVerified }: { isVerified: boolean }) => {
-  const stroke = isVerified ? "#2145CF" : "#6F7788";
+  const fill = isVerified ? "#2145CF" : "#5C6474";
   return (
     <svg
       aria-hidden="true"
       viewBox="0 0 16 16"
-      className="h-[13px] w-[13px]"
+      className="h-[19px] w-[19px]"
       style={{ overflow: "visible" }}
     >
-      <circle cx="8" cy="4.4" r="2.1" fill="#D7DBE4" stroke={stroke} strokeWidth="0.75" />
+      <circle cx="8" cy="4.4" r="2.1" fill={fill} />
       <path
         d="M4.15 12.3c0-1.95 1.72-3.35 3.85-3.35s3.85 1.4 3.85 3.35"
-        fill="#D7DBE4"
-        stroke={stroke}
-        strokeWidth="0.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fill={fill}
       />
     </svg>
   );
@@ -52,7 +48,7 @@ type CompressedGroup = {
 };
 
 const QuietGroupGlyph = () => (
-  <Users className="h-[12px] w-[12px] text-[#6F7788]" strokeWidth={1.5} aria-hidden="true" />
+  <Users className="h-[18px] w-[18px] text-[#5C6474]" strokeWidth={1.7} aria-hidden="true" />
 );
 
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
@@ -171,7 +167,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 }}
                 aria-label={`${group.ids.length} nearby users`}
               >
-                <div className="relative flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[#E3E7EF]">
+                <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-full bg-[#E3E7EF]">
                   <QuietGroupGlyph />
                   <span
                     className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full px-1 text-[8px] font-semibold leading-none text-[#4E5565]"
@@ -235,7 +231,11 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
               const normalizedName = String(friend.name || "").trim();
               const initial = (normalizedName.charAt(0) || "F").toUpperCase();
               if (isCompressedMode) {
-                return <QuietUserGlyph isVerified={friend.isVerified === true} />;
+                return (
+                  <span className="flex h-[24px] w-[24px] items-center justify-center rounded-full bg-[#E3E7EF]">
+                    <QuietUserGlyph isVerified={friend.isVerified === true} />
+                  </span>
+                );
               }
               return (
                 <span
