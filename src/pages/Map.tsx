@@ -36,6 +36,7 @@ import BroadcastMarker from "@/components/map/BroadcastMarker";
 import AlertMarkersOverlay from "@/components/map/AlertMarkersOverlay";
 import VetMarkersOverlay from "@/components/map/VetMarkersOverlay";
 import FriendMarkersOverlay, { type FriendOverlayPin } from "@/components/map/FriendMarkersOverlay";
+import { normalizeGenderBucket } from "@/components/map/maskedPinAssets";
 import { loadBlockedUserIdsFor } from "@/lib/blocking";
 import { PublicProfileSheet } from "@/components/profile/PublicProfileSheet";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
@@ -98,6 +99,7 @@ interface FriendPin {
   avatar_url: string | null;
   is_verified?: boolean | null;
   is_invisible?: boolean | null;
+  gender_genre?: string | null;
   dob: string | null;
   relationship_status: string | null;
   owns_pets: boolean | null;
@@ -1197,18 +1199,34 @@ const MapPage = () => {
         if (friendIds.length > 0) {
           const { data: profileRows } = await supabase
             .from("profiles")
-            .select("id,is_verified")
+            .select("id,is_verified,gender_genre,hide_from_map")
             .in("id", friendIds);
-          const verifiedById = new Map<string, boolean>(
-            ((profileRows || []) as Array<{ id: string; is_verified?: boolean | null }>).map((row) => [
+          const profileById = new Map<
+            string,
+            { is_verified: boolean; gender_genre: string | null; hide_from_map: boolean }
+          >(
+            (
+              (profileRows || []) as Array<{
+                id: string;
+                is_verified?: boolean | null;
+                gender_genre?: string | null;
+                hide_from_map?: boolean | null;
+              }>
+            ).map((row) => [
               row.id,
-              row.is_verified === true,
+              {
+                is_verified: row.is_verified === true,
+                gender_genre: row.gender_genre ?? null,
+                hide_from_map: row.hide_from_map === true,
+              },
             ])
           );
           setFriendPins(
             visiblePins.map((pin) => ({
               ...pin,
-              is_verified: verifiedById.get(pin.id) ?? false,
+              is_verified: profileById.get(pin.id)?.is_verified ?? false,
+              gender_genre: profileById.get(pin.id)?.gender_genre ?? null,
+              is_invisible: profileById.get(pin.id)?.hide_from_map ?? false,
             }))
           );
         } else {
@@ -1435,6 +1453,8 @@ const MapPage = () => {
         avatarUrl: p.avatar_url,
         isVerified: Boolean(p.is_verified),
         isInvisible: Boolean(p.is_invisible),
+        genderBucket: normalizeGenderBucket(p.gender_genre),
+        sessionMarker: p.location_pinned_until,
         markerState: "active",
       });
     });
