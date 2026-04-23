@@ -377,6 +377,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_languages: false,
     show_location: false,
   });
+  const [draftHydrationSeed, setDraftHydrationSeed] = useState<{
+    baselineValue: Record<string, unknown>;
+    baselineUpdatedAt: string;
+  } | null>(null);
   const profileDraftMode: DraftMode = onboardingMode ? "local-only" : "local-and-remote";
   const resolveProfileDraftKey = useCallback(() => (
     onboardingMode
@@ -970,6 +974,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false),
       social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
     };
+    setFormData(nextForm);
     socialAlbumRef.current = canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum);
     setSelectedCountry(matchedCountry?.code || "");
     if (profile?.avatar_url) {
@@ -995,16 +1000,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     });
     setLocationQuery(locationName);
     setResolvedLocationCountry(extractCountryFromPlaceLabel(locationName) || locationCountry || "");
-    hydrateProfileDraftFromBaseline({
+    setDraftHydrationSeed({
       baselineValue: nextForm,
       baselineUpdatedAt: String((profile as { updated_at?: string } | null)?.updated_at || null),
-      legacyDraft: readLegacySetProfileDraft(),
     });
   }, [
-    hydrateProfileDraftFromBaseline,
     onboardingMode,
     profile,
-    readLegacySetProfileDraft,
     resolveSetProfilePrefillKey,
     signupData.display_name,
     signupData.dob,
@@ -1752,6 +1754,15 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     discardDraft: discardProfileDraft,
     commitLatestDraftAsBaseline: commitProfileDraftAsBaseline,
   } = profileDraftAutosave;
+
+  useEffect(() => {
+    if (!draftHydrationSeed) return;
+    hydrateProfileDraftFromBaseline({
+      baselineValue: draftHydrationSeed.baselineValue,
+      baselineUpdatedAt: draftHydrationSeed.baselineUpdatedAt,
+      legacyDraft: readLegacySetProfileDraft(),
+    });
+  }, [draftHydrationSeed, hydrateProfileDraftFromBaseline, readLegacySetProfileDraft]);
 
   // ── Silent draft save (View tab) ────────────────────────────────────────────
   const silentSave = async () => {

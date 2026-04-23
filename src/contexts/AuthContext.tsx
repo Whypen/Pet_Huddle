@@ -287,11 +287,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return hydrationRunRef.current === runId;
   }, []);
 
-  const clearTransientUserStorage = useCallback(() => {
+  const clearTransientUserStorage = useCallback((options?: { preserveSignupFlow?: boolean }) => {
+    const preserveSignupFlow = options?.preserveSignupFlow === true;
     const scopedPrefixes = [
-      "huddle_signup_v2:",
-      "huddle_signup_password_v1:",
-      "signup_pending_verification_v1:",
+      ...(
+        preserveSignupFlow
+          ? []
+          : [
+              "huddle_signup_v2:",
+              "huddle_signup_password_v1:",
+              "signup_pending_verification_v1:",
+              "setprofile_prefill:",
+              "setpet_prefill:",
+            ] as const
+      ),
       "discovery_handled_",
       "discovery_passed_",
       "discovery_passed_session_",
@@ -303,22 +312,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       "chats_unread_",
       "chats_unread_seen_",
       "chats_unread_ack_",
-      "setprofile_prefill:",
-      "setpet_prefill:",
       "huddle_pin:",
       "huddle_social_pins:",
       "huddle_social_saves:",
       "huddle_offline_actions:",
     ] as const;
     const globalUnsafeKeys = [
-      "huddle_signup_v2",
-      "huddle_signup_password_v1",
-      "signup_pending_verification_v1",
-      "signup_verify_submitted_v1",
-      "signup_verify_docs_submitted",
-      "huddle_vi_status",
-      "setprofile_prefill",
-      "setpet_prefill",
+      ...(
+        preserveSignupFlow
+          ? []
+          : [
+              "huddle_signup_v2",
+              "huddle_signup_password_v1",
+              "signup_pending_verification_v1",
+              "signup_verify_submitted_v1",
+              "signup_verify_docs_submitted",
+              "huddle_vi_status",
+              "setprofile_prefill",
+              "setpet_prefill",
+            ] as const
+      ),
       "huddle_pin",
       "huddle_social_pins",
       "huddle_social_saves",
@@ -350,7 +363,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const resetAuthBoundary = useCallback((runId?: number) => {
+  const resetAuthBoundary = useCallback((runId?: number, options?: { preserveSignupFlow?: boolean }) => {
     if (typeof runId === "number" && !isHydrationRunCurrent(runId)) return;
     supabase.realtime.setAuth(null);
     setSession(null);
@@ -358,8 +371,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setProfile(null);
     setMfaPending(false);
     previousUserIdRef.current = null;
-    clearTransientUserStorage();
-    clearSignupScopedStorage([]);
+    clearTransientUserStorage({ preserveSignupFlow: options?.preserveSignupFlow });
+    if (!options?.preserveSignupFlow) {
+      clearSignupScopedStorage([]);
+    }
   }, [clearTransientUserStorage, isHydrationRunCurrent]);
 
   const fetchProfile = useCallback(async (
@@ -462,7 +477,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const hydrateValidatedSession = useCallback(async (candidateSession: Session | null) => {
     const runId = beginHydrationRun();
     if (!candidateSession) {
-      resetAuthBoundary(runId);
+      resetAuthBoundary(runId, { preserveSignupFlow: true });
       setLoading(false);
       setHydrating(false);
       return;
@@ -486,7 +501,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       await supabase.auth.signOut({ scope: "local" });
       if (!isHydrationRunCurrent(runId)) return;
-      resetAuthBoundary(runId);
+      resetAuthBoundary(runId, { preserveSignupFlow: true });
       setLoading(false);
       setHydrating(false);
       return;
