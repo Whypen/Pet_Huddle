@@ -2119,12 +2119,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         resetSignup();
         clearOnboardingDraftKeys(activeUser.id);
       }
-      // Welcome email — fire once on onboarding completion
-      if (onboardingMode) {
-        void supabase.functions.invoke("send-welcome-email", {
-          body: { user_id: activeUser.id },
-        }).catch((err) => console.warn("[send-welcome-email] failed silently", err));
-      }
       if (!onboardingMode) {
         toast.success(t("Profile updated!"));
       }
