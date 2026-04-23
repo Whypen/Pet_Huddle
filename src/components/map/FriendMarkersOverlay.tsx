@@ -24,8 +24,7 @@ type Props = {
 const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
 const COMPRESSED_MODE_EXIT_ZOOM = 15;
 const COMPRESSED_GROUP_DISTANCE_PX = 18;
-const EXPANDED_OVERLAP_DISTANCE_PX = 28;
-const EXPANDED_OVERLAP_STEP_PX = 20;
+const EXPANDED_GROUP_DISTANCE_PX = 28;
 const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
 const COMPRESSED_VERIFIED_BG = "#E6EEFF";
 const COMPRESSED_BADGE_BG = "#EEF2F8";
@@ -127,16 +126,16 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
     [friends, points]
   );
 
-  const compressedGroups = useMemo<CompressedGroup[]>(() => {
-    if (!isCompressedMode) return [];
+  const overlapGroups = useMemo<CompressedGroup[]>(() => {
     const groups: CompressedGroup[] = [];
+    const maxDistancePx = isCompressedMode ? COMPRESSED_GROUP_DISTANCE_PX : EXPANDED_GROUP_DISTANCE_PX;
     activeFriends.forEach((friend) => {
       const pt = points[friend.id];
       if (!pt) return;
       const overlappingGroup = groups.find((group) => {
         const dx = group.x - pt.x;
         const dy = group.y - pt.y;
-        return Math.hypot(dx, dy) <= COMPRESSED_GROUP_DISTANCE_PX;
+        return Math.hypot(dx, dy) <= maxDistancePx;
       });
       if (!overlappingGroup) {
         groups.push({ ids: [friend.id], x: pt.x, y: pt.y });
@@ -152,52 +151,19 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
 
   const groupedIds = useMemo(() => {
     const ids = new Set<string>();
-    compressedGroups.forEach((group) => {
+    overlapGroups.forEach((group) => {
       if (group.ids.length > 1) {
         group.ids.forEach((id) => ids.add(id));
       }
     });
     return ids;
-  }, [compressedGroups]);
-
-  const expandedOffsets = useMemo(() => {
-    if (isCompressedMode) return new Map<string, number>();
-    const offsets = new Map<string, number>();
-    const clusters: Array<{ ids: string[]; x: number; y: number }> = [];
-    activeFriends.forEach((friend) => {
-      const pt = points[friend.id];
-      if (!pt) return;
-      const overlappingCluster = clusters.find((cluster) => {
-        const dx = cluster.x - pt.x;
-        const dy = cluster.y - pt.y;
-        return Math.hypot(dx, dy) <= EXPANDED_OVERLAP_DISTANCE_PX;
-      });
-      if (!overlappingCluster) {
-        clusters.push({ ids: [friend.id], x: pt.x, y: pt.y });
-        return;
-      }
-      const nextCount = overlappingCluster.ids.length + 1;
-      overlappingCluster.x = (overlappingCluster.x * overlappingCluster.ids.length + pt.x) / nextCount;
-      overlappingCluster.y = (overlappingCluster.y * overlappingCluster.ids.length + pt.y) / nextCount;
-      overlappingCluster.ids.push(friend.id);
-    });
-    clusters.forEach((cluster) => {
-      if (cluster.ids.length < 2) return;
-      const sortedIds = [...cluster.ids].sort((left, right) => left.localeCompare(right));
-      const start = -((sortedIds.length - 1) * EXPANDED_OVERLAP_STEP_PX) / 2;
-      sortedIds.forEach((id, index) => {
-        offsets.set(id, start + index * EXPANDED_OVERLAP_STEP_PX);
-      });
-    });
-    return offsets;
-  }, [activeFriends, isCompressedMode, points]);
+  }, [overlapGroups]);
 
   if (!map || friends.length === 0) return null;
 
   return (
     <>
-      {isCompressedMode &&
-        compressedGroups
+      {overlapGroups
           .filter((group) => group.ids.length > 1)
           .map((group) => {
             const sortedIds = [...group.ids].sort((left, right) => left.localeCompare(right));
@@ -220,12 +186,12 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 }}
                 aria-label={`${group.ids.length} nearby users`}
               >
-                <div className="relative h-[34px] w-[34px]">
+                <div className="relative h-11 w-11">
                   {groupPinUrl ? (
                     <img
                       src={groupPinUrl}
                       alt=""
-                      className="h-full w-full object-contain"
+                      className="h-full w-full object-cover"
                       aria-hidden="true"
                     />
                   ) : null}
@@ -245,14 +211,13 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
         if (friend.markerState === "expired_dot") return null;
         if (groupedIds.has(friend.id)) return null;
         const ringColor = friend.isVerified ? "#2145CF" : "#C9CEDA";
-        const expandedOffsetX = expandedOffsets.get(friend.id) ?? 0;
         return (
           <button
             key={friend.id}
             type="button"
             className="absolute z-[1150] pointer-events-auto focus:outline-none"
             style={{
-              left: `${pt.x + expandedOffsetX}px`,
+              left: `${pt.x}px`,
               top: `${pt.y}px`,
               transform: "translate(-50%, -100%)",
             }}
@@ -287,14 +252,15 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 const bucket = friend.genderBucket ?? "neutral";
                 const sessionKey = `${friend.id}:${friend.sessionMarker || "unpinned"}:${bucket}`;
                 const maskedAvatarUrl = pickMaskedAvatarAsset(bucket, sessionKey);
+                const fallbackAvatarUrl = maskedAvatarUrl || normalizedAvatarUrl;
                 return (
                   <span
                     className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
                     style={{ border: `1.5px solid ${ringColor}` }}
                   >
-                    {maskedAvatarUrl ? (
+                    {fallbackAvatarUrl ? (
                       <img
-                        src={maskedAvatarUrl}
+                        src={fallbackAvatarUrl}
                         alt=""
                         className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
                         aria-hidden="true"
