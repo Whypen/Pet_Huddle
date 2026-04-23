@@ -13,7 +13,7 @@ const getStatusLabel = (mode: DraftMode, status: DraftStatus): string => {
   if (status === "saved") return mode === "local-only" ? "Saved" : "Saved";
   if (status === "offline_draft") return "Offline draft saved";
   if (status === "error") return "Couldn't save. Your draft is still stored on this device.";
-  if (status === "restored") return "Restored from draft";
+  if (status === "restored") return "";
   return "";
 };
 
