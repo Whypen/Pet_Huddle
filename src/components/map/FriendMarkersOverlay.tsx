@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type mapboxgl from "mapbox-gl";
+import { Users } from "lucide-react";
 import { pickGroupedPinAsset, pickMaskedAvatarAsset, type GenderBucket } from "./maskedPinAssets";
 
 export type FriendOverlayPin = {
@@ -27,6 +28,7 @@ const COMPRESSED_GROUP_DISTANCE_PX = 18;
 const EXPANDED_GROUP_DISTANCE_PX = 28;
 const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
 const COMPRESSED_VERIFIED_BG = "#E6EEFF";
+const FALLBACK_GROUP_BG = "#A6D539";
 const COMPRESSED_BADGE_BG = "#EEF2F8";
 const COMPRESSED_BADGE_TEXT = "#5C6474";
 
@@ -56,6 +58,7 @@ type CompressedGroup = {
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
   const [points, setPoints] = useState<Record<string, { x: number; y: number }>>({});
   const [avatarErrorsById, setAvatarErrorsById] = useState<Record<string, boolean>>({});
+  const [groupAssetErrorsByKey, setGroupAssetErrorsByKey] = useState<Record<string, boolean>>({});
   const [isCompressedMode, setIsCompressedMode] = useState(false);
 
   useEffect(() => {
@@ -174,6 +177,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
               .map((friend) => `${friend.id}:${friend.sessionMarker || "unpinned"}`)
               .join("|");
             const groupPinUrl = pickGroupedPinAsset(groupingSessionMarker);
+            const hasWorkingGroupAsset = Boolean(groupPinUrl) && !groupAssetErrorsByKey[groupingSessionMarker];
             const countLabel = group.ids.length > 9 ? "9+" : String(group.ids.length);
             return (
               <div
@@ -187,14 +191,28 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 aria-label={`${group.ids.length} nearby users`}
               >
                 <div className="relative h-11 w-11">
-                  {groupPinUrl ? (
+                  {hasWorkingGroupAsset ? (
                     <img
-                      src={groupPinUrl}
+                      src={groupPinUrl || ""}
                       alt=""
                       className="h-full w-full object-cover"
                       aria-hidden="true"
+                      onError={() =>
+                        setGroupAssetErrorsByKey((prev) => ({
+                          ...prev,
+                          [groupingSessionMarker]: true,
+                        }))
+                      }
                     />
-                  ) : null}
+                  ) : (
+                    <div
+                      className="flex h-full w-full items-center justify-center rounded-full border border-white/80"
+                      style={{ background: FALLBACK_GROUP_BG }}
+                      aria-hidden="true"
+                    >
+                      <Users className="h-[18px] w-[18px] text-white" strokeWidth={2.1} />
+                    </div>
+                  )}
                   <span
                     className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
                     style={{ background: COMPRESSED_BADGE_BG, color: COMPRESSED_BADGE_TEXT }}
