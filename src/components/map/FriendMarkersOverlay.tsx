@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
-import { User, Users } from "lucide-react";
+import { User } from "lucide-react";
 
 export type FriendOverlayPin = {
   id: string;
@@ -22,9 +22,12 @@ type Props = {
 const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
 const COMPRESSED_MODE_EXIT_ZOOM = 15;
 const COMPRESSED_GROUP_DISTANCE_PX = 18;
+const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
+const COMPRESSED_VERIFIED_BG = "#E6EEFF";
+const COMPRESSED_BADGE_BG = "#EEF2F8";
+const COMPRESSED_BADGE_TEXT = "#5C6474";
 
-const QuietUserGlyph = ({ isVerified }: { isVerified: boolean }) => {
-  const fill = isVerified ? "#2145CF" : "#5C6474";
+const QuietUserGlyph = ({ fill }: { fill: string }) => {
   return (
     <svg
       aria-hidden="true"
@@ -32,9 +35,9 @@ const QuietUserGlyph = ({ isVerified }: { isVerified: boolean }) => {
       className="h-[19px] w-[19px]"
       style={{ overflow: "visible" }}
     >
-      <circle cx="8" cy="4.4" r="2.1" fill={fill} />
+      <circle cx="8" cy="4.45" r="2.15" fill={fill} />
       <path
-        d="M4.15 12.3c0-1.95 1.72-3.35 3.85-3.35s3.85 1.4 3.85 3.35"
+        d="M4.05 12.2c0-1.92 1.78-3.3 3.95-3.3s3.95 1.38 3.95 3.3"
         fill={fill}
       />
     </svg>
@@ -48,7 +51,21 @@ type CompressedGroup = {
 };
 
 const QuietGroupGlyph = () => (
-  <Users className="h-[18px] w-[18px] text-[#5C6474]" strokeWidth={1.7} aria-hidden="true" />
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 18 18"
+    className="h-[18px] w-[18px]"
+    style={{ overflow: "visible" }}
+  >
+    <circle cx="6.2" cy="6.05" r="1.95" fill="#5C6474" />
+    <circle cx="11.75" cy="6.3" r="1.75" fill="#5C6474" opacity="0.92" />
+    <path d="M2.85 13.6c0-1.95 1.58-3.3 3.72-3.3s3.72 1.35 3.72 3.3" fill="#5C6474" />
+    <path
+      d="M8.55 13.45c0-1.58 1.28-2.68 3.05-2.68s3.05 1.1 3.05 2.68"
+      fill="#5C6474"
+      opacity="0.92"
+    />
+  </svg>
 );
 
 const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
@@ -170,8 +187,8 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-full border border-white/80 bg-[#E3E7EF]">
                   <QuietGroupGlyph />
                   <span
-                    className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full px-1 text-[8px] font-semibold leading-none text-[#4E5565]"
-                    style={{ background: "#F7F8FB", border: "0.75px solid rgba(78,85,101,0.24)" }}
+                    className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
+                    style={{ background: COMPRESSED_BADGE_BG, color: COMPRESSED_BADGE_TEXT }}
                   >
                     {countLabel}
                   </span>
@@ -231,9 +248,15 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
               const normalizedName = String(friend.name || "").trim();
               const initial = (normalizedName.charAt(0) || "F").toUpperCase();
               if (isCompressedMode) {
+                const isVerified = friend.isVerified === true;
                 return (
-                  <span className="flex h-[24px] w-[24px] items-center justify-center rounded-full border border-white/80 bg-[#E3E7EF]">
-                    <QuietUserGlyph isVerified={friend.isVerified === true} />
+                  <span
+                    className="flex h-[24px] w-[24px] items-center justify-center rounded-full border border-white/80"
+                    style={{
+                      background: isVerified ? COMPRESSED_VERIFIED_BG : COMPRESSED_NON_VERIFIED_BG,
+                    }}
+                  >
+                    <QuietUserGlyph fill={isVerified ? "#2145CF" : "#5C6474"} />
                   </span>
                 );
               }
