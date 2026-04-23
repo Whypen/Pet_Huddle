@@ -28,7 +28,6 @@ const COMPRESSED_GROUP_DISTANCE_PX = 18;
 const EXPANDED_GROUP_DISTANCE_PX = 28;
 const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
 const COMPRESSED_VERIFIED_BG = "#E6EEFF";
-const FALLBACK_GROUP_BG = "#A6D539";
 const COMPRESSED_BADGE_BG = "#EEF2F8";
 const COMPRESSED_BADGE_TEXT = "#5C6474";
 
@@ -186,35 +185,37 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 style={{
                   left: `${group.x}px`,
                   top: `${group.y}px`,
-                  transform: "translate(-50%, -100%)",
+                  transform: isCompressedMode ? "translate(-50%, -50%) scale(0.75)" : "translate(-50%, -50%)",
                 }}
                 aria-label={`${group.ids.length} nearby users`}
               >
                 <div className="relative h-11 w-11">
                   {hasWorkingGroupAsset ? (
-                    <img
-                      src={groupPinUrl || ""}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      aria-hidden="true"
-                      onError={() =>
-                        setGroupAssetErrorsByKey((prev) => ({
-                          ...prev,
-                          [groupingSessionMarker]: true,
-                        }))
-                      }
-                    />
+                    <div className="h-full w-full overflow-hidden rounded-full">
+                      <img
+                        src={groupPinUrl || ""}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        aria-hidden="true"
+                        onError={() =>
+                          setGroupAssetErrorsByKey((prev) => ({
+                            ...prev,
+                            [groupingSessionMarker]: true,
+                          }))
+                        }
+                      />
+                    </div>
                   ) : (
                     <div
                       className="flex h-full w-full items-center justify-center rounded-full border border-white/80"
-                      style={{ background: FALLBACK_GROUP_BG }}
+                      style={{ background: COMPRESSED_NON_VERIFIED_BG }}
                       aria-hidden="true"
                     >
-                      <Users className="h-[18px] w-[18px] text-white" strokeWidth={2.1} />
+                      <Users className="h-[18px] w-[18px] text-[#5C6474]" strokeWidth={2.1} />
                     </div>
                   )}
                   <span
-                    className="absolute -right-1 -top-1 flex min-w-[12px] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
+                    className="absolute right-0 top-0 flex min-w-[12px] translate-x-[22%] -translate-y-[18%] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
                     style={{ background: COMPRESSED_BADGE_BG, color: COMPRESSED_BADGE_TEXT }}
                   >
                     {countLabel}
