@@ -215,7 +215,7 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                     </div>
                   )}
                   <span
-                    className="absolute right-0 top-0 flex min-w-[12px] translate-x-[22%] -translate-y-[18%] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
+                    className="absolute right-[2px] top-[2px] z-[1] flex min-w-[14px] translate-x-[10%] -translate-y-[10%] items-center justify-center rounded-full border border-white/80 px-1 text-[8px] font-semibold leading-none"
                     style={{ background: COMPRESSED_BADGE_BG, color: COMPRESSED_BADGE_TEXT }}
                   >
                     {countLabel}
