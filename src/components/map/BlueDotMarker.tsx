@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
 import { User } from "lucide-react";
 
+const COMPRESSED_MODE_ENTER_ZOOM = 14;
+const COMPRESSED_MODE_EXIT_ZOOM = 14.5;
+
 type Coords = { lat: number; lng: number };
 
 interface BlueDotMarkerProps {
@@ -25,6 +28,7 @@ const BlueDotMarker = ({
 }: BlueDotMarkerProps) => {
   const [screenPoint, setScreenPoint] = useState<{ x: number; y: number } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [isCompressedMode, setIsCompressedMode] = useState(false);
 
   useEffect(() => {
     if (!map || !coords) {
@@ -33,6 +37,12 @@ const BlueDotMarker = ({
     }
 
     const syncToMap = () => {
+      const zoom = map.getZoom();
+      setIsCompressedMode((current) => {
+        if (zoom <= COMPRESSED_MODE_ENTER_ZOOM) return true;
+        if (zoom >= COMPRESSED_MODE_EXIT_ZOOM) return false;
+        return current;
+      });
       const point = map.project([coords.lng, coords.lat]);
       setScreenPoint({ x: point.x, y: point.y });
     };
@@ -77,7 +87,7 @@ const BlueDotMarker = ({
       style={{
         left: `${screenPoint.x}px`,
         top: `${screenPoint.y}px`,
-        transform: "translate(-50%, -50%)",
+        transform: isCompressedMode ? "translate(-50%, -50%) scale(0.5)" : "translate(-50%, -50%)",
       }}
     >
       {markerState === "expired_dot" ? (
