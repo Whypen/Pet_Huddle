@@ -1,0 +1,319 @@
+{
+  "style": "notionists",
+  "source_base": "https://api.dicebear.com/9.x/notionists/svg",
+  "generated_at": "2026-04-23T06:28:17.986Z",
+  "buckets": {
+    "male": [
+      {
+        "seed": "Jasper Wong",
+        "filename": "male/01-jasper-wong.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jasper%20Wong"
+      },
+      {
+        "seed": "Ethan Ho",
+        "filename": "male/02-ethan-ho.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Ethan%20Ho"
+      },
+      {
+        "seed": "Ryan Au",
+        "filename": "male/03-ryan-au.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Ryan%20Au"
+      },
+      {
+        "seed": "Calvin Poon",
+        "filename": "male/04-calvin-poon.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Calvin%20Poon"
+      },
+      {
+        "seed": "Marcus Lau",
+        "filename": "male/05-marcus-lau.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Marcus%20Lau"
+      },
+      {
+        "seed": "Adrian Ng",
+        "filename": "male/06-adrian-ng.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Adrian%20Ng"
+      },
+      {
+        "seed": "Daniel Kwok",
+        "filename": "male/07-daniel-kwok.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Daniel%20Kwok"
+      },
+      {
+        "seed": "Victor Cheng",
+        "filename": "male/08-victor-cheng.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Victor%20Cheng"
+      }
+    ],
+    "female": [
+      {
+        "seed": "Maya Chan",
+        "filename": "female/01-maya-chan.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Maya%20Chan"
+      },
+      {
+        "seed": "Sabrina Lee",
+        "filename": "female/02-sabrina-lee.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Sabrina%20Lee"
+      },
+      {
+        "seed": "Naomi Yip",
+        "filename": "female/03-naomi-yip.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Naomi%20Yip"
+      },
+      {
+        "seed": "Tiffany Cheung",
+        "filename": "female/04-tiffany-cheung.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Tiffany%20Cheung"
+      },
+      {
+        "seed": "Olivia Tang",
+        "filename": "female/05-olivia-tang.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Olivia%20Tang"
+      },
+      {
+        "seed": "Chloe Lam",
+        "filename": "female/06-chloe-lam.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Chloe%20Lam"
+      },
+      {
+        "seed": "Grace Ho",
+        "filename": "female/07-grace-ho.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Grace%20Ho"
+      },
+      {
+        "seed": "Hannah Yu",
+        "filename": "female/08-hannah-yu.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Hannah%20Yu"
+      }
+    ],
+    "neutral": [
+      {
+        "seed": "Alex Taylor",
+        "filename": "neutral/01-alex-taylor.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Alex%20Taylor"
+      },
+      {
+        "seed": "River Chen",
+        "filename": "neutral/02-river-chen.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=River%20Chen"
+      },
+      {
+        "seed": "Sky Morgan",
+        "filename": "neutral/03-sky-morgan.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Sky%20Morgan"
+      },
+      {
+        "seed": "Casey Lin",
+        "filename": "neutral/04-casey-lin.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Casey%20Lin"
+      },
+      {
+        "seed": "Jordan Vale",
+        "filename": "neutral/05-jordan-vale.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jordan%20Vale"
+      },
+      {
+        "seed": "Avery Wong",
+        "filename": "neutral/06-avery-wong.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Avery%20Wong"
+      },
+      {
+        "seed": "Quinn Park",
+        "filename": "neutral/07-quinn-park.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Quinn%20Park"
+      },
+      {
+        "seed": "Jamie Lau",
+        "filename": "neutral/08-jamie-lau.svg",
+        "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jamie%20Lau"
+      }
+    ]
+  },
+  "groups": [
+    {
+      "filename": "groups/01-group-maya-chan-jasper-wong-alex-taylor.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Maya Chan",
+          "filename": "female/01-maya-chan.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Maya%20Chan"
+        },
+        {
+          "bucket": "male",
+          "seed": "Jasper Wong",
+          "filename": "male/01-jasper-wong.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jasper%20Wong"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Alex Taylor",
+          "filename": "neutral/01-alex-taylor.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Alex%20Taylor"
+        }
+      ]
+    },
+    {
+      "filename": "groups/02-group-sabrina-lee-ethan-ho-river-chen.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Sabrina Lee",
+          "filename": "female/02-sabrina-lee.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Sabrina%20Lee"
+        },
+        {
+          "bucket": "male",
+          "seed": "Ethan Ho",
+          "filename": "male/02-ethan-ho.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Ethan%20Ho"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "River Chen",
+          "filename": "neutral/02-river-chen.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=River%20Chen"
+        }
+      ]
+    },
+    {
+      "filename": "groups/03-group-naomi-yip-ryan-au-sky-morgan.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Naomi Yip",
+          "filename": "female/03-naomi-yip.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Naomi%20Yip"
+        },
+        {
+          "bucket": "male",
+          "seed": "Ryan Au",
+          "filename": "male/03-ryan-au.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Ryan%20Au"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Sky Morgan",
+          "filename": "neutral/03-sky-morgan.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Sky%20Morgan"
+        }
+      ]
+    },
+    {
+      "filename": "groups/04-group-tiffany-cheung-calvin-poon-casey-lin.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Tiffany Cheung",
+          "filename": "female/04-tiffany-cheung.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Tiffany%20Cheung"
+        },
+        {
+          "bucket": "male",
+          "seed": "Calvin Poon",
+          "filename": "male/04-calvin-poon.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Calvin%20Poon"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Casey Lin",
+          "filename": "neutral/04-casey-lin.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Casey%20Lin"
+        }
+      ]
+    },
+    {
+      "filename": "groups/05-group-olivia-tang-marcus-lau-jordan-vale.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Olivia Tang",
+          "filename": "female/05-olivia-tang.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Olivia%20Tang"
+        },
+        {
+          "bucket": "male",
+          "seed": "Marcus Lau",
+          "filename": "male/05-marcus-lau.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Marcus%20Lau"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Jordan Vale",
+          "filename": "neutral/05-jordan-vale.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jordan%20Vale"
+        }
+      ]
+    },
+    {
+      "filename": "groups/06-group-chloe-lam-adrian-ng-avery-wong.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Chloe Lam",
+          "filename": "female/06-chloe-lam.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Chloe%20Lam"
+        },
+        {
+          "bucket": "male",
+          "seed": "Adrian Ng",
+          "filename": "male/06-adrian-ng.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Adrian%20Ng"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Avery Wong",
+          "filename": "neutral/06-avery-wong.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Avery%20Wong"
+        }
+      ]
+    },
+    {
+      "filename": "groups/07-group-grace-ho-daniel-kwok-quinn-park.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Grace Ho",
+          "filename": "female/07-grace-ho.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Grace%20Ho"
+        },
+        {
+          "bucket": "male",
+          "seed": "Daniel Kwok",
+          "filename": "male/07-daniel-kwok.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Daniel%20Kwok"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Quinn Park",
+          "filename": "neutral/07-quinn-park.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Quinn%20Park"
+        }
+      ]
+    },
+    {
+      "filename": "groups/08-group-hannah-yu-victor-cheng-jamie-lau.svg",
+      "sources": [
+        {
+          "bucket": "female",
+          "seed": "Hannah Yu",
+          "filename": "female/08-hannah-yu.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Hannah%20Yu"
+        },
+        {
+          "bucket": "male",
+          "seed": "Victor Cheng",
+          "filename": "male/08-victor-cheng.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Victor%20Cheng"
+        },
+        {
+          "bucket": "neutral",
+          "seed": "Jamie Lau",
+          "filename": "neutral/08-jamie-lau.svg",
+          "url": "https://api.dicebear.com/9.x/notionists/svg?seed=Jamie%20Lau"
+        }
+      ]
+    }
+  ]
+}
