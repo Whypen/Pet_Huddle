@@ -227,6 +227,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const lastPriceHintsRef = useRef("");
   const previousUserIdRef = useRef<string | null>(null);
   const hydrationRunRef = useRef(0);
+  const profileDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const beginHydrationRun = useCallback(() => {
     hydrationRunRef.current += 1;
@@ -548,13 +549,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           filter: `id=eq.${user.id}`,
         },
         () => {
-          const runId = beginHydrationRun();
-          void fetchProfile(user.id, runId);
+          if (profileDebounceRef.current !== null) window.clearTimeout(profileDebounceRef.current);
+          profileDebounceRef.current = window.setTimeout(() => {
+            profileDebounceRef.current = null;
+            const runId = beginHydrationRun();
+            void fetchProfile(user.id, runId);
+          }, 300);
         },
       )
       .subscribe();
 
     return () => {
+      if (profileDebounceRef.current !== null) window.clearTimeout(profileDebounceRef.current);
       void supabase.removeChannel(channel);
     };
   }, [beginHydrationRun, fetchProfile, user?.id]);

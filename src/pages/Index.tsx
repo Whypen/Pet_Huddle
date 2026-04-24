@@ -91,6 +91,7 @@ const Index = () => {
   const [firstTimeNoPetView, setFirstTimeNoPetView] = useState(false);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const petsDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const fetchPets = useCallback(async () => {
     try {
@@ -134,21 +135,27 @@ const Index = () => {
   }, [user?.id, fetchPets]);
 
   useEffect(() => {
+    if (!user?.id) return;
     const channel = supabase
-      .channel("pets-home-refresh")
+      .channel(`pets-home-realtime-${user.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "pets" },
+        { event: "*", schema: "public", table: "pets", filter: `owner_id=eq.${user.id}` },
         () => {
-          void fetchPets();
+          if (petsDebounceRef.current !== null) window.clearTimeout(petsDebounceRef.current);
+          petsDebounceRef.current = window.setTimeout(() => {
+            petsDebounceRef.current = null;
+            void fetchPets();
+          }, 350);
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (petsDebounceRef.current !== null) window.clearTimeout(petsDebounceRef.current);
+      void supabase.removeChannel(channel);
     };
-  }, [fetchPets]);
+  }, [fetchPets, user?.id]);
 
   useEffect(() => {
     if (pets.length === 0) {

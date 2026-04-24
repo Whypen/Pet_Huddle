@@ -6,7 +6,7 @@
  * No framer-motion bounce (A.8 — banned)
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Home, Users, MessageCircle, PawPrint, MapPin } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -34,6 +34,7 @@ export const BottomNav = () => {
     [profile?.id]
   );
   const [chatUnread, setChatUnread] = useState(0);
+  const realtimeDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const isChatSurface =
     location.pathname.startsWith("/chats") ||
     location.pathname.startsWith("/chat-dialogue") ||
@@ -103,10 +104,15 @@ export const BottomNav = () => {
     const channel = supabase
       .channel(`bottom_nav_unread_${profile.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
-        void recalcUnreadFromBackend(profile.id);
+        if (realtimeDebounceRef.current !== null) window.clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = window.setTimeout(() => {
+          realtimeDebounceRef.current = null;
+          void recalcUnreadFromBackend(profile.id);
+        }, 350);
       })
       .subscribe();
     return () => {
+      if (realtimeDebounceRef.current !== null) window.clearTimeout(realtimeDebounceRef.current);
       void supabase.removeChannel(channel);
     };
   }, [profile?.id, recalcUnreadFromBackend]);
