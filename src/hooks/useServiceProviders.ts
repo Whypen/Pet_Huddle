@@ -323,15 +323,12 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
         if (upsertErr) throw upsertErr;
       }
 
-      setProviders((prev) =>
-        prev.map((item) =>
-          item.userId === providerUserId ? { ...item, isBookmarked: !isBookmarked } : item,
-        ),
+      const updated = previous.map((item) =>
+        item.userId === providerUserId ? { ...item, isBookmarked: !isBookmarked } : item,
       );
+      setProviders(updated);
       serviceProvidersCache.set(cacheKey, {
-        providers: previous.map((item) =>
-          item.userId === providerUserId ? { ...item, isBookmarked: !isBookmarked } : item,
-        ),
+        providers: updated,
         updatedAt: lastFetchedAtRef.current || Date.now(),
       });
     } catch (err) {

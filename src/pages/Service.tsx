@@ -116,17 +116,19 @@ const Service = () => {
 
   useServiceAnalytics(profile?.id, visibleProviders, filters.sort, activeProviderId, loading);
 
-  const leftColumn = visibleProviders.filter((_, index) => index % 2 === 0);
-  const rightColumn = visibleProviders.filter((_, index) => index % 2 === 1);
+  const { leftColumn, rightColumn } = useMemo(() => ({
+    leftColumn: visibleProviders.filter((_, index) => index % 2 === 0),
+    rightColumn: visibleProviders.filter((_, index) => index % 2 === 1),
+  }), [visibleProviders]);
 
-  const handleBookmark = async (providerUserId: string) => {
+  const handleBookmark = useCallback(async (providerUserId: string) => {
     try {
       await toggleBookmark(providerUserId);
     } catch (error) {
       console.error("[service.bookmark_failed]", error);
       toast.error("Unable to update bookmark right now.");
     }
-  };
+  }, [toggleBookmark]);
 
   const handleRequestService = useCallback(async (providerUserId: string) => {
     if (isActive("service_disabled")) {

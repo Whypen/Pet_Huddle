@@ -105,6 +105,8 @@ const ServiceChat = () => {
   const [dismissedPreviewUrls, setDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  // Mirror of linkPreviewByUrl state; used in effects that must not re-run on every preview update.
+  const linkPreviewMapRef = useRef<Record<string, ExternalLinkPreview>>({});
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const messageContentRef = useRef<HTMLElement | null>(null);
@@ -172,6 +174,8 @@ const ServiceChat = () => {
     ? lockedPreviewUrl
     : composerFirstUrl;
   const composerPreview = activePreviewUrl ? linkPreviewByUrl[activePreviewUrl] || null : null;
+  // Keep ref in sync so link-preview effects can guard without taking linkPreviewByUrl as a dep.
+  useEffect(() => { linkPreviewMapRef.current = linkPreviewByUrl; }, [linkPreviewByUrl]);
   const showLoading = authLoading || loading || (!!roomId && (!userId || !currentRoomResolved));
 
   const markCurrentRoomSeen = useCallback(() => {
@@ -320,19 +324,19 @@ const ServiceChat = () => {
     }
   }, [loading, markCurrentRoomSeen, messages, showLoading]);
 
-  useEffect(() => {
-    const computeHeight = () => {
-      const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
-      const bookingTop = bookingCardRef.current?.getBoundingClientRect().height ?? 0;
-      const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
-      const viewport = window.innerHeight;
-      const reserved = stickyTop + bookingTop + bottom;
-      setMessageViewportHeight(Math.max(220, viewport - reserved));
-    };
+  const computeHeight = useCallback(() => {
+    const stickyTop = stickyHeaderRef.current?.getBoundingClientRect().height ?? 0;
+    const bookingTop = bookingCardRef.current?.getBoundingClientRect().height ?? 0;
+    const bottom = bottomBarRef.current?.getBoundingClientRect().height ?? 0;
+    const viewport = window.innerHeight;
+    const reserved = stickyTop + bookingTop + bottom;
+    setMessageViewportHeight(Math.max(220, viewport - reserved));
+  }, []);
 
+  useEffect(() => {
     computeHeight();
 
-    const observer = new ResizeObserver(() => computeHeight());
+    const observer = new ResizeObserver(computeHeight);
     if (stickyHeaderRef.current) observer.observe(stickyHeaderRef.current);
     if (bookingCardRef.current) observer.observe(bookingCardRef.current);
     if (bottomBarRef.current) observer.observe(bottomBarRef.current);
@@ -342,7 +346,7 @@ const ServiceChat = () => {
       observer.disconnect();
       window.removeEventListener("resize", computeHeight);
     };
-  }, [status, loading]);
+  }, [computeHeight, status, loading]);
 
   useEffect(() => {
     const container = messageScrollRef.current;
@@ -377,6 +381,8 @@ const ServiceChat = () => {
     snapToLatestMessage,
   ]);
 
+  // Use linkPreviewMapRef (not state) for the guard so this effect doesn't re-run on every
+  // preview update — only when the message list or composerFirstUrl changes.
   useEffect(() => {
     const urls = new Set<string>();
     if (activePreviewUrl) urls.add(activePreviewUrl);
@@ -388,23 +394,25 @@ const ServiceChat = () => {
       if (previewUrl) urls.add(previewUrl);
     });
     urls.forEach((url) => {
-      if (linkPreviewByUrl[url]?.resolved || linkPreviewByUrl[url]?.failed || linkPreviewByUrl[url]?.loading) return;
+      const existing = linkPreviewMapRef.current[url];
+      if (existing?.resolved || existing?.failed || existing?.loading) return;
       setLinkPreviewByUrl((prev) => ({ ...prev, [url]: { url, loading: true } }));
       void fetchExternalLinkPreview(url).then((preview) => {
         setLinkPreviewByUrl((prev) => ({ ...prev, [url]: preview }));
       });
     });
-  }, [activePreviewUrl, linkPreviewByUrl, messages]);
+  }, [activePreviewUrl, messages]);
 
   useEffect(() => {
     if (!composerFirstUrl) return;
-    const preview = linkPreviewByUrl[composerFirstUrl];
+    const preview = linkPreviewMapRef.current[composerFirstUrl];
     if (!preview?.resolved || preview.failed) return;
     setLockedPreviewUrl(composerFirstUrl);
     setComposer((prev) => {
       if (!prev.includes(composerFirstUrl)) return prev;
       return stripExternalUrlFromText(prev, composerFirstUrl);
     });
+  // Re-run when linkPreviewByUrl state changes so the ref is current before this check runs.
   }, [composerFirstUrl, linkPreviewByUrl]);
 
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
