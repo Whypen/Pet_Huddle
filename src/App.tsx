@@ -39,6 +39,7 @@ import SetProfile from "./pages/SetProfile";
 import SetPetProfile from "./pages/SetPetProfile";
 import NotFound from "./pages/NotFound";
 import Privacy from "./pages/Privacy";
+import Support from "./pages/Support";
 import Terms from "./pages/Terms";
 import CommunityGuidelines from "./pages/CommunityGuidelines";
 import CookiesPolicy from "./pages/CookiesPolicy";
@@ -136,8 +137,6 @@ const AuthCacheIsolation = () => {
     const currentUserId = user?.id ?? null;
     if (previousUserRef.current && previousUserRef.current !== currentUserId) {
       queryClient.clear();
-    } else if (!currentUserId) {
-      queryClient.removeQueries();
     }
     previousUserRef.current = currentUserId;
   }, [queryClient, user?.id]);
@@ -190,7 +189,6 @@ const App = () => (
                   <Route path="/verify" element={<VerifyCallback />} />
                   {/* Group invite link — code from /join/:code invite URLs */}
                   <Route path="/join/:code" element={<JoinGroup />} />
-
                   {/* Protected Routes */}
                   <Route
                     path="/"
@@ -448,6 +446,10 @@ const App = () => (
                         </AppShell>
                       </ProtectedRoute>
                     }
+                  />
+                  <Route
+                    path="/support"
+                    element={<Support />}
                   />
                   <Route
                     path="/privacy"
