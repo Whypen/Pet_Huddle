@@ -28,7 +28,7 @@ const Support = () => {
       ) : null}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-6 ${nativeContentOnly ? "pt-4" : "pt-[68px]"}`}>
+        <div className={`mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 pb-6 ${nativeContentOnly ? "pt-[72px]" : "pt-[68px]"}`}>
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground">Need help with Huddle?</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
