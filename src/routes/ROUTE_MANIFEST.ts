@@ -47,6 +47,8 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
   // ── Legal ───────────────────────────────────────────────────
   "/privacy",
   "/terms",
+  "/privacy-choices",
+  "/support",
 
   // ── Admin ───────────────────────────────────────────────────
   "/admin",

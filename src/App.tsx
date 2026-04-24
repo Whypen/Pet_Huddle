@@ -106,6 +106,7 @@ const Terms = lazy(() => import("./pages/Terms"));
 const CommunityGuidelines = lazy(() => import("./pages/CommunityGuidelines"));
 const CookiesPolicy = lazy(() => import("./pages/CookiesPolicy"));
 const PrivacyChoices = lazy(() => import("./pages/PrivacyChoices"));
+const Support = lazy(() => import("./pages/Support"));
 const ServiceAgreement = lazy(() => import("./pages/ServiceAgreement"));
 const BookingTerms = lazy(() => import("./pages/BookingTerms"));
 
@@ -477,6 +478,10 @@ const App = () => (
                   <Route
                     path="/privacy-choices"
                     element={<RouteSuspense><PrivacyChoices /></RouteSuspense>}
+                  />
+                  <Route
+                    path="/support"
+                    element={<RouteSuspense><Support /></RouteSuspense>}
                   />
                   <Route
                     path="/admin"
