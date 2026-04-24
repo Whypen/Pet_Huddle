@@ -3301,45 +3301,52 @@ const Chats = () => {
       );
     });
   }, [chats, getChatPreview, mainTab, profile?.id, searchQuery]);
-  const avatarOnlyMatchedChats = useMemo(
-    () =>
-      filteredChats.filter(
-        (chat) =>
-          Boolean(chat.peerUserId) &&
-          chat.peerUserId !== profile?.id &&
-          activeMatchedPeerIds.has(String(chat.peerUserId || "").trim()) &&
-          !chat.lastMessageAt &&
-          getChatPreview(chat).length === 0
-      ),
-    [activeMatchedPeerIds, filteredChats, getChatPreview, profile?.id]
-  );
-  const avatarOnlyMatchedChatIds = useMemo(
-    () => new Set(avatarOnlyMatchedChats.map((chat) => chat.id)),
-    [avatarOnlyMatchedChats]
-  );
-  const visibleConversationChats = useMemo(
-    () =>
-      filteredChats.filter((chat) => {
-        const hasConversationActivity = Boolean(chat.lastMessageAt) || getChatPreview(chat).length > 0;
-        if (!hasConversationActivity) return false;
-        return !avatarOnlyMatchedChatIds.has(chat.id);
-      }),
-    [avatarOnlyMatchedChatIds, filteredChats, getChatPreview]
-  );
-  const priorityStarChats = useMemo(
-    () => visibleConversationChats.filter(
-      (chat) => isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true
-    ),
-    [visibleConversationChats]
-  );
-  const priorityStarChatIds = useMemo(
-    () => new Set(priorityStarChats.map((chat) => chat.id)),
-    [priorityStarChats]
-  );
-  const regularConversationChats = useMemo(
-    () => visibleConversationChats.filter((chat) => !priorityStarChatIds.has(chat.id)),
-    [priorityStarChatIds, visibleConversationChats]
-  );
+  // Single-pass derivation: replace 6 chained memos (each allocating a new array/Set)
+  // with one memo that classifies every chat in filteredChats exactly once.
+  const {
+    avatarOnlyMatchedChats,
+    avatarOnlyMatchedChatIds,
+    visibleConversationChats,
+    priorityStarChats,
+    regularConversationChats,
+  } = useMemo(() => {
+    const avatarOnly: ChatUser[] = [];
+    const avatarOnlyIds = new Set<string>();
+    const conversations: ChatUser[] = [];
+    const priorityStar: ChatUser[] = [];
+    const regular: ChatUser[] = [];
+
+    for (const chat of filteredChats) {
+      const preview = getChatPreview(chat);
+      const hasActivity = Boolean(chat.lastMessageAt) || preview.length > 0;
+      const peerId = String(chat.peerUserId || "").trim();
+      const isAvatarOnly =
+        Boolean(peerId) &&
+        peerId !== (profile?.id || "") &&
+        activeMatchedPeerIds.has(peerId) &&
+        !hasActivity;
+
+      if (isAvatarOnly) {
+        avatarOnly.push(chat);
+        avatarOnlyIds.add(chat.id);
+      } else if (hasActivity) {
+        conversations.push(chat);
+        if (isStarIntroKind(chat.lastMessageKind || null) && chat.lastMessageFromMe !== true) {
+          priorityStar.push(chat);
+        } else {
+          regular.push(chat);
+        }
+      }
+    }
+
+    return {
+      avatarOnlyMatchedChats: avatarOnly,
+      avatarOnlyMatchedChatIds: avatarOnlyIds,
+      visibleConversationChats: conversations,
+      priorityStarChats: priorityStar,
+      regularConversationChats: regular,
+    };
+  }, [activeMatchedPeerIds, filteredChats, getChatPreview, profile?.id]);
   const filteredServiceChats = filteredChats;
   const strictMatchedDiscoveryIds = useMemo(() => {
     const ids = new Set<string>();
@@ -3550,6 +3557,11 @@ const Chats = () => {
       discoverBootstrapReady &&
       (!inboxLoadedScopesRef.current.has("friends") || !inboxLoadedScopesRef.current.has("groups"));
     if (shouldHydrateDiscoverInbox) {
+      // Mark all scopes optimistically so the 260ms warm timer below doesn't race and
+      // issue redundant individual scope fetches before the "all" RPC returns.
+      inboxLoadedScopesRef.current.add("friends");
+      inboxLoadedScopesRef.current.add("service");
+      inboxLoadedScopesRef.current.add("groups");
       void loadConversations("all");
     } else if (!inboxLoadedScopesRef.current.has(mainTab)) {
       void loadConversations(mainTab);
@@ -3576,12 +3588,23 @@ const Chats = () => {
         window.clearTimeout(inboxWarmTimerRef.current);
         inboxWarmTimerRef.current = null;
       }
+      // NOTE: dirtyRoomFlushTimerRef is intentionally NOT cleared here — this effect
+      // re-runs on every tab switch and clearing it would drop pending unread-count
+      // delta flushes. It is cleaned up in the profile-scoped unmount effect below.
+    };
+  }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
+
+  // Profile-scoped cleanup: flush the dirty-room timer when the user logs out or
+  // the component unmounts. Separate from the tab-switch effect above so tab
+  // changes never cancel a pending delta flush mid-flight.
+  useEffect(() => {
+    return () => {
       if (dirtyRoomFlushTimerRef.current != null) {
         window.clearTimeout(dirtyRoomFlushTimerRef.current);
         dirtyRoomFlushTimerRef.current = null;
       }
     };
-  }, [authLoading, discoverBootstrapReady, loadConversations, logChatsPerfMetric, mainTab, profile?.id, topTab]);
+  }, [profile?.id]);
 
   useEffect(() => {
     if (!conversationsHydratedRef.current) return;
@@ -4687,7 +4710,7 @@ const Chats = () => {
     [exploreGroups, groupDetailsId, groups, invitedExploreGroups]
   );
 
-  const handleChatClick = (chat: ChatUser) => {
+  const handleChatClick = useCallback((chat: ChatUser) => {
     // Mark as read
     setChats(prev => prev.map(c =>
       c.id === chat.id ? { ...c, unread: 0 } : c
@@ -4718,18 +4741,18 @@ const Chats = () => {
       return;
     }
     navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
-  };
+  }, [ensureDirectRoom, markChatMessagesRead, navigate]);
 
-  const handleRemoveChat = (chat: ChatUser) => {
+  const handleRemoveChat = useCallback((chat: ChatUser) => {
     if (chat.hasTransaction) {
       toast.error(t("Cannot remove conversations with active transactions"));
       return;
     }
     setChats((prev) => prev.filter((c) => c.id !== chat.id));
     toast.success(t("Conversation removed"));
-  };
+  }, [t]);
 
-  const handleGroupClick = (group: Group) => {
+  const handleGroupClick = useCallback((group: Group) => {
     if (group.invitePending) {
       setPendingGroupInvite({
         inviteId: "",
@@ -4745,7 +4768,7 @@ const Chats = () => {
     ));
     void markChatMessagesRead(group.id);
     navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-  };
+  }, [markChatMessagesRead, navigate]);
 
   // Tap user profile — open right-side sheet showing public fields; block if non_social
   const handleProfileTap = async (userId: string, displayName: string, avatarUrl?: string | null) => {
