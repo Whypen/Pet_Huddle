@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Bell, BellOff, LogOut, ShieldAlert, ImageIcon, Hash, BadgeCheck, Settings, Pencil, Save } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Hash, BadgeCheck, Settings, Pencil, Save } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
@@ -811,7 +811,6 @@ const Chats = () => {
   const [groupDetailsMediaUrls, setGroupDetailsMediaUrls] = useState<string[]>([]);
   const [mutualWaves, setMutualWaves] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [groupAddSearch, setGroupAddSearch] = useState("");
-  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [discoveryProfiles, setDiscoveryProfiles] = useState<DiscoveryProfile[]>([]);
   const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
@@ -1189,11 +1188,16 @@ const Chats = () => {
 
   useEffect(() => {
     if (!profile?.id) return;
-    try {
-      localStorage.setItem(discoveryFiltersKey, JSON.stringify(filters));
-    } catch {
-      // ignore cache write failure
-    }
+    // Debounce localStorage writes — dragging the distance slider fires setFilters per
+    // pixel; stringifying the full filters object on every tick produces main-thread jank.
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(discoveryFiltersKey, JSON.stringify(filters));
+      } catch {
+        // ignore cache write failure
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
   }, [discoveryFiltersKey, filters, profile?.id]);
 
   useEffect(() => {
@@ -2230,59 +2234,48 @@ const Chats = () => {
 
   // Filters are now managed in the filters state object with sensible defaults
 
-  // Fetch user pets when the nanny booking modal opens
+  // Fetch user pets and initial booking state exactly once per nanny-booking-modal open.
+  // Previously this effect depended on serviceDate/serviceEndDate/startTime/endTime/
+  // sitterHourlyRate, which meant every keystroke in the date/time fields refetched
+  // pets + sitter rate AND reset the form values back to their defaults. The booking
+  // amount derivation is owned by the separate effect below (deps on the time fields).
   useEffect(() => {
-    if (nannyBookingOpen && profile?.id) {
-      supabase.from("pets").select("id, name, species").eq("owner_id", profile.id).then(({ data }) => {
-        if (data) {
-          setUserPets(data);
-          if (data.length > 0) {
-            setSelectedPet(data[0].id);
-          }
-        }
+    if (!nannyBookingOpen || !profile?.id) return;
+    let cancelled = false;
+    void supabase
+      .from("pets")
+      .select("id, name, species")
+      .eq("owner_id", profile.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setUserPets(data);
+        if (data.length > 0) setSelectedPet(data[0].id);
       });
-      setBookingLocation(
-        profile.location_name ||
-          (profile.last_lat && profile.last_lng ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}` : "")
-      );
-      if (selectedNanny?.id) {
-        supabase
-          .from("sitter_profiles" as "profiles")
-          .select("hourly_rate" as "*")
-          .eq("user_id" as "id", selectedNanny.id)
-          .maybeSingle()
-          .then(({ data }: { data: Record<string, unknown> | null }) => {
-            setSitterHourlyRate((data?.hourly_rate as number) || null);
-          });
-      }
-      setServiceDate("");
-      setServiceEndDate("");
-      setStartTime("09:00");
-      setEndTime("17:00");
-      setSafeHarborAccepted(false);
-      if (sitterHourlyRate) {
-        const baseDate = serviceDate || new Date().toISOString().split("T")[0];
-        const endDate = serviceEndDate || baseDate;
-        const start = new Date(`${baseDate}T${startTime}`);
-        const end = new Date(`${endDate}T${endTime}`);
-        const hours = Math.max(0, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
-        const expected = Math.round((sitterHourlyRate * hours) / 100);
-        if (expected > 0) setBookingAmount(expected.toString());
-      }
+    setBookingLocation(
+      profile.location_name ||
+        (profile.last_lat && profile.last_lng ? `${profile.last_lat.toFixed(5)}, ${profile.last_lng.toFixed(5)}` : "")
+    );
+    if (selectedNanny?.id) {
+      void supabase
+        .from("sitter_profiles" as "profiles")
+        .select("hourly_rate" as "*")
+        .eq("user_id" as "id", selectedNanny.id)
+        .maybeSingle()
+        .then(({ data }: { data: Record<string, unknown> | null }) => {
+          if (cancelled) return;
+          setSitterHourlyRate((data?.hourly_rate as number) || null);
+        });
     }
-  }, [
-    nannyBookingOpen,
-    profile?.id,
-    profile?.last_lat,
-    profile?.last_lng,
-    profile?.location_name,
-    selectedNanny?.id,
-    serviceDate,
-    serviceEndDate,
-    startTime,
-    endTime,
-    sitterHourlyRate,
-  ]);
+    setServiceDate("");
+    setServiceEndDate("");
+    setStartTime("09:00");
+    setEndTime("17:00");
+    setSafeHarborAccepted(false);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nannyBookingOpen, profile?.id, selectedNanny?.id]);
 
   useEffect(() => {
     if (!sitterHourlyRate || !serviceDate || !serviceEndDate) return;
@@ -2646,7 +2639,7 @@ const Chats = () => {
       }
       const counterpartInActiveConversations = new Set(
         friendChats
-          .filter((chat) => Boolean(chat.lastMessageAt) || parseChatPreviewText(chat.lastMessage).length > 0)
+          .filter((chat) => Boolean(chat.lastMessageAt) || (chat.lastMessage || "").length > 0)
           .map((chat) => String(chat.peerUserId || "").trim())
           .filter(Boolean)
       );
@@ -3278,7 +3271,8 @@ const Chats = () => {
           .from("chat_messages")
           .select("id, sender_id, content, created_at")
           .eq("chat_id", roomId)
-          .order("created_at", { ascending: true }))?.data || []) as Array<{
+          .order("created_at", { ascending: false })
+          .limit(150))?.data || []) as Array<{
           id: string;
           sender_id: string;
           content: string;
@@ -3407,7 +3401,9 @@ const Chats = () => {
       const isSender = chat.lastMessageStarSenderId === profile?.id || chat.lastMessageFromMe === true;
       return isSender ? "You sent a Star ⭐" : "New Star Connection ⭐";
     }
-    return parseChatPreviewText(chat.lastMessage);
+    // chat.lastMessage is already normalized by parseChatPreviewText in
+    // buildChatFromSummary — don't re-parse on every list render.
+    return chat.lastMessage || "";
   }, [profile?.id]);
 
   const getServiceStatusLabel = (chat: ChatUser) => {
@@ -3587,12 +3583,22 @@ const Chats = () => {
 
   useEffect(() => {
     if (!profile?.id) return;
+    // Dispatch the in-app event immediately so BottomNav/badge UI reacts without lag,
+    // but debounce the localStorage write — realtime message ticks can churn unread
+    // counts several times per second.
     try {
-      localStorage.setItem(`chats_unread_${profile.id}`, String(totalUnreadMessages));
       window.dispatchEvent(new CustomEvent("huddle:chats-unread", { detail: { count: totalUnreadMessages } }));
     } catch {
-      // ignore storage dispatch failure
+      // ignore dispatch failure
     }
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(`chats_unread_${profile.id}`, String(totalUnreadMessages));
+      } catch {
+        // ignore storage write failure
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
   }, [profile?.id, totalUnreadMessages]);
 
   useEffect(() => {
@@ -3913,6 +3919,8 @@ const Chats = () => {
     }
   }, [discoveryDeck.length, discoveryLoading, discoverySource.length, discoveryVisibleCount, passedDiscoveryIds.size]);
   const groupSelectableUsers = useMemo(() => {
+    // Gated: this list is only rendered inside the Manage-Group dialog. Avoid rebuilding on every inbox tick.
+    if (!groupManageId) return [] as GroupContactOption[];
     const nextById = new Map<string, GroupContactOption>();
     const add = (entry: GroupContactOption | null | undefined) => {
       if (!entry?.id) return;
@@ -3943,10 +3951,12 @@ const Chats = () => {
     );
 
     return Array.from(nextById.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [blockedUserIds, chats, groupContactPool, matchOnlyAvatars, profile?.id]);
+  }, [blockedUserIds, chats, groupContactPool, groupManageId, matchOnlyAvatars, profile?.id]);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    // Gated: groupContactPool is only consumed by the Manage-Group sheet. Skip the
+    // up-to-250-row profile lookup when the sheet is closed.
+    if (!profile?.id || !groupManageId) return;
     void (async () => {
       const matchesRows = await fetchUserMatches();
       const counterpartIds = Array.from(
@@ -4002,7 +4012,7 @@ const Chats = () => {
         setGroupContactPool(fallback);
       }
     })();
-  }, [blockedUserIds, fetchUserMatches, matchesFeedTick, profile?.id]);
+  }, [blockedUserIds, fetchUserMatches, groupManageId, matchesFeedTick, profile?.id]);
 
   const ensureDirectRoom = useCallback(async (targetUserId: string, targetName: string) => {
     if (!profile?.id) return null;
@@ -4324,12 +4334,13 @@ const Chats = () => {
       }, 350);
     };
 
+    // Collapse 4 listeners (INSERT/UPDATE × user1/user2) into 2 using event: "*". The
+    // JS-side guard above (`user1 !== profile.id && user2 !== profile.id`) already
+    // filters out irrelevant rows that might leak if the filter layer ever misbehaves.
     const channel = supabase
       .channel(`matches_feed_${profile.id}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `user1_id=eq.${profile.id}` }, onMatchChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "matches", filter: `user2_id=eq.${profile.id}` }, onMatchChange)
       .subscribe();
 
     return () => {
@@ -4855,8 +4866,13 @@ const Chats = () => {
         .limit(80);
       const urls: string[] = [];
       for (const row of (data || []) as Array<{ content?: string | null }>) {
+        const raw = String(row.content || "");
+        // Cheap pre-filter: most messages are plain text. Skip JSON.parse (and its
+        // throw-on-every-non-JSON main-thread cost) unless the payload looks like
+        // an attachment-bearing object.
+        if (!raw.startsWith("{") || raw.indexOf('"attachments"') === -1) continue;
         try {
-          const parsed = JSON.parse(String(row.content || "")) as { attachments?: Array<{ url?: string; mime?: string }> };
+          const parsed = JSON.parse(raw) as { attachments?: Array<{ url?: string; mime?: string }> };
           if (!Array.isArray(parsed.attachments)) continue;
           parsed.attachments.forEach((attachment) => {
             const url = String(attachment?.url || "").trim();
@@ -4865,7 +4881,7 @@ const Chats = () => {
             urls.push(url);
           });
         } catch {
-          // ignore plain text rows
+          // malformed JSON, skip
         }
       }
       setGroupDetailsMediaUrls(urls);
@@ -5612,7 +5628,7 @@ const Chats = () => {
                                 showBadges={true}
                               />
                               {/* Online indicator */}
-                              {(chat.isOnline || onlineUsers.has(chat.id)) && (
+                              {chat.isOnline && (
                                 <div className="absolute top-0 left-0 w-3 h-3 rounded-full bg-[#A6D539] ring-2 ring-white" />
                               )}
                             </div>
