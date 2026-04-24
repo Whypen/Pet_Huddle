@@ -863,6 +863,7 @@ const Chats = () => {
   const subscribedInboxRoomIdsRef = useRef<Set<string>>(new Set());
   const conversationsHydratedRef = useRef(false);
   const conversationsRetryTimerRef = useRef<number | null>(null);
+  const matchesFeedDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const chatsPerfRef = useRef({
     routeMountedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
     firstDiscoverReadyAt: null as number | null,
@@ -4314,9 +4315,13 @@ const Chats = () => {
       const user1 = String(row.user1_id || "");
       const user2 = String(row.user2_id || "");
       if (user1 !== profile.id && user2 !== profile.id) return;
-      invalidateMatchesCache();
-      setMatchesFeedTick((prev) => prev + 1);
-      void loadConversations("friends");
+      if (matchesFeedDebounceRef.current !== null) window.clearTimeout(matchesFeedDebounceRef.current);
+      matchesFeedDebounceRef.current = window.setTimeout(() => {
+        matchesFeedDebounceRef.current = null;
+        invalidateMatchesCache();
+        setMatchesFeedTick((prev) => prev + 1);
+        void loadConversations("friends");
+      }, 350);
     };
 
     const channel = supabase
@@ -4328,6 +4333,7 @@ const Chats = () => {
       .subscribe();
 
     return () => {
+      if (matchesFeedDebounceRef.current !== null) window.clearTimeout(matchesFeedDebounceRef.current);
       void supabase.removeChannel(channel);
     };
   }, [invalidateMatchesCache, loadConversations, profile?.id]);
