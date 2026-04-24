@@ -185,9 +185,6 @@ const PROFILE_COLUMNS = [
   "card_verification_status", "card_verified", "card_brand", "card_last4",
   "verification_rejection_code", "social_album", "prefs",
   "hide_from_map", "last_active_at",
-  "family_owner_id",
-  "subscription_cancel_reason_other",
-  "share_perks_cancel_reason_other",
 ] as const;
 const PROFILE_SELECT = PROFILE_COLUMNS.join(", ");
 
