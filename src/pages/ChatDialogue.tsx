@@ -832,7 +832,7 @@ const ChatDialogue = () => {
     if (!roomId || !profile?.id) return;
     const readChannel = supabase
       .channel(`chat_dialogue_reads_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `user_id=neq.${profile.id}` }, (payload) => {
         const row = payload.new as { message_id?: string; user_id?: string } | null;
         if (!row?.message_id || row.user_id === profile.id) return;
         const sentIds = new Set(messages.filter((message) => message.sender_id === profile.id).map((message) => message.id));

@@ -481,7 +481,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     if (!roomId || !userId) return;
     const readChannel = supabase
       .channel(`service_chat_reads_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `user_id=neq.${userId}` }, (payload) => {
         const row = payload.new as { message_id?: string | null; user_id?: string | null } | null;
         if (!row?.message_id || row.user_id === userId) return;
         setReadMessageIds((prev) => {
