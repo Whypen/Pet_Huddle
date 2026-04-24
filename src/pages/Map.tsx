@@ -1103,9 +1103,12 @@ const MapPage = () => {
       node.style.right = "12px";
       node.style.bottom = `calc(var(--nav-height,64px) + env(safe-area-inset-bottom) + 120px)`;
     };
+    // One-shot on mount/change, then watch for the node to appear via MutationObserver
+    // instead of polling every 500 ms (which caused continuous reflows).
     applyControlOffset();
-    const id = window.setInterval(applyControlOffset, 500);
-    return () => window.clearInterval(id);
+    const observer = new MutationObserver(applyControlOffset);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: false });
+    return () => observer.disconnect();
   }, [isBroadcastOpen, mapLoaded]);
 
   // NOTE: Do not auto-fly on userLocation changes to prevent map blinking.
@@ -1150,9 +1153,7 @@ const MapPage = () => {
           ...row,
           marker_state: "expired_dot",
         }));
-      const visibleOnly = mapped
-        .concat(fallbackDots)
-        .filter((row, index, all) => all.findIndex((entry) => entry.id === row.id) === index)
+      const visibleOnly = dedupeById(mapped.concat(fallbackDots))
         .filter((row): row is MapAlert => row.marker_state !== "hidden")
         .filter((row) => !(row.creator_id && blockedUserIds.has(row.creator_id)));
       setDbAlerts(visibleOnly);
@@ -1591,6 +1592,34 @@ const MapPage = () => {
   }, [isPinned, pinningActive, showAlerts, showFriends]);
 
   // ==========================================================================
+  // Stable marker-overlay callbacks — defined here (not inline in JSX) so
+  // they don't trigger child rerenders on every parent state update.
+  // ==========================================================================
+  const handleVetSelect = useCallback((id: string) => {
+    const vet = vetClinics.find((v) => v.id === id);
+    if (!vet) return;
+    focusMapTarget("marker.vet.click", vet.lat, vet.lng);
+    setSelectedVet(vet);
+  }, [focusMapTarget, vetClinics]);
+
+  const handleFriendSelect = useCallback((id: string) => {
+    const friend = friendOverlayPins.find((f) => f.id === id);
+    if (!friend) return;
+    focusMapTarget("marker.friend.click", friend.lat, friend.lng);
+    const pin = friendPins.find((p) => p.id === friend.id);
+    if (pin) {
+      void openPublicProfileSheet(pin.id, pin.display_name || "Friend");
+    }
+  }, [focusMapTarget, friendOverlayPins, friendPins, openPublicProfileSheet]);
+
+  const handleAlertSelect = useCallback((alertId: string) => {
+    const alert = filteredPins.find((pin) => pin.id === alertId);
+    if (!alert) return;
+    focusMapTarget(alert.is_demo ? "marker.demoAlert.click" : "marker.alert.click", alert.latitude, alert.longitude);
+    setSelectedAlert(alert);
+  }, [filteredPins, focusMapTarget]);
+
+  // ==========================================================================
   // RENDER
   // ==========================================================================
   return (
@@ -1751,12 +1780,7 @@ const MapPage = () => {
           <VetMarkersOverlay
             map={map.current}
             vets={vetClinics}
-            onSelect={(id) => {
-              const vet = vetClinics.find((v) => v.id === id);
-              if (!vet) return;
-              focusMapTarget("marker.vet.click", vet.lat, vet.lng);
-              setSelectedVet(vet);
-            }}
+            onSelect={handleVetSelect}
           />
         )}
 
@@ -1764,18 +1788,7 @@ const MapPage = () => {
           <FriendMarkersOverlay
             map={map.current}
             friends={friendOverlayPins}
-            onSelect={(id) => {
-              const friend = friendOverlayPins.find((f) => f.id === id);
-              if (!friend) return;
-              focusMapTarget("marker.friend.click", friend.lat, friend.lng);
-              const pin = friendPins.find((p) => p.id === friend.id);
-              if (pin) {
-                void openPublicProfileSheet(
-                  pin.id,
-                  pin.display_name || "Friend"
-                );
-              }
-            }}
+            onSelect={handleFriendSelect}
           />
         )}
 
@@ -1797,12 +1810,7 @@ const MapPage = () => {
           <AlertMarkersOverlay
             map={map.current}
             alerts={filteredPins}
-            onSelect={(alertId) => {
-              const alert = filteredPins.find((pin) => pin.id === alertId);
-              if (!alert) return;
-              focusMapTarget(alert.is_demo ? "marker.demoAlert.click" : "marker.alert.click", alert.latitude, alert.longitude);
-              setSelectedAlert(alert);
-            }}
+            onSelect={handleAlertSelect}
           />
         )}
 
@@ -1927,7 +1935,7 @@ const MapPage = () => {
         alert={selectedAlert}
         onClose={() => setSelectedAlert(null)}
         onHide={(id) => {
-          setHiddenAlerts((prev) => new Set([...prev, id]));
+          setHiddenAlerts((prev) => { const next = new Set(prev); next.add(id); return next; });
           toast.success("Alert hidden");
         }}
         onRefresh={fetchAlerts}
