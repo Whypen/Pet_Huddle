@@ -28,6 +28,13 @@ type SupportRequestFormProps = {
   compact?: boolean;
 };
 
+type SupportFieldErrors = {
+  message?: string;
+  replyEmail?: string;
+};
+
+const SUPPORT_REPLY_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function SupportRequestForm({
   initialSubject = "",
   initialMessage = "",
@@ -42,6 +49,7 @@ export function SupportRequestForm({
   const [submitting, setSubmitting] = useState(false);
   const [ticketNumber, setTicketNumber] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<SupportFieldErrors>({});
   const supportTurnstile = useTurnstile("support_ticket");
 
   const knownEmail = useMemo(
@@ -57,7 +65,6 @@ export function SupportRequestForm({
   const requiresReplyEmail = wantsReply && !knownEmail;
   const effectiveEmail = wantsReply ? knownEmail || replyEmail.trim() : "no-reply@huddle.pet";
   const needsTurnstile = !user;
-  const turnstileReady = !needsTurnstile || supportTurnstile.isTokenUsable;
 
   const recordSubmitDiag = (next: Partial<NonNullable<Window["__huddleSupportSubmitDiag"]>>) => {
     if (typeof window === "undefined") return;
@@ -74,16 +81,57 @@ export function SupportRequestForm({
     };
   };
 
+  const clearFieldError = (field: keyof SupportFieldErrors) => {
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateSupportFields = () => {
+    const nextErrors: SupportFieldErrors = {};
+
+    if (!message.trim()) {
+      nextErrors.message = "Please tell us how we can help.";
+    }
+
+    if (requiresReplyEmail) {
+      const trimmedReplyEmail = replyEmail.trim();
+      if (!trimmedReplyEmail) {
+        nextErrors.replyEmail = "Enter your email if you want a reply.";
+      } else if (!SUPPORT_REPLY_EMAIL_PATTERN.test(trimmedReplyEmail)) {
+        nextErrors.replyEmail = "Enter a valid email address.";
+      }
+    }
+
+    setFieldErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
   useEffect(() => {
     if (ticketNumber) return;
     setSubject(initialSubject);
     setMessage(initialMessage);
     setWantsReply(defaultWantsReply);
+    setFieldErrors({});
   }, [defaultWantsReply, initialMessage, initialSubject, ticketNumber]);
+
+  useEffect(() => {
+    if (requiresReplyEmail) return;
+    setFieldErrors((current) => {
+      if (!current.replyEmail) return current;
+      const next = { ...current };
+      delete next.replyEmail;
+      return next;
+    });
+  }, [requiresReplyEmail]);
 
   const resetForm = () => {
     setTicketNumber(null);
     setSubmitError("");
+    setFieldErrors({});
     setSubject(initialSubject);
     setMessage(initialMessage);
     setReplyEmail("");
@@ -99,13 +147,7 @@ export function SupportRequestForm({
 
     setSubmitError("");
 
-    if (!trimmedMessage) {
-      setSubmitError("Please tell us how we can help.");
-      return;
-    }
-
-    if (requiresReplyEmail && !replyEmail.trim()) {
-      setSubmitError("Enter your email if you want a reply.");
+    if (!validateSupportFields()) {
       return;
     }
 
@@ -178,6 +220,7 @@ export function SupportRequestForm({
       setMessage(initialMessage);
       setReplyEmail("");
       setWantsReply(defaultWantsReply);
+      setFieldErrors({});
       supportTurnstile.consumeToken();
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Couldn't send your message. Please try again.";
@@ -217,7 +260,10 @@ export function SupportRequestForm({
       <FormField
         label="Subject"
         value={subject}
-        onChange={(event) => setSubject(event.target.value)}
+        onChange={(event) => {
+          setSubject(event.target.value);
+          setSubmitError("");
+        }}
         placeholder="Subject (optional)"
         disabled={submitting}
       />
@@ -225,15 +271,38 @@ export function SupportRequestForm({
       <FormTextArea
         label="Message"
         value={message}
-        onChange={(event) => setMessage(event.target.value)}
+        onChange={(event) => {
+          const nextMessage = event.target.value;
+          setMessage(nextMessage);
+          setSubmitError("");
+          if (nextMessage.trim()) {
+            clearFieldError("message");
+          }
+        }}
+        onBlur={() => {
+          if (!message.trim()) {
+            setFieldErrors((current) => ({
+              ...current,
+              message: "Please tell us how we can help.",
+            }));
+          }
+        }}
         placeholder="How can we help?"
+        error={fieldErrors.message}
         className="[&_textarea]:min-h-[72px]"
         disabled={submitting}
       />
 
       <NeuCheckbox
         checked={wantsReply}
-        onCheckedChange={(checked) => setWantsReply(Boolean(checked))}
+        onCheckedChange={(checked) => {
+          const nextWantsReply = Boolean(checked);
+          setWantsReply(nextWantsReply);
+          setSubmitError("");
+          if (!nextWantsReply || knownEmail) {
+            clearFieldError("replyEmail");
+          }
+        }}
         label="You may follow up with me via email if needed."
         disabled={submitting}
       />
@@ -243,9 +312,34 @@ export function SupportRequestForm({
           type="email"
           label="Email"
           value={replyEmail}
-          onChange={(event) => setReplyEmail(event.target.value)}
+          onChange={(event) => {
+            const nextReplyEmail = event.target.value;
+            setReplyEmail(nextReplyEmail);
+            setSubmitError("");
+            if (SUPPORT_REPLY_EMAIL_PATTERN.test(nextReplyEmail.trim())) {
+              clearFieldError("replyEmail");
+            }
+          }}
+          onBlur={() => {
+            if (!requiresReplyEmail) return;
+            const trimmedReplyEmail = replyEmail.trim();
+            if (!trimmedReplyEmail) {
+              setFieldErrors((current) => ({
+                ...current,
+                replyEmail: "Enter your email if you want a reply.",
+              }));
+              return;
+            }
+            if (!SUPPORT_REPLY_EMAIL_PATTERN.test(trimmedReplyEmail)) {
+              setFieldErrors((current) => ({
+                ...current,
+                replyEmail: "Enter a valid email address.",
+              }));
+            }
+          }}
           placeholder="name@email.com"
           autoComplete="email"
+          error={fieldErrors.replyEmail}
           disabled={submitting}
         />
       ) : null}
@@ -286,7 +380,7 @@ export function SupportRequestForm({
         <NeuControl
           type="button"
           onClick={submitSupport}
-          disabled={submitting || !message.trim() || (needsTurnstile && (!supportTurnstile.enabled || !turnstileReady))}
+          disabled={submitting}
           loading={submitting}
           size="lg"
           className="flex-1 h-[52px] min-h-[52px]"

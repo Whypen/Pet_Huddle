@@ -245,11 +245,11 @@ html {
 
 .form-field-focus,
 .form-field-rest:focus-within {
-  border-color: rgba(255,255,255,0.62);
+  border-color: rgba(33,69,207,0.38);
   box-shadow:
     inset 2px 2px 6px rgba(163,168,190,0.18),
     inset -1px -1px 4px rgba(255,255,255,0.80),
-    0 0 0 2px rgba(163,168,190,0.16);
+    0 0 0 2px rgba(33,69,207,0.16);
   outline: none;
 }
 
