@@ -69,7 +69,7 @@ type CounterpartProfile = {
 };
 
 type BlockState = "none" | "blocked_by_them" | "blocked_by_me";
-type UnmatchState = "none" | "unmatched_by_them";
+type UnmatchState = "none" | "unmatched_by_them" | "unmatched_by_me";
 const INITIAL_MESSAGE_LOAD_SIZE = 10;
 const OLDER_MESSAGE_PAGE_SIZE = 20;
 const MESSAGE_READ_BUFFER_MS = 100;
@@ -122,6 +122,7 @@ const ChatDialogue = () => {
   const [counterpart, setCounterpart] = useState<CounterpartProfile | null>(null);
   const [blockState, setBlockState] = useState<BlockState>("none");
   const [unmatchState, setUnmatchState] = useState<UnmatchState>("none");
+  const isUnmatched = unmatchState !== "none";
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
   const [profileSheetData, setProfileSheetData] = useState<Record<string, unknown> | null>(null);
   const [confirmUnmatchOpen, setConfirmUnmatchOpen] = useState(false);
@@ -614,6 +615,8 @@ const ChatDialogue = () => {
     const unmatchRelation = Array.isArray(unmatches) && unmatches.length > 0 ? unmatches[0] : null;
     if (unmatchRelation?.actor_id === counterpartId && unmatchRelation?.target_id === profile.id) {
       setUnmatchState("unmatched_by_them");
+    } else if (unmatchRelation?.actor_id === profile.id && unmatchRelation?.target_id === counterpartId) {
+      setUnmatchState("unmatched_by_me");
     } else {
       setUnmatchState("none");
     }
@@ -931,7 +934,7 @@ const ChatDialogue = () => {
     const cannotSend =
       blockState === "blocked_by_them" ||
       blockState === "blocked_by_me" ||
-      unmatchState === "unmatched_by_them" ||
+      isUnmatched ||
       chatDisabledBySafety;
     if (!roomId || !profile?.id || sending || cannotSend) return;
     const text = chatInput.trim();
@@ -966,17 +969,17 @@ const ChatDialogue = () => {
       setSending(false);
       setUploadingComposer(false);
     }
-  }, [activeComposerPreviewUrl, blockState, chatDisabledBySafety, chatInput, composerUploads, loadRoomMessages, profile?.id, roomId, scheduleReadReceiptRefresh, sending, unmatchState, uploadFilesToNotices]);
+  }, [activeComposerPreviewUrl, blockState, chatDisabledBySafety, chatInput, composerUploads, isUnmatched, loadRoomMessages, profile?.id, roomId, scheduleReadReceiptRefresh, sending, uploadFilesToNotices]);
 
   const attachComposerMedia = useCallback(() => {
     const cannotAttach =
       blockState === "blocked_by_them" ||
       blockState === "blocked_by_me" ||
-      unmatchState === "unmatched_by_them" ||
+      isUnmatched ||
       sending;
     if (cannotAttach) return;
     composerFileInputRef.current?.click();
-  }, [blockState, sending, unmatchState]);
+  }, [blockState, isUnmatched, sending]);
 
   const handleComposerMediaChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -1348,10 +1351,10 @@ const ChatDialogue = () => {
             </span>
           </div>
         )}
-        {unmatchState === "unmatched_by_them" && (
+        {isUnmatched && (
           <div className="flex justify-center py-1">
             <span className="rounded-full bg-[rgba(120,128,150,0.15)] px-3 py-1 text-xs font-medium text-[#8C93AA]">
-              You've been unmatched.
+              {unmatchState === "unmatched_by_me" ? "You've unmatched this user." : "You've been unmatched."}
             </span>
           </div>
         )}
@@ -1568,7 +1571,7 @@ const ChatDialogue = () => {
             disabled={
               blockState === "blocked_by_them" ||
               blockState === "blocked_by_me" ||
-              unmatchState === "unmatched_by_them" ||
+              isUnmatched ||
               sending
             }
           >
@@ -1597,7 +1600,7 @@ const ChatDialogue = () => {
             disabled={
               blockState === "blocked_by_them" ||
               blockState === "blocked_by_me" ||
-              unmatchState === "unmatched_by_them" ||
+              isUnmatched ||
               sending
             }
           />
@@ -1612,7 +1615,7 @@ const ChatDialogue = () => {
               chatDisabledBySafety ||
               blockState === "blocked_by_them" ||
               blockState === "blocked_by_me" ||
-              unmatchState === "unmatched_by_them" ||
+              isUnmatched ||
               (!chatInput.trim() && composerUploads.length === 0 && !activeComposerPreviewUrl)
             }
             className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-brandBlue text-white disabled:opacity-45"
