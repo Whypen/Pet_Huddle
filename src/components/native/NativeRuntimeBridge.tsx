@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   clearPendingExternalFlow,
   hasNativeShell,
-  isNativeContentOnlyMode,
   isReturnLikePath,
   normalizeInboundUrlToAppPath,
   readPendingExternalFlow,
@@ -12,67 +12,20 @@ import {
   syncNativeAuthState,
   upsertPushRegistration,
 } from "@/lib/nativeShell";
-import { getRouteChromeConfig } from "@/routes/ROUTE_MANIFEST";
 import { supabase } from "@/integrations/supabase/client";
 
 const REFRESH_THROTTLE_MS = 4_000;
+
 export const NativeRuntimeBridge = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const { user, refreshProfile } = useAuth();
   const lastResumeRefreshRef = useRef(0);
-  const routeChrome = getRouteChromeConfig(location.pathname);
-  const nativeContentOnlyMode = isNativeContentOnlyMode();
-  const useNativeHeader =
-    nativeContentOnlyMode
-    && routeChrome.nativeChromeConsumable === true
-    && routeChrome.contentOnlySafe
-    && routeChrome.contentOnlyHeader === "native";
-  const useNativeBottomNav =
-    nativeContentOnlyMode
-    && routeChrome.nativeChromeConsumable === true
-    && routeChrome.contentOnlySafe
-    && routeChrome.contentOnlyBottomNav === "native";
 
   useEffect(() => {
     syncNativeAuthState(Boolean(user?.id), user?.id ?? null);
   }, [user?.id]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (!hasNativeShell()) {
-      delete root.dataset.nativeContentOnly;
-      delete root.dataset.nativeHeaderMode;
-      delete root.dataset.nativeBottomNavMode;
-      root.style.removeProperty("--nav-height");
-      root.style.removeProperty("--web-header-height");
-      return;
-    }
-
-    root.dataset.nativeContentOnly = nativeContentOnlyMode ? "1" : "0";
-    root.dataset.nativeHeaderMode = useNativeHeader ? "native" : "web";
-    root.dataset.nativeBottomNavMode = useNativeBottomNav ? "native" : "web";
-
-    if (useNativeBottomNav) {
-      root.style.setProperty("--nav-height", "0px");
-    } else {
-      root.style.removeProperty("--nav-height");
-    }
-
-    if (useNativeHeader) {
-      root.style.setProperty("--web-header-height", "0px");
-    } else {
-      root.style.removeProperty("--web-header-height");
-    }
-
-    return () => {
-      delete root.dataset.nativeContentOnly;
-      delete root.dataset.nativeHeaderMode;
-      delete root.dataset.nativeBottomNavMode;
-      root.style.removeProperty("--nav-height");
-      root.style.removeProperty("--web-header-height");
-    };
-  }, [nativeContentOnlyMode, useNativeBottomNav, useNativeHeader]);
 
   useEffect(() => {
     if (!user?.id || !hasNativeShell()) return;
@@ -128,7 +81,8 @@ export const NativeRuntimeBridge = () => {
     if (!readPendingExternalFlow()) return;
     clearPendingExternalFlow();
     void refreshProfile();
-  }, [location.hash, location.pathname, location.search, refreshProfile]);
+    void queryClient.invalidateQueries();
+  }, [location.hash, location.pathname, location.search, queryClient, refreshProfile]);
 
   useEffect(() => {
     const refreshRuntimeState = () => {
@@ -137,6 +91,7 @@ export const NativeRuntimeBridge = () => {
       lastResumeRefreshRef.current = now;
       if (document.visibilityState === "hidden") return;
       void refreshProfile();
+      void queryClient.invalidateQueries();
     };
 
     const onVisibility = () => {
@@ -160,7 +115,7 @@ export const NativeRuntimeBridge = () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("huddle:native-resume", onNativeResume as EventListener);
     };
-  }, [refreshProfile]);
+  }, [queryClient, refreshProfile]);
 
   return null;
 };

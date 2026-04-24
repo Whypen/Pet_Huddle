@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import "mapbox-gl/dist/mapbox-gl.css";
 
 if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
   const originalFetch = window.fetch.bind(window);
@@ -182,7 +183,13 @@ const syncToLatestEntryBundleOnce = async () => {
   }
 };
 
-void syncToLatestEntryBundleOnce();
+if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
+  void syncToLatestEntryBundleOnce();
+} else {
+  // Always run the proactive entry-bundle sync in production — it's targeted and safe.
+  // It reloads only when the cached main bundle is stale vs. the live index.html.
+  void syncToLatestEntryBundleOnce();
+}
 
 // Vite-native hook: fired when any dynamic import() fails to load.
 // Belt-and-suspenders on top of the error/unhandledrejection handlers below.

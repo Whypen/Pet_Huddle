@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
@@ -181,7 +181,15 @@ export const useIsAdmin = () => {
   return profile?.is_admin === true;
 };
 
-const PROFILE_COLUMNS = [
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [hydrating, setHydrating] = useState(false);
+  const [mfaPending, setMfaPending] = useState(false);
+
+  const profileColumns = [
     "id",
     "user_id",
     "email",
@@ -264,22 +272,11 @@ const PROFILE_COLUMNS = [
     "prefs",
     "hide_from_map",
     "last_active_at",
-] as const;
-const PROFILE_SELECT = PROFILE_COLUMNS.join(", ");
-const ACTIVITY_TOUCH_KEY = "huddle_last_activity_touch_at";
-const EXPIRE_RESTRICTIONS_SESSION_KEY = "huddle:auth:expire-restrictions-last";
-const EXPIRE_RESTRICTIONS_TTL_MS = 10 * 60 * 1000;
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [hydrating, setHydrating] = useState(false);
-  const [mfaPending, setMfaPending] = useState(false);
+  ] as const;
+  const profileSelect = profileColumns.join(", ");
+  const activityTouchKey = "huddle_last_activity_touch_at";
   const previousUserIdRef = useRef<string | null>(null);
   const hydrationRunRef = useRef(0);
-  const lastPriceHintsRef = useRef<string>("");
 
   const beginHydrationRun = useCallback(() => {
     hydrationRunRef.current += 1;
@@ -388,7 +385,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select(PROFILE_SELECT)
+        .select("*")
         .eq("id", userId)
         .maybeSingle();
       if (!isHydrationRunCurrent(runId)) return;
@@ -424,18 +421,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const familyOwnerId = ownerId !== userId ? ownerId : null;
       const effectiveTier = normalizeMembershipTier(String(data.effective_tier ?? data.tier ?? "free"));
 
-      // Auto-expire any restriction/suspension that has passed its deadline.
-      // Rate-limit to once per EXPIRE_RESTRICTIONS_TTL_MS per session so profile
-      // realtime bumps and focus-triggered refreshes don't fire this repeatedly.
-      try {
-        const lastRan = Number(sessionStorage.getItem(EXPIRE_RESTRICTIONS_SESSION_KEY) || 0);
-        if (!Number.isFinite(lastRan) || Date.now() - lastRan > EXPIRE_RESTRICTIONS_TTL_MS) {
-          sessionStorage.setItem(EXPIRE_RESTRICTIONS_SESSION_KEY, String(Date.now()));
-          void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
-        }
-      } catch {
-        // best-effort only
-      }
+      // Auto-expire any restriction/suspension that has passed its deadline
+      void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
 
       const nextProfile = { ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId };
       const nextProfileKey = stableStringify(nextProfile);
@@ -448,8 +435,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Warm pricing cache in the background so Premium / upsell UI can
       // render the user's resolved currency without a visible flash.
-      // Skip when the resolved country+currency hint hasn't changed since the
-      // last run in this session — profile realtime bumps shouldn't re-fetch prices.
       void (async () => {
         const profilePrefs = (data as Profile).prefs as Record<string, unknown> | null | undefined;
         const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
@@ -460,9 +445,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           profileCountry: (data as Profile).location_country ?? null,
           profileCurrency: savedPricingCurrency,
         });
-        const hintKey = `${hints.country ?? ""}::${hints.currency ?? ""}`;
-        if (lastPriceHintsRef.current === hintKey) return;
-        lastPriceHintsRef.current = hintKey;
         await fetchLivePrices({
           country: hints.country,
           currency: hints.currency,
@@ -478,14 +460,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const touchProfileActivity = useCallback(async () => {
     try {
       const now = Date.now();
-      const raw = localStorage.getItem(ACTIVITY_TOUCH_KEY);
+      const raw = localStorage.getItem(activityTouchKey);
       const lastTouched = raw ? Number(raw) : 0;
       if (Number.isFinite(lastTouched) && now - lastTouched < 5 * 60 * 1000) {
         return;
       }
       const { error } = await supabase.rpc("touch_profile_activity");
       if (!error) {
-        localStorage.setItem(ACTIVITY_TOUCH_KEY, String(now));
+        localStorage.setItem(activityTouchKey, String(now));
       }
     } catch {
       // best-effort heartbeat only
@@ -509,6 +491,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setHydrating(true);
     const { data, error } = await supabase.auth.getUser();
     if (!isHydrationRunCurrent(runId)) return;
+    const { data: refreshedSessionData } = await supabase.auth.getSession();
+    if (!isHydrationRunCurrent(runId)) return;
     if (error || !data.user) {
       if (import.meta.env.DEV) {
         console.warn("[AuthContext] clearing stale local session", {
@@ -523,7 +507,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const effectiveSession = candidateSession;
+    const effectiveSession = refreshedSessionData.session ?? candidateSession;
     supabase.realtime.setAuth(effectiveSession.access_token ?? null);
     const aal = await getAuthenticatorAssurance(supabase);
     if (!isHydrationRunCurrent(runId)) return;
@@ -644,7 +628,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [hydrateValidatedSession]);
 
-  const signUp = useCallback(async (
+  const signUp = async (
     email: string,
     password: string,
     displayName: string,
@@ -717,9 +701,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     return { error: error as Error | null };
-  }, []);
+  };
 
-  const signIn = useCallback(async (email: string, password: string, phone?: string, turnstileToken?: string) => {
+  const signIn = async (email: string, password: string, phone?: string, turnstileToken?: string) => {
     const runtimeEnv = getAuthRuntimeEnv();
     if (import.meta.env.DEV) {
       console.debug("[auth.signin] runtime", {
@@ -789,9 +773,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         mfaMethod: null,
       };
     }
-  }, []);
+  };
 
-  const signOut = useCallback(async () => {
+  const signOut = async () => {
     const emailOwner = normalizeStorageOwner(session?.user?.email || profile?.phone || "");
     const scopedSignupKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, emailOwner);
     const scopedSignupPasswordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, emailOwner);
@@ -811,33 +795,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     sessionStorage.removeItem("signup_verify_docs_submitted");
     localStorage.removeItem("huddle_offline_actions");
     localStorage.removeItem("pending_addon");
-  }, [session, profile, beginHydrationRun, resetAuthBoundary]);
+  };
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = async () => {
     if (user) {
       const runId = beginHydrationRun();
       await fetchProfile(user.id, runId);
     }
-  }, [user, beginHydrationRun, fetchProfile]);
-
-  const contextValue = useMemo(
-    () => ({
-      user,
-      session,
-      profile,
-      loading,
-      hydrating,
-      mfaPending,
-      signUp,
-      signIn,
-      signOut,
-      refreshProfile,
-    }),
-    [user, session, profile, loading, hydrating, mfaPending, signUp, signIn, signOut, refreshProfile],
-  );
+  };
 
   return (
-    <AuthContext.Provider value={contextValue}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        profile,
+        loading,
+        hydrating,
+        mfaPending,
+        signUp,
+        signIn,
+        signOut,
+        refreshProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
