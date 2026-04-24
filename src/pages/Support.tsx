@@ -1,6 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/layouts/PageHeader";
-import { SUPPORT_EMAIL } from "@/lib/support";
 import { SupportRequestForm } from "@/components/support/SupportRequestForm";
 
 declare global {
@@ -20,7 +19,7 @@ const Support = () => {
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-x-hidden flex flex-col">
       {!nativeContentOnly ? (
         <PageHeader
-          title={<h3 className="text-base font-semibold text-[#424965] truncate">Help &amp; Support</h3>}
+          title="Help & Support"
           titleClassName="justify-start"
           showBack
           onBack={() => navigate(-1)}
@@ -38,25 +37,10 @@ const Support = () => {
             <div className="mt-4">
               <SupportRequestForm />
             </div>
-            <p className="mt-4 text-sm leading-6 text-muted-foreground">
-              You can also contact the team at{" "}
-              <a
-                href={`mailto:${SUPPORT_EMAIL}`}
-                className="font-medium text-primary underline underline-offset-4"
-              >
-                {SUPPORT_EMAIL}
-              </a>.
-            </p>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              If you are already signed in, you can also use the in-app help and support entry from Settings.
-            </p>
           </section>
 
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground">Legal pages</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              These public pages are the canonical legal URLs for the current launch scope.
-            </p>
             <div className="mt-4 flex flex-col gap-3 text-sm">
               <Link className="font-medium text-primary underline underline-offset-4" to="/privacy">
                 Privacy Policy

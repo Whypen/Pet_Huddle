@@ -96,6 +96,49 @@ const BRIDGE_BOOTSTRAP_SCRIPT = `
     window.addEventListener("hashchange", notifyNativeRouteMeta);
     notifyNativeRouteMeta();
 
+    var lastSupportRuntimeDiag = "";
+    var collectSupportRuntimeDiag = function () {
+      try {
+        if (window.location.pathname !== "/support") return;
+        if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== "function") return;
+        var route = window.__huddleTurnstileDiag && window.__huddleTurnstileDiag.routes
+          ? window.__huddleTurnstileDiag.routes["/support"]
+          : null;
+        var submit = window.__huddleSupportSubmitDiag || null;
+        var responseField = document.querySelector('input[name="cf-turnstile-response"], textarea[name="cf-turnstile-response"]');
+        var tokenLength = responseField && (responseField.value || responseField.textContent)
+          ? String(responseField.value || responseField.textContent).trim().length
+          : 0;
+        var sendButton = Array.prototype.slice.call(document.querySelectorAll("button")).find(function (button) {
+          return String(button.textContent || "").trim() === "Send";
+        }) || null;
+        var diag = {
+          type: "huddle-support-runtime-diag",
+          pathname: window.location.pathname,
+          widgetRendered: Boolean(route && route.widgetIds && route.widgetIds.length),
+          callbackFired: Boolean(route && route.callbackFired),
+          errorCallbackFired: Boolean(route && route.errorCallbackFired),
+          expiredCallbackFired: Boolean(route && route.expiredCallbackFired),
+          tokenLengthAtCallback: route && typeof route.tokenLengthAtCallback === "number" ? route.tokenLengthAtCallback : 0,
+          tokenLengthAtSubmit: route && typeof route.tokenLengthAtSubmit === "number" ? route.tokenLengthAtSubmit : 0,
+          domTokenLength: tokenLength,
+          sendDisabled: sendButton ? Boolean(sendButton.disabled) : null,
+          submitAttempted: Boolean(submit && submit.attempted),
+          submitStatus: submit && typeof submit.status === "number" ? submit.status : null,
+          submitSucceeded: Boolean(submit && submit.succeeded),
+          submitError: submit && typeof submit.error === "string" ? submit.error : null,
+          lastEvents: route && route.events ? route.events.slice(-6) : []
+        };
+        var serialized = JSON.stringify(diag);
+        if (serialized === lastSupportRuntimeDiag) return;
+        lastSupportRuntimeDiag = serialized;
+        window.ReactNativeWebView.postMessage(serialized);
+      } catch (error) {}
+    };
+    window.setInterval(collectSupportRuntimeDiag, 1500);
+    window.addEventListener("huddle:native-message", collectSupportRuntimeDiag);
+    window.addEventListener("load", collectSupportRuntimeDiag);
+
     var pendingShares = {};
 
     var makeRequestId = function () {
@@ -199,6 +242,26 @@ type WebBridgeMessage =
       pathname?: string;
       nativeHeaderVisible?: boolean;
       nativeBottomNavVisible?: boolean;
+      widgetRendered?: boolean;
+      callbackFired?: boolean;
+      errorCallbackFired?: boolean;
+      expiredCallbackFired?: boolean;
+      tokenLengthAtCallback?: number;
+      tokenLengthAtSubmit?: number;
+      domTokenLength?: number;
+      sendDisabled?: boolean | null;
+      submitAttempted?: boolean;
+      submitStatus?: number | null;
+      submitSucceeded?: boolean;
+      submitError?: string | null;
+      lastEvents?: Array<{ type?: string; action?: string; tokenLength?: number; widgetId?: string | null }>;
+      label?: string;
+      urlHost?: string | null;
+      urlPathname?: string | null;
+      isTopFrame?: boolean | null;
+      navigationType?: string | null;
+      lockIdentifier?: number | null;
+      mainDocumentUrl?: string | null;
     }
   | null;
 
@@ -805,6 +868,27 @@ export function WebShellScreen() {
         nativeHeaderVisible: payload.nativeHeaderVisible === true,
         nativeBottomNavVisible: payload.nativeBottomNavVisible === true,
       });
+      return;
+    }
+
+    if (payload.type === "huddle-support-runtime-diag") {
+      if (__DEV__) {
+        console.log("[support-runtime-diag]", {
+          widgetRendered: payload.widgetRendered === true,
+          callbackFired: payload.callbackFired === true,
+          errorCallbackFired: payload.errorCallbackFired === true,
+          expiredCallbackFired: payload.expiredCallbackFired === true,
+          tokenLengthAtCallback: payload.tokenLengthAtCallback ?? 0,
+          tokenLengthAtSubmit: payload.tokenLengthAtSubmit ?? 0,
+          domTokenLength: payload.domTokenLength ?? 0,
+          sendDisabled: payload.sendDisabled,
+          submitAttempted: payload.submitAttempted === true,
+          submitStatus: payload.submitStatus ?? null,
+          submitSucceeded: payload.submitSucceeded === true,
+          submitError: payload.submitError ?? null,
+          lastEvents: payload.lastEvents ?? [],
+        });
+      }
     }
   }, [handleExternalOpen, queuePayload]);
 
@@ -812,6 +896,33 @@ export function WebShellScreen() {
     setCanGoBack(state.canGoBack);
     setRouteChrome(approvedNativeChromeForUrl(state.url));
   }, []);
+
+  const logSupportWebViewEvent = useCallback((label: string, details: Record<string, unknown> = {}) => {
+    if (!__DEV__) return;
+    const activePath = routeChrome.pathname || pathnameFromUrl(shellUri) || "/";
+    const detailPath = typeof details.url === "string" ? pathnameFromUrl(details.url) : null;
+    if (activePath !== "/support" && detailPath !== "/support") return;
+
+    let urlHost: string | null = null;
+    let urlPathname: string | null = null;
+    if (typeof details.url === "string") {
+      try {
+        const parsed = new URL(details.url);
+        urlHost = parsed.host;
+        urlPathname = parsed.pathname;
+      } catch {
+        urlHost = null;
+        urlPathname = null;
+      }
+    }
+
+    console.log("[support-webview]", {
+      label,
+      ...details,
+      urlHost,
+      urlPathname,
+    });
+  }, [routeChrome.pathname, shellUri]);
 
   const handleNativeBack = useCallback(() => {
     if (canGoBack) {
@@ -840,36 +951,59 @@ export function WebShellScreen() {
           key={reloadKey}
           ref={webViewRef}
           source={{ uri: shellUri }}
+          originWhitelist={["http://*", "https://*", "about:*", "blob:*"]}
           injectedJavaScriptBeforeContentLoaded={BRIDGE_BOOTSTRAP_SCRIPT}
           onMessage={handleMessage}
           onLoadStart={() => {
             pageReadyRef.current = false;
             setLoading(true);
             setLoadError(null);
+            logSupportWebViewEvent("load-start", { url: shellUri });
           }}
           onLoadEnd={() => {
             pageReadyRef.current = true;
             setLoading(false);
             flushPendingPayloads();
+            logSupportWebViewEvent("load-end", { url: shellUri });
           }}
           onError={(event) => {
             pageReadyRef.current = false;
             setLoading(false);
             setLoadError(event.nativeEvent.description || "Failed to load huddle.pet.");
+            logSupportWebViewEvent("load-error", {
+              url: event.nativeEvent.url,
+              description: event.nativeEvent.description,
+              code: event.nativeEvent.code,
+            });
           }}
           onHttpError={(event) => {
             pageReadyRef.current = false;
             setLoading(false);
             setLoadError(`HTTP ${event.nativeEvent.statusCode}`);
+            logSupportWebViewEvent("http-error", {
+              url: event.nativeEvent.url,
+              statusCode: event.nativeEvent.statusCode,
+            });
           }}
           onNavigationStateChange={handleNavigationStateChange}
           onShouldStartLoadWithRequest={(request) => {
+            logSupportWebViewEvent("should-start", {
+              url: request.url,
+              isTopFrame: request.isTopFrame ?? null,
+              navigationType: request.navigationType ?? null,
+              lockIdentifier: request.lockIdentifier ?? null,
+              mainDocumentUrl:
+                "mainDocumentURL" in request && typeof request.mainDocumentURL === "string"
+                  ? request.mainDocumentURL
+                  : null,
+            });
             if (isAppLink(request.url)) {
               handleInboundUrl(request.url);
               return false;
             }
 
             if (isTopFrameRequest(request) && shouldOpenOutside(request.url)) {
+              logSupportWebViewEvent("open-outside", { url: request.url });
               void handleExternalOpen(request.url);
               return false;
             }
@@ -878,6 +1012,8 @@ export function WebShellScreen() {
           }}
           javaScriptEnabled
           domStorageEnabled
+          allowsInlineMediaPlayback
+          mediaPlaybackRequiresUserAction={false}
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
           allowsBackForwardNavigationGestures

@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Huddle App",
+    "slug": "huddle-app",
+    "version": "0.1.0",
+    "scheme": "huddle",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": false,
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Huddle to access your photos.",
+          "cameraPermission": "Allow Huddle to access your camera.",
+          "microphonePermission": "Allow Huddle to access your microphone for video capture."
+        }
+      ],
+      "expo-notifications",
+      "expo-font"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSUserNotificationUsageDescription": "Allow Huddle to send you updates and alerts."
+      },
+      "bundleIdentifier": "com.whypen.huddleapp"
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.whypen.huddleapp"
+    }
+  }
+}

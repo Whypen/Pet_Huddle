@@ -201,7 +201,7 @@ export function SupportRequestForm({
           }}
           size="lg"
           fullWidth
-          className="mt-2"
+          className="mt-2 h-[52px] min-h-[52px]"
         >
           Done
         </NeuControl>
@@ -278,7 +278,7 @@ export function SupportRequestForm({
           disabled={submitting}
           variant="secondary"
           size="lg"
-          className="flex-1"
+          className="flex-1 h-[52px] min-h-[52px]"
         >
           Cancel
         </NeuControl>
@@ -288,7 +288,7 @@ export function SupportRequestForm({
           disabled={submitting || !message.trim() || (needsTurnstile && (!supportTurnstile.enabled || !turnstileReady))}
           loading={submitting}
           size="lg"
-          className="flex-1"
+          className="flex-1 h-[52px] min-h-[52px]"
         >
           Send
         </NeuControl>
