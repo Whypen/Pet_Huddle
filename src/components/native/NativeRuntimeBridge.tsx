@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   clearPendingExternalFlow,
@@ -19,7 +18,6 @@ const REFRESH_THROTTLE_MS = 4_000;
 export const NativeRuntimeBridge = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const queryClient = useQueryClient();
   const { user, refreshProfile } = useAuth();
   const lastResumeRefreshRef = useRef(0);
 
@@ -81,8 +79,7 @@ export const NativeRuntimeBridge = () => {
     if (!readPendingExternalFlow()) return;
     clearPendingExternalFlow();
     void refreshProfile();
-    void queryClient.invalidateQueries();
-  }, [location.hash, location.pathname, location.search, queryClient, refreshProfile]);
+  }, [location.hash, location.pathname, location.search, refreshProfile]);
 
   useEffect(() => {
     const refreshRuntimeState = () => {
@@ -91,7 +88,6 @@ export const NativeRuntimeBridge = () => {
       lastResumeRefreshRef.current = now;
       if (document.visibilityState === "hidden") return;
       void refreshProfile();
-      void queryClient.invalidateQueries();
     };
 
     const onVisibility = () => {
@@ -115,7 +111,7 @@ export const NativeRuntimeBridge = () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("huddle:native-resume", onNativeResume as EventListener);
     };
-  }, [queryClient, refreshProfile]);
+  }, [refreshProfile]);
 
   return null;
 };
