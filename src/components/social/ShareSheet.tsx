@@ -71,21 +71,17 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
     setLoadingTargets(true);
     try {
       const fetchUserMatches = async (): Promise<MatchRow[]> => {
-        const attempts: Array<{ select: string; activeOnly: boolean }> = [
-          { select: "user1_id,user2_id", activeOnly: true },
-          { select: "user1_id,user2_id", activeOnly: false },
-        ];
-        for (const attempt of attempts) {
-          let query = supabase
+        const attempts = ["user1_id,user2_id"];
+        for (const selectColumns of attempts) {
+          const query = supabase
             .from("matches")
-            .select(attempt.select)
+            .select(selectColumns)
             .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+            .eq("is_active", true)
             .limit(500);
-          if (attempt.activeOnly) query = query.eq("is_active", true);
           const result = await query;
           if (result.error) continue;
-          if (attempt.activeOnly && Array.isArray(result.data) && result.data.length === 0) continue;
-          return ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
+          return (((result.data || []) as unknown) as Array<Record<string, unknown>>).map((row) => ({
             user1_id: String(row.user1_id || ""),
             user2_id: String(row.user2_id || ""),
           }));

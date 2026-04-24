@@ -98,6 +98,7 @@ export const sendDiscoveryWave = async (
       .select("id")
       .eq("user1_id", viewerId)
       .eq("user2_id", targetUserId)
+      .eq("is_active", true)
       .limit(1)
       .maybeSingle();
     if ((matchProbeA.data as { id?: string } | null)?.id) {
@@ -110,6 +111,7 @@ export const sendDiscoveryWave = async (
       .select("id")
       .eq("user1_id", targetUserId)
       .eq("user2_id", viewerId)
+      .eq("is_active", true)
       .limit(1)
       .maybeSingle();
     if ((matchProbeB.data as { id?: string } | null)?.id) {

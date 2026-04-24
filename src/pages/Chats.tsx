@@ -586,14 +586,6 @@ type PendingGroupInvite = {
   createdAt?: string | null;
 };
 
-type MatchOnlyAvatar = {
-  userId: string;
-  name: string;
-  avatarUrl?: string | null;
-  isVerified: boolean;
-  hasCar: boolean;
-};
-
 type DiscoveryAnchor = {
   lat: number;
   lng: number;
@@ -848,7 +840,7 @@ const Chats = () => {
   const discoverySendCueKindRef = useRef<"wave" | "star" | null>(null);
   const discoverySendCueCommitPendingRef = useRef(false);
   const discoverySendCueProgress = useMotionValue(0);
-  const [matchOnlyAvatars, setMatchOnlyAvatars] = useState<MatchOnlyAvatar[]>([]);
+  const [activeMatchedPeerIds, setActiveMatchedPeerIds] = useState<Set<string>>(new Set());
   const [matchesFeedTick, setMatchesFeedTick] = useState(0);
   const seenMatchUserIdsRef = useRef<Set<string>>(new Set());
   const serverSeenMatchUserIdsRef = useRef<Set<string>>(new Set());
@@ -1253,6 +1245,7 @@ const Chats = () => {
     setPassedDiscoveryIds(new Set());
     setCarryoverPassedIds(new Set());
     setHiddenDiscoveryIds(new Set());
+    setActiveMatchedPeerIds(new Set());
     seenMatchUserIdsRef.current = new Set();
     pendingSeenMatchWritesRef.current = new Set();
     serverSeenMatchUserIdsRef.current = new Set();
@@ -1284,6 +1277,7 @@ const Chats = () => {
     setHandledDiscoveryIds(new Set());
     setPassedDiscoveryIds(new Set());
     setCarryoverPassedIds(new Set());
+    setActiveMatchedPeerIds(new Set());
     setDiscoveryHistoryHydrated(false);
     setDiscoveryVisibleCount(20);
     setSwipeDir(null);
@@ -1292,7 +1286,10 @@ const Chats = () => {
   }, [dragX, dragY, profile?.id]);
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!profile?.id) {
+      setActiveMatchedPeerIds(new Set());
+      return;
+    }
     try {
       const handledRaw = localStorage.getItem(handledDiscoveryKey);
       const handled = handledRaw ? (JSON.parse(handledRaw) as string[]) : [];
@@ -1436,40 +1433,31 @@ const Chats = () => {
       if (matchesCacheRef.current) return matchesCacheRef.current;
       if (matchesInFlightRef.current) return matchesInFlightRef.current;
     }
-    const attempts: Array<{ select: string; activeOnly: boolean }> = [
-      { select: "chat_id,user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
-      { select: "user1_id,user2_id,matched_at,last_interaction_at", activeOnly: true },
-      { select: "chat_id,user1_id,user2_id,matched_at,last_interaction_at", activeOnly: false },
-      { select: "user1_id,user2_id,matched_at,last_interaction_at", activeOnly: false },
-      { select: "chat_id,user1_id,user2_id", activeOnly: false },
-      { select: "user1_id,user2_id", activeOnly: false },
+    const attempts: string[] = [
+      "chat_id,user1_id,user2_id,matched_at,last_interaction_at",
+      "user1_id,user2_id,matched_at,last_interaction_at",
+      "chat_id,user1_id,user2_id",
+      "user1_id,user2_id",
     ];
 
     const request = (async () => {
       let lastErrorMessage = "";
-      for (const attempt of attempts) {
+      for (const selectColumns of attempts) {
         let query = supabase
           .from("matches")
-          .select(attempt.select)
+          .select(selectColumns)
           .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+          .eq("is_active", true)
           .limit(500);
-        if (attempt.select.includes("matched_at")) {
+        if (selectColumns.includes("matched_at")) {
           query = query.order("matched_at", { ascending: false, nullsFirst: false });
-        }
-        if (attempt.activeOnly) {
-          query = query.eq("is_active", true);
         }
         const result = await query;
         if (result.error) {
           lastErrorMessage = result.error.message || lastErrorMessage;
           continue;
         }
-        if (attempt.activeOnly && Array.isArray(result.data) && result.data.length === 0) {
-          // Some environments keep legacy rows where is_active is null/false.
-          // Fall through to non-active query attempts before concluding no matches.
-          continue;
-        }
-        const rows = ((result.data || []) as Array<Record<string, unknown>>).map((row) => ({
+        const rows = (((result.data || []) as unknown) as Array<Record<string, unknown>>).map((row) => ({
           user1_id: String(row.user1_id || ""),
           user2_id: String(row.user2_id || ""),
           chat_id: typeof row.chat_id === "string" ? row.chat_id : null,
@@ -1598,6 +1586,13 @@ const Chats = () => {
     void (async () => {
       const rows = await fetchUserMatches();
       if (cancelled) return;
+      setActiveMatchedPeerIds(
+        new Set(
+          rows
+            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
+            .filter((id): id is string => Boolean(id) && id !== profile.id)
+        )
+      );
       // Intentionally not pruning seenMatchUserIdsRef here.
       // Pruning caused re-shows when fetchUserMatches() missed rows temporarily.
       void rows;
@@ -1745,6 +1740,7 @@ const Chats = () => {
           .select("id")
           .eq("user1_id", profile.id)
           .eq("user2_id", targetUserId)
+          .eq("is_active", true)
           .limit(1)
           .maybeSingle();
         if ((matchProbeA.data as { id?: string } | null)?.id) {
@@ -1756,6 +1752,7 @@ const Chats = () => {
           .select("id")
           .eq("user1_id", targetUserId)
           .eq("user2_id", profile.id)
+          .eq("is_active", true)
           .limit(1)
           .maybeSingle();
         if ((matchProbeB.data as { id?: string } | null)?.id) {
@@ -2622,93 +2619,6 @@ const Chats = () => {
     [profile?.id]
   );
 
-  const refreshMatchOnlyAvatars = useCallback(
-    async (friendChats: ChatUser[]) => {
-      if (!profile?.id) return;
-      const matchesRows = await fetchUserMatches();
-      const counterpartIds = Array.from(
-        new Set(
-          matchesRows
-            .map((row) => (row.user1_id === profile.id ? row.user2_id : row.user1_id))
-            .filter((id) => Boolean(id) && id !== profile.id)
-        )
-      );
-      if (counterpartIds.length === 0) {
-        setMatchOnlyAvatars([]);
-        return;
-      }
-      const counterpartInActiveConversations = new Set(
-        friendChats
-          .filter((chat) => Boolean(chat.lastMessageAt) || (chat.lastMessage || "").length > 0)
-          .map((chat) => String(chat.peerUserId || "").trim())
-          .filter(Boolean)
-      );
-      const profileById = new Map<string, Record<string, unknown>>();
-      const { data: profileRows } = await supabase
-        .from("profiles")
-        .select("id, display_name, avatar_url, is_verified, has_car, social_album, social_id")
-        .in("id", counterpartIds);
-      if (Array.isArray(profileRows)) {
-        for (const row of profileRows as Array<Record<string, unknown>>) {
-          const rowId = String(row.id || "");
-          if (rowId) profileById.set(rowId, row);
-        }
-      }
-      const unresolvedIds = counterpartIds.filter((id) => !profileById.has(id));
-      if (unresolvedIds.length > 0) {
-        const { data: publicRows } = await supabase
-          .from("profiles_public")
-          .select("id, display_name, avatar_url, is_verified, has_car")
-          .in("id", unresolvedIds);
-        if (Array.isArray(publicRows)) {
-          for (const row of publicRows as Array<Record<string, unknown>>) {
-            const rowId = String(row.id || "");
-            if (rowId) profileById.set(rowId, row);
-          }
-        }
-      }
-      const avatarCandidates = new Map<string, MatchOnlyAvatar>();
-      for (const row of matchesRows) {
-        const counterpart = row.user1_id === profile.id ? row.user2_id : row.user1_id;
-        if (!counterpart || counterpart === profile.id) continue;
-        if (counterpartInActiveConversations.has(counterpart)) continue;
-        const profileRow = (profileById.get(counterpart) || {}) as Record<string, unknown>;
-        const displayName = String(profileRow.display_name || "User");
-        const socialId =
-          typeof profileRow.social_id === "string" && profileRow.social_id.trim().length > 0
-            ? profileRow.social_id
-            : null;
-        const isOfficialTeamHuddle =
-          counterpart === TEAM_HUDDLE_USER_ID ||
-          isTeamHuddleIdentity(displayName, socialId);
-        const socialAlbumFallback = Array.isArray(profileRow.social_album)
-          ? String((profileRow.social_album as unknown[])[0] || "").trim()
-          : "";
-        avatarCandidates.set(counterpart, {
-          userId: counterpart,
-          name: resolveTeamHuddleDisplayName(counterpart, displayName, socialId) || displayName,
-          avatarUrl: resolveTeamHuddleAvatar(
-            (profileRow.avatar_url as string | null) || socialAlbumFallback || null,
-            displayName,
-            socialId
-          ),
-          isVerified: isOfficialTeamHuddle || profileRow.is_verified === true,
-          hasCar: Boolean(profileRow.has_car),
-          matchedAt: row.matched_at || null,
-        });
-      }
-      setMatchOnlyAvatars(Array.from(avatarCandidates.values()).slice(0, 12));
-    },
-    [fetchUserMatches, profile?.id]
-  );
-
-  const scheduleMatchOnlyAvatarRefresh = useCallback((friendChats: ChatUser[]) => {
-    if (typeof window === "undefined") return;
-    window.setTimeout(() => {
-      void refreshMatchOnlyAvatars(friendChats);
-    }, 0);
-  }, [refreshMatchOnlyAvatars]);
-
   const applyInboxRowsToCaches = useCallback(
     (scope: InboxScope, rows: InboxSummaryRow[], targetedRoomIds?: string[]) => {
       const nextFriends: ChatUser[] = [];
@@ -2777,17 +2687,6 @@ const Chats = () => {
       try {
         const rows = await fetchInboxSummaryRows(scope);
         applyInboxRowsToCaches(scope, rows);
-        if (scope === "all" || scope === "friends") {
-          const friendChats =
-            scope === "all"
-              ? inboxCacheRef.current.friends
-              : sortChatUsers(
-                  rows
-                    .map((row) => (String(row.room_type || "").trim() === "group" ? null : buildChatFromSummary(row)))
-                    .filter((row): row is ChatUser => Boolean(row) && row.type === "friend")
-                );
-          scheduleMatchOnlyAvatarRefresh(friendChats);
-        }
         conversationsHydratedRef.current = true;
       } catch {
         if (!conversationsHydratedRef.current) {
@@ -2802,7 +2701,7 @@ const Chats = () => {
         toast.error("Failed to load conversations");
       }
     },
-    [applyInboxRowsToCaches, buildChatFromSummary, fetchInboxSummaryRows, profile?.id, scheduleMatchOnlyAvatarRefresh, sortChatUsers]
+    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id]
   );
 
   const refreshRoomSummaries = useCallback(
@@ -2812,14 +2711,11 @@ const Chats = () => {
       try {
         const rows = await fetchInboxSummaryRows("all", nextRoomIds);
         applyInboxRowsToCaches("all", rows, nextRoomIds);
-        if (rows.some((row) => String(row.room_type || "").trim() !== "group")) {
-          scheduleMatchOnlyAvatarRefresh(inboxCacheRef.current.friends);
-        }
       } catch (error) {
         console.warn("[chats.inbox] room summary refresh failed", error);
       }
     },
-    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id, scheduleMatchOnlyAvatarRefresh]
+    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id]
   );
 
   const flushDirtyRoomSummaries = useCallback(async () => {
@@ -3447,10 +3343,11 @@ const Chats = () => {
         (chat) =>
           Boolean(chat.peerUserId) &&
           chat.peerUserId !== profile?.id &&
+          activeMatchedPeerIds.has(String(chat.peerUserId || "").trim()) &&
           !chat.lastMessageAt &&
           getChatPreview(chat).length === 0
       ),
-    [filteredChats, getChatPreview, profile?.id]
+    [activeMatchedPeerIds, filteredChats, getChatPreview, profile?.id]
   );
   const avatarOnlyMatchedChatIds = useMemo(
     () => new Set(avatarOnlyMatchedChats.map((chat) => chat.id)),
@@ -3464,14 +3361,6 @@ const Chats = () => {
         return !avatarOnlyMatchedChatIds.has(chat.id);
       }),
     [avatarOnlyMatchedChatIds, filteredChats, getChatPreview]
-  );
-  const visibleConversationPeerIds = useMemo(
-    () => new Set(visibleConversationChats.map((chat) => String(chat.peerUserId || "").trim()).filter(Boolean)),
-    [visibleConversationChats]
-  );
-  const avatarOnlyMatchOnlyAvatars = useMemo(
-    () => matchOnlyAvatars.filter((entry) => !visibleConversationPeerIds.has(entry.userId)),
-    [matchOnlyAvatars, visibleConversationPeerIds]
   );
   const priorityStarChats = useMemo(
     () => visibleConversationChats.filter(
@@ -3496,13 +3385,8 @@ const Chats = () => {
       if (!peerId) continue;
       ids.add(peerId);
     }
-    for (const entry of matchOnlyAvatars) {
-      const peerId = String(entry.userId || "").trim();
-      if (!peerId) continue;
-      ids.add(peerId);
-    }
     return ids;
-  }, [chats, matchOnlyAvatars]);
+  }, [chats]);
 
   useEffect(() => {
     if (strictMatchedDiscoveryIds.size === 0) return;
@@ -3941,17 +3825,8 @@ const Chats = () => {
           verified: Boolean(chat.isVerified),
         })
       );
-    matchOnlyAvatars.forEach((entry) =>
-      add({
-        id: entry.userId,
-        name: entry.name || "User",
-        avatar: entry.avatarUrl || undefined,
-        verified: Boolean(entry.isVerified),
-      })
-    );
-
     return Array.from(nextById.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [blockedUserIds, chats, groupContactPool, groupManageId, matchOnlyAvatars, profile?.id]);
+  }, [blockedUserIds, chats, groupContactPool, groupManageId, profile?.id]);
 
   useEffect(() => {
     // Gated: groupContactPool is only consumed by the Manage-Group sheet. Skip the
@@ -4070,24 +3945,10 @@ const Chats = () => {
   const closeMatchModal = useCallback(async () => {
     if (matchModal?.userId) {
       await markMatchSeenPersisted(matchModal.userId);
-      setMatchOnlyAvatars((prev) => {
-        const exists = prev.some((entry) => entry.userId === matchModal.userId);
-        if (exists) return prev;
-        return [
-          {
-            userId: matchModal.userId,
-            name: matchModal.name || "Conversation",
-            avatarUrl: matchModal.avatarUrl || null,
-            isVerified: false,
-            hasCar: false,
-            matchedAt: new Date().toISOString(),
-          },
-          ...prev,
-        ].slice(0, 12);
-      });
+      void loadConversations("friends");
     }
     setMatchModal(null);
-  }, [markMatchSeenPersisted, matchModal]);
+  }, [loadConversations, markMatchSeenPersisted, matchModal]);
 
   const openMatchModalFor = useCallback(
     async (target: { userId: string; name: string; avatarUrl?: string | null }) => {
@@ -4129,6 +3990,9 @@ const Chats = () => {
   const finalizeDiscoveryMatch = useCallback(
     (target: DiscoveryProfile, matchCreated: boolean) => {
       persistMatchedDiscoveryUser(target.id);
+      if (matchCreated) {
+        setActiveMatchedPeerIds((prev) => new Set([...prev, target.id]));
+      }
       setHiddenDiscoveryIds((prev) => {
         const next = new Set(prev);
         next.add(target.id);
@@ -4928,29 +4792,6 @@ const Chats = () => {
     navigate(`/chat-dialogue?room=${encodeURIComponent(chat.id)}&name=${encodeURIComponent(chat.name)}`);
   };
 
-  const handleMatchAvatarClick = useCallback((entry: MatchOnlyAvatar) => {
-    if (!entry.userId) return;
-    void (async () => {
-      try {
-        const roomId = await ensureDirectRoom(entry.userId, entry.name || "Conversation");
-        if (!roomId) return;
-        void markChatMessagesRead(roomId);
-        navigate(
-          `/chat-dialogue?room=${encodeURIComponent(roomId)}&name=${encodeURIComponent(entry.name || "Conversation")}&with=${encodeURIComponent(
-            entry.userId
-          )}`
-        );
-      } catch (error: unknown) {
-        const detail =
-          error && typeof error === "object" && "message" in error
-            ? String((error as { message?: unknown }).message || "")
-            : "";
-        console.error("[chats.match_avatar_open_failed]", detail || error);
-        toast.error(detail ? `Unable to open chat right now: ${detail}` : "Unable to open chat right now.");
-      }
-    })();
-  }, [ensureDirectRoom, markChatMessagesRead, navigate]);
-
   const handleRemoveChat = (chat: ChatUser) => {
     if (chat.hasTransaction) {
       toast.error(t("Cannot remove conversations with active transactions"));
@@ -5464,7 +5305,7 @@ const Chats = () => {
                 {/* Chat List */}
                 <div className="px-5">
                   <div className="space-y-0.5">
-                    {visibleConversationChats.length === 0 && avatarOnlyMatchedChats.length === 0 && avatarOnlyMatchOnlyAvatars.length === 0 ? (
+                    {visibleConversationChats.length === 0 && avatarOnlyMatchedChats.length === 0 ? (
                       <div className="mx-auto flex w-full max-w-md flex-col items-center py-4">
                         <img
                           src={emptyChatImage}
@@ -5477,7 +5318,7 @@ const Chats = () => {
                       </div>
                     ) : (
                       <>
-                        {(avatarOnlyMatchedChats.length > 0 || avatarOnlyMatchOnlyAvatars.length > 0) && (
+                        {avatarOnlyMatchedChats.length > 0 && (
                           <div className="flex items-center gap-2 overflow-x-auto overflow-y-visible px-2 pb-2 pt-2">
                             {avatarOnlyMatchedChats.slice(0, 10).map((chat) => (
                               <button
@@ -5492,24 +5333,6 @@ const Chats = () => {
                                   name={chat.name}
                                   isVerified={chat.isVerified}
                                   hasCar={chat.hasCar}
-                                  size="md"
-                                  showBadges={true}
-                                />
-                              </button>
-                            ))}
-                            {avatarOnlyMatchOnlyAvatars.slice(0, 10).map((entry) => (
-                              <button
-                                key={`avatar-only-match-${entry.userId}`}
-                                type="button"
-                                onClick={() => handleMatchAvatarClick(entry)}
-                                className="relative shrink-0 overflow-visible rounded-full p-0.5"
-                                aria-label={entry.name}
-                              >
-                                <UserAvatar
-                                  avatarUrl={entry.avatarUrl}
-                                  name={entry.name}
-                                  isVerified={entry.isVerified}
-                                  hasCar={entry.hasCar}
                                   size="md"
                                   showBadges={true}
                                 />

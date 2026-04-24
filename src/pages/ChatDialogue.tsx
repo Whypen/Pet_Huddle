@@ -731,6 +731,7 @@ const ChatDialogue = () => {
               .select("user1_id,user2_id")
               .eq("chat_id", room)
               .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+              .eq("is_active", true)
               .maybeSingle();
             if (matchRow) {
               const row = matchRow as { user1_id?: string | null; user2_id?: string | null };
