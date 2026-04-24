@@ -1,10 +1,9 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { lazy, Suspense, useEffect, useRef, type ComponentType } from "react";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { lazy, Suspense, type ComponentType } from "react";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { NetworkProvider } from "@/contexts/NetworkContext";
@@ -113,16 +112,6 @@ const BookingTerms = lazy(() => import("./pages/BookingTerms"));
 // Fallback
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 2,
-      staleTime: 1000 * 60 * 5, // 5 minutes
-      refetchOnWindowFocus: false,
-    },
-  },
-});
-
 const RouteSuspense = ({ children }: { children: React.ReactNode }) => (
   <Suspense
     fallback={
@@ -135,26 +124,9 @@ const RouteSuspense = ({ children }: { children: React.ReactNode }) => (
   </Suspense>
 );
 
-const AuthCacheIsolation = () => {
-  const { user } = useAuth();
-  const queryClient = useQueryClient();
-  const previousUserRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const currentUserId = user?.id ?? null;
-    if (previousUserRef.current && previousUserRef.current !== currentUserId) {
-      queryClient.clear();
-    }
-    previousUserRef.current = currentUserId;
-  }, [queryClient, user?.id]);
-
-  return null;
-};
-
 const App = () => (
   <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
-      <LanguageProvider>
+    <LanguageProvider>
         <NetworkProvider>
           <TooltipProvider>
             <AppBackground />
@@ -167,7 +139,6 @@ const App = () => (
               }}
             >
               <AuthProvider>
-                <AuthCacheIsolation />
                 <SignupProvider>
                   <UpsellBannerProvider>
                   <OfflineBanner />
@@ -558,7 +529,6 @@ const App = () => (
           </TooltipProvider>
         </NetworkProvider>
       </LanguageProvider>
-    </QueryClientProvider>
   </ErrorBoundary>
 );
 

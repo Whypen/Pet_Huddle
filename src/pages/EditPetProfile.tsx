@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-import { useQueryClient } from "@tanstack/react-query";
 import type { Json } from "@/integrations/supabase/types";
 import { PetDetailsBody, getSterilizedLabel, toTitleCase } from "@/components/pets/PetDetailsBody";
 import {
@@ -593,7 +592,6 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
   const petId = onboardingMode ? null : petIdParam;
   const { user, refreshProfile } = useAuth();
   const { data: signupData } = useSignup();
-  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(!!petId);
   const [saving, setSaving] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
@@ -1235,7 +1233,6 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
         if (!onboardingMode) {
           toast.success(t("Pet added!"));
         }
-        await queryClient.invalidateQueries({ queryKey: ["pets"] });
         setSavedPetId(finalPetId);
       } else {
         const { error } = await supabase.from("pets").update(petData).eq("id", petId);
@@ -1248,7 +1245,6 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
         if (!onboardingMode) {
           toast.success(t("Pet profile updated!"));
         }
-        await queryClient.invalidateQueries({ queryKey: ["pets"] });
         setSavedPetId(petId);
       }
 
@@ -1421,7 +1417,6 @@ const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
       setIsNewPet(false);
       setPhotoPreview(photoUrl);
       setPhotoFile(null);
-      await queryClient.invalidateQueries({ queryKey: ["pets"] });
       toast.success("Draft saved");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
