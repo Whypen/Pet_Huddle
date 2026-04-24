@@ -204,6 +204,8 @@ if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
   void syncToLatestEntryBundleOnce();
 }
 
+window.setTimeout(clearRuntimeRecoveryQueryParams, 500);
+
 // Vite-native hook: fired when any dynamic import() fails to load.
 // Belt-and-suspenders on top of the error/unhandledrejection handlers below.
 window.addEventListener("vite:preloadError", () => {

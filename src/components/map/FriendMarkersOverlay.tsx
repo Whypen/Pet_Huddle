@@ -254,6 +254,35 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                   normalizedAvatarUrl.startsWith("data:"));
               const normalizedName = String(friend.name || "").trim();
               const initial = (normalizedName.charAt(0) || "F").toUpperCase();
+              if (friend.isInvisible) {
+                const bucket = friend.genderBucket ?? "neutral";
+                const sessionKey = `${friend.id}:${friend.sessionMarker || "unpinned"}:${bucket}`;
+                const maskedAvatarUrl = pickMaskedAvatarAsset(bucket, sessionKey);
+                const fallbackAvatarUrl = maskedAvatarUrl || normalizedAvatarUrl;
+                const markerSizeClass = isCompressedMode ? "h-[24px] w-[24px]" : "h-11 w-11";
+                const imageInsetClass = isCompressedMode
+                  ? "h-[calc(100%-2px)] w-[calc(100%-2px)]"
+                  : "h-[calc(100%-4px)] w-[calc(100%-4px)]";
+                return (
+                  <span
+                    className={`flex ${markerSizeClass} items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]`}
+                    style={{ border: `1.5px solid ${ringColor}` }}
+                  >
+                    {fallbackAvatarUrl ? (
+                      <img
+                        src={fallbackAvatarUrl}
+                        alt=""
+                        className={`${imageInsetClass} rounded-full object-cover`}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <span className={`flex ${imageInsetClass} items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]`}>
+                        {initial}
+                      </span>
+                    )}
+                  </span>
+                );
+              }
               if (isCompressedMode) {
                 const isVerified = friend.isVerified === true;
                 return (
@@ -264,31 +293,6 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                     }}
                   >
                     <QuietUserGlyph fill={isVerified ? "#2145CF" : "#5C6474"} />
-                  </span>
-                );
-              }
-              if (friend.isInvisible) {
-                const bucket = friend.genderBucket ?? "neutral";
-                const sessionKey = `${friend.id}:${friend.sessionMarker || "unpinned"}:${bucket}`;
-                const maskedAvatarUrl = pickMaskedAvatarAsset(bucket, sessionKey);
-                const fallbackAvatarUrl = maskedAvatarUrl || normalizedAvatarUrl;
-                return (
-                  <span
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
-                    style={{ border: `1.5px solid ${ringColor}` }}
-                  >
-                    {fallbackAvatarUrl ? (
-                      <img
-                        src={fallbackAvatarUrl}
-                        alt=""
-                        className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
-                        {initial}
-                      </span>
-                    )}
                   </span>
                 );
               }
