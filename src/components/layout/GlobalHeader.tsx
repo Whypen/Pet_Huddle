@@ -211,6 +211,8 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   const [notifLoading, setNotifLoading] = useState(false);
   const markedOnOpenRef = useRef(false);
   const notifOpenRef = useRef(false);
+  const notifBadgeDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const notifDrawerDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   const showUnreadDot = !notifOpen && unreadCount > 0;
 
   const isVerified = profile?.is_verified === true;
@@ -361,7 +363,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => { void refreshUnread(); }
+        () => {
+          if (notifBadgeDebounceRef.current !== null) window.clearTimeout(notifBadgeDebounceRef.current);
+          notifBadgeDebounceRef.current = window.setTimeout(() => {
+            notifBadgeDebounceRef.current = null;
+            void refreshUnread();
+          }, 400);
+        }
       )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
@@ -384,11 +392,14 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
     return () => {
       cancelled = true;
+      if (notifBadgeDebounceRef.current !== null) window.clearTimeout(notifBadgeDebounceRef.current);
       window.clearInterval(pollId);
       document.removeEventListener("visibilitychange", onVisibility);
       supabase.removeChannel(channel);
     };
-  }, [user]);
+    // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // ── Load notifications when drawer opens ────────────────────────────────────
   useEffect(() => {
@@ -448,7 +459,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => void load({ silent: true })
+        () => {
+          if (notifDrawerDebounceRef.current !== null) window.clearTimeout(notifDrawerDebounceRef.current);
+          notifDrawerDebounceRef.current = window.setTimeout(() => {
+            notifDrawerDebounceRef.current = null;
+            void load({ silent: true });
+          }, 400);
+        }
       )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
@@ -465,10 +482,13 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
 
     return () => {
       cancelled = true;
+      if (notifDrawerDebounceRef.current !== null) window.clearTimeout(notifDrawerDebounceRef.current);
       window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
-  }, [notifOpen, user]);
+    // Only user.id is used inside; intentionally avoid re-subscribing on other user property changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifOpen, user?.id]);
 
   useEffect(() => {
     if (!notifOpen) return;

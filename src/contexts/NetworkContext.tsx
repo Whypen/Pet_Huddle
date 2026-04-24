@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { toast } from "sonner";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -293,17 +293,17 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isOnline, isServerReachable]);
 
+  const contextValue = useMemo(() => ({
+    isOnline,
+    isServerReachable,
+    lastOnlineTime,
+    retryConnection,
+    addOfflineAction,
+    pendingActions,
+  }), [isOnline, isServerReachable, lastOnlineTime, retryConnection, addOfflineAction, pendingActions]);
+
   return (
-    <NetworkContext.Provider
-      value={{
-        isOnline,
-        isServerReachable,
-        lastOnlineTime,
-        retryConnection,
-        addOfflineAction,
-        pendingActions,
-      }}
-    >
+    <NetworkContext.Provider value={contextValue}>
       {children}
     </NetworkContext.Provider>
   );
