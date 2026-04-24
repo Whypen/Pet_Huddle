@@ -136,8 +136,6 @@ const AuthCacheIsolation = () => {
     const currentUserId = user?.id ?? null;
     if (previousUserRef.current && previousUserRef.current !== currentUserId) {
       queryClient.clear();
-    } else if (!currentUserId) {
-      queryClient.removeQueries();
     }
     previousUserRef.current = currentUserId;
   }, [queryClient, user?.id]);

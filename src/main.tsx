@@ -1,7 +1,6 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
-import "mapbox-gl/dist/mapbox-gl.css";
 
 if (import.meta.env.DEV && import.meta.env.VITE_UAT_DEBUG === "true") {
   const originalFetch = window.fetch.bind(window);

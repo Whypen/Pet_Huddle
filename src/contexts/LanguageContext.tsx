@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState, useEffect } from "react";
 
 export type Language = "en" | "zh-TW" | "zh-CN";
 
@@ -1841,25 +1841,27 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return detectLanguage();
   });
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem("huddle_language", lang);
-  };
+  }, []);
 
-  const t = (key: string, vars?: Record<string, string | number>): string => {
+  const t = useCallback((key: string, vars?: Record<string, string | number>): string => {
     const template = translations[language][key] || translations.en[key] || key;
     if (!vars) return template;
     return Object.entries(vars).reduce((value, [name, replacement]) => (
       value.replaceAll(`{${name}}`, String(replacement))
     ), template);
-  };
+  }, [language]);
+
+  const contextValue = useMemo(() => ({ language, setLanguage, t }), [language, setLanguage, t]);
 
   useEffect(() => {
     document.documentElement.lang = language === "zh-TW" ? "zh-Hant" : language === "zh-CN" ? "zh-Hans" : "en";
   }, [language]);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, t }}>
+    <LanguageContext.Provider value={contextValue}>
       {children}
     </LanguageContext.Provider>
   );

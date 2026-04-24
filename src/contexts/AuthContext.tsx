@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { getAuthenticatorAssurance, listTotpFactors } from "@/lib/mfa";
@@ -153,6 +153,44 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+const ACTIVITY_TOUCH_KEY = "huddle_last_activity_touch_at";
+const EXPIRE_RESTRICTIONS_SESSION_KEY = "huddle:expire-restrictions-ts";
+const EXPIRE_RESTRICTIONS_TTL_MS = 10 * 60 * 1000; // 10 minutes per tab session
+
+const PROFILE_COLUMNS = [
+  "id", "user_id", "email", "display_name", "legal_name", "social_id",
+  "phone", "phone_verification_status", "phone_verified_at",
+  "avatar_url", "bio", "gender_genre", "orientation", "dob",
+  "height", "weight", "weight_unit", "degree", "school", "major",
+  "affiliation", "occupation", "pet_experience", "experience_years",
+  "relationship_status", "has_car", "languages", "location_name",
+  "location_country", "location_district", "is_admin", "user_role",
+  "tier", "effective_tier",
+  "subscription_status", "stripe_subscription_id",
+  "subscription_current_period_end", "subscription_cancel_at_period_end",
+  "subscription_cancel_requested_at", "subscription_cancel_reason",
+  "subscription_cancel_reason_other",
+  "share_perks_subscription_id", "share_perks_subscription_status",
+  "share_perks_subscription_current_period_end",
+  "share_perks_cancel_at_period_end", "share_perks_cancel_requested_at",
+  "share_perks_cancel_reason", "share_perks_cancel_reason_other",
+  "stars_count", "mesh_alert_count", "media_credits", "family_slots",
+  "onboarding_completed", "email_verified", "owns_pets", "non_social",
+  "availability_status", "show_gender", "show_orientation", "show_age",
+  "show_height", "show_weight", "show_academic", "show_affiliation",
+  "show_occupation", "show_bio", "show_relationship_status",
+  "last_lat", "last_lng", "care_circle",
+  "verification_status", "is_verified", "verification_comment",
+  "human_verification_status", "human_verified_at",
+  "card_verification_status", "card_verified", "card_brand", "card_last4",
+  "verification_rejection_code", "social_album", "prefs",
+  "hide_from_map", "last_active_at",
+  "family_owner_id",
+  "subscription_cancel_reason_other",
+  "share_perks_cancel_reason_other",
+] as const;
+const PROFILE_SELECT = PROFILE_COLUMNS.join(", ");
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const stableStringify = (value: unknown): string => {
@@ -189,92 +227,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [hydrating, setHydrating] = useState(false);
   const [mfaPending, setMfaPending] = useState(false);
 
-  const profileColumns = [
-    "id",
-    "user_id",
-    "email",
-    "display_name",
-    "legal_name",
-    "social_id",
-    "phone",
-    "avatar_url",
-    "bio",
-    "gender_genre",
-    "orientation",
-    "dob",
-    "height",
-    "weight",
-    "weight_unit",
-    "degree",
-    "school",
-    "major",
-    "affiliation",
-    "occupation",
-    "pet_experience",
-    "experience_years",
-    "relationship_status",
-    "has_car",
-    "languages",
-    "location_name",
-    "location_country",
-    "location_district",
-    "is_admin",
-    "user_role",
-    "tier",
-    "effective_tier",
-    "subscription_status",
-    "stripe_subscription_id",
-    "subscription_current_period_end",
-    "subscription_cancel_at_period_end",
-    "subscription_cancel_requested_at",
-    "subscription_cancel_reason",
-    "subscription_cancel_reason_other",
-    "share_perks_subscription_id",
-    "share_perks_subscription_status",
-    "share_perks_subscription_current_period_end",
-    "share_perks_cancel_at_period_end",
-    "share_perks_cancel_requested_at",
-    "share_perks_cancel_reason",
-    "share_perks_cancel_reason_other",
-    "stars_count",
-    "mesh_alert_count",
-    "media_credits",
-    "family_slots",
-    "onboarding_completed",
-    "email_verified",
-    "owns_pets",
-    "non_social",
-    "availability_status",
-    "show_gender",
-    "show_orientation",
-    "show_age",
-    "show_height",
-    "show_weight",
-    "show_academic",
-    "show_affiliation",
-    "show_occupation",
-    "show_bio",
-    "show_relationship_status",
-    "last_lat",
-    "last_lng",
-    "care_circle",
-    "verification_status",
-    "is_verified",
-    "verification_comment",
-    "human_verification_status",
-    "human_verified_at",
-    "card_verification_status",
-    "card_verified",
-    "card_brand",
-    "card_last4",
-    "verification_rejection_code",
-    "social_album",
-    "prefs",
-    "hide_from_map",
-    "last_active_at",
-  ] as const;
-  const profileSelect = profileColumns.join(", ");
-  const activityTouchKey = "huddle_last_activity_touch_at";
+  const lastPriceHintsRef = useRef("");
   const previousUserIdRef = useRef<string | null>(null);
   const hydrationRunRef = useRef(0);
 
@@ -385,7 +338,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select(PROFILE_SELECT)
         .eq("id", userId)
         .maybeSingle();
       if (!isHydrationRunCurrent(runId)) return;
@@ -421,8 +374,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const familyOwnerId = ownerId !== userId ? ownerId : null;
       const effectiveTier = normalizeMembershipTier(String(data.effective_tier ?? data.tier ?? "free"));
 
-      // Auto-expire any restriction/suspension that has passed its deadline
-      void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
+      // Auto-expire any restriction/suspension that has passed its deadline.
+      // Rate-limited to once per 10 min per tab session to avoid firing on every realtime/focus tick.
+      try {
+        const lastRan = Number(sessionStorage.getItem(EXPIRE_RESTRICTIONS_SESSION_KEY) || 0);
+        if (!Number.isFinite(lastRan) || Date.now() - lastRan > EXPIRE_RESTRICTIONS_TTL_MS) {
+          sessionStorage.setItem(EXPIRE_RESTRICTIONS_SESSION_KEY, String(Date.now()));
+          void (supabase.rpc as unknown as (fn: string) => Promise<unknown>)("expire_account_restrictions");
+        }
+      } catch {
+        // best-effort only
+      }
 
       const nextProfile = { ...(data as Profile), effective_tier: effectiveTier, family_owner_id: familyOwnerId };
       const nextProfileKey = stableStringify(nextProfile);
@@ -435,6 +397,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       // Warm pricing cache in the background so Premium / upsell UI can
       // render the user's resolved currency without a visible flash.
+      // Deduplicated: skip if same country+currency hints as last call.
       void (async () => {
         const profilePrefs = (data as Profile).prefs as Record<string, unknown> | null | undefined;
         const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
@@ -445,6 +408,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           profileCountry: (data as Profile).location_country ?? null,
           profileCurrency: savedPricingCurrency,
         });
+        const hintsKey = `${hints.country ?? ""}:${hints.currency ?? ""}`;
+        if (lastPriceHintsRef.current === hintsKey) return;
+        lastPriceHintsRef.current = hintsKey;
         await fetchLivePrices({
           country: hints.country,
           currency: hints.currency,
@@ -491,8 +457,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setHydrating(true);
     const { data, error } = await supabase.auth.getUser();
     if (!isHydrationRunCurrent(runId)) return;
-    const { data: refreshedSessionData } = await supabase.auth.getSession();
-    if (!isHydrationRunCurrent(runId)) return;
     if (error || !data.user) {
       if (import.meta.env.DEV) {
         console.warn("[AuthContext] clearing stale local session", {
@@ -507,7 +471,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const effectiveSession = refreshedSessionData.session ?? candidateSession;
+    const effectiveSession = candidateSession;
     supabase.realtime.setAuth(effectiveSession.access_token ?? null);
     const aal = await getAuthenticatorAssurance(supabase);
     if (!isHydrationRunCurrent(runId)) return;
@@ -628,7 +592,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [hydrateValidatedSession]);
 
-  const signUp = async (
+  const signUp = useCallback(async (
     email: string,
     password: string,
     displayName: string,
@@ -701,9 +665,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     return { error: error as Error | null };
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const signIn = async (email: string, password: string, phone?: string, turnstileToken?: string) => {
+  const signIn = useCallback(async (email: string, password: string, phone?: string, turnstileToken?: string) => {
     const runtimeEnv = getAuthRuntimeEnv();
     if (import.meta.env.DEV) {
       console.debug("[auth.signin] runtime", {
@@ -773,9 +738,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         mfaMethod: null,
       };
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     const emailOwner = normalizeStorageOwner(session?.user?.email || profile?.phone || "");
     const scopedSignupKey = buildScopedStorageKey(SIGNUP_STORAGE_KEY, emailOwner);
     const scopedSignupPasswordKey = buildScopedStorageKey(SIGNUP_PASSWORD_SESSION_KEY, emailOwner);
@@ -795,30 +761,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     sessionStorage.removeItem("signup_verify_docs_submitted");
     localStorage.removeItem("huddle_offline_actions");
     localStorage.removeItem("pending_addon");
-  };
+  }, [beginHydrationRun, profile?.phone, resetAuthBoundary, session?.user?.email]);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
       const runId = beginHydrationRun();
       await fetchProfile(user.id, runId);
     }
-  };
+  }, [beginHydrationRun, fetchProfile, user]);
+
+  const contextValue = useMemo(() => ({
+    user,
+    session,
+    profile,
+    loading,
+    hydrating,
+    mfaPending,
+    signUp,
+    signIn,
+    signOut,
+    refreshProfile,
+  }), [user, session, profile, loading, hydrating, mfaPending, signUp, signIn, signOut, refreshProfile]);
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        loading,
-        hydrating,
-        mfaPending,
-        signUp,
-        signIn,
-        signOut,
-        refreshProfile,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );
