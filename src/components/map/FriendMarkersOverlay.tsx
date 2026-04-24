@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import type mapboxgl from "mapbox-gl";
-import { Users } from "lucide-react";
 import { pickGroupedPinAsset, pickMaskedAvatarAsset, type GenderBucket } from "./maskedPinAssets";
 
 export type FriendOverlayPin = {
@@ -30,23 +29,6 @@ const COMPRESSED_NON_VERIFIED_BG = "#E3E7EF";
 const COMPRESSED_VERIFIED_BG = "#E6EEFF";
 const COMPRESSED_BADGE_BG = "#EEF2F8";
 const COMPRESSED_BADGE_TEXT = "#5C6474";
-
-const QuietUserGlyph = ({ fill }: { fill: string }) => {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-[19px] w-[19px]"
-      style={{ overflow: "visible" }}
-    >
-      <circle cx="8" cy="4.45" r="2.15" fill={fill} />
-      <path
-        d="M4.05 12.2c0-1.92 1.78-3.3 3.95-3.3s3.95 1.38 3.95 3.3"
-        fill={fill}
-      />
-    </svg>
-  );
-};
 
 type CompressedGroup = {
   ids: string[];
@@ -211,7 +193,9 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                       style={{ background: COMPRESSED_NON_VERIFIED_BG }}
                       aria-hidden="true"
                     >
-                      <Users className="h-[18px] w-[18px] text-[#5C6474]" strokeWidth={2.1} />
+                      <span className="text-[10px] font-semibold leading-none" style={{ color: COMPRESSED_BADGE_TEXT }}>
+                        {countLabel}
+                      </span>
                     </div>
                   )}
                   <span
@@ -245,13 +229,13 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
           >
             {(() => {
               const normalizedAvatarUrl = String(friend.avatarUrl || "").trim();
-              const canRenderAvatar =
-                !isCompressedMode &&
+              const canRenderAvatarUrl =
                 !avatarErrorsById[friend.id] &&
                 normalizedAvatarUrl.length > 0 &&
                 (/^https?:\/\//i.test(normalizedAvatarUrl) ||
                   normalizedAvatarUrl.startsWith("blob:") ||
                   normalizedAvatarUrl.startsWith("data:"));
+              const canRenderAvatar = !isCompressedMode && canRenderAvatarUrl;
               const normalizedName = String(friend.name || "").trim();
               const initial = (normalizedName.charAt(0) || "F").toUpperCase();
               if (friend.isInvisible) {
@@ -284,15 +268,32 @@ const FriendMarkersOverlay = ({ map, friends, onSelect }: Props) => {
                 );
               }
               if (isCompressedMode) {
-                const isVerified = friend.isVerified === true;
+                const bucket = friend.genderBucket ?? "neutral";
+                const sessionKey = `${friend.id}:${friend.sessionMarker || "unpinned"}:${bucket}:compressed`;
+                const maskedAvatarUrl = pickMaskedAvatarAsset(bucket, sessionKey);
+                const fallbackAvatarUrl = canRenderAvatarUrl ? normalizedAvatarUrl : maskedAvatarUrl;
                 return (
                   <span
                     className="flex h-[24px] w-[24px] items-center justify-center rounded-full border border-white/80"
                     style={{
-                      background: isVerified ? COMPRESSED_VERIFIED_BG : COMPRESSED_NON_VERIFIED_BG,
+                      background: friend.isVerified === true ? COMPRESSED_VERIFIED_BG : COMPRESSED_NON_VERIFIED_BG,
                     }}
                   >
-                    <QuietUserGlyph fill={isVerified ? "#2145CF" : "#5C6474"} />
+                    {fallbackAvatarUrl ? (
+                      <img
+                        src={fallbackAvatarUrl}
+                        alt=""
+                        className="h-[22px] w-[22px] rounded-full object-cover"
+                        aria-hidden="true"
+                        onError={() =>
+                          setAvatarErrorsById((prev) => ({ ...prev, [friend.id]: true }))
+                        }
+                      />
+                    ) : (
+                      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-muted text-[11px] font-bold text-[var(--text-secondary)]">
+                        {initial}
+                      </span>
+                    )}
                   </span>
                 );
               }

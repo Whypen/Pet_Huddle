@@ -1692,6 +1692,8 @@ const MapPage = () => {
             avatarUrl={profile?.avatar_url || null}
             isVerified={profile?.is_verified === true}
             isInvisible={isInvisible}
+            genderBucket={normalizeGenderBucket(profile?.gender_genre)}
+            sessionMarker={pinPersistedAt}
             markerState={ownMarkerState || "active"}
           />
         )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type mapboxgl from "mapbox-gl";
-import { User } from "lucide-react";
+import { pickMaskedAvatarAsset, type GenderBucket } from "./maskedPinAssets";
 
 const COMPRESSED_MODE_ENTER_ZOOM = 14.5;
 const COMPRESSED_MODE_EXIT_ZOOM = 15;
@@ -14,6 +14,8 @@ interface BlueDotMarkerProps {
   avatarUrl?: string | null;
   isVerified?: boolean;
   isInvisible?: boolean;
+  genderBucket?: GenderBucket;
+  sessionMarker?: string | null;
   markerState?: "active" | "expired_dot";
 }
 
@@ -24,6 +26,8 @@ const BlueDotMarker = ({
   avatarUrl,
   isVerified = false,
   isInvisible = false,
+  genderBucket = "neutral",
+  sessionMarker = null,
   markerState = "active",
 }: BlueDotMarkerProps) => {
   const [screenPoint, setScreenPoint] = useState<{ x: number; y: number } | null>(null);
@@ -80,6 +84,11 @@ const BlueDotMarker = ({
     (/^https?:\/\//i.test(normalizedAvatarUrl) ||
       normalizedAvatarUrl.startsWith("blob:") ||
       normalizedAvatarUrl.startsWith("data:"));
+  const maskedAvatarUrl = pickMaskedAvatarAsset(
+    genderBucket,
+    `${displayName || "me"}:${sessionMarker || "unpinned"}:${genderBucket}:own`
+  );
+  const ownAvatarUrl = hasRenderableAvatar ? normalizedAvatarUrl : maskedAvatarUrl;
 
   return (
     <div
@@ -100,11 +109,23 @@ const BlueDotMarker = ({
         </div>
       ) : isInvisible ? (
         <div
-          className="h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)] flex items-center justify-center"
-          style={{ border: "2px solid #A6D539", background: "#A6D539" }}
+          className="h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)] flex items-center justify-center overflow-hidden"
+          style={{ border: "2px solid #A6D539", background: "#fff" }}
           aria-label="You are incognito"
         >
-          <User className="h-5 w-5 text-white" strokeWidth={2.4} />
+          {ownAvatarUrl ? (
+            <img
+              src={ownAvatarUrl}
+              alt=""
+              className="h-[calc(100%-4px)] w-[calc(100%-4px)] rounded-full object-cover"
+              aria-hidden="true"
+              onError={() => setAvatarFailed(true)}
+            />
+          ) : (
+            <span className="flex h-[calc(100%-4px)] w-[calc(100%-4px)] items-center justify-center rounded-full bg-muted text-sm font-bold text-[var(--text-secondary)]">
+              {initial}
+            </span>
+          )}
         </div>
       ) : (
         <div

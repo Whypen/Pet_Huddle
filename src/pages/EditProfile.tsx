@@ -45,7 +45,6 @@ import {
   type DraftMode,
   type StoredFormDraft,
 } from "@/lib/formDraftConfigs";
-import { FormDraftStatus } from "@/components/ui/FormDraftStatus";
 
 // Option constants matching database schema
 const genderOptions = CANONICAL_GENDER_OPTIONS.filter(o => o !== "Prefer not to say");
@@ -1747,11 +1746,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     },
   });
   const {
-    status: profileDraftStatus,
     hydrateFromBaseline: hydrateProfileDraftFromBaseline,
     flushLocalDraftNow: flushProfileLocalDraftNow,
     flushRemoteNow: flushProfileRemoteDraftNow,
-    discardDraft: discardProfileDraft,
     commitLatestDraftAsBaseline: commitProfileDraftAsBaseline,
   } = profileDraftAutosave;
 
@@ -2201,23 +2198,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       </header>
 
       <div className="px-4 pt-2">
-        <FormDraftStatus
-          mode={profileDraftMode}
-          status={profileDraftStatus}
-          onDiscard={
-            profileDraftMode === "local-and-remote"
-              ? () => discardProfileDraft({ restoreBaseline: true })
-              : undefined
-          }
-          onReload={
-            profileDraftMode === "local-and-remote"
-              ? () => {
-                  discardProfileDraft({ restoreBaseline: false });
-                  void refreshProfile();
-                }
-              : undefined
-          }
-        />
         <div className="grid grid-cols-2 border-b border-border">
           <button
             type="button"
