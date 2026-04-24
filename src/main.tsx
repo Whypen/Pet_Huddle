@@ -182,6 +182,20 @@ const syncToLatestEntryBundleOnce = async () => {
   }
 };
 
+const clearRuntimeRecoveryQueryParams = () => {
+  try {
+    const url = new URL(window.location.href);
+    const recoveryParams = ["__chunk_recover", "__bundle", "__entry_sync"];
+    const hadRecoveryParam = recoveryParams.some((key) => url.searchParams.has(key));
+    if (!hadRecoveryParam) return;
+    recoveryParams.forEach((key) => url.searchParams.delete(key));
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl || "/");
+  } catch {
+    // Best effort only; recovery markers are cosmetic after a healthy boot.
+  }
+};
+
 if (ENABLE_AUTOMATIC_RUNTIME_RELOAD) {
   void syncToLatestEntryBundleOnce();
 } else {
@@ -224,6 +238,7 @@ window.setTimeout(() => {
   try {
     sessionStorage.removeItem(CHUNK_RELOAD_ATTEMPTS_KEY);
     sessionStorage.removeItem(CHUNK_RECOVERY_GUARD_KEY);
+    clearRuntimeRecoveryQueryParams();
   } catch {
     // ignore
   }

@@ -52,12 +52,28 @@ serve(async (req: Request) => {
     const { data: unmatchRows, error: unmatchError } = await supabase
       .from("user_unmatches")
       .select("id")
-      .eq("actor_id", targetUserId)
-      .eq("target_id", actorId)
+      .or(`and(actor_id.eq.${targetUserId},target_id.eq.${actorId}),and(actor_id.eq.${actorId},target_id.eq.${targetUserId})`)
       .limit(1);
     if (unmatchError) throw unmatchError;
     if (Array.isArray(unmatchRows) && unmatchRows.length > 0) {
-      return new Response(JSON.stringify({ error: "unmatched_by_target" }), {
+      return new Response(JSON.stringify({ error: "unmatched_relationship" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const user1 = actorId < targetUserId ? actorId : targetUserId;
+    const user2 = actorId < targetUserId ? targetUserId : actorId;
+    const { data: matchRow, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .eq("user1_id", user1)
+      .eq("user2_id", user2)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (matchError) throw matchError;
+    if (!matchRow) {
+      return new Response(JSON.stringify({ error: "active_match_required" }), {
         status: 403,
         headers: { "Content-Type": "application/json" },
       });

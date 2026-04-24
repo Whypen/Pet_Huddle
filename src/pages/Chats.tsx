@@ -38,7 +38,6 @@ import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { openExternalUrl } from "@/lib/nativeShell";
 import { isStarIntroKind, parseStarChatContent, sendStarChat } from "@/lib/starChat";
 import { parseChatShareMessage } from "@/lib/shareModel";
-import { SharedContentCard } from "@/components/chat/SharedContentCard";
 import { DiscoveryDeck } from "@/components/chat/DiscoveryDeck";
 import { GroupDetailsPanel } from "@/components/chat/GroupDetailsPanel";
 import { groupActivityRankValue, updateGroupChatMetadata, type GroupMetadataRow } from "@/lib/groupChats";
@@ -632,6 +631,7 @@ type InboxSummaryRow = {
   blocked_by_me?: boolean | null;
   blocked_by_them?: boolean | null;
   unmatched_by_them?: boolean | null;
+  unmatched_by_me?: boolean | null;
   matched_at?: string | null;
   chat_name?: string | null;
   avatar_url?: string | null;
@@ -823,11 +823,6 @@ const Chats = () => {
   const [pendingGroupInvite, setPendingGroupInvite] = useState<PendingGroupInvite | null>(null);
   const seenGroupInvitePromptsRef = useRef<Set<string>>(new Set());
 
-  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
-  const [activeRoomName, setActiveRoomName] = useState<string>("");
-  const [activeRoomMessages, setActiveRoomMessages] = useState<{ id: string; sender_id: string; content: string; created_at: string }[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatSending, setChatSending] = useState(false);
   const [showChatsToggleDot, setShowChatsToggleDot] = useState(false);
   const [starUpgradeTier, setStarUpgradeTier] = useState<StarUpgradeTier | null>(null);
   const [starUpgradeBilling, setStarUpgradeBilling] = useState<"monthly" | "annual">("monthly");
@@ -2527,9 +2522,11 @@ const Chats = () => {
           ? `You're blocked by ${counterpartName}.`
           : row.unmatched_by_them
             ? "You've been unmatched."
-            : showRequesterRequestPrompt
-              ? "Send a request to get started!"
-              : "";
+            : row.unmatched_by_me
+              ? "You've unmatched this user."
+              : showRequesterRequestPrompt
+                ? "Send a request to get started!"
+                : "";
       return {
         id: roomId,
         peerUserId: counterpartUserId,
@@ -3221,21 +3218,6 @@ const Chats = () => {
     [profile?.id]
   );
 
-  const loadRoomMessages = useCallback(async (roomId: string) => {
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("id, sender_id, content, created_at")
-      .eq("chat_id", roomId)
-      .order("created_at", { ascending: true })
-      .limit(150);
-    if (error) {
-      toast.error("Failed to load chat messages");
-      return;
-    }
-    const nextMessages = (data || []) as { id: string; sender_id: string; content: string; created_at: string }[];
-    setActiveRoomMessages(nextMessages);
-    void markChatMessagesRead(roomId, nextMessages);
-  }, [markChatMessagesRead]);
   const subscribedInboxRoomIds = useMemo(
     () =>
       Array.from(
@@ -3271,24 +3253,6 @@ const Chats = () => {
       void supabase.removeChannel(channel);
     };
   }, [profile?.id, queueDirtyRoomSummaryRefresh]);
-
-  useEffect(() => {
-    if (!activeRoomId) return;
-    const roomChannel = supabase
-      .channel(`active_room_${activeRoomId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "chat_messages", filter: `chat_id=eq.${activeRoomId}` },
-        () => {
-          void loadRoomMessages(activeRoomId);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(roomChannel);
-    };
-  }, [activeRoomId, loadRoomMessages]);
 
   const getChatPreview = useCallback((chat: ChatUser) => {
     const override = String(chat.previewOverride || "").trim();
@@ -4232,10 +4196,9 @@ const Chats = () => {
 
     if (openRoomId) {
       void (async () => {
-        const canonicalRoomId = openUserId ? (await ensureDirectRoom(openUserId, openUserName)) || openRoomId : openRoomId;
-        void markChatMessagesRead(canonicalRoomId);
+        void markChatMessagesRead(openRoomId);
         navigate(
-          `/chat-dialogue?room=${encodeURIComponent(canonicalRoomId)}&name=${encodeURIComponent(openUserName)}${
+          `/chat-dialogue?room=${encodeURIComponent(openRoomId)}&name=${encodeURIComponent(openUserName)}${
             openUserId ? `&with=${encodeURIComponent(openUserId)}` : ""
           }`,
           { replace: true }
@@ -4261,41 +4224,6 @@ const Chats = () => {
       }
     })();
   }, [ensureDirectRoom, isVerified, markChatMessagesRead, navigate, profile?.id, searchParams]);
-
-  const sendInlineMessage = useCallback(async () => {
-    if (!activeRoomId || !profile?.id || !chatInput.trim() || chatSending) return;
-    setChatSending(true);
-    const text = chatInput.trim();
-    setChatInput("");
-    try {
-      const { data: recipients } = await supabase
-        .from("chat_room_members")
-        .select("user_id")
-        .eq("chat_id", activeRoomId)
-        .neq("user_id", profile.id);
-      const recipientIds = (((recipients || []) as unknown) as Array<{ user_id: string }>).map((item) => item.user_id);
-      for (const recipientId of recipientIds) {
-        const blocked = await areUsersBlocked(profile.id, recipientId);
-        if (blocked) {
-          toast.error("Messaging blocked for this user.");
-          setChatInput(text);
-          setChatSending(false);
-          return;
-        }
-      }
-      const { error } = await supabase
-        .from("chat_messages")
-        .insert({ chat_id: activeRoomId, sender_id: profile.id, content: text });
-      if (error) throw error;
-      await loadRoomMessages(activeRoomId);
-      await refreshRoomSummaries([activeRoomId]);
-    } catch {
-      toast.error("Failed to send message");
-      setChatInput(text);
-    } finally {
-      setChatSending(false);
-    }
-  }, [activeRoomId, chatInput, chatSending, loadRoomMessages, profile?.id, refreshRoomSummaries]);
 
   const handleCreateGroup = () => {
     if (!isVerified) {
@@ -5143,56 +5071,6 @@ const Chats = () => {
       {/* ── CHATS view ───────────────────────────────────────────────────────── */}
       {!discoverChatAgeBlocked && topTab === "chats" && (
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-
-          {/* Inline room chat (if active) */}
-          {activeRoomId && (
-            <section className="px-5 pb-3">
-              <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden">
-                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                  <div className="text-sm font-semibold truncate">{activeRoomName || "Chat"}</div>
-                  <button className="text-xs underline" onClick={() => setActiveRoomId(null)}>Close</button>
-                </div>
-                <div className="max-h-64 overflow-y-auto px-4 py-3 space-y-2">
-                  {activeRoomMessages.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No messages yet.</p>
-                  ) : activeRoomMessages.map((m) => {
-                    const mine = m.sender_id === profile?.id;
-                    const share = parseChatShareMessage(m.content);
-                    return (
-                      <div key={m.id} className={cn("max-w-[85%]", mine ? "ml-auto" : "")}>
-                        {share ? (
-                          <SharedContentCard share={share} mine={mine} compact />
-                        ) : (
-                          <div className={cn("rounded-lg px-3 py-2 text-sm", mine ? "bg-brandBlue text-white" : "bg-muted text-brandText")}>
-                            {m.content}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="px-3 py-3 border-t border-border flex items-center gap-2">
-                  <input
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Type a message..."
-                    style={{ fontSize: "16px" }}
-                    className="flex-1 h-10 rounded-[10px] bg-[rgba(255,255,255,0.72)] shadow-[inset_2px_2px_5px_rgba(163,168,190,0.30),inset_-1px_-1px_4px_rgba(255,255,255,0.90)] border-0 outline-none px-3 text-sm text-[var(--text-primary,#424965)]"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void sendInlineMessage();
-                      }
-                    }}
-                  />
-                  <NeuButton className="h-10 px-3" onClick={() => void sendInlineMessage()} disabled={chatSending || !chatInput.trim()}>
-                    {chatSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Send</span>}
-                  </NeuButton>
-                </div>
-              </div>
-            </section>
-          )}
-
           {/* Search bar */}
           {isSearchOpen && (
             <div className="px-5 pt-1 pb-2">

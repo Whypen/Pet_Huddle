@@ -16,6 +16,17 @@ export async function ensureDirectChatRoom(
     const v = message.toLowerCase();
     return v.includes("could not find the function") || v.includes("not found") || v.includes("does not exist");
   };
+  const isContractRejection = (message: string) => {
+    const v = message.toLowerCase();
+    return (
+      v.includes("active_match_required") ||
+      v.includes("blocked_relationship") ||
+      v.includes("unmatched_relationship") ||
+      v.includes("cannot_chat_with_self") ||
+      v.includes("target_required") ||
+      v.includes("not_authenticated")
+    );
+  };
   const payloadVariants: Array<Record<string, unknown>> = [
     { p_target_user_id: targetUserId, p_target_name: targetName },
     { target_user_id: targetUserId, target_name: targetName },
@@ -32,7 +43,10 @@ export async function ensureDirectChatRoom(
     }
     const message = String(error?.message || "");
     lastRpcError = message || lastRpcError;
-    // Keep trying payload variants, then use edge fallback regardless of error type.
+    if (message && !isRpcMissing(message) && isContractRejection(message)) {
+      throw new Error(message);
+    }
+    // Keep trying payload variants, then use edge fallback for availability drift.
   }
 
   // Primary fallback: edge function with service role to bypass client RLS drift.

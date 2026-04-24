@@ -704,16 +704,19 @@ const ChatDialogue = () => {
 
           if (membership) {
             const grouped = await loadGroupInfo(room);
-            let directTargetId = hintedUserId && hintedUserId !== profile.id ? hintedUserId : null;
-            if (!grouped && !directTargetId) {
+            let directTargetId: string | null = null;
+            if (!grouped) {
               const { data: directMembers } = await supabase
                 .from("chat_room_members")
                 .select("user_id")
                 .eq("chat_id", room);
-              directTargetId =
-                ((directMembers || []) as Array<{ user_id?: string | null }>)
-                  .map((member) => String(member.user_id || "").trim())
-                  .find((userId) => Boolean(userId) && userId !== profile.id) || null;
+              const otherMemberIds = ((directMembers || []) as Array<{ user_id?: string | null }>)
+                .map((member) => String(member.user_id || "").trim())
+                .filter((userId) => Boolean(userId) && userId !== profile.id);
+              const safeHintedUserId = hintedUserId && hintedUserId !== profile.id ? hintedUserId : null;
+              directTargetId = safeHintedUserId && otherMemberIds.includes(safeHintedUserId)
+                ? safeHintedUserId
+                : otherMemberIds[0] || null;
             }
             const nextRoomId = room;
             await loadRoomMessages(nextRoomId);
@@ -727,19 +730,17 @@ const ChatDialogue = () => {
             return;
           }
 
-          let fallbackTargetId = hintedUserId && hintedUserId !== profile.id ? hintedUserId : null;
-          if (!fallbackTargetId) {
-            const { data: matchRow } = await supabase
-              .from("matches")
-              .select("user1_id,user2_id")
-              .eq("chat_id", room)
-              .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
-              .eq("is_active", true)
-              .maybeSingle();
-            if (matchRow) {
-              const row = matchRow as { user1_id?: string | null; user2_id?: string | null };
-              fallbackTargetId = row.user1_id === profile.id ? (row.user2_id || null) : (row.user1_id || null);
-            }
+          let fallbackTargetId: string | null = null;
+          const { data: matchRow } = await supabase
+            .from("matches")
+            .select("user1_id,user2_id")
+            .eq("chat_id", room)
+            .or(`user1_id.eq.${profile.id},user2_id.eq.${profile.id}`)
+            .eq("is_active", true)
+            .maybeSingle();
+          if (matchRow) {
+            const row = matchRow as { user1_id?: string | null; user2_id?: string | null };
+            fallbackTargetId = row.user1_id === profile.id ? (row.user2_id || null) : (row.user1_id || null);
           }
 
           if (!fallbackTargetId || fallbackTargetId === profile.id) {
