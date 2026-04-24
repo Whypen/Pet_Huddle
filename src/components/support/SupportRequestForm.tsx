@@ -3,7 +3,22 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { FormField, FormTextArea, NeuCheckbox, NeuControl } from "@/components/ui";
 import { postPublicFunction } from "@/lib/publicFunctionClient";
+
+declare global {
+  interface Window {
+    __huddleSupportSubmitDiag?: {
+      attempted: boolean;
+      tokenLengthAtSubmit: number;
+      status: number | null;
+      succeeded: boolean;
+      error: string | null;
+      ticketNumber: string | null;
+      updatedAt: string;
+    };
+  }
+}
 
 type SupportRequestFormProps = {
   initialSubject?: string;
@@ -36,10 +51,26 @@ export function SupportRequestForm({
     [profile, user?.email],
   );
   const effectiveEmail = knownEmail || replyEmail.trim();
-  const defaultWantsReply = Boolean(knownEmail);
+  const defaultWantsReply = true;
   const [wantsReply, setWantsReply] = useState(defaultWantsReply);
-  const requiresReplyEmail = wantsReply && !knownEmail;
+  const requiresReplyEmail = !knownEmail;
   const needsTurnstile = !user;
+  const turnstileReady = !needsTurnstile || supportTurnstile.isTokenUsable;
+
+  const recordSubmitDiag = (next: Partial<NonNullable<Window["__huddleSupportSubmitDiag"]>>) => {
+    if (typeof window === "undefined") return;
+    window.__huddleSupportSubmitDiag = {
+      attempted: false,
+      tokenLengthAtSubmit: 0,
+      status: null,
+      succeeded: false,
+      error: null,
+      ticketNumber: null,
+      ...window.__huddleSupportSubmitDiag,
+      ...next,
+      updatedAt: new Date().toISOString(),
+    };
+  };
 
   useEffect(() => {
     if (ticketNumber) return;
@@ -72,31 +103,49 @@ export function SupportRequestForm({
     }
 
     if (requiresReplyEmail && !trimmedReplyEmail) {
-      setSubmitError("Enter your email if you want a reply.");
+      setSubmitError("Enter your email so the support team can follow up.");
       return;
     }
 
     let turnstileToken = "";
     if (needsTurnstile) {
       turnstileToken = supportTurnstile.getToken();
+      recordSubmitDiag({
+        attempted: true,
+        tokenLengthAtSubmit: turnstileToken.length,
+        status: null,
+        succeeded: false,
+        error: null,
+        ticketNumber: null,
+      });
       if (!turnstileToken) {
         supportTurnstile.reset();
-        setSubmitError(
+        const nextError =
           supportTurnstile.error
             ? String(supportTurnstile.error)
-            : "Complete human verification first.",
-        );
+            : "Complete human verification first.";
+        recordSubmitDiag({ error: nextError });
+        setSubmitError(nextError);
         return;
       }
+    } else {
+      recordSubmitDiag({
+        attempted: true,
+        tokenLengthAtSubmit: 0,
+        status: null,
+        succeeded: false,
+        error: null,
+        ticketNumber: null,
+      });
     }
 
     setSubmitting(true);
     try {
-      const { data, error } = await postPublicFunction<{ ticket_number?: string }>(
+      const { data, error, status } = await postPublicFunction<{ ticket_number?: string }>(
         "submit-support-ticket",
         {
           name: knownName,
-          email: wantsReply ? trimmedReplyEmail : "",
+          email: trimmedReplyEmail,
           subject: trimmedSubject,
           message: trimmedMessage,
           wants_reply: wantsReply,
@@ -105,9 +154,22 @@ export function SupportRequestForm({
         { accessToken: session?.access_token ?? null },
       );
 
-      if (error) throw error;
+      if (error) {
+        recordSubmitDiag({
+          status,
+          succeeded: false,
+          error: error.message,
+        });
+        throw error;
+      }
 
       const nextTicketNumber = (data as { ticket_number?: string } | null)?.ticket_number ?? null;
+      recordSubmitDiag({
+        status,
+        succeeded: true,
+        error: null,
+        ticketNumber: nextTicketNumber,
+      });
       setTicketNumber(nextTicketNumber);
       setSubject(initialSubject);
       setMessage(initialMessage);
@@ -131,76 +193,60 @@ export function SupportRequestForm({
         <p className="text-[13px] leading-relaxed text-[var(--text-secondary)]">
           Your ticket number is <span className="font-mono font-semibold text-brandBlue">{ticketNumber}</span>. We&apos;ll be in touch soon.
         </p>
-        <button
+        <NeuControl
           type="button"
           onClick={() => {
             resetForm();
             onDone?.();
           }}
-          className="mt-2 h-11 w-full rounded-xl bg-brandBlue text-[14px] font-[500] text-white"
+          size="lg"
+          fullWidth
+          className="mt-2"
         >
           Done
-        </button>
+        </NeuControl>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1.5">
-        <label className="pl-1 text-[13px] font-semibold text-[var(--text-primary,#424965)]">Subject</label>
-        <div className="form-field-rest relative flex items-center">
-          <input
-            value={subject}
-            onChange={(event) => setSubject(event.target.value)}
-            placeholder="Subject (optional)"
-            className="field-input-core"
-            disabled={submitting}
-          />
-        </div>
-      </div>
+      <FormField
+        label="Subject"
+        value={subject}
+        onChange={(event) => setSubject(event.target.value)}
+        placeholder="Subject (optional)"
+        disabled={submitting}
+      />
 
-      <div className="space-y-1.5">
-        <label className="pl-1 text-[13px] font-semibold text-[var(--text-primary,#424965)]">Message</label>
-        <div className="form-field-rest relative h-auto min-h-[96px] py-3">
-          <textarea
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="How can we help?"
-            className="field-input-core min-h-[72px] resize-none"
-            disabled={submitting}
-          />
-        </div>
-      </div>
+      <FormTextArea
+        label="Message"
+        value={message}
+        onChange={(event) => setMessage(event.target.value)}
+        placeholder="How can we help?"
+        className="[&_textarea]:min-h-[72px]"
+        disabled={submitting}
+      />
 
-      <label className="flex cursor-pointer select-none items-start gap-2.5">
-        <input
-          type="checkbox"
+      {knownEmail ? (
+        <NeuCheckbox
           checked={wantsReply}
-          onChange={(event) => setWantsReply(event.target.checked)}
-          className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brandBlue"
+          onCheckedChange={(checked) => setWantsReply(Boolean(checked))}
+          label="You may follow up with me via email if needed."
           disabled={submitting}
         />
-        <span className="text-[13px] text-[var(--text-secondary)]">
-          You may follow up with me via email if needed.
-        </span>
-      </label>
+      ) : null}
 
       {requiresReplyEmail ? (
-        <div className="space-y-1.5">
-          <label className="pl-1 text-[13px] font-semibold text-[var(--text-primary,#424965)]">Email</label>
-          <div className="form-field-rest relative flex items-center">
-            <input
-              type="email"
-              value={replyEmail}
-              onChange={(event) => setReplyEmail(event.target.value)}
-              placeholder="name@email.com"
-              className="field-input-core"
-              autoComplete="email"
-              disabled={submitting}
-            />
-          </div>
-        </div>
+        <FormField
+          type="email"
+          label="Email"
+          value={replyEmail}
+          onChange={(event) => setReplyEmail(event.target.value)}
+          placeholder="name@email.com"
+          autoComplete="email"
+          disabled={submitting}
+        />
       ) : null}
 
       {needsTurnstile ? (
@@ -223,25 +269,29 @@ export function SupportRequestForm({
       ) : null}
 
       <div className={compact ? "!flex-row flex gap-2 pt-2" : "flex flex-col gap-2 pt-2 sm:flex-row"}>
-        <button
+        <NeuControl
           type="button"
           onClick={() => {
             resetForm();
             onDone?.();
           }}
           disabled={submitting}
-          className="h-11 flex-1 rounded-xl border border-[var(--border)] text-[14px] font-[500] text-[var(--text-primary)] disabled:opacity-50"
+          variant="secondary"
+          size="lg"
+          className="flex-1"
         >
           Cancel
-        </button>
-        <button
+        </NeuControl>
+        <NeuControl
           type="button"
           onClick={submitSupport}
-          disabled={submitting || !message.trim() || (needsTurnstile && !supportTurnstile.enabled)}
-          className="h-11 flex-1 rounded-xl bg-brandBlue text-[14px] font-[500] text-white disabled:opacity-50"
+          disabled={submitting || !message.trim() || (needsTurnstile && (!supportTurnstile.enabled || !turnstileReady))}
+          loading={submitting}
+          size="lg"
+          className="flex-1"
         >
-          {submitting ? "Sending…" : "Send"}
-        </button>
+          Send
+        </NeuControl>
       </div>
     </div>
   );

@@ -20,7 +20,7 @@ const Support = () => {
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-x-hidden flex flex-col">
       {!nativeContentOnly ? (
         <PageHeader
-          title={<h1 className="text-base font-semibold text-[#424965] truncate">Help &amp; Support</h1>}
+          title={<h3 className="text-base font-semibold text-[#424965] truncate">Help &amp; Support</h3>}
           titleClassName="justify-start"
           showBack
           onBack={() => navigate(-1)}
@@ -32,8 +32,8 @@ const Support = () => {
           <section className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground">Need help with Huddle?</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Send your message directly to the Huddle support team here. If you want a reply and we don&apos;t already
-              have your email, the form will ask for it.
+              Send your message directly to the Huddle support team here. If we don&apos;t already have your email,
+              the public form will ask for it so the team can follow up.
             </p>
             <div className="mt-4">
               <SupportRequestForm />
