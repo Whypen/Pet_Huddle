@@ -305,6 +305,14 @@ const MapPage = () => {
   const hideFromMap = Boolean(profile?.hide_from_map);
   const ownMarkerCacheKey = useMemo(() => (user?.id ? `huddle:last-own-coords:${user.id}` : null), [user?.id]);
   const alertsCacheKey = useMemo(() => (user?.id ? `huddle:map-alerts:${user.id}` : null), [user?.id]);
+  const activePinGpsRefreshSessionKey = useMemo(
+    () => (user?.id ? `huddle:active-pin-gps-refresh-session:${user.id}` : null),
+    [user?.id]
+  );
+  const friendPinsSessionKey = useMemo(
+    () => (user?.id ? `huddle:friend-pins-session:${user.id}` : null),
+    [user?.id]
+  );
 
   useEffect(() => {
     if (!ownMarkerCacheKey) {
@@ -692,42 +700,49 @@ const MapPage = () => {
   }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, refreshProfile, user?.id]);
 
   const refreshActivePinFromGrantedGps = useCallback(async () => {
-    if (!user?.id || !navigator.geolocation || !navigator.permissions?.query) return;
+    if (!user?.id || !navigator.geolocation || !navigator.permissions?.query) return null;
     try {
       const permission = await navigator.permissions.query({ name: "geolocation" as PermissionName });
-      if (permission.state !== "granted") return;
+      if (permission.state !== "granted") return null;
     } catch {
-      return;
+      return null;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const resolvedAddress = pinAddressSnapshotRef.current || (await lookupBroadcastAddress(lat, lng)) || null;
-        if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
-        const { error } = await supabase.rpc("set_user_location", {
-          p_lat: lat,
-          p_lng: lng,
-          p_pin_hours: USER_PIN_ACTIVE_HOURS,
-          p_retention_hours: USER_PIN_RETENTION_HOURS,
-          p_address: resolvedAddress,
-        });
-        if (error) return;
-        const pinnedAt = new Date().toISOString();
-        const next = { lat, lng };
-        setUserLocation(next);
-        setOwnMarkerState("active");
-        setPinPersistedAt(pinnedAt);
-        persistOwnMarkerCoords(next);
-        setVisibleEnabled(true);
-        void refreshProfile();
-      },
-      () => {
-        // Keep the saved pin if a background GPS refresh fails.
-      },
-      { enableHighAccuracy: true, timeout: 7000, maximumAge: 60_000 }
-    );
+    return new Promise<{ lat: number; lng: number } | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const resolvedAddress = pinAddressSnapshotRef.current || (await lookupBroadcastAddress(lat, lng)) || null;
+          if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
+          const { error } = await supabase.rpc("set_user_location", {
+            p_lat: lat,
+            p_lng: lng,
+            p_pin_hours: USER_PIN_ACTIVE_HOURS,
+            p_retention_hours: USER_PIN_RETENTION_HOURS,
+            p_address: resolvedAddress,
+          });
+          if (error) {
+            resolve(null);
+            return;
+          }
+          const pinnedAt = new Date().toISOString();
+          const next = { lat, lng };
+          setUserLocation(next);
+          setOwnMarkerState("active");
+          setPinPersistedAt(pinnedAt);
+          persistOwnMarkerCoords(next);
+          setVisibleEnabled(true);
+          void refreshProfile();
+          resolve(next);
+        },
+        () => {
+          // Keep the saved pin if a GPS refresh fails.
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 7000, maximumAge: 60_000 }
+      );
+    });
   }, [lookupBroadcastAddress, persistOwnMarkerCoords, refreshProfile, user?.id]);
 
   const requestPinFromLiveGps = useCallback(() => {
@@ -924,8 +939,9 @@ const MapPage = () => {
       const rect = mapContainer.current.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
-      const initialCenter: [number, number] = userLocation
-        ? [userLocation.lng, userLocation.lat]
+      const currentUserLocation = userLocationRef.current;
+      const initialCenter: [number, number] = currentUserLocation
+        ? [currentUserLocation.lng, currentUserLocation.lat]
         : defaultCenter;
 
       if (import.meta.env.DEV) console.debug("[MAP_INIT] mapboxgl.Map typeof =", typeof mapboxgl?.Map);
@@ -966,9 +982,10 @@ const MapPage = () => {
 
       map.current.on("load", () => {
         setMapLoaded(true);
-        if (!hasInitialized.current && userLocation) {
+        const currentUserLocation = userLocationRef.current;
+        if (!hasInitialized.current && currentUserLocation) {
           flyToWithDebug("map.load.initialSnap", {
-            center: [userLocation.lng, userLocation.lat],
+            center: [currentUserLocation.lng, currentUserLocation.lat],
             zoom: PROXIMITY_ZOOM,
             essential: true,
             duration: 2000,
@@ -995,7 +1012,7 @@ const MapPage = () => {
         const next = { lat: event.lngLat.lat, lng: event.lngLat.lng };
         setBroadcastPreviewPin(next);
         void lookupBroadcastAddress(next.lat, next.lng).then((address) => {
-          setBroadcastPreviewAddress(address || pinAddressSnapshot || null);
+          setBroadcastPreviewAddress(address || pinAddressSnapshotRef.current || null);
         });
         setIsPickingBroadcastLocation(false);
         setIsBroadcastOpen(true);
@@ -1022,7 +1039,7 @@ const MapPage = () => {
       map.current = null;
       setMapLoaded(false);
     };
-  }, [defaultCenter, flyToWithDebug, lookupBroadcastAddress, mapInitNonce, pinAddressSnapshot, userLocation]);
+  }, [defaultCenter, flyToWithDebug, lookupBroadcastAddress, mapInitNonce]);
 
   const handleFallbackClick = useCallback(() => {
     if (!isPickingBroadcastLocation) return;
@@ -1234,6 +1251,7 @@ const MapPage = () => {
       });
       if (error) throw error;
       const dbPins = (Array.isArray(data) ? data : []) as FriendPin[];
+      let nextPins: FriendPin[] = [];
       if (dbPins.length > 0) {
         const visiblePins = dbPins.filter((pin) => pin.marker_state !== "expired_dot");
         const friendIds = visiblePins.map((pin) => pin.id).filter(Boolean);
@@ -1262,24 +1280,24 @@ const MapPage = () => {
               },
             ])
           );
-          setFriendPins(
-            visiblePins.map((pin) => ({
+          nextPins = visiblePins.map((pin) => ({
               ...pin,
               is_verified: profileById.get(pin.id)?.is_verified ?? false,
               gender_genre: profileById.get(pin.id)?.gender_genre ?? null,
               is_invisible: profileById.get(pin.id)?.hide_from_map ?? false,
-            }))
-          );
+            }));
         } else {
-          setFriendPins(visiblePins);
+          nextPins = visiblePins;
         }
-      } else {
-        setFriendPins([]);
+      }
+      setFriendPins(nextPins);
+      if (friendPinsSessionKey) {
+        sessionStorage.setItem(friendPinsSessionKey, JSON.stringify(nextPins));
       }
     } catch {
       // Preserve the current overlay on transient failures.
     }
-  }, [defaultCenter, profile?.last_lat, profile?.last_lng, user, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
+  }, [defaultCenter, friendPinsSessionKey, profile?.last_lat, profile?.last_lng, user, userLocation?.lat, userLocation?.lng, viewRadiusMeters]);
 
   const fetchCurrentPinState = useCallback(async () => {
     if (!user?.id) {
@@ -1328,12 +1346,15 @@ const MapPage = () => {
     void (async () => {
       const pinState = await fetchCurrentPinState();
       if (cancelled || !pinState) return;
+      if (!activePinGpsRefreshSessionKey) return;
+      if (sessionStorage.getItem(activePinGpsRefreshSessionKey)) return;
+      sessionStorage.setItem(activePinGpsRefreshSessionKey, new Date().toISOString());
       void refreshActivePinFromGrantedGps();
     })();
     return () => {
       cancelled = true;
     };
-  }, [fetchCurrentPinState, refreshActivePinFromGrantedGps, user?.id]);
+  }, [activePinGpsRefreshSessionKey, fetchCurrentPinState, refreshActivePinFromGrantedGps, user?.id]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1406,8 +1427,25 @@ const MapPage = () => {
 
   useEffect(() => {
     if (!showFriends) return;
+    if (friendPinsSessionKey) {
+      const cached = sessionStorage.getItem(friendPinsSessionKey);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            setFriendPins(parsed as FriendPin[]);
+            return;
+          }
+        } catch {
+          sessionStorage.removeItem(friendPinsSessionKey);
+        }
+      }
+      const fetchedFlag = `${friendPinsSessionKey}:fetched`;
+      if (sessionStorage.getItem(fetchedFlag)) return;
+      sessionStorage.setItem(fetchedFlag, new Date().toISOString());
+    }
     void fetchFriendPins();
-  }, [fetchFriendPins, showFriends, userLocation?.lat, userLocation?.lng]);
+  }, [fetchFriendPins, friendPinsSessionKey, showFriends]);
 
   useEffect(() => {
     if (!selectedAlert) return;
@@ -1426,7 +1464,9 @@ const MapPage = () => {
       setSelectedVet(null);
       const [pinState] = await Promise.all([fetchCurrentPinState(), fetchAlerts(), fetchVetClinics(), fetchFriendPins()]);
       if (pinState) {
-        flyToWithDebug("refresh.pinned", { center: [pinState.lng, pinState.lat], zoom: 15.5 });
+        const refreshedPin = await refreshActivePinFromGrantedGps();
+        const focusPin = refreshedPin ?? pinState;
+        flyToWithDebug("refresh.pinned", { center: [focusPin.lng, focusPin.lat], zoom: 15.5 });
       } else if (localPinSnapshot) {
         // Preserve local pin position when backend read momentarily lags.
         flyToWithDebug("refresh.localPinned", { center: [localPinSnapshot.lng, localPinSnapshot.lat], zoom: 15.5 });
@@ -1462,6 +1502,7 @@ const MapPage = () => {
     isPinned,
     profile?.last_lat,
     profile?.last_lng,
+    refreshActivePinFromGrantedGps,
     resolveProfileLocationCenter,
     userLocation,
     visibleEnabled,
