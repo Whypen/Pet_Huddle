@@ -426,14 +426,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const touchProfileActivity = useCallback(async () => {
     try {
       const now = Date.now();
-      const raw = localStorage.getItem(activityTouchKey);
+      const raw = localStorage.getItem(ACTIVITY_TOUCH_KEY);
       const lastTouched = raw ? Number(raw) : 0;
       if (Number.isFinite(lastTouched) && now - lastTouched < 5 * 60 * 1000) {
         return;
       }
       const { error } = await supabase.rpc("touch_profile_activity");
       if (!error) {
-        localStorage.setItem(activityTouchKey, String(now));
+        localStorage.setItem(ACTIVITY_TOUCH_KEY, String(now));
       }
     } catch {
       // best-effort heartbeat only
@@ -665,7 +665,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     return { error: error as Error | null };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signIn = useCallback(async (email: string, password: string, phone?: string, turnstileToken?: string) => {
@@ -738,7 +737,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         mfaMethod: null,
       };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signOut = useCallback(async () => {
