@@ -99,6 +99,8 @@ export interface Profile {
   show_relationship_status?: boolean;
   last_lat?: number | null;
   last_lng?: number | null;
+  location_pinned_until?: string | null;
+  location_retention_until?: string | null;
   hide_from_map?: boolean | null;
   care_circle?: string[] | null;
   last_active_at?: string | null;
@@ -179,7 +181,7 @@ const PROFILE_COLUMNS = [
   "availability_status", "show_gender", "show_orientation", "show_age",
   "show_height", "show_weight", "show_academic", "show_affiliation",
   "show_occupation", "show_bio", "show_relationship_status",
-  "last_lat", "last_lng", "care_circle",
+  "last_lat", "last_lng", "location_pinned_until", "location_retention_until", "care_circle",
   "verification_status", "is_verified", "verification_comment",
   "human_verification_status", "human_verified_at",
   "card_verification_status", "card_verified", "card_brand", "card_last4",

@@ -281,11 +281,13 @@ const MapPage = () => {
   const [hiddenAlerts, setHiddenAlerts] = useState<Set<string>>(new Set());
   const [pinning, setPinning] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const userLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const [lastKnownOwnCoords, setLastKnownOwnCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewPin, setBroadcastPreviewPin] = useState<{ lat: number; lng: number } | null>(null);
   const [broadcastPreviewAddress, setBroadcastPreviewAddress] = useState<string | null>(null);
   const [draftBroadcastType, setDraftBroadcastType] = useState<"Stray" | "Lost" | "Caution" | "Others">("Stray");
   useEffect(() => {
+    userLocationRef.current = userLocation;
     if (import.meta.env.DEV) console.debug("[USER_PIN]", userLocation);
   }, [userLocation]);
   useEffect(() => {
@@ -294,6 +296,10 @@ const MapPage = () => {
   const [pinPersistedAt, setPinPersistedAt] = useState<string | null>(null);
   const [ownMarkerState, setOwnMarkerState] = useState<"active" | "expired_dot" | null>(null);
   const [pinAddressSnapshot, setPinAddressSnapshot] = useState<string | null>(null);
+  const pinAddressSnapshotRef = useRef<string | null>(null);
+  useEffect(() => {
+    pinAddressSnapshotRef.current = pinAddressSnapshot;
+  }, [pinAddressSnapshot]);
   const { upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
   const defaultCenter = useMemo<[number, number]>(() => [114.1583, 22.2828], []);
   const hideFromMap = Boolean(profile?.hide_from_map);
@@ -377,18 +383,13 @@ const MapPage = () => {
     const pinnedUntil = typeof profileRecord?.location_pinned_until === "string"
       ? String(profileRecord.location_pinned_until)
       : null;
-    const nowMs = Date.now();
-    const pinnedMs = pinnedUntil ? new Date(pinnedUntil).getTime() : Number.NaN;
-    if (Number.isFinite(pinnedMs) && pinnedMs > nowMs) {
-      return {
-        lat,
-        lng,
-        pinnedAt: pinnedUntil,
-        markerState: "active",
-        isInvisible: Boolean(profileRecord?.hide_from_map),
-      };
-    }
-    return null;
+    return {
+      lat,
+      lng,
+      pinnedAt: pinnedUntil,
+      markerState: "active",
+      isInvisible: Boolean(profileRecord?.hide_from_map),
+    };
   }, []);
 
   const getProfileActivePin = useCallback((): OwnPinState | null => {
@@ -685,9 +686,49 @@ const MapPage = () => {
     setVisibleEnabled(true);
     setIsInvisible(false);
     setPinning(false);
+    void refreshProfile();
     if (import.meta.env.DEV) console.debug(`[PIN] ✅ Pin State Updated: pinned=true, visible=true (via ${source})`);
     toast.success(`Location pinned (${source})`);
-  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, user?.id]);
+  }, [flyToWithDebug, lookupBroadcastAddress, persistOwnMarkerCoords, pinAddressSnapshot, refreshProfile, user?.id]);
+
+  const refreshActivePinFromGrantedGps = useCallback(async () => {
+    if (!user?.id || !navigator.geolocation || !navigator.permissions?.query) return;
+    try {
+      const permission = await navigator.permissions.query({ name: "geolocation" as PermissionName });
+      if (permission.state !== "granted") return;
+    } catch {
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const resolvedAddress = pinAddressSnapshotRef.current || (await lookupBroadcastAddress(lat, lng)) || null;
+        if (resolvedAddress) setPinAddressSnapshot(resolvedAddress);
+        const { error } = await supabase.rpc("set_user_location", {
+          p_lat: lat,
+          p_lng: lng,
+          p_pin_hours: USER_PIN_ACTIVE_HOURS,
+          p_retention_hours: USER_PIN_RETENTION_HOURS,
+          p_address: resolvedAddress,
+        });
+        if (error) return;
+        const pinnedAt = new Date().toISOString();
+        const next = { lat, lng };
+        setUserLocation(next);
+        setOwnMarkerState("active");
+        setPinPersistedAt(pinnedAt);
+        persistOwnMarkerCoords(next);
+        setVisibleEnabled(true);
+        void refreshProfile();
+      },
+      () => {
+        // Keep the saved pin if a background GPS refresh fails.
+      },
+      { enableHighAccuracy: true, timeout: 7000, maximumAge: 60_000 }
+    );
+  }, [lookupBroadcastAddress, persistOwnMarkerCoords, refreshProfile, user?.id]);
 
   const requestPinFromLiveGps = useCallback(() => {
     // No secure context — GPS cannot work at all.
@@ -1258,7 +1299,7 @@ const MapPage = () => {
       .maybeSingle();
     if (error) {
       // Keep current UI pin state on transient fetch failure.
-      return userLocation;
+      return userLocationRef.current;
     }
     const activePin = deriveOwnPinState((data || null) as Record<string, unknown> | null);
     if (!activePin) {
@@ -1279,7 +1320,20 @@ const MapPage = () => {
     setPinPersistedAt(activePin.pinnedAt);
     setOwnMarkerState(activePin.markerState);
     return next;
-  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, persistOwnMarkerCoords, user?.id, userLocation]);
+  }, [clearOwnMarkerCoordsCache, deriveOwnPinState, persistOwnMarkerCoords, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      const pinState = await fetchCurrentPinState();
+      if (cancelled || !pinState) return;
+      void refreshActivePinFromGrantedGps();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchCurrentPinState, refreshActivePinFromGrantedGps, user?.id]);
 
   const focusMapTarget = useCallback((source: string, lat: number, lng: number) => {
     flyToWithDebug(source, { center: [lng, lat], zoom: 15.5 });
@@ -1463,8 +1517,8 @@ const MapPage = () => {
 
   const ownMarkerCoords = useMemo<{ lat: number; lng: number } | null>(() => {
     if (userLocation) return userLocation;
-    return null;
-  }, [userLocation]);
+    return lastKnownOwnCoords;
+  }, [lastKnownOwnCoords, userLocation]);
 
   const filteredPins = useMemo(
     () =>

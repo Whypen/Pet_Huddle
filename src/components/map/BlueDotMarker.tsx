@@ -101,10 +101,10 @@ const BlueDotMarker = ({
       ) : isInvisible ? (
         <div
           className="h-11 w-11 rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.3)] flex items-center justify-center"
-          style={{ border: "2px solid rgba(166, 213, 57, 0.3)", background: "rgba(166, 213, 57, 0.3)" }}
+          style={{ border: "2px solid rgba(166, 213, 57, 0.7)", background: "rgba(166, 213, 57, 0.7)" }}
           aria-label="You are incognito"
         >
-          <User className="h-5 w-5 text-white opacity-30" strokeWidth={2.4} aria-hidden="true" />
+          <User className="h-5 w-5 text-white opacity-70" strokeWidth={2.4} aria-hidden="true" />
         </div>
       ) : (
         <div
