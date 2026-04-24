@@ -24,6 +24,7 @@ type SupportRequestFormProps = {
   initialSubject?: string;
   initialMessage?: string;
   onDone?: () => void;
+  onSent?: (ticketNumber: string | null) => void;
   compact?: boolean;
 };
 
@@ -31,6 +32,7 @@ export function SupportRequestForm({
   initialSubject = "",
   initialMessage = "",
   onDone,
+  onSent,
   compact = false,
 }: SupportRequestFormProps) {
   const { user, profile, session } = useAuth();
@@ -50,10 +52,10 @@ export function SupportRequestForm({
     () => String((profile as Record<string, unknown> | null)?.display_name || user?.email || "Guest").trim(),
     [profile, user?.email],
   );
-  const effectiveEmail = knownEmail || replyEmail.trim();
-  const defaultWantsReply = true;
+  const defaultWantsReply = Boolean(knownEmail);
   const [wantsReply, setWantsReply] = useState(defaultWantsReply);
-  const requiresReplyEmail = !knownEmail;
+  const requiresReplyEmail = wantsReply && !knownEmail;
+  const effectiveEmail = wantsReply ? knownEmail || replyEmail.trim() : "no-reply@huddle.pet";
   const needsTurnstile = !user;
   const turnstileReady = !needsTurnstile || supportTurnstile.isTokenUsable;
 
@@ -102,8 +104,8 @@ export function SupportRequestForm({
       return;
     }
 
-    if (requiresReplyEmail && !trimmedReplyEmail) {
-      setSubmitError("Enter your email so the support team can follow up.");
+    if (requiresReplyEmail && !replyEmail.trim()) {
+      setSubmitError("Enter your email if you want a reply.");
       return;
     }
 
@@ -171,6 +173,7 @@ export function SupportRequestForm({
         ticketNumber: nextTicketNumber,
       });
       setTicketNumber(nextTicketNumber);
+      onSent?.(nextTicketNumber);
       setSubject(initialSubject);
       setMessage(initialMessage);
       setReplyEmail("");
@@ -228,14 +231,12 @@ export function SupportRequestForm({
         disabled={submitting}
       />
 
-      {knownEmail ? (
-        <NeuCheckbox
-          checked={wantsReply}
-          onCheckedChange={(checked) => setWantsReply(Boolean(checked))}
-          label="You may follow up with me via email if needed."
-          disabled={submitting}
-        />
-      ) : null}
+      <NeuCheckbox
+        checked={wantsReply}
+        onCheckedChange={(checked) => setWantsReply(Boolean(checked))}
+        label="You may follow up with me via email if needed."
+        disabled={submitting}
+      />
 
       {requiresReplyEmail ? (
         <FormField

@@ -403,6 +403,11 @@ export function useTurnstile(action: string) {
     }
   }, [readTokenFromDom, storeToken]);
 
+  const consumeToken = useCallback(() => {
+    recordTurnstileDiag(actionRef.current, "consume-token", { tokenLength: String(tokenRef.current || "").trim().length });
+    storeToken(null);
+  }, [storeToken]);
+
   const isTokenUsable = useMemo(() => {
     const current = String(token || "").trim() || readTokenFromDom();
     if (!current) return false;
@@ -432,5 +437,6 @@ export function useTurnstile(action: string) {
     setContainer,
     getToken,
     reset,
+    consumeToken,
   };
 }
