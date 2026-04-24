@@ -552,6 +552,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [topicFilters, setTopicFilters] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<"" | "Trending" | "Latest" | "Saves">("Latest");
   const noticesRef = useRef<Thread[]>([]);
+  const commentsByThreadRef = useRef<Record<string, ThreadComment[]>>({});
   const filtersRowRef = useRef<HTMLDivElement | null>(null);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -610,6 +611,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     noticesRef.current = notices;
     lastCursorRef.current = buildFeedCursor(notices[notices.length - 1]);
   }, [notices]);
+
+  useEffect(() => {
+    commentsByThreadRef.current = commentsByThread;
+  }, [commentsByThread]);
 
   useEffect(() => {
     mentionDirectoryRef.current = mentionDirectory;
@@ -965,7 +970,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       };
 
       const seedUsersFromFeed = () => {
-        notices.forEach((notice) => {
+        // Read from refs so this effect only re-runs on user change, not on every like/comment.
+        noticesRef.current.forEach((notice) => {
           if (!notice.user_id) return;
           addSeed({
             userId: notice.user_id,
@@ -976,7 +982,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             lastSeenAt: new Date(notice.created_at).getTime(),
           });
         });
-        Object.values(commentsByThread).flat().forEach((comment) => {
+        Object.values(commentsByThreadRef.current).flat().forEach((comment) => {
           if (!comment.user_id) return;
           addSeed({
             userId: comment.user_id,
@@ -1140,7 +1146,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     return () => {
       cancelled = true;
     };
-  }, [commentsByThread, notices, upsertMentionDirectory, user?.id]);
+  // Reads from noticesRef/commentsByThreadRef so it doesn't cascade on every like or reply.
+  }, [upsertMentionDirectory, user?.id]);
 
   const insertMentionIntoComposer = useCallback(
     (
@@ -1338,12 +1345,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     return true;
   }, [applyHydratedRows, fetchFeedPage, hydrateRows, user?.id]);
 
+  // noticeIdsKey changes only when the set of IDs changes, not on in-place updates (like count, etc.)
+  // This prevents a thread_supports DB round-trip on every optimistic like toggle.
   useEffect(() => {
     if (!user?.id) {
       setLikedNotices(new Set());
       return;
     }
-    const ids = notices.map((n) => n.id).filter(Boolean);
+    const ids = noticeIdsKey.split(",").filter(Boolean);
     if (ids.length === 0) {
       setLikedNotices(new Set());
       return;
@@ -1360,7 +1369,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       );
       setLikedNotices(next);
     })();
-  }, [notices, user?.id]);
+  }, [noticeIdsKey, user?.id]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -2291,12 +2300,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const handleSupport = (noticeId: string) => {
     const target = notices.find((item) => item.id === noticeId);
     if (target?.user_id && user?.id) {
+      // blockedUsers is already loaded in state; no need for an async round-trip per like.
+      if (blockedUsers.has(target.user_id)) {
+        toast.error("You cannot support this user.");
+        return;
+      }
       void (async () => {
-        const blocked = await areUsersBlocked(user.id, target.user_id);
-        if (blocked) {
-          toast.error("You cannot support this user.");
-          return;
-        }
         const isRemoving = likedNotices.has(noticeId);
         const delta = isRemoving ? -1 : 1;
         setLikedNotices((prev) => {
@@ -2665,11 +2674,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [socialSavesKey]);
 
   useEffect(() => {
-    localStorage.setItem(socialPinsKey, JSON.stringify(Array.from(pinnedNotices)));
+    const timer = window.setTimeout(() => {
+      try { localStorage.setItem(socialPinsKey, JSON.stringify(Array.from(pinnedNotices))); } catch (_) { /* ignore storage errors */ }
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [pinnedNotices, socialPinsKey]);
 
   useEffect(() => {
-    localStorage.setItem(socialSavesKey, JSON.stringify(Array.from(savedNotices)));
+    const timer = window.setTimeout(() => {
+      try { localStorage.setItem(socialSavesKey, JSON.stringify(Array.from(savedNotices))); } catch (_) { /* ignore storage errors */ }
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [savedNotices, socialSavesKey]);
 
   const visibleNotices = useMemo(() => {
@@ -2713,6 +2728,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return b.id.localeCompare(a.id);
     });
   }, [blockedUsers, commentsByThread, hiddenNotices, notices, pinnedNotices, savedNotices, searchQuery, sortMode, topicFilters]);
+
+  // Stable keys: only change when the set of IDs changes, not when like/comment counts change.
+  // Used to gate effects that must NOT re-fire on in-place property updates.
+  const noticeIdsKey = useMemo(
+    () => notices.map((n) => n.id).filter(Boolean).sort().join(","),
+    [notices]
+  );
+  const visibleNoticeIdsKey = useMemo(
+    () => visibleNotices.map((n) => n.id).join(","),
+    [visibleNotices]
+  );
+  const visibleNoticesRef = useRef(visibleNotices);
+  useEffect(() => { visibleNoticesRef.current = visibleNotices; }, [visibleNotices]);
+
   const createContentFirstUrl = useMemo(() => {
     const u = extractFirstHttpUrl(content || "");
     return u && !dismissedPreviewUrls.has(u) ? u : null;
@@ -2777,10 +2806,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     saveStoredLinkPreviewMap(Object.fromEntries(sorted));
   }, []);
 
+  // Gate on visibleNoticeIdsKey (stable string of IDs) so this effect does not re-run when
+  // in-place properties (like counts, comment counts) change — only when the visible set changes.
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
+      const notices = visibleNoticesRef.current;
       const next: Record<string, boolean> = {};
-      visibleNotices.forEach((notice) => {
+      notices.forEach((notice) => {
         const node = contentRefs.current[notice.id];
         if (!node) {
           next[notice.id] = false;
@@ -2791,10 +2823,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setExpandableContentById(next);
     });
     return () => cancelAnimationFrame(frame);
-  }, [visibleNotices, threadMentionsById]);
+  }, [visibleNoticeIdsKey, threadMentionsById]);
 
   useEffect(() => {
-    if (visibleNotices.length === 0) return;
+    const notices = visibleNoticesRef.current;
+    if (notices.length === 0) return;
     if (typeof IntersectionObserver === "undefined") return;
     const dwellTimeouts = dwellTimeoutsRef.current;
     const observer = new IntersectionObserver(
@@ -2831,7 +2864,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       { threshold: [0.6] },
     );
 
-    visibleNotices.forEach((notice) => {
+    notices.forEach((notice) => {
       const node = threadRefs.current[notice.id];
       if (node) observer.observe(node);
     });
@@ -2841,7 +2874,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       dwellTimeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
       dwellTimeouts.clear();
     };
-  }, [recordSocialFeedEvent, visibleNotices]);
+  }, [recordSocialFeedEvent, visibleNoticeIdsKey]);
 
   const fetchLinkPreview = useCallback(async (url: string) => {
     const existing = linkPreviewMapRef.current[url];
@@ -2968,10 +3001,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     processLinkPreviewQueue();
   }, [processLinkPreviewQueue]);
 
+  // Use visibleNoticesRef so this effect only re-fires when IDs change, not on in-place updates.
   useEffect(() => {
     const urls = Array.from(
       new Set(
-        visibleNotices
+        visibleNoticesRef.current
           .map((notice) => extractFirstHttpUrl(notice.content || ""))
           .filter((url): url is string => Boolean(url))
       )
@@ -3052,7 +3086,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
     })();
     return () => { cancelled = true; };
-  }, [ensureLinkPreview, persistLinkPreviewToLocalCache, visibleNotices]);
+  }, [ensureLinkPreview, persistLinkPreviewToLocalCache, visibleNoticeIdsKey]);
 
   useEffect(() => {
     const draftUrl = extractFirstHttpUrl(content || "");
