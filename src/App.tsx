@@ -16,41 +16,7 @@ import { BottomNav } from "@/components/layout/BottomNav";
 import { AppShell } from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
-import SignupDob from "./pages/signup/SignupDob";
-import SignupName from "./pages/signup/SignupName";
-import SignupCredentials from "./pages/signup/SignupCredentials";
-import SignupVerify from "./pages/signup/SignupVerify";
-import SignupEmailConfirmation from "./pages/signup/SignupEmailConfirmation";
-import SignupMarketingConfirmed from "./pages/signup/SignupMarketingConfirmed";
-import SignupVerifyEmail from "./pages/signup/SignupVerifyEmail";
-import VerifyCallback from "./pages/VerifyCallback";
-import ResetPassword from "./pages/ResetPassword";
-import ResetPasswordDirect from "./pages/ResetPasswordDirect";
-import ResetPasswordInline from "./pages/ResetPasswordInline";
-import ResetPasswordInlineHealthAction from "./pages/ResetPasswordInlineHealthAction";
-import UpdatePassword from "./pages/UpdatePassword";
-import AuthCallback from "./pages/AuthCallback";
-import TurnstileHealth from "./pages/TurnstileHealth";
-import TurnstileHealthResetAction from "./pages/TurnstileHealthResetAction";
-import EditProfile from "./pages/EditProfile";
-import EditPetProfile from "./pages/EditPetProfile";
-import SetProfile from "./pages/SetProfile";
-import SetPetProfile from "./pages/SetPetProfile";
-import NotFound from "./pages/NotFound";
-import Privacy from "./pages/Privacy";
-import Terms from "./pages/Terms";
-import CommunityGuidelines from "./pages/CommunityGuidelines";
-import CookiesPolicy from "./pages/CookiesPolicy";
-import PrivacyChoices from "./pages/PrivacyChoices";
-import ServiceAgreement from "./pages/ServiceAgreement";
-import BookingTerms from "./pages/BookingTerms";
-import VerifyIdentity from "./pages/VerifyIdentity";
-import ServiceProviderAgreement from "./pages/ServiceProviderAgreement";
-import CarerProfile from "./pages/CarerProfile";
-import Social from "./pages/Social";
 import { ScrollToTop } from "@/components/routing/ScrollToTop";
-import JoinGroup from "./pages/JoinGroup";
 import { UpsellBannerProvider } from "@/contexts/UpsellBannerContext";
 import { AppBackground } from "@/components/ui/AppBackground";
 import { NativeRuntimeBridge } from "@/components/native/NativeRuntimeBridge";
@@ -104,6 +70,48 @@ const AdminSafety = lazy(() => import("./pages/admin/AdminSafety"));
 const Marketplace = lazy(() => import("./pages/Marketplace"));
 const Service = lazyWithChunkRecovery("service", () => import("./pages/Service"));
 const AdminDisputes = lazy(() => import("./screens/AdminDisputes"));
+
+// Auth & signup flow
+const Auth = lazyWithChunkRecovery("auth", () => import("./pages/Auth"));
+const SignupDob = lazy(() => import("./pages/signup/SignupDob"));
+const SignupName = lazy(() => import("./pages/signup/SignupName"));
+const SignupCredentials = lazy(() => import("./pages/signup/SignupCredentials"));
+const SignupVerify = lazy(() => import("./pages/signup/SignupVerify"));
+const SignupEmailConfirmation = lazy(() => import("./pages/signup/SignupEmailConfirmation"));
+const SignupMarketingConfirmed = lazy(() => import("./pages/signup/SignupMarketingConfirmed"));
+const SignupVerifyEmail = lazy(() => import("./pages/signup/SignupVerifyEmail"));
+const VerifyCallback = lazy(() => import("./pages/VerifyCallback"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const ResetPasswordDirect = lazy(() => import("./pages/ResetPasswordDirect"));
+const ResetPasswordInline = lazy(() => import("./pages/ResetPasswordInline"));
+const ResetPasswordInlineHealthAction = lazy(() => import("./pages/ResetPasswordInlineHealthAction"));
+const UpdatePassword = lazy(() => import("./pages/UpdatePassword"));
+const AuthCallback = lazy(() => import("./pages/AuthCallback"));
+const TurnstileHealth = lazy(() => import("./pages/TurnstileHealth"));
+const TurnstileHealthResetAction = lazy(() => import("./pages/TurnstileHealthResetAction"));
+const JoinGroup = lazy(() => import("./pages/JoinGroup"));
+
+// Core app pages (protected, non-nav)
+const Social = lazyWithChunkRecovery("social", () => import("./pages/Social"));
+const EditProfile = lazyWithChunkRecovery("edit-profile", () => import("./pages/EditProfile"));
+const EditPetProfile = lazyWithChunkRecovery("edit-pet-profile", () => import("./pages/EditPetProfile"));
+const SetProfile = lazyWithChunkRecovery("set-profile", () => import("./pages/SetProfile"));
+const SetPetProfile = lazyWithChunkRecovery("set-pet", () => import("./pages/SetPetProfile"));
+const VerifyIdentity = lazyWithChunkRecovery("verify-identity", () => import("./pages/VerifyIdentity"));
+const CarerProfile = lazyWithChunkRecovery("carer-profile", () => import("./pages/CarerProfile"));
+const ServiceProviderAgreement = lazy(() => import("./pages/ServiceProviderAgreement"));
+
+// Legal pages
+const Privacy = lazy(() => import("./pages/Privacy"));
+const Terms = lazy(() => import("./pages/Terms"));
+const CommunityGuidelines = lazy(() => import("./pages/CommunityGuidelines"));
+const CookiesPolicy = lazy(() => import("./pages/CookiesPolicy"));
+const PrivacyChoices = lazy(() => import("./pages/PrivacyChoices"));
+const ServiceAgreement = lazy(() => import("./pages/ServiceAgreement"));
+const BookingTerms = lazy(() => import("./pages/BookingTerms"));
+
+// Fallback
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -167,27 +175,27 @@ const App = () => (
                   <NativeRuntimeBridge />
                   <Routes>
                   {/* Public Routes */}
-                  <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
-                  <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
-                  <Route path="/reset-password-direct" element={<ResetPasswordDirect />} />
-                  <Route path="/reset-password-inline" element={<ResetPasswordInline />} />
-                  <Route path="/reset-password-inline-healthaction" element={<ResetPasswordInlineHealthAction />} />
-                  <Route path="/update-password" element={<PublicRoute><UpdatePassword /></PublicRoute>} />
-                  <Route path="/auth/callback" element={<PublicRoute><AuthCallback /></PublicRoute>} />
-                  <Route path="/signup/dob" element={<PublicRoute><SignupDob /></PublicRoute>} />
-                  <Route path="/signup/name" element={<PublicRoute><SignupName /></PublicRoute>} />
-                  <Route path="/signup/credentials" element={<PublicRoute><SignupCredentials /></PublicRoute>} />
-                  <Route path="/signup/verify" element={<PublicRoute><SignupVerify /></PublicRoute>} />
-                  <Route path="/signup/email-confirmation" element={<PublicRoute><SignupEmailConfirmation /></PublicRoute>} />
-                  <Route path="/signup/marketing-confirmed" element={<PublicRoute><SignupMarketingConfirmed /></PublicRoute>} />
+                  <Route path="/auth" element={<PublicRoute><RouteSuspense><Auth /></RouteSuspense></PublicRoute>} />
+                  <Route path="/reset-password" element={<PublicRoute><RouteSuspense><ResetPassword /></RouteSuspense></PublicRoute>} />
+                  <Route path="/reset-password-direct" element={<RouteSuspense><ResetPasswordDirect /></RouteSuspense>} />
+                  <Route path="/reset-password-inline" element={<RouteSuspense><ResetPasswordInline /></RouteSuspense>} />
+                  <Route path="/reset-password-inline-healthaction" element={<RouteSuspense><ResetPasswordInlineHealthAction /></RouteSuspense>} />
+                  <Route path="/update-password" element={<PublicRoute><RouteSuspense><UpdatePassword /></RouteSuspense></PublicRoute>} />
+                  <Route path="/auth/callback" element={<PublicRoute><RouteSuspense><AuthCallback /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/dob" element={<PublicRoute><RouteSuspense><SignupDob /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/name" element={<PublicRoute><RouteSuspense><SignupName /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/credentials" element={<PublicRoute><RouteSuspense><SignupCredentials /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/verify" element={<PublicRoute><RouteSuspense><SignupVerify /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/email-confirmation" element={<PublicRoute><RouteSuspense><SignupEmailConfirmation /></RouteSuspense></PublicRoute>} />
+                  <Route path="/signup/marketing-confirmed" element={<PublicRoute><RouteSuspense><SignupMarketingConfirmed /></RouteSuspense></PublicRoute>} />
                   {/* No PublicRoute wrapper — accessible from email client in-app browsers without a session */}
-                  <Route path="/signup/verify-email" element={<SignupVerifyEmail />} />
-                  <Route path="/turnstile-health" element={<TurnstileHealth />} />
-                  <Route path="/turnstile-health-resetaction" element={<TurnstileHealthResetAction />} />
+                  <Route path="/signup/verify-email" element={<RouteSuspense><SignupVerifyEmail /></RouteSuspense>} />
+                  <Route path="/turnstile-health" element={<RouteSuspense><TurnstileHealth /></RouteSuspense>} />
+                  <Route path="/turnstile-health-resetaction" element={<RouteSuspense><TurnstileHealthResetAction /></RouteSuspense>} />
                   {/* Email verification callback — token in URL is the auth, no session required */}
-                  <Route path="/verify" element={<VerifyCallback />} />
+                  <Route path="/verify" element={<RouteSuspense><VerifyCallback /></RouteSuspense>} />
                   {/* Group invite link — code from /join/:code invite URLs */}
-                  <Route path="/join/:code" element={<JoinGroup />} />
+                  <Route path="/join/:code" element={<RouteSuspense><JoinGroup /></RouteSuspense>} />
 
                   {/* Protected Routes */}
                   <Route
@@ -323,7 +331,7 @@ const App = () => (
                     path="/service-provider-agreement"
                     element={
                       <AppShell>
-                        <ServiceProviderAgreement />
+                        <RouteSuspense><ServiceProviderAgreement /></RouteSuspense>
                       </AppShell>
                     }
                   />
@@ -412,7 +420,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <VerifyIdentity />
+                          <RouteSuspense><VerifyIdentity /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -432,7 +440,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <SetProfile />
+                          <RouteSuspense><SetProfile /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -442,25 +450,25 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <SetPetProfile />
+                          <RouteSuspense><SetPetProfile /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
                   />
                   <Route
                     path="/privacy"
-                    element={<Privacy />}
+                    element={<RouteSuspense><Privacy /></RouteSuspense>}
                   />
                   <Route
                     path="/terms"
-                    element={<Terms />}
+                    element={<RouteSuspense><Terms /></RouteSuspense>}
                   />
                   <Route
                     path="/community-guidelines"
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <CommunityGuidelines />
+                          <RouteSuspense><CommunityGuidelines /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -470,7 +478,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <ServiceAgreement />
+                          <RouteSuspense><ServiceAgreement /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -480,7 +488,7 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <BookingTerms />
+                          <RouteSuspense><BookingTerms /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
@@ -490,14 +498,14 @@ const App = () => (
                     element={
                       <ProtectedRoute>
                         <AppShell>
-                          <CookiesPolicy />
+                          <RouteSuspense><CookiesPolicy /></RouteSuspense>
                         </AppShell>
                       </ProtectedRoute>
                     }
                   />
                   <Route
                     path="/privacy-choices"
-                    element={<PrivacyChoices />}
+                    element={<RouteSuspense><PrivacyChoices /></RouteSuspense>}
                   />
                   <Route
                     path="/admin"
@@ -541,7 +549,7 @@ const App = () => (
                   />
 
                   {/* Catch-all */}
-                  <Route path="*" element={<NotFound />} />
+                  <Route path="*" element={<RouteSuspense><NotFound /></RouteSuspense>} />
                   </Routes>
                 </UpsellBannerProvider>
               </SignupProvider>
