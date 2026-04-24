@@ -545,12 +545,14 @@ function isAppLink(url: string) {
 }
 
 function shouldOpenOutside(url: string) {
-  if (!url) return false;
-  if (url.startsWith("about:") || url.startsWith("javascript:") || url.startsWith("data:")) return false;
-  if (isAppLink(url)) return false;
-  if (url.startsWith("mailto:") || url.startsWith("tel:") || url.startsWith("sms:")) return true;
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return !isAllowedShellHost(url);
+  const normalized = String(url || "").trim();
+  const lower = normalized.toLowerCase();
+  if (!normalized) return false;
+  if (lower.startsWith("about:") || lower.startsWith("javascript:") || lower.startsWith("data:")) return false;
+  if (isAppLink(normalized)) return false;
+  if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")) return true;
+  if (lower.startsWith("http://") || lower.startsWith("https://")) {
+    return !isAllowedShellHost(normalized);
   }
   return true;
 }
@@ -623,6 +625,7 @@ export function WebShellScreen() {
   }, [injectPayload]);
 
   const handleExternalOpen = useCallback(async (url: string) => {
+    if (!shouldOpenOutside(url)) return;
     try {
       await Linking.openURL(url);
     } catch {
