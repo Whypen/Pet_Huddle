@@ -1619,18 +1619,21 @@ export type Database = {
       }
       message_reads: {
         Row: {
+          chat_id: string | null
           id: string
           message_id: string
           read_at: string | null
           user_id: string
         }
         Insert: {
+          chat_id?: string | null
           id?: string
           message_id: string
           read_at?: string | null
           user_id: string
         }
         Update: {
+          chat_id?: string | null
           id?: string
           message_id?: string
           read_at?: string | null

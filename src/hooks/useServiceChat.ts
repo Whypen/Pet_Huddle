@@ -155,6 +155,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
           message_id: messageId,
           user_id: userId,
           read_at: new Date().toISOString(),
+          chat_id: roomId ?? null,
         }));
 
       if (missingRows.length === 0) return;
@@ -167,7 +168,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
         console.warn("[service_chat.mark_read.upsert_failed]", upsertError.message);
       }
     },
-    [userId]
+    [roomId, userId]
   );
 
   const refreshReadReceipts = useCallback(
@@ -481,7 +482,7 @@ export const useServiceChat = (roomId: string, userId: string): UseServiceChatRe
     if (!roomId || !userId) return;
     const readChannel = supabase
       .channel(`service_chat_reads_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `user_id=neq.${userId}` }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `chat_id=eq.${roomId}` }, (payload) => {
         const row = payload.new as { message_id?: string | null; user_id?: string | null } | null;
         if (!row?.message_id || row.user_id === userId) return;
         setReadMessageIds((prev) => {

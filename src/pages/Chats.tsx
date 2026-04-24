@@ -3314,6 +3314,7 @@ const Chats = () => {
           message_id: messageId,
           user_id: profile.id,
           read_at: new Date().toISOString(),
+          chat_id: roomId ?? null,
         }));
 
       if (missingRows.length === 0) return;

@@ -277,6 +277,7 @@ const ChatDialogue = () => {
           message_id: messageId,
           user_id: profile.id,
           read_at: new Date().toISOString(),
+          chat_id: roomId ?? null,
         })),
         { onConflict: "message_id,user_id" },
       );
@@ -296,7 +297,7 @@ const ChatDialogue = () => {
         void flushPendingMessageReads();
       }, MESSAGE_READ_BUFFER_MS);
     }
-  }, [profile?.id]);
+  }, [profile?.id, roomId]);
 
   const markMessagesAsRead = useCallback((roomMessages: ChatMessage[]) => {
     if (!profile?.id || roomMessages.length === 0) return;
@@ -832,7 +833,7 @@ const ChatDialogue = () => {
     if (!roomId || !profile?.id) return;
     const readChannel = supabase
       .channel(`chat_dialogue_reads_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `user_id=neq.${profile.id}` }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads", filter: `chat_id=eq.${roomId}` }, (payload) => {
         const row = payload.new as { message_id?: string; user_id?: string } | null;
         if (!row?.message_id || row.user_id === profile.id) return;
         const sentIds = new Set(messages.filter((message) => message.sender_id === profile.id).map((message) => message.id));
