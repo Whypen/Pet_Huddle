@@ -2,7 +2,6 @@ import { AppBackground } from "@/components/ui/AppBackground";
 import { ErrorBoundary } from "@/components/error/ErrorBoundary";
 import { NativeRuntimeBridge } from "@/components/native/NativeRuntimeBridge";
 import { AuthProvider } from "@/contexts/AuthContext";
-import { LanguageProvider } from "@/contexts/LanguageContext";
 import { SignupProvider } from "@/contexts/SignupContext";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
@@ -52,27 +51,25 @@ const App = () => {
 
   return (
     <ErrorBoundary>
-      <LanguageProvider>
-        <AppBackground />
-        <BrowserRouter
-          future={{
-            v7_startTransition: true,
-            v7_relativeSplatPath: true,
-          }}
-        >
-          <AuthProvider>
-            <SignupProvider>
-              <NativeRuntimeBridge />
-              <RuntimeRoutes />
-            </SignupProvider>
-          </AuthProvider>
-        </BrowserRouter>
-        {afterFirstPaint ? (
-          <Suspense fallback={null}>
-            <AppToasters />
-          </Suspense>
-        ) : null}
-      </LanguageProvider>
+      <AppBackground />
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <AuthProvider>
+          <SignupProvider>
+            <NativeRuntimeBridge />
+            <RuntimeRoutes />
+          </SignupProvider>
+        </AuthProvider>
+      </BrowserRouter>
+      {afterFirstPaint ? (
+        <Suspense fallback={null}>
+          <AppToasters />
+        </Suspense>
+      ) : null}
     </ErrorBoundary>
   );
 };

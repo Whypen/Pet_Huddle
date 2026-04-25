@@ -1,7 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
-import { LanguageContext } from "@/contexts/LanguageContext";
 
 interface Props {
   children: ReactNode;
@@ -15,8 +14,6 @@ interface State {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  static contextType = LanguageContext;
-  declare context: React.ContextType<typeof LanguageContext>;
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -51,7 +48,6 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
-    const t = this.context?.t || ((value: string) => value);
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
@@ -67,9 +63,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Error Message */}
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-foreground">{t("Something went wrong")}</h1>
+              <h1 className="text-2xl font-bold text-foreground">Something went wrong</h1>
               <p className="text-muted-foreground">
-                {t("We encountered an unexpected error. Please try again or return to the home page.")}
+                We encountered an unexpected error. Please try again or return to the home page.
               </p>
             </div>
 
@@ -94,7 +90,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="w-full h-12 rounded-xl"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
-                {t("Try Again")}
+                Try Again
               </NeuButton>
               <NeuButton
                 variant="outline"
@@ -102,13 +98,13 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="w-full h-12 rounded-xl"
               >
                 <Home className="w-4 h-4 mr-2" />
-                {t("Go to Home")}
+                Go to Home
               </NeuButton>
             </div>
 
             {/* Help Text */}
             <p className="text-xs text-muted-foreground">
-              {t("Please refresh or return home and try again.")}
+              Please refresh or return home and try again.
             </p>
           </div>
         </div>
