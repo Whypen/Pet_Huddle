@@ -29,7 +29,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
-import imageCompression from "browser-image-compression";
+// browser-image-compression is dynamically imported inside prepareComposerMedia
+// so the ~50 KB lib stays out of the initial Social bundle.
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { areUsersBlocked, loadBlockedUserIdsFor } from "@/lib/blocking";
@@ -1576,6 +1577,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       let nextFile = file;
       if (kind === "image") {
         try {
+          const { default: imageCompression } = await import("browser-image-compression");
           nextFile = await imageCompression(file, {
             maxSizeMB: 0.8,
             maxWidthOrHeight: 1800,

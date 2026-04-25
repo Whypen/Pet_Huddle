@@ -1051,11 +1051,23 @@ const MapPage = () => {
     if (import.meta.env.DEV) console.debug("[PLACE_SELECTED]", { lat: fallback.lat, lng: fallback.lng });
   }, [defaultCenter, isPickingBroadcastLocation, pinAddressSnapshot, userLocation]);
 
-  // Handle window resize
+  // Handle window resize. Coalesce RAF: bursty resize events (mobile keyboard
+  // open/close, rotation) would otherwise stack callbacks and cause many redundant
+  // map.resize() invocations.
   useEffect(() => {
-    const handleResize = () => { requestAnimationFrame(() => map.current?.resize()); };
+    let frame: number | null = null;
+    const handleResize = () => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        map.current?.resize();
+      });
+    };
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
 
   // First viewport priority:
