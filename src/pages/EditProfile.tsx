@@ -582,8 +582,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       let changed = false;
       const next = { ...prev };
       fields.forEach((field) => {
-        if (prev[field] && !hasVisibilityContent(field, prev)) {
-          next[field] = false;
+        const shouldShow = hasVisibilityContent(field, prev);
+        if (prev[field] !== shouldShow) {
+          next[field] = shouldShow;
           changed = true;
         }
       });
