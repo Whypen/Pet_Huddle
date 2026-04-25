@@ -3232,27 +3232,73 @@ const Chats = () => {
     subscribedInboxRoomIdsRef.current = new Set(subscribedInboxRoomIds);
   }, [subscribedInboxRoomIds]);
 
+  // Stable string key — identity is preserved when the *set* of room IDs is
+  // unchanged, even though the upstream `subscribedInboxRoomIds` memo rebuilds
+  // its array each time chats/groups state shifts (last_message_at updates etc.).
+  // Used to gate the realtime resubscribe so it only fires on real list changes.
+  const subscribedInboxRoomIdsKey = useMemo(
+    () => subscribedInboxRoomIds.join(","),
+    [subscribedInboxRoomIds]
+  );
+
+  // Server-side filter the chat_messages stream to only the rooms in this user's
+  // inbox. Previously this subscribed to *all* chat_messages globally and filtered
+  // client-side via subscribedInboxRoomIdsRef — wasting bandwidth and battery on
+  // mobile clients receiving every message on the platform.
+  //
+  // For users with > NARROW_FILTER_MAX rooms we fall back to the broad
+  // subscription because the URL-encoded filter list would grow unwieldy and the
+  // realtime server may refuse it. The client-side guard remains as
+  // defense-in-depth for both paths.
+  //
+  // Resubscribes are debounced 250 ms so that incremental inbox loads (chats
+  // arriving in waves) don't thrash the channel.
   useEffect(() => {
     if (!profile?.id) return;
-    const channel = supabase
-      .channel(`chats_messages_${profile.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "chat_messages" },
-        (payload) => {
-          const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
-          const roomId = String(row?.chat_id || "").trim();
-          if (!roomId) return;
-          if (!subscribedInboxRoomIdsRef.current.has(roomId)) return;
-          queueDirtyRoomSummaryRefresh(roomId);
-        }
-      );
-    channel.subscribe();
+    if (subscribedInboxRoomIds.length === 0) return;
+    const NARROW_FILTER_MAX = 100;
+    const useNarrowFilter = subscribedInboxRoomIds.length <= NARROW_FILTER_MAX;
+    const roomIdsForFilter = subscribedInboxRoomIds.slice(0, NARROW_FILTER_MAX);
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const debounceTimer = window.setTimeout(() => {
+      const filterClause = useNarrowFilter
+        ? {
+            event: "*" as const,
+            schema: "public",
+            table: "chat_messages",
+            filter: `chat_id=in.(${roomIdsForFilter.join(",")})`,
+          }
+        : { event: "*" as const, schema: "public", table: "chat_messages" };
+      channel = supabase
+        .channel(`chats_messages_${profile.id}`)
+        .on(
+          "postgres_changes",
+          filterClause,
+          (payload) => {
+            const row = ((payload.new || payload.old || null) as { chat_id?: string | null } | null);
+            const roomId = String(row?.chat_id || "").trim();
+            if (!roomId) return;
+            // Belt-and-braces: even with a server filter, defend against any
+            // race where the filter list is briefly stale during resubscribe.
+            if (!subscribedInboxRoomIdsRef.current.has(roomId)) return;
+            queueDirtyRoomSummaryRefresh(roomId);
+          }
+        );
+      channel.subscribe();
+    }, 250);
 
     return () => {
-      void supabase.removeChannel(channel);
+      window.clearTimeout(debounceTimer);
+      if (channel) {
+        void supabase.removeChannel(channel);
+      }
     };
-  }, [profile?.id, queueDirtyRoomSummaryRefresh]);
+  // Gate on the stable string key, not the array reference, so we don't
+  // resubscribe on every chats/groups state shuffle (which preserves the
+  // same room-ID set).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomIdsKey]);
 
   const getChatPreview = useCallback((chat: ChatUser) => {
     const override = String(chat.previewOverride || "").trim();

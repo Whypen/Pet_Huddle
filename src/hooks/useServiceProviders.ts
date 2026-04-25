@@ -196,41 +196,70 @@ export function useServiceProviders(anchor?: Anchor, viewerCountry?: string | nu
         distanceByUserId.set(id, distanceKm);
       }
 
-      const mapped = await Promise.all(
-        providerRows.map(async (row) => {
-          const rowObj = row as Record<string, unknown>;
-          const providerUserId = String(rowObj.user_id ?? "");
-          const publicProfile = publicProfileById.get(providerUserId) ?? null;
-          const albumProfile = albumById.get(providerUserId) ?? null;
-          const mergedProfile =
-            publicProfile || albumProfile
-              ? { ...(publicProfile ?? {}), ...(albumProfile ?? {}) }
-              : null;
+      // Pre-resolve album URLs in concurrency-capped batches.
+      // Previous behavior: Promise.all over N providers fired N parallel
+      // storage-signing requests, head-of-line-blocking other Supabase calls
+      // behind Chrome's 6-per-origin connection cap. Now: collect unique
+      // cache misses, resolve in batches of 6, then do a sync mapping pass.
+      const ALBUM_BATCH_SIZE = 6;
+      const profileByProviderId = new Map<string, Record<string, unknown> | null>();
+      const albumRawByProviderId = new Map<string, string[]>();
+      const missingAlbumKeys = new Map<string, string[]>(); // cacheKey → albumRaw
 
-          const albumRaw = canonicalizeSocialAlbumEntries((mergedProfile?.social_album as string[] | null) ?? []);
-          let albumUrls: string[] = [];
-          if (albumRaw.length > 0) {
+      for (const row of providerRows) {
+        const rowObj = row as Record<string, unknown>;
+        const providerUserId = String(rowObj.user_id ?? "");
+        if (!providerUserId) continue;
+        const publicProfile = publicProfileById.get(providerUserId) ?? null;
+        const albumProfile = albumById.get(providerUserId) ?? null;
+        const mergedProfile =
+          publicProfile || albumProfile
+            ? { ...(publicProfile ?? {}), ...(albumProfile ?? {}) }
+            : null;
+        profileByProviderId.set(providerUserId, mergedProfile);
+
+        const albumRaw = canonicalizeSocialAlbumEntries((mergedProfile?.social_album as string[] | null) ?? []);
+        albumRawByProviderId.set(providerUserId, albumRaw);
+        if (albumRaw.length === 0) continue;
+        const cacheKey = albumRaw.join("|");
+        if (socialAlbumUrlCache.get(cacheKey)) continue;
+        if (!missingAlbumKeys.has(cacheKey)) missingAlbumKeys.set(cacheKey, albumRaw);
+      }
+
+      const missingEntries = Array.from(missingAlbumKeys.entries());
+      for (let i = 0; i < missingEntries.length; i += ALBUM_BATCH_SIZE) {
+        const slice = missingEntries.slice(i, i + ALBUM_BATCH_SIZE);
+        await Promise.all(
+          slice.map(async ([cacheKey, albumRaw]) => {
             try {
-              const albumCacheKey = albumRaw.join("|");
-              const cachedAlbumUrls = socialAlbumUrlCache.get(albumCacheKey);
-              if (cachedAlbumUrls) {
-                albumUrls = cachedAlbumUrls;
-              } else {
-                albumUrls = await resolveSocialAlbumUrlList(albumRaw);
-                socialAlbumUrlCache.set(albumCacheKey, albumUrls);
-              }
+              const urls = await resolveSocialAlbumUrlList(albumRaw);
+              socialAlbumUrlCache.set(cacheKey, urls);
             } catch (error) {
               console.warn("[service.fetch_providers.album_url_resolve_failed]", {
-                providerUserId,
+                cacheKey,
                 error,
               });
+              // Intentionally do NOT cache the failure — preserves the prior
+              // behavior of retrying on the next provider fetch (transient
+              // signing errors will recover). The mapping pass below falls
+              // back to [] when the cache is empty for this key.
             }
-          }
-          const mapped = mapProviderRow(rowObj, mergedProfile, albumUrls, bookmarkedSet.has(providerUserId));
-          mapped.distanceKm = distanceByUserId.get(providerUserId) ?? null;
-          return mapped;
-        }),
-      );
+          }),
+        );
+      }
+
+      const mapped = providerRows.map((row) => {
+        const rowObj = row as Record<string, unknown>;
+        const providerUserId = String(rowObj.user_id ?? "");
+        const mergedProfile = profileByProviderId.get(providerUserId) ?? null;
+        const albumRaw = albumRawByProviderId.get(providerUserId) ?? [];
+        const albumUrls = albumRaw.length > 0
+          ? (socialAlbumUrlCache.get(albumRaw.join("|")) ?? [])
+          : [];
+        const out = mapProviderRow(rowObj, mergedProfile, albumUrls, bookmarkedSet.has(providerUserId));
+        out.distanceKm = distanceByUserId.get(providerUserId) ?? null;
+        return out;
+      });
 
       const viewerCountryKey = normalizeCountryKey(viewerCountry);
       const geoFiltered = mapped.filter((entry) => {
