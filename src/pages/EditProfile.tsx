@@ -414,18 +414,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     experience_years: value.experience_years,
     owns_pets: value.owns_pets,
     availability_status: value.availability_status,
-    show_gender: value.show_gender,
-    show_orientation: value.show_orientation,
-    show_age: value.show_age,
-    show_height: value.show_height,
-    show_weight: value.show_weight,
-    show_academic: value.show_academic,
-    show_affiliation: value.show_affiliation,
-    show_occupation: value.show_occupation,
-    show_bio: value.show_bio,
-    show_relationship_status: value.show_relationship_status,
-    show_languages: value.show_languages,
-    show_location: value.show_location,
+    show_gender: value.show_gender && Boolean(value.gender_genre.trim()),
+    show_orientation: value.show_orientation && Boolean(value.orientation.trim()),
+    show_age: value.show_age && Boolean(value.dob),
+    show_height: value.show_height && Boolean(value.height.trim()),
+    show_weight: value.show_weight && Boolean(value.weight.trim()),
+    show_academic: value.show_academic && Boolean(value.degree.trim() || value.school.trim() || value.major.trim()),
+    show_affiliation: value.show_affiliation && Boolean(value.affiliation.trim()),
+    show_occupation: value.show_occupation && Boolean(value.occupation.trim()),
+    show_bio: value.show_bio && Boolean(value.bio.trim()),
+    show_relationship_status: value.show_relationship_status && Boolean(value.relationship_status.trim()),
+    show_languages: value.show_languages && value.languages.length > 0,
+    show_location: value.show_location && Boolean(value.location_country.trim() && value.location_district.trim()),
     avatar_url: isPersistableImageUrl(photoPreview) ? photoPreview : "",
   }), [photoPreview]);
   const hasVerifiedLegalName = Boolean(formData.legal_name?.trim()) && (
@@ -507,6 +507,29 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     | "show_languages"
     | "show_location";
 
+  const hasVisibilityContent = useCallback((field: VisibilityField, source: typeof formData) => {
+    const requirements: Record<VisibilityField, boolean> = {
+      show_gender: Boolean(source.gender_genre.trim()),
+      show_orientation: Boolean(source.orientation.trim()),
+      show_age: Boolean(source.dob),
+      show_height: Boolean(source.height.trim()),
+      show_weight: Boolean(source.weight.trim()),
+      show_academic: Boolean(source.degree.trim() || source.school.trim() || source.major.trim()),
+      show_affiliation: Boolean(source.affiliation.trim()),
+      show_occupation: Boolean(source.occupation.trim()),
+      show_bio: Boolean(source.bio.trim()),
+      show_relationship_status: Boolean(source.relationship_status.trim()),
+      show_languages: source.languages.length > 0,
+      show_location: Boolean(source.location_country.trim() && source.location_district.trim()),
+    };
+    return requirements[field];
+  }, []);
+
+  const isVisibilityOn = useCallback(
+    (field: VisibilityField, source: typeof formData = formData) => Boolean(source[field]) && hasVisibilityContent(field, source),
+    [formData, hasVisibilityContent],
+  );
+
   const handleVisibilityToggle = useCallback((field: VisibilityField, checked: boolean) => {
     if (!checked) {
       setFormData((prev) => ({ ...prev, [field]: false }));
@@ -539,6 +562,51 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
     setFormData((prev) => ({ ...prev, [field]: true }));
   }, [formData, scrollToProfileField]);
+
+  useEffect(() => {
+    const fields: VisibilityField[] = [
+      "show_gender",
+      "show_orientation",
+      "show_age",
+      "show_height",
+      "show_weight",
+      "show_academic",
+      "show_affiliation",
+      "show_occupation",
+      "show_bio",
+      "show_relationship_status",
+      "show_languages",
+      "show_location",
+    ];
+    setFormData((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      fields.forEach((field) => {
+        if (prev[field] && !hasVisibilityContent(field, prev)) {
+          next[field] = false;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [
+    formData.gender_genre,
+    formData.orientation,
+    formData.dob,
+    formData.height,
+    formData.weight,
+    formData.degree,
+    formData.school,
+    formData.major,
+    formData.affiliation,
+    formData.occupation,
+    formData.bio,
+    formData.relationship_status,
+    formData.languages,
+    formData.location_country,
+    formData.location_district,
+    hasVisibilityContent,
+  ]);
 
   const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
     const response = await fetch(dataUrl);
@@ -959,18 +1027,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       owns_pets: profile?.owns_pets ?? Boolean(safeCachedDraft?.owns_pets),
       non_social: resolvedAvailability.length === 0,
       availability_status: resolvedAvailability,
-      show_gender: profile?.show_gender ?? Boolean(safeCachedDraft?.show_gender ?? Boolean(genderGenre.trim())),
-      show_orientation: profile?.show_orientation ?? Boolean(safeCachedDraft?.show_orientation ?? Boolean(orientation.trim())),
-      show_age: profile?.show_age ?? Boolean(safeCachedDraft?.show_age ?? Boolean(dob)),
-      show_height: profile?.show_height ?? Boolean(safeCachedDraft?.show_height ?? Boolean(height)),
-      show_weight: profile?.show_weight ?? Boolean(safeCachedDraft?.show_weight ?? Boolean(weight)),
-      show_academic: profile?.show_academic ?? Boolean(safeCachedDraft?.show_academic ?? Boolean(degree.trim() || school.trim() || major.trim())),
-      show_affiliation: profile?.show_affiliation ?? Boolean(safeCachedDraft?.show_affiliation ?? Boolean(affiliation.trim())),
-      show_occupation: profile?.show_occupation ?? Boolean(safeCachedDraft?.show_occupation ?? Boolean(occupation.trim())),
-      show_bio: profile?.show_bio ?? Boolean(safeCachedDraft?.show_bio ?? Boolean(bio.trim())),
-      show_relationship_status: profile?.show_relationship_status ?? Boolean(safeCachedDraft?.show_relationship_status ?? Boolean(relationshipStatus.trim())),
-      show_languages: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? safeCachedDraft?.show_languages ?? false),
-      show_location: Boolean((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false),
+      show_gender: Boolean((profile?.show_gender ?? safeCachedDraft?.show_gender ?? Boolean(genderGenre.trim())) && genderGenre.trim()),
+      show_orientation: Boolean((profile?.show_orientation ?? safeCachedDraft?.show_orientation ?? Boolean(orientation.trim())) && orientation.trim()),
+      show_age: Boolean((profile?.show_age ?? safeCachedDraft?.show_age ?? Boolean(dob)) && dob),
+      show_height: Boolean((profile?.show_height ?? safeCachedDraft?.show_height ?? Boolean(height)) && height.trim()),
+      show_weight: Boolean((profile?.show_weight ?? safeCachedDraft?.show_weight ?? Boolean(weight)) && weight.trim()),
+      show_academic: Boolean((profile?.show_academic ?? safeCachedDraft?.show_academic ?? Boolean(degree.trim() || school.trim() || major.trim())) && (degree.trim() || school.trim() || major.trim())),
+      show_affiliation: Boolean((profile?.show_affiliation ?? safeCachedDraft?.show_affiliation ?? Boolean(affiliation.trim())) && affiliation.trim()),
+      show_occupation: Boolean((profile?.show_occupation ?? safeCachedDraft?.show_occupation ?? Boolean(occupation.trim())) && occupation.trim()),
+      show_bio: Boolean((profile?.show_bio ?? safeCachedDraft?.show_bio ?? Boolean(bio.trim())) && bio.trim()),
+      show_relationship_status: Boolean((profile?.show_relationship_status ?? safeCachedDraft?.show_relationship_status ?? Boolean(relationshipStatus.trim())) && relationshipStatus.trim()),
+      show_languages: Boolean(((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? safeCachedDraft?.show_languages ?? false) && (profile?.languages ?? cachedLanguages).length > 0),
+      show_location: Boolean(((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false) && locationCountry.trim() && locationDistrict.trim()),
       social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
     };
     setFormData(nextForm);
@@ -1965,20 +2033,20 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             petsProfileCount > 0
               ? enforceAvailabilityDefaults(formData.availability_status, true)
               : enforceAvailabilityDefaults(formData.availability_status, formData.owns_pets),
-          show_gender: formData.show_gender,
-          show_orientation: formData.show_orientation,
+          show_gender: isVisibilityOn("show_gender"),
+          show_orientation: isVisibilityOn("show_orientation"),
           show_age: true,
-          show_height: formData.show_height,
-          show_weight: formData.show_weight,
-          show_academic: formData.show_academic,
-          show_affiliation: formData.show_affiliation,
-          show_occupation: formData.show_occupation,
-          show_bio: formData.show_bio,
-          show_relationship_status: formData.show_relationship_status,
+          show_height: isVisibilityOn("show_height"),
+          show_weight: isVisibilityOn("show_weight"),
+          show_academic: isVisibilityOn("show_academic"),
+          show_affiliation: isVisibilityOn("show_affiliation"),
+          show_occupation: isVisibilityOn("show_occupation"),
+          show_bio: isVisibilityOn("show_bio"),
+          show_relationship_status: isVisibilityOn("show_relationship_status"),
           prefs: {
             ...((profile?.prefs as Record<string, unknown> | null) || {}),
-            show_languages: formData.show_languages,
-            show_location: formData.show_location,
+            show_languages: isVisibilityOn("show_languages"),
+            show_location: isVisibilityOn("show_location"),
           },
           social_album: canonicalizeSocialAlbumEntries(formData.social_album),
           avatar_url: avatarUrl,
@@ -2626,7 +2694,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <div className="flex items-center gap-2">
                     <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                     <NeuToggle
-                      checked={formData.show_height}
+                      checked={isVisibilityOn("show_height")}
                       onCheckedChange={(checked) => handleVisibilityToggle("show_height", checked)}
                     />
                   </div>
@@ -2663,7 +2731,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_bio}
+                    checked={isVisibilityOn("show_bio")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_bio", checked)}
                   />
                 </div>
@@ -2810,7 +2878,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_gender}
+                    checked={isVisibilityOn("show_gender")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_gender", checked)}
                   />
                 </div>
@@ -2834,7 +2902,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_orientation}
+                    checked={isVisibilityOn("show_orientation")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_orientation", checked)}
                   />
                 </div>
@@ -2855,7 +2923,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                 <NeuToggle
-                  checked={formData.show_academic}
+                  checked={isVisibilityOn("show_academic")}
                   onCheckedChange={(checked) => handleVisibilityToggle("show_academic", checked)}
                 />
               </div>
@@ -2909,7 +2977,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_occupation}
+                    checked={isVisibilityOn("show_occupation")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_occupation", checked)}
                   />
                 </div>
@@ -2937,7 +3005,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                 <NeuToggle
-                  checked={formData.show_affiliation}
+                  checked={isVisibilityOn("show_affiliation")}
                   onCheckedChange={(checked) => handleVisibilityToggle("show_affiliation", checked)}
                 />
               </div>
@@ -2963,7 +3031,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_relationship_status}
+                    checked={isVisibilityOn("show_relationship_status")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_relationship_status", checked)}
                   />
                 </div>
@@ -2998,7 +3066,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_languages}
+                    checked={isVisibilityOn("show_languages")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_languages", checked)}
                   />
                 </div>
@@ -3053,7 +3121,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-muted-foreground" aria-hidden />
                   <NeuToggle
-                    checked={formData.show_location}
+                    checked={isVisibilityOn("show_location")}
                     onCheckedChange={(checked) => handleVisibilityToggle("show_location", checked)}
                   />
                 </div>
@@ -3403,14 +3471,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           petHeads={activePetHeads}
           visibility={{
             show_age: formData.show_age,
-            show_gender: formData.show_gender,
-            show_orientation: formData.show_orientation,
-            show_height: formData.show_height,
-            show_relationship_status: formData.show_relationship_status,
-            show_academic: formData.show_academic,
-            show_occupation: formData.show_occupation,
-            show_affiliation: formData.show_affiliation,
-            show_bio: formData.show_bio,
+            show_gender: isVisibilityOn("show_gender"),
+            show_orientation: isVisibilityOn("show_orientation"),
+            show_height: isVisibilityOn("show_height"),
+            show_relationship_status: isVisibilityOn("show_relationship_status"),
+            show_academic: isVisibilityOn("show_academic"),
+            show_occupation: isVisibilityOn("show_occupation"),
+            show_affiliation: isVisibilityOn("show_affiliation"),
+            show_bio: isVisibilityOn("show_bio"),
           }}
         />
       </div>
