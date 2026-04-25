@@ -37,6 +37,15 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
       || isOAuthOnboarding
     );
   const onboardingIncomplete = Boolean(user && profile && !isRegisteredUserProfile(profile));
+  const activeSignupFlow =
+    flowState !== "idle" ||
+    persistedSignupFlowState ||
+    hasPersistedSignupDraft ||
+    isOAuthOnboarding;
+  const allowSignupVerifyDecision =
+    location.pathname === "/signup/verify" &&
+    onboardingIncomplete &&
+    activeSignupFlow;
   const isTokenGatedPath =
     location.pathname === "/signup/email-confirmation" ||
     location.pathname === "/signup/marketing-confirmed" ||
@@ -86,6 +95,7 @@ export const PublicRoute = ({ children }: { children: React.ReactNode }) => {
       return <Navigate to="/auth" replace />;
     }
     if (onboardingIncomplete) {
+      if (allowSignupVerifyDecision) return <>{children}</>;
       return <Navigate to="/set-profile" replace />;
     }
     return <Navigate to="/" replace />;

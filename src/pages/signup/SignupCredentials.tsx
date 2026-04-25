@@ -4,15 +4,13 @@
  * All business logic (OTP, duplicate detection, password strength, dialog) preserved.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Lock, Mail, Phone } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
-import "react-phone-number-input/style.css";
 import { credentialsSchema, oauthCredentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,6 +31,8 @@ import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessio
 
 const FORM_ID = "signup-credentials-form";
 const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
+const BASIC_E164_REGEX = /^\+[1-9]\d{1,14}$/;
+const SignupPhoneInput = lazy(() => import("@/components/signup/SignupPhoneInput"));
 const emailSchema = z.string().trim().email();
 const ACCOUNT_UNAVAILABLE_MESSAGE =
   "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
@@ -97,6 +97,7 @@ const SignupCredentials = () => {
   const [signinError, setSigninError] = useState("");
   const [signinRemember, setSigninRemember] = useState(true);
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
+  const [phoneValidator, setPhoneValidator] = useState<((value: string) => boolean) | null>(null);
   const duplicateCheckRef = useRef(0);
   const presignupTurnstile = useTurnstile("send_pre_signup_verify");
   const readTurnstileToken = (turnstileState: { getToken?: unknown; token?: string | null }) => {
@@ -130,6 +131,9 @@ const SignupCredentials = () => {
 
   const email = watch("email") || "";
   const phone = watch("phone") || "";
+  const setPhoneValue = (value: string) => {
+    setValue("phone", value || "", { shouldValidate: true, shouldTouch: true });
+  };
   const defaultCountry = useMemo(() => {
     const locale = typeof navigator !== "undefined" ? navigator.language : "";
     const parts = locale.split("-");
@@ -139,18 +143,33 @@ const SignupCredentials = () => {
   const confirmPassword = watch("confirmPassword") || "";
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== password;
   // Email signup path: Zod schema validation (E.164 structural regex).
+  const isPhoneStructurallyValid = useCallback((value: string) => {
+    const normalized = String(value || "").trim();
+    if (!BASIC_E164_REGEX.test(normalized)) return false;
+    return phoneValidator ? phoneValidator(normalized) : false;
+  }, [phoneValidator]);
+  const phoneValidatorPending = Boolean(phone) && BASIC_E164_REGEX.test(phone.trim()) && !phoneValidator;
   const phoneInvalid = Boolean(errors.phone);
 
-  // OAuth onboarding path: full structural validity check via libphonenumber
-  // (shipped with react-phone-number-input).
-  // isValidPhoneNumber checks actual national-number patterns, not just length ranges.
-  // isPossiblePhoneNumber (length-range only) accepted partial inputs for any country whose
-  // possible-length list spans a range — isValidPhoneNumber checks actual national-number
-  // patterns and rejects any number not yet structurally complete for its country.
-  // "valid" = structurally complete for the country, NOT OTP-verified ownership.
-  const phoneNotValid = Boolean(phone) && !isValidPhoneNumber(phone);
+  // Full structural phone validation is loaded after first paint with the phone
+  // input chunk. It must pass before duplicate checks or Continue can run.
+  const phoneNotValid = Boolean(phone) && !phoneValidatorPending && !isPhoneStructurallyValid(phone);
 
   // ── Effects ──────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    let mounted = true;
+    void import("@/lib/signupPhoneValidation")
+      .then((module) => {
+        if (mounted) setPhoneValidator(() => module.isValidSignupPhoneNumber);
+      })
+      .catch(() => {
+        if (mounted) setPhoneValidator(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const hasChanges = data.email !== email || data.phone !== phone || data.password !== password;
@@ -242,7 +261,7 @@ const SignupCredentials = () => {
       // Only check phone uniqueness: pass empty string for p_email so the RPC
       // matches on phone only. Phone is compared in normalized E.164 — no false
       // collisions from formatting differences.
-      if (!phone || !isValidPhoneNumber(phone)) {
+      if (!phone || !isPhoneStructurallyValid(phone)) {
         // No valid phone yet — clear state, nothing to check.
         setCheckingDuplicate(false);
         setDuplicateDetected(false);
@@ -304,7 +323,7 @@ const SignupCredentials = () => {
     const trimmedPhone = phone.trim();
     const duplicateKey = `${trimmedEmail.toLowerCase()}|${trimmedPhone}`;
     const emailReady = emailSchema.safeParse(trimmedEmail).success;
-    const phoneReady = Boolean(trimmedPhone) && isValidPhoneNumber(trimmedPhone);
+    const phoneReady = Boolean(trimmedPhone) && isPhoneStructurallyValid(trimmedPhone);
 
     // Do not trigger duplicate checks (or sign-in modal) while user is still typing.
     // Only check once both identifiers are structurally valid.
@@ -363,7 +382,7 @@ const SignupCredentials = () => {
       }
     }, 400);
     return () => clearTimeout(timer);
-  }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey, isOAuthOnboarding]);
+  }, [email, phone, showSignInModal, duplicateRetryToken, dismissedDuplicateKey, isOAuthOnboarding, isPhoneStructurallyValid]);
 
   useEffect(() => { if (showSignInModal) setSigninRemember(true); }, [showSignInModal]);
 
@@ -394,8 +413,8 @@ const SignupCredentials = () => {
     }
     // Strict OAuth onboarding path — already authenticated via Google / Apple,
     // incomplete onboarding, signup flow active. Do NOT call signUp() again.
-    // oauthCredentialsSchema already validated phone structurally; the only
-    // remaining runtime guard is the async duplicate-check state.
+    // oauthCredentialsSchema validates the base E.164 shape; the lazy phone
+    // validator above must pass selected-country rules before this can submit.
     if (isOAuthOnboarding) {
       if (duplicateDetected) return;
       update({
@@ -407,7 +426,9 @@ const SignupCredentials = () => {
       goTo("/signup/name");
       return;
     }
-    // Email signup path — credentialsSchema validated all fields including password.
+    // Email signup path — credentialsSchema validates email, password, and the
+    // base E.164 phone shape; selected-country phone validation is enforced in
+    // the CTA/duplicate-check guards above before submit can run.
     // Step order is:
     // credentials -> email-confirmation -> name -> create auth user -> verify identity
     // Skip the email-confirmation gate only if a usable pre-signup proof already exists.
@@ -474,13 +495,15 @@ const SignupCredentials = () => {
 
   // OAuth onboarding CTA requirements (all must pass):
   //   • phone non-empty
-  //   • isValidPhoneNumber === true  (structural pattern check against selected country, NOT OTP ownership)
+  //   • phone structural validation passes selected country rules, NOT OTP ownership
   //   • no duplicate phone collision with another user's account
   //   • not mid-check, not mid-submit
   // Email signup CTA: unchanged.
   const ctaDisabled = isOAuthOnboarding
-    ? !phone || phoneNotValid || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
+    ? !phone || phoneValidatorPending || phoneNotValid || duplicateDetected || checkingDuplicate || Boolean(duplicateCheckError) || submitting
     : !isValid ||
+      phoneValidatorPending ||
+      phoneNotValid ||
       !presignupTurnstile.isTokenUsable ||
       Boolean(signupBlockedMessage) ||
       duplicateDetected ||
@@ -495,6 +518,8 @@ const SignupCredentials = () => {
           ? "Checking phone…"
           : duplicateCheckError
             ? "Could not verify phone. Retry."
+            : phoneValidatorPending
+              ? "Preparing phone validation…"
             : phoneNotValid
               ? "Phone number length is not valid for the selected country"
               : "Enter your phone number to continue")
@@ -504,9 +529,11 @@ const SignupCredentials = () => {
           ? "Checking account details…"
           : signupBlockedMessage
             ? "Signup is currently unavailable for this account"
+          : phoneValidatorPending
+            ? "Preparing phone validation…"
           : !presignupTurnstile.isTokenUsable
             ? "Preparing verification…"
-          : phoneInvalid
+          : phoneInvalid || phoneNotValid
             ? "Enter a valid phone number"
             : "Complete all required fields to continue");
 
@@ -582,48 +609,61 @@ const SignupCredentials = () => {
           <div className="flex flex-col" style={{ gap: "var(--field-gap-lc, 6px)" }}>
             <label className="text-[13px] font-semibold text-[var(--text-primary,#424965)] pl-1">Phone Number</label>
             <div className={`form-field-rest relative flex items-center ${
-              isOAuthOnboarding ? (phoneNotValid || duplicateDetected ? "form-field-error" : "") : (errors.phone ? "form-field-error" : "")
+              isOAuthOnboarding ? (phoneNotValid || duplicateDetected ? "form-field-error" : "") : ((errors.phone || phoneNotValid) ? "form-field-error" : "")
             }`}>
               <Phone className="absolute left-4 h-4 w-4 text-[var(--text-tertiary)] pointer-events-none" />
-              <PhoneInput
-                defaultCountry={defaultCountry as never}
-                international
-                value={phone}
-                onChange={(value) => setValue("phone", value || "", { shouldValidate: true, shouldTouch: true })}
-                className="w-full pl-10 [&_.PhoneInputCountry]:bg-transparent [&_.PhoneInputCountry]:shadow-none [&_.PhoneInputCountrySelectArrow]:opacity-50 [&_.PhoneInputCountryIcon]:bg-transparent [&_.PhoneInputInput]:bg-transparent [&_.PhoneInputInput]:border-0 [&_.PhoneInputInput]:shadow-none [&_.PhoneInputInput]:outline-none"
-                inputStyle={{
-                  width: "100%",
-                  height: "100%",
-                  fontSize: "15px",
-                  border: "none",
-                  boxShadow: "none",
-                  padding: 0,
-                  background: "transparent",
-                  color: "var(--text-primary,#424965)",
-                  outline: "none",
-                }}
-              />
+              <Suspense
+                fallback={
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(event) => setPhoneValue(event.target.value)}
+                    autoComplete="tel"
+                    inputMode="tel"
+                    placeholder="+852"
+                    className="field-input-core w-full pl-10 pr-4 font-[var(--font)] focus:outline-none focus:ring-0 focus-visible:outline-none"
+                  />
+                }
+              >
+                <SignupPhoneInput
+                  defaultCountry={defaultCountry}
+                  value={phone}
+                  onChange={setPhoneValue}
+                />
+              </Suspense>
             </div>
             {isOAuthOnboarding ? (
               <>
                 {/* Country-aware digit-count validation — not OTP ownership */}
-                {phoneNotValid && (
+                {phoneValidatorPending && (
+                  <p className="text-[12px] font-medium text-[rgba(74,73,101,0.55)] pl-1" aria-live="polite">
+                    Preparing phone validation…
+                  </p>
+                )}
+                {!phoneValidatorPending && phoneNotValid && (
                   <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                     Phone number length is not valid for the selected country
                   </p>
                 )}
-                {!phoneNotValid && duplicateDetected && (
+                {!phoneValidatorPending && !phoneNotValid && duplicateDetected && (
                   <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
                     This phone number is already used by another account
                   </p>
                 )}
               </>
             ) : (
-              errors.phone && (
-                <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
-                  Your phone number is invalid
-                </p>
-              )
+              <>
+                {phoneValidatorPending && (
+                  <p className="text-[12px] font-medium text-[rgba(74,73,101,0.55)] pl-1" aria-live="polite">
+                    Preparing phone validation…
+                  </p>
+                )}
+                {!phoneValidatorPending && (errors.phone || phoneNotValid) && (
+                  <p className="text-[12px] font-medium text-[var(--color-error,#E84545)] pl-1" aria-live="polite">
+                    Your phone number is invalid
+                  </p>
+                )}
+              </>
             )}
           </div>
 
