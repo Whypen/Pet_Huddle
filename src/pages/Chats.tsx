@@ -2454,20 +2454,28 @@ const Chats = () => {
     })();
   }, [profile?.id]);
 
+  // Sort priority (activity-first):
+  //   1. Both have message activity → newer last_message_at first
+  //   2. Only one has message activity → it comes first (push matched-no-msg to bottom)
+  //   3. Neither has messages → newer matched_at first (newest matches at top of rail)
+  // Earlier this function sorted by matched_at first, falling back to last_message_at
+  // only when both rows lacked matched_at — that worked accidentally when matched_at
+  // was usually NULL on legacy rooms. After the 20260426010000 backfill every direct
+  // chat has a matched_at, so the old order ignored message recency entirely.
   const sortChatUsers = useCallback((items: ChatUser[]) => {
     return [...items].sort((a, b) => {
-      const aMatch = a.matchedAt ? new Date(a.matchedAt).getTime() : Number.NaN;
-      const bMatch = b.matchedAt ? new Date(b.matchedAt).getTime() : Number.NaN;
-      if (Number.isFinite(aMatch) || Number.isFinite(bMatch)) {
-        const safeA = Number.isFinite(aMatch) ? aMatch : -Infinity;
-        const safeB = Number.isFinite(bMatch) ? bMatch : -Infinity;
-        if (safeA !== safeB) return safeB - safeA;
+      const aMsg = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : null;
+      const bMsg = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : null;
+      if (aMsg !== null && bMsg !== null) {
+        if (aMsg !== bMsg) return bMsg - aMsg;
+      } else if (aMsg !== null) {
+        return -1;
+      } else if (bMsg !== null) {
+        return 1;
       }
-      const aMsg = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : Number.NaN;
-      const bMsg = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : Number.NaN;
-      const safeA = Number.isFinite(aMsg) ? aMsg : -Infinity;
-      const safeB = Number.isFinite(bMsg) ? bMsg : -Infinity;
-      return safeB - safeA;
+      const aMatch = a.matchedAt ? new Date(a.matchedAt).getTime() : -Infinity;
+      const bMatch = b.matchedAt ? new Date(b.matchedAt).getTime() : -Infinity;
+      return bMatch - aMatch;
     });
   }, []);
 
