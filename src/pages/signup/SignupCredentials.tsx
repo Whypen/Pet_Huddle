@@ -9,7 +9,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Lock, Mail, Phone } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { credentialsSchema, oauthCredentialsSchema } from "@/lib/authSchemas";
 import { useSignup } from "@/contexts/SignupContext";
@@ -17,22 +17,22 @@ import { useAuth } from "@/contexts/AuthContext";
 import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import { getClientEnv } from "@/lib/env";
 import { NeuButton } from "@/components/ui/NeuButton";
-import { FormField, NeuCheckbox } from "@/components/ui";
-import { LegalModal } from "@/components/modals/LegalModal";
+import { FormField } from "@/components/ui";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { SignupShell } from "@/components/signup/SignupShell";
-import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
 import { useTurnstile } from "@/hooks/useTurnstile";
-import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
 import { loadSignupDraft } from "@/lib/signupOnboarding";
-import { enablePersistentSession, enableSessionOnlyAuth } from "@/lib/authSessionPersistence";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const FORM_ID = "signup-credentials-form";
 const SIGNUP_TURNSTILE_TOKEN_KEY = "huddle_signup_turnstile_token";
 const BASIC_E164_REGEX = /^\+[1-9]\d{1,14}$/;
 const SignupPhoneInput = lazy(() => import("@/components/signup/SignupPhoneInput"));
+const SignupAlreadyRegisteredDialog = lazy(() => import("@/components/signup/SignupAlreadyRegisteredDialog"));
+const SignupTurnstileControls = lazy(() => import("@/components/signup/SignupTurnstileControls"));
+const LegalModal = lazy(() =>
+  import("@/components/modals/LegalModal").then((module) => ({ default: module.LegalModal })),
+);
 const emailSchema = z.string().trim().email();
 const ACCOUNT_UNAVAILABLE_MESSAGE =
   "Your Huddle account is unavailable. Contact support@huddle.pet if you think this is a mistake.";
@@ -98,6 +98,7 @@ const SignupCredentials = () => {
   const [signinRemember, setSigninRemember] = useState(true);
   const [dismissedDuplicateKey, setDismissedDuplicateKey] = useState<string | null>(null);
   const [phoneValidator, setPhoneValidator] = useState<((value: string) => boolean) | null>(null);
+  const [afterFirstPaint, setAfterFirstPaint] = useState(false);
   const duplicateCheckRef = useRef(0);
   const presignupTurnstile = useTurnstile("send_pre_signup_verify");
   const readTurnstileToken = (turnstileState: { getToken?: unknown; token?: string | null }) => {
@@ -158,6 +159,19 @@ const SignupCredentials = () => {
   // ── Effects ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => setAfterFirstPaint(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!afterFirstPaint) return;
     let mounted = true;
     void import("@/lib/signupPhoneValidation")
       .then((module) => {
@@ -169,7 +183,7 @@ const SignupCredentials = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [afterFirstPaint]);
 
   useEffect(() => {
     const hasChanges = data.email !== email || data.phone !== phone || data.password !== password;
@@ -548,16 +562,18 @@ const SignupCredentials = () => {
         cta={
           <div className="space-y-2">
             {!isOAuthOnboarding ? (
-              <div data-testid="signup-credentials-turnstile">
-                <TurnstileWidget
-                  siteKeyMissing={presignupTurnstile.siteKeyMissing}
-                  setContainer={presignupTurnstile.setContainer}
-                  className="min-h-[65px]"
-                />
-              </div>
-            ) : null}
-            {!isOAuthOnboarding ? (
-              <TurnstileDebugPanel visible={showTurnstileDiag} diag={presignupTurnstile.diag} />
+              afterFirstPaint ? (
+                <Suspense fallback={<div className="min-h-[65px]" />}>
+                  <SignupTurnstileControls
+                    siteKeyMissing={presignupTurnstile.siteKeyMissing}
+                    setContainer={presignupTurnstile.setContainer}
+                    showDiagnostics={showTurnstileDiag}
+                    diag={presignupTurnstile.diag}
+                  />
+                </Suspense>
+              ) : (
+                <div data-testid="signup-credentials-turnstile" className="min-h-[65px]" />
+              )
             ) : null}
             {signupBlockedMessage ? (
               <div
@@ -612,25 +628,37 @@ const SignupCredentials = () => {
               isOAuthOnboarding ? (phoneNotValid || duplicateDetected ? "form-field-error" : "") : ((errors.phone || phoneNotValid) ? "form-field-error" : "")
             }`}>
               <Phone className="absolute left-4 h-4 w-4 text-[var(--text-tertiary)] pointer-events-none" />
-              <Suspense
-                fallback={
-                  <input
-                    type="tel"
+              {afterFirstPaint ? (
+                <Suspense
+                  fallback={
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(event) => setPhoneValue(event.target.value)}
+                      autoComplete="tel"
+                      inputMode="tel"
+                      placeholder="+852"
+                      className="field-input-core w-full pl-10 pr-4 font-[var(--font)] focus:outline-none focus:ring-0 focus-visible:outline-none"
+                    />
+                  }
+                >
+                  <SignupPhoneInput
+                    defaultCountry={defaultCountry}
                     value={phone}
-                    onChange={(event) => setPhoneValue(event.target.value)}
-                    autoComplete="tel"
-                    inputMode="tel"
-                    placeholder="+852"
-                    className="field-input-core w-full pl-10 pr-4 font-[var(--font)] focus:outline-none focus:ring-0 focus-visible:outline-none"
+                    onChange={setPhoneValue}
                   />
-                }
-              >
-                <SignupPhoneInput
-                  defaultCountry={defaultCountry}
+                </Suspense>
+              ) : (
+                <input
+                  type="tel"
                   value={phone}
-                  onChange={setPhoneValue}
+                  onChange={(event) => setPhoneValue(event.target.value)}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  placeholder="+852"
+                  className="field-input-core w-full pl-10 pr-4 font-[var(--font)] focus:outline-none focus:ring-0 focus-visible:outline-none"
                 />
-              </Suspense>
+              )}
             </div>
             {isOAuthOnboarding ? (
               <>
@@ -727,103 +755,41 @@ const SignupCredentials = () => {
         </form>
       </SignupShell>
 
-      {/* Legal modals */}
-      <LegalModal isOpen={legalModal === "terms"}    onClose={() => setLegalModal(null)} type="terms" />
-      <LegalModal isOpen={legalModal === "privacy"}  onClose={() => setLegalModal(null)} type="privacy" />
+      {legalModal ? (
+        <Suspense fallback={null}>
+          <LegalModal isOpen={legalModal === "terms"} onClose={() => setLegalModal(null)} type="terms" />
+          <LegalModal isOpen={legalModal === "privacy"} onClose={() => setLegalModal(null)} type="privacy" />
+        </Suspense>
+      ) : null}
 
-      {/* Already-registered sign-in dialog (unchanged) */}
-      <Dialog
-        open={showSignInModal}
-        onOpenChange={(open) => {
-          if (!open) {
-            const trimmedEmail = email.trim();
-            const trimmedPhone = phone.trim();
-            setDismissedDuplicateKey(`${trimmedEmail.toLowerCase()}|${trimmedPhone}`);
-          }
-          setShowSignInModal(open);
-          if (!open) setSigninError("");
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogTitle className="text-[18px] font-[600] text-[#424965]">
-            Already Registered
-          </DialogTitle>
-          <DialogDescription className="text-[13px] text-[rgba(74,73,101,0.70)]">
-            This email or phone number is already registered
-          </DialogDescription>
-
-          <div className="space-y-4 mt-4">
-            <FormField
-              type="email"
-              label="Email"
-              leadingIcon={<Mail size={16} strokeWidth={1.75} />}
-              value={signinEmail}
-              onChange={(e) => setSigninEmail(e.target.value)}
-              placeholder="Email"
-            />
-
-            <FormField
-              type="password"
-              label="Password"
-              leadingIcon={<Lock size={16} strokeWidth={1.75} />}
-              value={signinPassword}
-              onChange={(e) => setSigninPassword(e.target.value)}
-              placeholder="Password"
-            />
-
-            <div className="flex items-center justify-between">
-              <NeuCheckbox
-                checked={signinRemember}
-                onCheckedChange={(v) => setSigninRemember(Boolean(v))}
-                label="Stay logged in"
-              />
-              <Link to="/reset-password" className="text-[13px] text-[#2145CF]">
-                Forgot password?
-              </Link>
-            </div>
-
-            {signinError && (
-              <p className="text-[12px] text-[#EF4444]">{signinError}</p>
-            )}
-
-            <NeuButton
-              className="w-full"
-              disabled={!signinEmail || !signinPassword || signinLoading}
-              onClick={async () => {
-                setSigninLoading(true);
-                setSigninError("");
-                try {
-                  const result = await signIn(signinEmail, signinPassword);
-                  if (result.error) {
-                    throw new Error(mapAuthFailureMessage(result.error.message));
-                  }
-                  if (result.mfaRequired) {
-                    throw new Error("Two-step verification is required. Please continue from the Sign in screen.");
-                  }
-
-                  if (signinRemember) {
-                    localStorage.setItem("auth_login_identifier", signinEmail);
-                    enablePersistentSession();
-                  } else {
-                    localStorage.removeItem("auth_login_identifier");
-                    enableSessionOnlyAuth();
-                  }
-
-                  toast.success("Signed in successfully");
-                  setShowSignInModal(false);
-                  goTo("/");
-                } catch (err: unknown) {
-                  setSigninError(mapAuthFailureMessage(err instanceof Error ? err.message : "Couldn’t sign you in."));
-                } finally {
-                  setSigninLoading(false);
-                }
-              }}
-            >
-              {signinLoading ? "Signing in…" : "Sign in"}
-            </NeuButton>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {showSignInModal ? (
+        <Suspense fallback={null}>
+          <SignupAlreadyRegisteredDialog
+            open={showSignInModal}
+            onOpenChange={(open) => {
+              if (!open) {
+                const trimmedEmail = email.trim();
+                const trimmedPhone = phone.trim();
+                setDismissedDuplicateKey(`${trimmedEmail.toLowerCase()}|${trimmedPhone}`);
+              }
+              setShowSignInModal(open);
+              if (!open) setSigninError("");
+            }}
+            signinEmail={signinEmail}
+            setSigninEmail={setSigninEmail}
+            signinPassword={signinPassword}
+            setSigninPassword={setSigninPassword}
+            signinRemember={signinRemember}
+            setSigninRemember={setSigninRemember}
+            signinError={signinError}
+            setSigninError={setSigninError}
+            signinLoading={signinLoading}
+            setSigninLoading={setSigninLoading}
+            signIn={signIn}
+            goHome={() => goTo("/")}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 };

@@ -38,9 +38,19 @@ const hasAuthRedirectParams = () => {
   );
 };
 const shouldSkipServiceWorkerResetReload = () =>
-  window.location.pathname === "/auth/callback"
+  window.location.pathname.startsWith("/signup/")
+  || window.location.pathname === "/auth/callback"
+  || window.location.pathname === "/auth"
   || window.location.pathname === "/update-password"
+  || window.location.pathname === "/verify"
   || hasAuthRedirectParams();
+
+const shouldSkipProactiveEntrySync = () =>
+  window.location.pathname.startsWith("/signup/")
+  || window.location.pathname === "/auth"
+  || window.location.pathname === "/auth/callback"
+  || window.location.pathname === "/verify"
+  || window.location.pathname === "/update-password";
 
 const resetServiceWorkerCachesOnce = async () => {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
@@ -161,6 +171,7 @@ const reloadForChunkFailure = async () => {
 
 const syncToLatestEntryBundleOnce = async () => {
   if (!import.meta.env.PROD) return;
+  if (shouldSkipProactiveEntrySync()) return;
   if (sessionStorage.getItem(ENTRY_SYNC_GUARD_KEY) === "1") return;
   const currentBundle = getBundleFingerprint();
   if (!currentBundle.includes("/assets/index-")) return;
