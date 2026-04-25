@@ -167,6 +167,45 @@ const repairProfileEmail = async (
   console.warn("[auth-signup] profile row not ready for email repair", uid);
 };
 
+const canonicalizeVerifiedSignupEmail = async (
+  serviceClient: ReturnType<typeof createClient>,
+  userId: string | null | undefined,
+  email: string,
+  signupProof: string,
+): Promise<{ error: string | null }> => {
+  const uid = String(userId || "").trim();
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!signupProof || !uid || !normalizedEmail) return { error: null };
+
+  const confirm = await serviceClient.auth.admin.updateUserById(uid, {
+    email_confirm: true,
+  });
+  if (confirm.error) {
+    return { error: confirm.error.message || "signup_confirm_failed" };
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { data: row, error: readError } = await serviceClient
+      .from("profiles")
+      .select("id")
+      .eq("id", uid)
+      .maybeSingle();
+    if (readError) return { error: readError.message || "profile_lookup_failed" };
+    if (!row) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+
+    const { error: updateError } = await serviceClient
+      .from("profiles")
+      .update({ email: normalizedEmail, email_verified: true })
+      .eq("id", uid);
+    return { error: updateError ? updateError.message || "profile_email_verify_failed" : null };
+  }
+
+  return { error: "profile_row_not_ready" };
+};
+
 const ensureSessionForVerifiedSignup = async (
   authClient: ReturnType<typeof createClient>,
   serviceClient: ReturnType<typeof createClient>,
@@ -215,6 +254,7 @@ const seedIncompleteProfile = async (
   serviceClient: ReturnType<typeof createClient>,
   userId: string | null | undefined,
   seed: SignupSeed,
+  options?: { emailVerified?: boolean },
 ) => {
   const uid = String(userId || "").trim();
   if (!uid) return;
@@ -225,6 +265,7 @@ const seedIncompleteProfile = async (
     onboarding_completed: false,
     updated_at: new Date().toISOString(),
   };
+  if (options?.emailVerified === true) payload.email_verified = true;
 
   if (seed.display_name) payload.display_name = seed.display_name;
   if (seed.legal_name) payload.legal_name = seed.legal_name;
@@ -444,8 +485,15 @@ Deno.serve(async (req: Request) => {
       }
       retrySession = recoveredSession.session;
     }
-    await seedIncompleteProfile(serviceClient, retrySignUp.data.user?.id, signupSeed);
-    await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
+    await seedIncompleteProfile(serviceClient, retrySignUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
+    const retryCanonicalEmail = await canonicalizeVerifiedSignupEmail(
+      serviceClient,
+      retrySignUp.data.user?.id,
+      email,
+      signupProof,
+    );
+    if (retryCanonicalEmail.error) return json(400, { error: retryCanonicalEmail.error });
+    if (!signupProof) await repairProfileEmail(serviceClient, retrySignUp.data.user?.id, email);
     void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, retrySignUp.data.user?.id);
 
     return json(200, {
@@ -484,8 +532,15 @@ Deno.serve(async (req: Request) => {
     }
     session = recoveredSession.session;
   }
-  await seedIncompleteProfile(serviceClient, signUp.data.user?.id, signupSeed);
-  await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
+  await seedIncompleteProfile(serviceClient, signUp.data.user?.id, signupSeed, { emailVerified: Boolean(signupProof) });
+  const canonicalEmail = await canonicalizeVerifiedSignupEmail(
+    serviceClient,
+    signUp.data.user?.id,
+    email,
+    signupProof,
+  );
+  if (canonicalEmail.error) return json(400, { error: canonicalEmail.error });
+  if (!signupProof) await repairProfileEmail(serviceClient, signUp.data.user?.id, email);
   void fireBrevoProfileCompleted(supabaseUrl, serviceRoleKey, signUp.data.user?.id);
 
   return json(200, {
