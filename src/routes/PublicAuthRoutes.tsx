@@ -1,4 +1,5 @@
 import { PublicRoute } from "@/components/auth/PublicRoute";
+import SignupCredentials from "@/pages/signup/SignupCredentials";
 import { lazyWithChunkRecovery } from "@/routes/lazyWithChunkRecovery";
 import { RouteSuspense } from "@/routes/RouteSuspense";
 import { lazy } from "react";
@@ -7,7 +8,6 @@ import { Route, Routes } from "react-router-dom";
 const Auth = lazyWithChunkRecovery("auth", () => import("@/pages/Auth"));
 const SignupDob = lazy(() => import("@/pages/signup/SignupDob"));
 const SignupName = lazy(() => import("@/pages/signup/SignupName"));
-const SignupCredentials = lazy(() => import("@/pages/signup/SignupCredentials"));
 const SignupVerify = lazy(() => import("@/pages/signup/SignupVerify"));
 const SignupEmailConfirmation = lazy(() => import("@/pages/signup/SignupEmailConfirmation"));
 const SignupMarketingConfirmed = lazy(() => import("@/pages/signup/SignupMarketingConfirmed"));
@@ -39,7 +39,7 @@ export const PublicAuthRoutes = () => (
     <Route path="/auth/callback" element={<PublicRoute><RouteSuspense><AuthCallback /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/dob" element={<PublicRoute><RouteSuspense><SignupDob /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/name" element={<PublicRoute><RouteSuspense><SignupName /></RouteSuspense></PublicRoute>} />
-    <Route path="/signup/credentials" element={<PublicRoute><RouteSuspense><SignupCredentials /></RouteSuspense></PublicRoute>} />
+    <Route path="/signup/credentials" element={<PublicRoute renderWhileAuthLoading><SignupCredentials /></PublicRoute>} />
     <Route path="/signup/verify" element={<PublicRoute><RouteSuspense><SignupVerify /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/email-confirmation" element={<PublicRoute><RouteSuspense><SignupEmailConfirmation /></RouteSuspense></PublicRoute>} />
     <Route path="/signup/marketing-confirmed" element={<PublicRoute><RouteSuspense><SignupMarketingConfirmed /></RouteSuspense></PublicRoute>} />
