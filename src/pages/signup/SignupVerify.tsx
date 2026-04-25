@@ -92,10 +92,10 @@ const SignupVerify = () => {
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
-      toast.error("Session not ready. Please sign in and continue.");
-      navigate("/signup/credentials", {
+      toast.error("Please sign in to continue identity verification.");
+      navigate("/auth", {
         replace: true,
-        state: { email: data.email || "" },
+        state: { from: "/verify-identity", email: data.email || "" },
       });
       return;
     }

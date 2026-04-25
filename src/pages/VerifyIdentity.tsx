@@ -37,6 +37,7 @@ import { useSignup } from "@/contexts/SignupContext";
 import { requestPhoneOtp, verifyPhoneOtp } from "@/lib/phoneOtp";
 import { useTurnstile } from "@/hooks/useTurnstile";
 import { TurnstileDebugPanel, TurnstileWidget } from "@/components/security/TurnstileWidget";
+import { isRegisteredUserProfile } from "@/lib/signupFlow";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
@@ -933,6 +934,8 @@ export function VerifyIdentity({
   const location = useLocation();
   const { user, profile, loading: authLoading, refreshProfile } = useAuth();
   const { flowState, setFlowState, data: signupData, update: updateSignupData } = useSignup();
+  const registeredProfile = isRegisteredUserProfile(profile ?? null);
+  const activeSignupFlow = flowState !== "idle" && !registeredProfile;
   const showTurnstileDiag = useMemo(
     () => new URLSearchParams(location.search).get("turnstile_diag") === "1",
     [location.search],
@@ -1031,13 +1034,13 @@ export function VerifyIdentity({
       const isSignupVerifyFlow =
         navStateRef.current.backTo === "/signup/verify"
         || navStateRef.current.returnTo === "/set-profile"
-        || flowState !== "idle";
+        || activeSignupFlow;
       allowVerifiedReturnRef.current = isSignupVerifyFlow;
       setIsSignupVerifyEntry(isSignupVerifyFlow);
       try {
         sessionStorage.setItem(VERIFY_IDENTITY_NAV_KEY, JSON.stringify(navStateRef.current));
       } catch { /* best-effort */ }
-    } else if (flowState !== "idle") {
+    } else if (activeSignupFlow) {
       // Restore after Stripe redirect (location.state wiped on full page reload)
       try {
         const saved = sessionStorage.getItem(VERIFY_IDENTITY_NAV_KEY);
@@ -1045,7 +1048,7 @@ export function VerifyIdentity({
         const isSignupVerifyFlow =
           navStateRef.current.backTo === "/signup/verify"
           || navStateRef.current.returnTo === "/set-profile"
-          || flowState !== "idle";
+          || activeSignupFlow;
         allowVerifiedReturnRef.current = isSignupVerifyFlow;
         setIsSignupVerifyEntry(isSignupVerifyFlow);
       } catch { /* best-effort */ }
@@ -1060,14 +1063,14 @@ export function VerifyIdentity({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flowState]);
+  }, [activeSignupFlow, flowState]);
 
   // ── Auto-redirect on verified ───────────────────────────────────────────────
   useEffect(() => {
     if (overallVerificationStatus !== "verified") return;
     if (!allowVerifiedReturnRef.current) return;
     const { returnTo, backTo } = navStateRef.current;
-    const isSignupVerifyFlow = backTo === "/signup/verify" || returnTo === "/set-profile" || flowState !== "idle";
+    const isSignupVerifyFlow = backTo === "/signup/verify" || returnTo === "/set-profile" || activeSignupFlow;
     if (isSignupVerifyFlow) {
       setIsSignupVerifyEntry(true);
       return;
@@ -1081,7 +1084,7 @@ export function VerifyIdentity({
     if (backTo) {
       navigate(backTo, { replace: true, state: { openSettingsDrawer: true } });
     }
-  }, [flowState, navigate, overallVerificationStatus, setFlowState]);
+  }, [activeSignupFlow, flowState, navigate, overallVerificationStatus, setFlowState]);
 
   useEffect(() => {
     if (overallVerificationStatus !== "verified") return;
@@ -1110,13 +1113,9 @@ export function VerifyIdentity({
       data: { session: liveSession },
     } = await supabase.auth.getSession();
     if (liveSession?.access_token) return true;
-    if (flowState !== "idle") {
-      navigate("/signup/verify", { replace: true });
-    } else {
-      setHumanErrorMessage("Please sign in to continue verification.");
-      setCardErrorMessage("Please sign in to continue verification.");
-      navigate("/auth", { replace: true, state: { from: "/verify-identity" } });
-    }
+    setHumanErrorMessage("Please sign in to continue verification.");
+    setCardErrorMessage("Please sign in to continue verification.");
+    navigate("/auth", { replace: true, state: { from: "/verify-identity" } });
     return false;
   };
 
@@ -2352,7 +2351,7 @@ export function VerifyIdentity({
             });
             return;
           }
-          if (flowState !== "idle") {
+          if (activeSignupFlow) {
             navigate("/signup/verify", { replace: true });
             return;
           }
