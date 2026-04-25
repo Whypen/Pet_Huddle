@@ -617,6 +617,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     commentsByThreadRef.current = commentsByThread;
   }, [commentsByThread]);
 
+  // Stable string key — identity is preserved when the set of notice IDs is
+  // unchanged, even on in-place updates (like-count, comment-count). Used by
+  // the likedNotices effect (below) so it doesn't refetch thread_supports on
+  // every optimistic UI tick. Declared here (not next to the visibleNotices
+  // memo further down) so it's initialised before the effects that consume it.
+  const noticeIdsKey = useMemo(
+    () => notices.map((n) => n.id).filter(Boolean).sort().join(","),
+    [notices]
+  );
+
   useEffect(() => {
     mentionDirectoryRef.current = mentionDirectory;
   }, [mentionDirectory]);
@@ -2731,12 +2741,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     });
   }, [blockedUsers, commentsByThread, hiddenNotices, notices, pinnedNotices, savedNotices, searchQuery, sortMode, topicFilters]);
 
-  // Stable keys: only change when the set of IDs changes, not when like/comment counts change.
-  // Used to gate effects that must NOT re-fire on in-place property updates.
-  const noticeIdsKey = useMemo(
-    () => notices.map((n) => n.id).filter(Boolean).sort().join(","),
-    [notices]
-  );
+  // Stable key for visibleNotices (defined here because visibleNotices itself
+  // is computed in the memo just above this point).
+  // noticeIdsKey is hoisted earlier in the file, near the noticesRef sync,
+  // because the likedNotices effect needs it before this memo position.
   const visibleNoticeIdsKey = useMemo(
     () => visibleNotices.map((n) => n.id).join(","),
     [visibleNotices]
