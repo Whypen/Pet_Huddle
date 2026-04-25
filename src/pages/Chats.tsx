@@ -2906,6 +2906,29 @@ const Chats = () => {
     [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id]
   );
 
+  // Fetch the inbox unread total from the server. Source of truth for the
+  // nav badge — independent of whether all paginated pages are loaded.
+  // Declared before flushDirtyRoomSummaries so the latter's dep-array read
+  // does not hit the const TDZ during render.
+  const fetchInboxBadgeTotal = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      const { data, error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "get_chat_inbox_unread_total",
+        {},
+      );
+      if (error) return;
+      // RPC returns bigint; supabase-js delivers numeric strings for bigints in some configs.
+      const total = typeof data === "number" ? data : Number(data ?? 0);
+      if (Number.isFinite(total)) setInboxBadgeUnreadTotal(Math.max(0, total));
+    } catch (error) {
+      console.warn("[chats.inbox] unread_total fetch failed", error);
+    }
+  }, [profile?.id]);
+
   const flushDirtyRoomSummaries = useCallback(async () => {
     if (dirtyRoomFlushTimerRef.current != null) {
       window.clearTimeout(dirtyRoomFlushTimerRef.current);
@@ -3761,27 +3784,6 @@ const Chats = () => {
   // to the local sum. Server total reflects ALL chats (including ones below
   // the paginated fold that aren't loaded yet); local sum only reflects loaded.
   const totalUnreadMessages = inboxBadgeUnreadTotal ?? localUnreadSum;
-
-  // Fetch the inbox unread total from the server. Source of truth for the
-  // nav badge — independent of whether all paginated pages are loaded.
-  const fetchInboxBadgeTotal = useCallback(async () => {
-    if (!profile?.id) return;
-    try {
-      const { data, error } = await (supabase.rpc as (
-        fn: string,
-        params?: Record<string, unknown>,
-      ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
-        "get_chat_inbox_unread_total",
-        {},
-      );
-      if (error) return;
-      // RPC returns bigint; supabase-js delivers numeric strings for bigints in some configs.
-      const total = typeof data === "number" ? data : Number(data ?? 0);
-      if (Number.isFinite(total)) setInboxBadgeUnreadTotal(Math.max(0, total));
-    } catch (error) {
-      console.warn("[chats.inbox] unread_total fetch failed", error);
-    }
-  }, [profile?.id]);
 
   useEffect(() => {
     if (!profile?.id) return;
