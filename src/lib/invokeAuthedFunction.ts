@@ -7,13 +7,9 @@ type InvokeArgs = {
 };
 
 const authErrorPattern = /(401|unauthori[sz]ed|invalid[_\s-]?jwt|missing[_\s-]?token)/i;
-const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
-// Supabase Functions on this project still accept the legacy anon JWT reliably at
-// the gateway layer, while user ES256 access tokens are passed through a
-// dedicated header and verified inside each function with auth.getUser().
-const legacyFunctionGatewayKey =
-  (import.meta.env.VITE_SUPABASE_LEGACY_ANON_KEY || "").trim()
-  || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp0cmJvdXJ3Y25ocnBtendscmNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkzNTQ2NDMsImV4cCI6MjA4NDkzMDY0M30.ehK3oSGq6AFdtuSovXTi02aMB_ht4suO16HJ8RecIvg";
+const supabasePublicKey = String(
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "",
+).trim();
 
 type AccessTokenResolution =
   | { token: string; hasSession: true }
@@ -117,8 +113,8 @@ export async function invokeAuthedFunction<T = unknown>(
       hasSession: resolved.hasSession,
       hasToken: Boolean(token),
       tokenParts: token ? token.split(".").length : 0,
-      hasAnonKey: Boolean(anonKey),
-      anonKeyPrefix: anonKey ? anonKey.slice(0, 16) : "missing",
+      hasPublicKey: Boolean(supabasePublicKey),
+      publicKeyPrefix: supabasePublicKey ? supabasePublicKey.slice(0, 16) : "missing",
     });
   }
   if (!token) {
@@ -151,8 +147,8 @@ export async function invokeAuthedFunction<T = unknown>(
   }
 
   const baseHeaders = { ...(args.headers || {}) };
-  if (anonKey) {
-    baseHeaders.apikey = baseHeaders.apikey || anonKey;
+  if (supabasePublicKey) {
+    baseHeaders.apikey = baseHeaders.apikey || supabasePublicKey;
   }
   if (!String(baseHeaders.apikey || "").trim()) {
     return {
@@ -162,7 +158,7 @@ export async function invokeAuthedFunction<T = unknown>(
   }
 
   const fnUrl = `${(import.meta.env.VITE_SUPABASE_URL as string).replace(/\/$/, "")}/functions/v1/${functionName}`;
-  const authorizationGatewayKey = legacyFunctionGatewayKey || anonKey;
+  const authorizationGatewayKey = String(baseHeaders.apikey || supabasePublicKey).trim();
   const invokeWithRawFetch = async (token: string): Promise<{ data: unknown; error: Error | null }> => {
     try {
       const requestBody =

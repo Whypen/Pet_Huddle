@@ -3,7 +3,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const base = process.env.BASE_URL || "http://127.0.0.1:8081";
 const supabaseUrl = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH";
+const supabaseAnonKey =
+  process.env.SUPABASE_PUBLISHABLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  "sb_publishable_DCn7OKhJ15mzHz1xcfTmsw_wxJh5zKd";
 
 function uniqueEmail() {
   const ts = Date.now();

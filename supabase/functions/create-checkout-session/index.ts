@@ -137,6 +137,34 @@ const json = (body: unknown, status = 200) =>
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 
+const isJwt = (value: string): boolean => value.split(".").length === 3;
+
+type CheckoutRequestBody = {
+  access_token?: unknown;
+  cancelUrl?: unknown;
+  country?: unknown;
+  currency?: unknown;
+  items?: unknown;
+  lookupKey?: unknown;
+  metadata?: Record<string, string> | null;
+  mode?: unknown;
+  priceId?: unknown;
+  successUrl?: unknown;
+  type?: unknown;
+  userId?: unknown;
+};
+
+const extractUserAccessToken = (req: Request, body: CheckoutRequestBody): string => {
+  const bodyToken = String(body.access_token || "").replace(/^Bearer\s+/i, "").trim();
+  const huddleToken = (req.headers.get("x-huddle-access-token") || "").replace(/^Bearer\s+/i, "").trim();
+  const bearerToken = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const anonKey = String(Deno.env.get("SUPABASE_ANON_KEY") || "").trim();
+  const serviceRole = String(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "").trim();
+  return [bodyToken, huddleToken, bearerToken].find(
+    (token) => isJwt(token) && token !== anonKey && token !== serviceRole,
+  ) || "";
+};
+
 const normalizeCurrency = (value: unknown): string | null => {
   const text = String(value || "").trim().toLowerCase();
   if (!/^[a-z]{3}$/.test(text)) return null;
@@ -315,6 +343,11 @@ serve(async (req: Request) => {
   try {
     console.log(`[CHECKOUT] Stripe mode=${stripeMode}`);
 
+    const body = (await req.json().catch(() => null)) as CheckoutRequestBody | null;
+    if (!body) {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
     const {
       userId: bodyUserId,
       type,
@@ -327,22 +360,22 @@ serve(async (req: Request) => {
       cancelUrl,
       currency,
       country,
-    } = await req.json();
+    } = body;
 
     // Enforce auth: require a valid JWT and bind user_id to auth.uid.
-    const authHeader = req.headers.get("Authorization") || "";
-    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const accessToken = extractUserAccessToken(req, body);
     const u = await supabase.auth.getUser(accessToken);
     const authedUserId = u.data?.user?.id || null;
     if (!authedUserId) {
       return json({ error: "Unauthorized" }, 401);
     }
 
-    if (!mode || (!type && !items)) {
+    const checkoutMode = mode === "subscription" || mode === "payment" ? mode : null;
+    if (!checkoutMode || (!type && !items)) {
       return json({ error: "Missing required parameters" }, 400);
     }
 
-    if (bodyUserId && bodyUserId !== authedUserId) {
+    if (bodyUserId && String(bodyUserId) !== authedUserId) {
       return json({ error: "Forbidden" }, 403);
     }
 
@@ -397,7 +430,7 @@ serve(async (req: Request) => {
       : [];
     const idempotencyKey = await buildCheckoutIdempotencyKey({
       userId,
-      mode: String(mode || ""),
+      mode: checkoutMode,
       type: normalizedType,
       lookupKey: typeof lookupKey === "string" ? lookupKey : "",
       priceId: typeof priceId === "string" ? priceId : "",
@@ -410,9 +443,9 @@ serve(async (req: Request) => {
     // Create checkout session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       customer: customerId,
-      mode,
-      success_url: successUrl,
-      cancel_url: cancelUrl,
+      mode: checkoutMode,
+      success_url: String(successUrl || ""),
+      cancel_url: String(cancelUrl || ""),
       metadata: {
         user_id: userId,
         type: normalizedType,
@@ -420,7 +453,7 @@ serve(async (req: Request) => {
       },
     };
 
-    if (mode === "subscription") {
+    if (checkoutMode === "subscription") {
       if (normalizedItems.length > 0) {
         const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
         for (const item of normalizedItems) {

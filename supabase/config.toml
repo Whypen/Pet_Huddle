@@ -39,9 +39,9 @@ template = "Your Verification code is {{ .Code }}. Drop it in and join the Huddl
 
 [auth.sms.twilio]
 enabled = true
-account_sid = ""
-message_service_sid = ""
-auth_token = ""
+account_sid = "env(TWILIO_ACCOUNT_SID)"
+message_service_sid = "env(TWILIO_MESSAGING_SERVICE_SID)"
+auth_token = "env(TWILIO_AUTH_TOKEN)"
 
 [auth.sms.test_otp]
 85264148332 = "498005"

@@ -14,7 +14,9 @@ const rawApiBase = String(
   import.meta.env.VITE_API_URL ||
   "",
 ).trim().replace(/\/+$/, "");
-const anonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
+const supabasePublicKey = String(
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || "",
+).trim();
 
 function resolveFunctionsBase(): string {
   const candidate = rawApiBase || `${rawSupabaseUrl}/functions/v1`;
@@ -33,7 +35,7 @@ export async function postPublicFunction<T>(
   options: PostOptions = {},
 ): Promise<{ data: T | null; error: ApiError | null; status: number | null; headers: Headers | null }> {
   const base = resolveFunctionsBase();
-  if (!base || !anonKey) {
+  if (!base || !supabasePublicKey) {
     return {
       data: null,
       error: { message: "auth_client_misconfigured" },
@@ -45,8 +47,8 @@ export async function postPublicFunction<T>(
   const accessToken = String(options.accessToken || "").trim();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    apikey: anonKey,
-    Authorization: `Bearer ${accessToken || anonKey}`,
+    apikey: supabasePublicKey,
+    Authorization: `Bearer ${accessToken || supabasePublicKey}`,
   };
   if (accessToken) headers["x-huddle-access-token"] = accessToken;
 
