@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 const Sheet = SheetPrimitive.Root;
 
@@ -55,7 +55,7 @@ interface SheetContentProps
 
 const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Content>, SheetContentProps>(
   ({ side = "right", className, children, ...props }, ref) => {
-    const { t } = useLanguage();
+    const t = resolveCopy;
     return (
       <SheetPortal>
         <SheetOverlay />

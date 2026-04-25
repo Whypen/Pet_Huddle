@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { PawPrint } from "lucide-react";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import firstJourneyImage from "@/assets/Notifications/Main Page (no Pet).png";
 import exploreImage from "@/assets/Notifications/Main Page_Cat.png";
 
@@ -10,7 +10,7 @@ interface EmptyPetStateProps {
 }
 
 export const EmptyPetState = ({ onAddPet, firstTimeFromSetProfile = false }: EmptyPetStateProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const title = firstTimeFromSetProfile
     ? "Your journey into huddle starts here."
     : "The best way to begin is simply to explore.";

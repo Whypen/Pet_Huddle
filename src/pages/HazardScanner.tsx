@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { toast } from "sonner";
 import imageCompression from "browser-image-compression";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface HazardResult {
   object: string;
@@ -17,7 +17,7 @@ interface HazardResult {
 }
 
 const HazardScanner = () => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const navigate = useNavigate();
   const { user } = useAuth();
   const [imageFile, setImageFile] = useState<File | null>(null);

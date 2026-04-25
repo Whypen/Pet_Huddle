@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Heart } from "lucide-react";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { useApi } from "@/hooks/useApi";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import huddleLogo from "@/assets/huddle-logo-transparent.png";
 
 interface FounderMessageProps {
@@ -11,7 +11,7 @@ interface FounderMessageProps {
 }
 
 const FounderMessage = ({ onClose }: FounderMessageProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { getFounderMessage } = useApi();

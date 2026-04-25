@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { Input } from "@/components/ui/input";
 
@@ -29,7 +29,7 @@ interface UserReportRow {
 
 const Admin = () => {
   const { profile } = useAuth();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [rows, setRows] = useState<VerificationRow[]>([]);
   const [reportRows, setReportRows] = useState<UserReportRow[]>([]);
   const [comment, setComment] = useState<Record<string, string>>({});

@@ -1,9 +1,9 @@
 import { useLocation } from "react-router-dom";
 import { useEffect } from "react";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 const NotFound = () => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const location = useLocation();
 
   useEffect(() => {

@@ -1,10 +1,10 @@
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { LegalContent } from "@/components/legal/LegalContent";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { BackButton } from "@/components/ui/BackButton";
 
 const Privacy = () => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
 
   return (
     <div className="h-full min-h-0 w-full max-w-full bg-background overflow-x-hidden">

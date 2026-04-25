@@ -7,7 +7,7 @@ import { EmptyPetState } from "@/components/pets/EmptyPetState";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatPetAge, computeNextEvent, formatNextEventLabel, type PetReminder } from "@/utils/petLogic";
@@ -81,7 +81,7 @@ const Index = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, user } = useAuth();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);

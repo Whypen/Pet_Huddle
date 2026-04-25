@@ -5,7 +5,7 @@
 
 import { useState, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { getQuotaCapsForTier, normalizeQuotaTier, quotaConfig } from "@/config/quotaConfig";
 import { getRemainingStarsFromSnapshot, resolveStarQuotaTier } from "@/lib/starQuota";
@@ -35,7 +35,7 @@ type QuotaSnapshot = {
 
 export const useUpsell = () => {
   const { profile, user } = useAuth();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [upsellModal, setUpsellModal] = useState<UpsellModalState>({
     isOpen: false,
     type: null,

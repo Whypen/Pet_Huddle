@@ -1,6 +1,4 @@
-export type Language = "en";
-
-type TranslateVars = Record<string, string | number>;
+type CopyVars = Record<string, string | number>;
 
 const ENGLISH_COPY: Record<string, string> = {
   "settings.privacy_policy": "Privacy Policy",
@@ -39,7 +37,7 @@ const humanizeKey = (key: string) => {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-const interpolate = (template: string, vars?: TranslateVars) => {
+const interpolate = (template: string, vars?: CopyVars) => {
   if (!vars) return template;
   return Object.entries(vars).reduce(
     (value, [name, replacement]) => value.replaceAll(`{${name}}`, String(replacement)),
@@ -47,13 +45,7 @@ const interpolate = (template: string, vars?: TranslateVars) => {
   );
 };
 
-const t = (key: string, vars?: TranslateVars) => {
+export const resolveCopy = (key: string, vars?: CopyVars) => {
   const template = ENGLISH_COPY[key] ?? humanizeKey(key);
   return interpolate(template, vars);
 };
-
-export const useLanguage = () => ({
-  language: "en" as const,
-  setLanguage: () => undefined,
-  t,
-});

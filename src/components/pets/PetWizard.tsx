@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface PetWizardProps {
   isOpen: boolean;
@@ -71,7 +71,7 @@ const temperamentOptions = [
 const genderOptions = ["Male", "Female", "Unknown"];
 
 export const PetWizard = ({ isOpen, onClose, onComplete }: PetWizardProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);

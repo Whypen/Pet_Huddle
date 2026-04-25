@@ -20,7 +20,7 @@ import { BOTTOM_NAV_HEIGHT } from "@/components/layout/BottomNav";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { UpsellModal } from "@/components/monetization/UpsellModal";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { toast } from "sonner";
@@ -239,7 +239,7 @@ function formatOpeningHours(hours: string): string {
 const MapPage = () => {
   const { user, profile, refreshProfile } = useAuth();
   const { isActive } = useSafetyRestrictions();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const location = useLocation();
   const navigate = useNavigate();
   const { showUpsellBanner } = useUpsellBanner();

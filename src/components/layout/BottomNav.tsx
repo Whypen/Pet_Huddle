@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Home, Users, MessageCircle, PawPrint, MapPin } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -27,7 +27,7 @@ export const BOTTOM_NAV_HEIGHT = 80;
 export const BottomNav = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const { profile } = useAuth();
   const unreadStorageKey = useMemo(
     () => `chats_unread_${profile?.id || "anon"}`,

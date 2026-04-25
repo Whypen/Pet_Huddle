@@ -3,7 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 const Dialog = DialogPrimitive.Root;
 
@@ -32,7 +32,7 @@ const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const ariaDescribedBy = (props as { "aria-describedby"?: string | undefined })["aria-describedby"];
   const ariaLabelledBy = (props as { "aria-labelledby"?: string | undefined })["aria-labelledby"];
   return (

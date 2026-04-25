@@ -27,7 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useUpsellBanner } from "@/contexts/UpsellBannerContext";
 // browser-image-compression is dynamically imported inside prepareComposerMedia
 // so the ~50 KB lib stays out of the initial Social bundle.
@@ -486,7 +486,7 @@ const buildFeedCursor = (thread?: Thread | null): FeedCursor | null => {
 };
 
 export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef }: NoticeBoardProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const { user, profile } = useAuth();
   const { isActive } = useSafetyRestrictions();
   const { showUpsellBanner } = useUpsellBanner();

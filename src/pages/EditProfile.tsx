@@ -14,7 +14,7 @@ import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useSignup } from "@/contexts/SignupContext";
 import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
@@ -228,7 +228,7 @@ const VISIBILITY_FIELDS = [
 type VisibilityField = typeof VISIBILITY_FIELDS[number];
 
 const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const showTurnstileDiag =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("turnstile_diag") === "1";

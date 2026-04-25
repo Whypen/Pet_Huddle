@@ -1,6 +1,6 @@
 import { Car } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import profilePlaceholder from "@/assets/Profile Placeholder.png";
 
 interface UserAvatarProps {
@@ -59,7 +59,7 @@ export const UserAvatar = ({
   className,
   onClick,
 }: UserAvatarProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const initials = name ? name.charAt(0).toUpperCase() : "?";
 
   return (

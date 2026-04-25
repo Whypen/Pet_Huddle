@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface Contact {
   id: string;
@@ -30,7 +30,7 @@ interface GroupData {
 }
 
 export const CreateGroupDialog = ({ isOpen, onClose, onCreateGroup, contacts }: CreateGroupDialogProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [groupName, setGroupName] = useState("");
   const [selectedMembers, setSelectedMembers] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState("");

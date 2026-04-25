@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Lock, Dog, Cat, User, Car, GraduationCap, Shield, Zap, Users, Heart, Bird, PawPrint } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SPECIES_LIST } from "@/lib/constants";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { quotaConfig } from "@/config/quotaConfig";
 import type { FilterState } from "./filterTypes";
 import { CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
@@ -50,7 +50,7 @@ const languageOptions = [
 ];
 
 export const FilterSheet = ({ isOpen, onClose, filters, onApply, onPremiumClick }: FilterSheetProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [localFilters, setLocalFilters] = useState<FilterState>(filters);
 
   const handleSpeciesToggle = (species: string) => {

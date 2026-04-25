@@ -8,7 +8,7 @@ import { StyledScrollArea } from "@/components/ui/styled-scrollbar";
 import { NeuControl } from "@/components/ui/NeuControl";
 import { PetDetailsBody, getSterilizedLabel, toTitleCase } from "@/components/pets/PetDetailsBody";
 import { toast } from "sonner";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useAuth } from "@/contexts/AuthContext";
 
 type VetVisitRecord = {
@@ -155,7 +155,7 @@ const formatPetAge = (dob: string | null) => {
 };
 
 const PetDetails = () => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const navigate = useNavigate();
   const { user } = useAuth();
   const [searchParams] = useSearchParams();

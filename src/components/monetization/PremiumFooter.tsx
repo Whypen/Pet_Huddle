@@ -8,7 +8,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Crown, X, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { getBroadcastCapsForTier } from "@/config/quotaConfig";
 
 interface PremiumFooterProps {
@@ -56,7 +56,7 @@ const PREMIUM_FEATURES = [
 
 export const PremiumFooter = ({ isOpen, onClose, triggerReason = "default" }: PremiumFooterProps) => {
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const msg = TRIGGER_MESSAGES[triggerReason] || TRIGGER_MESSAGES.default;
   const plusBroadcastCaps = getBroadcastCapsForTier("plus");
   const freeBroadcastCaps = getBroadcastCapsForTier("free");

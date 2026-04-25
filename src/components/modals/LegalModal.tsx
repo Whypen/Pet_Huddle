@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { LegalContent } from "@/components/legal/LegalContent";
 
 interface LegalModalProps {
@@ -10,7 +10,7 @@ interface LegalModalProps {
 }
 
 export const LegalModal = ({ isOpen, onClose, type }: LegalModalProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const title = type === "privacy" ? t("settings.privacy_policy") : t("settings.terms");
 
   return (

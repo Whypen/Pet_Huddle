@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import huddleVideo from "@/assets/huddle video.mp4";
 import huddleLogoImage from "@/assets/huddle-logo-transparent.png";
 import appleIcon from "@/assets/Apple icon.png";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSignup } from "@/contexts/SignupContext";
 import { LegalModal } from "@/components/modals/LegalModal";
@@ -39,7 +39,7 @@ type LoginForm = {
 type EmailModalStep = "choice" | "signin" | "mfa-challenge";
 
 const Auth = () => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const { signIn } = useAuth();
   const { setFlowState } = useSignup();
   const navigate = useNavigate();

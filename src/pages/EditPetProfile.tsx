@@ -15,7 +15,7 @@ import { ErrorLabel } from "@/components/ui/ErrorLabel";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import type { Json } from "@/integrations/supabase/types";
@@ -584,7 +584,7 @@ const hasPetProfileData = (pet: {
   );
 
 const EditPetProfile = ({ onboardingMode = false }: EditPetProfileProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();

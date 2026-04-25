@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { SPECIES_LIST, BREED_OPTIONS, VACCINATION_OPTIONS, TEMPERAMENT_OPTIONS } from "@/lib/constants";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface PetData {
   id?: string;
@@ -51,7 +51,7 @@ export const PetProfileForm = ({
   submitLabel,
   showCancel = true,
 }: PetProfileFormProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const submitText = submitLabel || t("Save Pet Profile");
   const [loading, setLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);

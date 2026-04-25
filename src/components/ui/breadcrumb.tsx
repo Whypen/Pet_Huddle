@@ -3,7 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 const Breadcrumb = React.forwardRef<
   HTMLElement,
@@ -11,7 +11,7 @@ const Breadcrumb = React.forwardRef<
     separator?: React.ReactNode;
   }
 >(({ ...props }, ref) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   return <nav ref={ref} aria-label={t("breadcrumb")} {...props} />;
 });
 Breadcrumb.displayName = "Breadcrumb";
@@ -71,7 +71,7 @@ const BreadcrumbSeparator = ({ children, className, ...props }: React.ComponentP
 BreadcrumbSeparator.displayName = "BreadcrumbSeparator";
 
 const BreadcrumbEllipsis = ({ className, ...props }: React.ComponentProps<"span">) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   return (
     <span
       role="presentation"

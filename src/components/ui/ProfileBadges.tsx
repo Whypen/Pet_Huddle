@@ -1,6 +1,6 @@
 import { Shield, Car } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface ProfileBadgesProps {
   isVerified?: boolean;
@@ -10,7 +10,7 @@ interface ProfileBadgesProps {
 }
 
 export const ProfileBadges = ({ isVerified, hasCar, className, size = "sm" }: ProfileBadgesProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const iconSize = size === "sm" ? "w-3 h-3" : "w-4 h-4";
   const badgeSize = size === "sm" ? "w-5 h-5" : "w-6 h-6";
   

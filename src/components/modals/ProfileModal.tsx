@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Hand, Heart, Star } from "lucide-react";
 import { ProfileBadges } from "@/components/ui/ProfileBadges";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -39,7 +39,7 @@ export const ProfileModal = ({
   onSupport,
   onStar,
 }: ProfileModalProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [showMatchPopup, setShowMatchPopup] = useState(false);
 
   const handleWave = () => {

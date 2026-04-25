@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Star, AlertTriangle, Camera, Users, Sparkles } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 
 interface UpsellModalProps {
   isOpen: boolean;
@@ -57,7 +57,7 @@ export const UpsellModal = ({
   onClose,
   onBuy,
 }: UpsellModalProps) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   if (!type) return null;
 
   const Icon = ICON_MAP[type];

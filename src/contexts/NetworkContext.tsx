@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { toast } from "sonner";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { supabase } from "@/integrations/supabase/client";
 import { buildScopedStorageKey, normalizeStorageOwner } from "@/lib/signupOnboarding";
 
@@ -29,7 +29,7 @@ const MAX_RETRY_COUNT = 3;
 const OFFLINE_ACTIONS_KEY = "huddle_offline_actions";
 
 export const NetworkProvider = ({ children }: { children: ReactNode }) => {
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isServerReachable, setIsServerReachable] = useState(true);
   const [lastOnlineTime, setLastOnlineTime] = useState<Date | null>(null);

@@ -7,7 +7,7 @@ import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { FilterSheet } from "@/components/social/FilterSheet";
 import { defaultFilters, type FilterState } from "@/components/social/filterTypes";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { useUpsell } from "@/hooks/useUpsell";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -149,7 +149,7 @@ const Discover = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const { isActive } = useSafetyRestrictions();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const { checkStarsAvailable, upsellModal, closeUpsellModal, buyAddOn } = useUpsell();
 
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);

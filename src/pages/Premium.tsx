@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLanguage } from "@/contexts/LanguageContext";
+import { resolveCopy } from "@/lib/copy";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { toast } from "sonner";
@@ -140,7 +140,7 @@ export default function PremiumPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile } = useAuth();
-  const { t } = useLanguage();
+  const t = resolveCopy;
   const profilePrefs = (profile?.prefs as Record<string, unknown> | null | undefined) ?? null;
   const savedPricingCurrency = typeof profilePrefs?.pricing_currency === "string"
     ? profilePrefs.pricing_currency
