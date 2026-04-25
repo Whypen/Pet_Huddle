@@ -758,11 +758,40 @@ const Chats = () => {
   });
   const inboxLoadedScopesRef = useRef<Set<MainTab>>(new Set());
   const inboxWarmTimerRef = useRef<number | null>(null);
+  // Pagination state per scope. Cursor = activity_ts of the oldest loaded
+  // conversation row (newer-than-cursor rows are already in cache).
+  // hasMore = whether the most recent server page returned a full payload.
+  // loading = guard against overlapping load-more triggers.
+  const inboxConversationCursorsRef = useRef<Record<InboxScope, string | null>>({
+    all: null,
+    friends: null,
+    service: null,
+    groups: null,
+  });
+  const inboxHasMoreRef = useRef<Record<InboxScope, boolean>>({
+    all: true,
+    friends: true,
+    service: true,
+    groups: true,
+  });
+  const inboxLoadMoreInFlightRef = useRef<Record<InboxScope, boolean>>({
+    all: false,
+    friends: false,
+    service: false,
+    groups: false,
+  });
+  const [inboxBadgeUnreadTotal, setInboxBadgeUnreadTotal] = useState<number | null>(null);
   const dirtyRoomIdsRef = useRef<Set<string>>(new Set());
   const dirtyRoomFlushTimerRef = useRef<number | null>(null);
   const [groupsPullRefreshing, setGroupsPullRefreshing] = useState(false);
   const [groupsPullOffset, setGroupsPullOffset] = useState(0);
   const groupsTouchStartYRef = useRef<number | null>(null);
+  // Pull-to-refresh state for the friends + service tabs (Bumble-style:
+  // pull-down at top → refresh, scroll/pull-up at bottom → load more).
+  const [chatsPullRefreshing, setChatsPullRefreshing] = useState(false);
+  const [chatsPullOffset, setChatsPullOffset] = useState(0);
+  const chatsTouchStartYRef = useRef<number | null>(null);
+  const chatsPullEligibleRef = useRef(false);
   const groupsPullEligibleRef = useRef(false);
   // IDs of groups where current user has a pending join request
   const [sentJoinRequests, setSentJoinRequests] = useState<Set<string>>(new Set());
@@ -2600,11 +2629,22 @@ const Chats = () => {
   );
 
   const fetchInboxSummaryRows = useCallback(
-    async (scope: InboxScope = "all", chatIds?: string[]) => {
+    async (
+      scope: InboxScope = "all",
+      chatIds?: string[],
+      options?: {
+        onlyWithActivity?: boolean | null;
+        limit?: number | null;
+        cursor?: string | null;
+      },
+    ) => {
       if (!profile?.id) return [] as InboxSummaryRow[];
-      const payload = {
+      const payload: Record<string, unknown> = {
         p_scope: scope,
         p_chat_ids: chatIds && chatIds.length > 0 ? chatIds : null,
+        p_only_with_activity: options?.onlyWithActivity ?? null,
+        p_limit: options?.limit ?? null,
+        p_cursor: options?.cursor ?? null,
       };
       const { data, error } = await (supabase.rpc as (
         fn: string,
@@ -2617,7 +2657,12 @@ const Chats = () => {
   );
 
   const applyInboxRowsToCaches = useCallback(
-    (scope: InboxScope, rows: InboxSummaryRow[], targetedRoomIds?: string[]) => {
+    (
+      scope: InboxScope,
+      rows: InboxSummaryRow[],
+      targetedRoomIds?: string[],
+      mergeMode: "replace" | "append" = "replace",
+    ) => {
       const nextFriends: ChatUser[] = [];
       const nextService: ChatUser[] = [];
       const nextGroups: Group[] = [];
@@ -2637,7 +2682,17 @@ const Chats = () => {
         }
       }
 
+      // Merge semantics:
+      //   - mergeMode="append"     → keep all existing rows, overlay incoming by id (used by load-more)
+      //   - targetedRoomIds present → keep existing except those listed, overlay incoming (room refresh)
+      //   - default "replace"      → drop existing, sort and use incoming as the new list
       const mergeById = <T extends { id: string }>(existing: T[], incoming: T[], sortFn: (items: T[]) => T[]) => {
+        if (mergeMode === "append") {
+          const map = new Map<string, T>();
+          for (const item of existing) map.set(item.id, item);
+          for (const item of incoming) map.set(item.id, item);
+          return sortFn(Array.from(map.values()));
+        }
         if (!targetedRoomIds || targetedRoomIds.length === 0) return sortFn(incoming);
         const map = new Map<string, T>();
         for (const item of existing) {
@@ -2678,12 +2733,112 @@ const Chats = () => {
     [buildChatFromSummary, buildGroupFromSummary, commitInboxCaches, sortChatUsers, sortGroups]
   );
 
+  // Page size constants for the paginated inbox.
+  const INBOX_FIRST_PAGE = 10;
+  const INBOX_NEXT_PAGE = 20;
+
+  // Helper: pick the activity_ts cursor for the LAST row in a page batch.
+  // Returns null if the batch was short-circuit empty.
+  const cursorFromRows = useCallback((rows: InboxSummaryRow[]): string | null => {
+    if (rows.length === 0) return null;
+    const last = rows[rows.length - 1];
+    const ts = (last as InboxSummaryRow & { activity_ts?: string | null }).activity_ts
+      || last.last_message_at
+      || last.matched_at
+      || last.created_at
+      || null;
+    return ts ? String(ts) : null;
+  }, []);
+
+  // Reset all per-scope pagination state for a fresh inbox load.
+  const resetInboxPaginationFor = useCallback((scope: InboxScope) => {
+    if (scope === "all") {
+      (Object.keys(inboxConversationCursorsRef.current) as InboxScope[]).forEach((s) => {
+        inboxConversationCursorsRef.current[s] = null;
+        inboxHasMoreRef.current[s] = true;
+      });
+    } else {
+      inboxConversationCursorsRef.current[scope] = null;
+      inboxHasMoreRef.current[scope] = true;
+    }
+  }, []);
+
+  // Helper: how many "with-activity" conversations are already in cache for a
+  // given scope. Used to keep loadConversations from shrinking the loaded set
+  // when called after pagination — e.g. after a match-accept or group-join we
+  // refresh, but the user had scrolled to load page 2; we must not drop page 2.
+  const loadedConversationCountFor = useCallback((scope: InboxScope): number => {
+    const countWithActivity = (list: { lastMessageAt?: string | null }[]) =>
+      list.reduce((acc, item) => acc + (item.lastMessageAt ? 1 : 0), 0);
+    if (scope === "friends") return countWithActivity(inboxCacheRef.current.friends);
+    if (scope === "service") return countWithActivity(inboxCacheRef.current.service);
+    if (scope === "groups") {
+      return inboxCacheRef.current.groups.reduce(
+        (acc, g) => acc + ((g.lastMessageAt) ? 1 : 0),
+        0,
+      );
+    }
+    // scope === "all"
+    return Math.max(
+      countWithActivity(inboxCacheRef.current.friends),
+      countWithActivity(inboxCacheRef.current.service),
+      inboxCacheRef.current.groups.reduce((acc, g) => acc + ((g.lastMessageAt) ? 1 : 0), 0),
+    );
+  }, []);
+
   const loadConversations = useCallback(
     async (scope: InboxScope = "all") => {
       if (!profile?.id) return;
       try {
-        const rows = await fetchInboxSummaryRows(scope);
-        applyInboxRowsToCaches(scope, rows);
+        resetInboxPaginationFor(scope);
+
+        if (scope === "service" || scope === "groups") {
+          // Service & groups tabs are typically small; no UI for "load more"
+          // there, so we fetch them in full and explicitly mark hasMore=false.
+          const rows = await fetchInboxSummaryRows(scope);
+          applyInboxRowsToCaches(scope, rows);
+          inboxConversationCursorsRef.current[scope] = null;
+          inboxHasMoreRef.current[scope] = false;
+          conversationsHydratedRef.current = true;
+          return;
+        }
+
+        // Friends scope: paginated active conversations + the avatar rail.
+        // pageRows is capped at the larger of (first page, current cache size)
+        // so a refresh after the user already scrolled (page 2+) doesn't shrink
+        // their loaded set.
+        const cachedCount = scope === "friends" ? loadedConversationCountFor("friends") : 0;
+        const fetchLimit = Math.max(INBOX_FIRST_PAGE, cachedCount);
+
+        if (scope === "all") {
+          // Fan out — friends paginated, service & groups unpaginated.
+          const [friendsRail, friendsPage, serviceRows, groupRows] = await Promise.all([
+            fetchInboxSummaryRows("friends", undefined, { onlyWithActivity: false }),
+            fetchInboxSummaryRows("friends", undefined, { onlyWithActivity: true, limit: fetchLimit }),
+            fetchInboxSummaryRows("service"),
+            fetchInboxSummaryRows("groups"),
+          ]);
+          applyInboxRowsToCaches("friends", [...friendsRail, ...friendsPage]);
+          applyInboxRowsToCaches("service", serviceRows);
+          applyInboxRowsToCaches("groups", groupRows);
+          inboxConversationCursorsRef.current.friends = cursorFromRows(friendsPage);
+          inboxHasMoreRef.current.friends = friendsPage.length >= fetchLimit;
+          inboxConversationCursorsRef.current.service = null;
+          inboxHasMoreRef.current.service = false;
+          inboxConversationCursorsRef.current.groups = null;
+          inboxHasMoreRef.current.groups = false;
+          conversationsHydratedRef.current = true;
+          return;
+        }
+
+        // scope === "friends"
+        const [railRows, pageRows] = await Promise.all([
+          fetchInboxSummaryRows(scope, undefined, { onlyWithActivity: false }),
+          fetchInboxSummaryRows(scope, undefined, { onlyWithActivity: true, limit: fetchLimit }),
+        ]);
+        applyInboxRowsToCaches(scope, [...railRows, ...pageRows]);
+        inboxConversationCursorsRef.current[scope] = cursorFromRows(pageRows);
+        inboxHasMoreRef.current[scope] = pageRows.length >= fetchLimit;
         conversationsHydratedRef.current = true;
       } catch {
         if (!conversationsHydratedRef.current) {
@@ -2698,7 +2853,43 @@ const Chats = () => {
         toast.error("Failed to load conversations");
       }
     },
-    [applyInboxRowsToCaches, fetchInboxSummaryRows, profile?.id]
+    [applyInboxRowsToCaches, cursorFromRows, fetchInboxSummaryRows, loadedConversationCountFor, profile?.id, resetInboxPaginationFor],
+  );
+
+  // Load the next paginated page for a scope. Triggered by the existing
+  // "Load more" button when the local cache is exhausted, and by scroll
+  // proximity to the end of the conversation list.
+  const loadMoreConversations = useCallback(
+    async (scope: InboxScope) => {
+      if (!profile?.id || scope === "all") return;
+      if (inboxLoadMoreInFlightRef.current[scope]) return;
+      if (!inboxHasMoreRef.current[scope]) return;
+      const cursor = inboxConversationCursorsRef.current[scope];
+      if (!cursor) {
+        // No cursor means we never loaded the first page; fall back to a
+        // fresh load instead of a load-more.
+        await loadConversations(scope);
+        return;
+      }
+      inboxLoadMoreInFlightRef.current[scope] = true;
+      try {
+        const rows = await fetchInboxSummaryRows(scope, undefined, {
+          onlyWithActivity: true,
+          limit: INBOX_NEXT_PAGE,
+          cursor,
+        });
+        applyInboxRowsToCaches(scope, rows, undefined, "append");
+        inboxConversationCursorsRef.current[scope] = cursorFromRows(rows) ?? cursor;
+        inboxHasMoreRef.current[scope] = rows.length >= INBOX_NEXT_PAGE;
+        // applyInboxRowsToCaches updates state via commitInboxCaches, which
+        // re-renders and re-evaluates the "Load more" button visibility.
+      } catch (error) {
+        console.warn("[chats.inbox] load_more failed", { scope, error });
+      } finally {
+        inboxLoadMoreInFlightRef.current[scope] = false;
+      }
+    },
+    [applyInboxRowsToCaches, cursorFromRows, fetchInboxSummaryRows, loadConversations, profile?.id],
   );
 
   const refreshRoomSummaries = useCallback(
@@ -2724,7 +2915,10 @@ const Chats = () => {
     dirtyRoomIdsRef.current.clear();
     if (roomIds.length === 0) return;
     await refreshRoomSummaries(roomIds);
-  }, [refreshRoomSummaries]);
+    // Realtime-driven changes can affect unread counts in chats both above
+    // and below the paginated fold — re-sync the server-authoritative badge.
+    void fetchInboxBadgeTotal();
+  }, [fetchInboxBadgeTotal, refreshRoomSummaries]);
 
   const queueDirtyRoomSummaryRefresh = useCallback(
     (roomId: string | null | undefined) => {
@@ -3300,6 +3494,85 @@ const Chats = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id, queueDirtyRoomSummaryRefresh, subscribedInboxRoomIdsKey]);
 
+  // ---------------------------------------------------------------------------
+  // Server-side search across the user's inbox.
+  // When the search box has >= 2 chars, debounce 300 ms and call search_chat_inbox.
+  // While searchResultRows is non-null, the rendered conversation/group lists
+  // source from these rows instead of `chats`/`groups` state. This keeps search
+  // working correctly even when the inbox is paginated and most chats aren't
+  // loaded into client state.
+  // ---------------------------------------------------------------------------
+  const [searchResultRows, setSearchResultRows] = useState<InboxSummaryRow[] | null>(null);
+  const [searchActive, setSearchActive] = useState(false);
+  useEffect(() => {
+    if (!profile?.id) {
+      setSearchResultRows(null);
+      setSearchActive(false);
+      return;
+    }
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) {
+      setSearchResultRows(null);
+      setSearchActive(false);
+      return;
+    }
+    setSearchActive(true);
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const { data, error } = await (supabase.rpc as (
+          fn: string,
+          params?: Record<string, unknown>,
+        ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+          "search_chat_inbox",
+          { p_query: trimmed },
+        );
+        if (cancelled) return;
+        if (error || !Array.isArray(data)) {
+          // Surface failure as "no results" rather than silently falling back to
+          // local — local search of paginated state would be misleading.
+          setSearchResultRows([]);
+          return;
+        }
+        setSearchResultRows(data as InboxSummaryRow[]);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("[chats.inbox] search failed", error);
+        setSearchResultRows([]);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [profile?.id, searchQuery]);
+
+  // Server search rows → ChatUser[] for direct/service rooms.
+  const searchResultChats = useMemo<ChatUser[] | null>(() => {
+    if (!searchResultRows) return null;
+    const built: ChatUser[] = [];
+    for (const row of searchResultRows) {
+      const roomType = String(row.room_type || "").trim();
+      if (roomType === "group") continue;
+      const chat = buildChatFromSummary(row);
+      if (chat) built.push(chat);
+    }
+    return built;
+  }, [buildChatFromSummary, searchResultRows]);
+
+  // Server search rows → Group[] for group rooms.
+  const searchResultGroups = useMemo<Group[] | null>(() => {
+    if (!searchResultRows) return null;
+    const built: Group[] = [];
+    for (const row of searchResultRows) {
+      const roomType = String(row.room_type || "").trim();
+      if (roomType !== "group") continue;
+      const group = buildGroupFromSummary(row);
+      if (group) built.push(group);
+    }
+    return built;
+  }, [buildGroupFromSummary, searchResultRows]);
+
   const getChatPreview = useCallback((chat: ChatUser) => {
     const override = String(chat.previewOverride || "").trim();
     if (override) return override;
@@ -3327,10 +3600,17 @@ const Chats = () => {
     }
   };
 
-  // Filter chats based on active tab and search (unified tab system)
+  // Filter chats based on active tab and search (unified tab system).
+  //
+  // When server-side search is active (searchResultChats !== null), source from
+  // search results — these came from the server filtered by query and are
+  // correct even for chats that aren't yet loaded into local state via
+  // pagination. Local query-substring filter is then redundant and skipped.
   const filteredChats = useMemo(() => {
     const loweredQuery = searchQuery.trim().toLowerCase();
-    return chats.filter((chat) => {
+    const sourceChats = searchResultChats ?? chats;
+    const useServerResults = searchResultChats !== null;
+    return sourceChats.filter((chat) => {
       if (chat.peerUserId && chat.peerUserId === profile?.id) return false;
       const matchesTab =
         mainTab === "friends"
@@ -3339,6 +3619,7 @@ const Chats = () => {
             ? chat.type === "service"
             : false;
       if (!matchesTab) return false;
+      if (useServerResults) return true;
       if (!loweredQuery) return true;
       const preview = getChatPreview(chat).toLowerCase();
       return (
@@ -3346,7 +3627,7 @@ const Chats = () => {
         preview.includes(loweredQuery)
       );
     });
-  }, [chats, getChatPreview, mainTab, profile?.id, searchQuery]);
+  }, [chats, getChatPreview, mainTab, profile?.id, searchQuery, searchResultChats]);
   // Single-pass derivation: replace 6 chained memos (each allocating a new array/Set)
   // with one memo that classifies every chat in filteredChats exactly once.
   const {
@@ -3453,8 +3734,13 @@ const Chats = () => {
 
   const filteredGroups = useMemo(() => {
     const loweredQuery = searchQuery.trim().toLowerCase();
-    return [...groups]
+    // Use server-side search results when active so groups not yet in client
+    // state can still be discovered via search.
+    const sourceGroups = searchResultGroups ?? groups;
+    const useServerResults = searchResultGroups !== null;
+    return [...sourceGroups]
       .filter((group) =>
+        useServerResults ||
         !loweredQuery ||
         group.name.toLowerCase().includes(loweredQuery) ||
         group.lastMessage.toLowerCase().includes(loweredQuery) ||
@@ -3465,12 +3751,42 @@ const Chats = () => {
           groupActivityRankValue(b.lastMessageAt, b.createdAt) - groupActivityRankValue(a.lastMessageAt, a.createdAt) ||
           a.name.localeCompare(b.name)
       );
-  }, [groups, searchQuery]);
+  }, [groups, searchQuery, searchResultGroups]);
 
-  const totalUnreadMessages = useMemo(
+  const localUnreadSum = useMemo(
     () => chats.reduce((sum, chat) => sum + Math.max(0, chat.unread || 0), 0) + groups.reduce((sum, group) => sum + Math.max(0, group.unread || 0), 0),
     [chats, groups]
   );
+  // Prefer the server-authoritative total when available, otherwise fall back
+  // to the local sum. Server total reflects ALL chats (including ones below
+  // the paginated fold that aren't loaded yet); local sum only reflects loaded.
+  const totalUnreadMessages = inboxBadgeUnreadTotal ?? localUnreadSum;
+
+  // Fetch the inbox unread total from the server. Source of truth for the
+  // nav badge — independent of whether all paginated pages are loaded.
+  const fetchInboxBadgeTotal = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      const { data, error } = await (supabase.rpc as (
+        fn: string,
+        params?: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { message?: string } | null }>)(
+        "get_chat_inbox_unread_total",
+        {},
+      );
+      if (error) return;
+      // RPC returns bigint; supabase-js delivers numeric strings for bigints in some configs.
+      const total = typeof data === "number" ? data : Number(data ?? 0);
+      if (Number.isFinite(total)) setInboxBadgeUnreadTotal(Math.max(0, total));
+    } catch (error) {
+      console.warn("[chats.inbox] unread_total fetch failed", error);
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    void fetchInboxBadgeTotal();
+  }, [profile?.id, fetchInboxBadgeTotal]);
   useEffect(() => {
     if (!groupManageId) {
       setGroupDescriptionEditing(false);
@@ -4716,6 +5032,74 @@ const Chats = () => {
     setGroupsPullOffset(0);
   }, [groupSubTab, groupsPullOffset, groupsPullRefreshing, mainTab, triggerGroupsExploreRefresh]);
 
+  // -------------------------------------------------------------------------
+  // Chats pull-to-refresh (friends + service tabs).
+  // -------------------------------------------------------------------------
+  const triggerChatsPullRefresh = useCallback(async () => {
+    if (chatsPullRefreshing) return;
+    if (mainTab !== "friends" && mainTab !== "service") return;
+    setChatsPullRefreshing(true);
+    try {
+      // Fresh first page + rail. fetchInboxBadgeTotal also runs to sync the badge.
+      await Promise.all([loadConversations(mainTab), fetchInboxBadgeTotal()]);
+    } catch {
+      toast.error("Couldn't refresh");
+    } finally {
+      setChatsPullRefreshing(false);
+      setChatsPullOffset(0);
+      chatsTouchStartYRef.current = null;
+      chatsPullEligibleRef.current = false;
+    }
+  }, [chatsPullRefreshing, fetchInboxBadgeTotal, loadConversations, mainTab]);
+
+  const handleChatsPullStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (mainTab !== "friends" && mainTab !== "service") {
+      chatsTouchStartYRef.current = null;
+      chatsPullEligibleRef.current = false;
+      return;
+    }
+    const container = event.currentTarget;
+    if ((container.scrollTop ?? 0) > 0 || chatsPullRefreshing) {
+      chatsTouchStartYRef.current = null;
+      chatsPullEligibleRef.current = false;
+      return;
+    }
+    const touchY = event.touches[0]?.clientY;
+    chatsPullEligibleRef.current = typeof touchY === "number" && touchY >= 60;
+    chatsTouchStartYRef.current = chatsPullEligibleRef.current ? touchY : null;
+  }, [chatsPullRefreshing, mainTab]);
+
+  const handleChatsPullMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    if (mainTab !== "friends" && mainTab !== "service") return;
+    if (!chatsPullEligibleRef.current) return;
+    const startY = chatsTouchStartYRef.current;
+    if (startY == null) return;
+    const currentY = event.touches[0]?.clientY;
+    if (typeof currentY !== "number") return;
+    const delta = currentY - startY;
+    if (delta <= 0) {
+      setChatsPullOffset(0);
+      return;
+    }
+    setChatsPullOffset(Math.min(84, delta * 0.45));
+  }, [mainTab]);
+
+  const handleChatsPullEnd = useCallback(() => {
+    if (mainTab !== "friends" && mainTab !== "service") {
+      chatsTouchStartYRef.current = null;
+      chatsPullEligibleRef.current = false;
+      setChatsPullOffset(0);
+      return;
+    }
+    if (chatsPullOffset >= PULL_REFRESH_THRESHOLD && !chatsPullRefreshing) {
+      void triggerChatsPullRefresh();
+      return;
+    }
+    chatsTouchStartYRef.current = null;
+    chatsPullEligibleRef.current = false;
+    setChatsPullOffset(0);
+  }, [chatsPullOffset, chatsPullRefreshing, mainTab, triggerChatsPullRefresh]);
+
   const openGroupDetailsSheet = useCallback(async (group: Group) => {
     setGroupDetailsId(group.id);
     try {
@@ -5222,10 +5606,10 @@ const Chats = () => {
           {/* Chat list */}
           <div
             className="flex-1 min-h-0 overflow-y-auto touch-pan-y pb-[calc(64px+env(safe-area-inset-bottom)+20px)]"
-            onTouchStart={handleGroupsPullStart}
-            onTouchMove={handleGroupsPullMove}
-            onTouchEnd={handleGroupsPullEnd}
-            onTouchCancel={handleGroupsPullEnd}
+            onTouchStart={(e) => { handleGroupsPullStart(e); handleChatsPullStart(e); }}
+            onTouchMove={(e) => { handleGroupsPullMove(e); handleChatsPullMove(e); }}
+            onTouchEnd={() => { handleGroupsPullEnd(); handleChatsPullEnd(); }}
+            onTouchCancel={() => { handleGroupsPullEnd(); handleChatsPullEnd(); }}
           >
             {mainTab === "groups" && groupSubTab === "explore" ? (
               <div
@@ -5240,6 +5624,25 @@ const Chats = () => {
                   {groupsPullRefreshing
                     ? "Refreshing..."
                     : groupsPullOffset >= PULL_REFRESH_THRESHOLD
+                      ? "Release to refresh"
+                      : "Pull to refresh"}
+                </span>
+              </div>
+            ) : null}
+
+            {(mainTab === "friends" || mainTab === "service") && (chatsPullRefreshing || chatsPullOffset > 0) ? (
+              <div
+                className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground transition-all duration-150"
+                style={{
+                  height: chatsPullRefreshing ? 28 : chatsPullOffset > 0 ? Math.max(14, Math.min(28, chatsPullOffset * 0.55)) : 0,
+                  opacity: chatsPullRefreshing || chatsPullOffset > 0 ? 1 : 0,
+                }}
+              >
+                <Loader2 className={chatsPullRefreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+                <span>
+                  {chatsPullRefreshing
+                    ? "Refreshing..."
+                    : chatsPullOffset >= PULL_REFRESH_THRESHOLD
                       ? "Release to refresh"
                       : "Pull to refresh"}
                 </span>
@@ -5454,11 +5857,18 @@ const Chats = () => {
                       </>
                     )}
                   </div>
-                  {regularConversationChats.length > Math.max(0, chatVisibleCount - priorityStarChats.length) && (
+                  {!searchActive && (regularConversationChats.length > Math.max(0, chatVisibleCount - priorityStarChats.length) || inboxHasMoreRef.current.friends) && (
                     <div className="flex justify-center pt-2">
                       <button
                         className="text-sm text-primary hover:underline"
-                        onClick={() => setChatVisibleCount((c) => c + 10)}
+                        onClick={() => {
+                          setChatVisibleCount((c) => c + 10);
+                          // If the local cache is close to exhausted, ask the server for the next page.
+                          const visible = Math.max(0, chatVisibleCount - priorityStarChats.length);
+                          if (regularConversationChats.length - visible <= 5 && inboxHasMoreRef.current.friends) {
+                            void loadMoreConversations("friends");
+                          }
+                        }}
                       >
                         {t("Load more")}
                       </button>
