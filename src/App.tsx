@@ -13,6 +13,10 @@ import { isPublicRuntimePath } from "@/routes/publicRuntimePaths";
 const FullAppRoutes = lazy(() => import("@/routes/FullAppRoutes"));
 const AppToasters = lazy(() => import("@/components/app/AppToasters"));
 
+if (typeof window !== "undefined" && window.location.pathname === "/signup/credentials") {
+  void import("@/pages/signup/SignupCredentials");
+}
+
 const RuntimeRoutes = () => {
   const location = useLocation();
 
