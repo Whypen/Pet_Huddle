@@ -210,6 +210,23 @@ type PendingSocialUpload = {
   status: UploadLifecycleStatus;
 };
 
+const VISIBILITY_FIELDS = [
+  "show_gender",
+  "show_orientation",
+  "show_age",
+  "show_height",
+  "show_weight",
+  "show_academic",
+  "show_affiliation",
+  "show_occupation",
+  "show_bio",
+  "show_relationship_status",
+  "show_languages",
+  "show_location",
+] as const;
+
+type VisibilityField = typeof VISIBILITY_FIELDS[number];
+
 const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const { t } = useLanguage();
   const showTurnstileDiag =
@@ -493,22 +510,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     scrollToProfileField(keyByLabel[first]);
   }, [scrollToProfileField]);
 
-  type VisibilityField =
-    | "show_gender"
-    | "show_orientation"
-    | "show_age"
-    | "show_height"
-    | "show_weight"
-    | "show_academic"
-    | "show_affiliation"
-    | "show_occupation"
-    | "show_bio"
-    | "show_relationship_status"
-    | "show_languages"
-    | "show_location";
-
-  const hasVisibilityContent = useCallback((field: VisibilityField, source: typeof formData) => {
-    const requirements: Record<VisibilityField, boolean> = {
+  const getVisibilityRequirement = useCallback((field: VisibilityField, source: typeof formData = formData) => {
+    const readyByField: Record<VisibilityField, boolean> = {
       show_gender: Boolean(source.gender_genre.trim()),
       show_orientation: Boolean(source.orientation.trim()),
       show_age: Boolean(source.dob),
@@ -522,8 +525,27 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       show_languages: source.languages.length > 0,
       show_location: Boolean(source.location_country.trim() && source.location_district.trim()),
     };
-    return requirements[field];
-  }, []);
+    const metaByField: Record<VisibilityField, { message: string; scrollKey?: string; errorKey?: keyof typeof fieldErrors }> = {
+      show_gender: { message: "Complete Gender first.", scrollKey: "gender", errorKey: "gender" },
+      show_orientation: { message: "Complete Sexual Orientation first." },
+      show_age: { message: "Complete Date of Birth first.", scrollKey: "dob", errorKey: "dob" },
+      show_height: { message: "Complete Height first.", scrollKey: "height", errorKey: "height" },
+      show_weight: { message: "Complete Weight first.", errorKey: "weight" },
+      show_academic: { message: "Complete Education & Career first." },
+      show_affiliation: { message: "Complete Affiliation first." },
+      show_occupation: { message: "Complete Occupation first." },
+      show_bio: { message: "Complete Bio first.", scrollKey: "bio" },
+      show_relationship_status: { message: "Complete Relationship Status first." },
+      show_languages: { message: "Select at least one language first." },
+      show_location: { message: "Complete Location first.", scrollKey: "location", errorKey: "location" },
+    };
+    return { ready: readyByField[field], ...metaByField[field] };
+  }, [formData]);
+
+  const hasVisibilityContent = useCallback(
+    (field: VisibilityField, source: typeof formData) => getVisibilityRequirement(field, source).ready,
+    [getVisibilityRequirement],
+  );
 
   const isVisibilityOn = useCallback(
     (field: VisibilityField, source: typeof formData = formData) => Boolean(source[field]) && hasVisibilityContent(field, source),
@@ -535,21 +557,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       setFormData((prev) => ({ ...prev, [field]: false }));
       return;
     }
-    const requirements: Record<VisibilityField, { ready: boolean; message: string; scrollKey?: string; errorKey?: keyof typeof fieldErrors }> = {
-      show_gender: { ready: Boolean(formData.gender_genre.trim()), message: "Complete Gender first.", scrollKey: "gender", errorKey: "gender" },
-      show_orientation: { ready: Boolean(formData.orientation.trim()), message: "Complete Sexual Orientation first." },
-      show_age: { ready: Boolean(formData.dob), message: "Complete Date of Birth first.", scrollKey: "dob", errorKey: "dob" },
-      show_height: { ready: Boolean(formData.height.trim()), message: "Complete Height first.", scrollKey: "height", errorKey: "height" },
-      show_weight: { ready: Boolean(formData.weight.trim()), message: "Complete Weight first.", errorKey: "weight" },
-      show_academic: { ready: Boolean(formData.degree.trim() || formData.school.trim() || formData.major.trim()), message: "Complete Education & Career first." },
-      show_affiliation: { ready: Boolean(formData.affiliation.trim()), message: "Complete Affiliation first." },
-      show_occupation: { ready: Boolean(formData.occupation.trim()), message: "Complete Occupation first." },
-      show_bio: { ready: Boolean(formData.bio.trim()), message: "Complete Bio first.", scrollKey: "bio" },
-      show_relationship_status: { ready: Boolean(formData.relationship_status.trim()), message: "Complete Relationship Status first." },
-      show_languages: { ready: formData.languages.length > 0, message: "Select at least one language first." },
-      show_location: { ready: Boolean(formData.location_country.trim() && formData.location_district.trim()), message: "Complete Location first.", scrollKey: "location", errorKey: "location" },
-    };
-    const requirement = requirements[field];
+    const requirement = getVisibilityRequirement(field);
     if (!requirement.ready) {
       if (requirement.errorKey) {
         setFieldErrors((prev) => ({ ...prev, [requirement.errorKey]: REQUIRED_CONNECT_ERROR }));
@@ -561,27 +569,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       return;
     }
     setFormData((prev) => ({ ...prev, [field]: true }));
-  }, [formData, scrollToProfileField]);
+  }, [getVisibilityRequirement, scrollToProfileField]);
 
   useEffect(() => {
-    const fields: VisibilityField[] = [
-      "show_gender",
-      "show_orientation",
-      "show_age",
-      "show_height",
-      "show_weight",
-      "show_academic",
-      "show_affiliation",
-      "show_occupation",
-      "show_bio",
-      "show_relationship_status",
-      "show_languages",
-      "show_location",
-    ];
     setFormData((prev) => {
       let changed = false;
       const next = { ...prev };
-      fields.forEach((field) => {
+      VISIBILITY_FIELDS.forEach((field) => {
         const shouldShow = hasVisibilityContent(field, prev);
         if (prev[field] !== shouldShow) {
           next[field] = shouldShow;
@@ -740,7 +734,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       },
     });
     if (auditError) {
-      console.warn("[EditProfile] Failed to write signup KYC audit log:", auditError.message);
+      console.warn("[EditProfile] Failed to write signup identity verification audit log:", auditError.message);
     }
 
     clearPendingSignupVerification(signupData.email || user?.id || "");

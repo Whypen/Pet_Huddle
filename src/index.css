@@ -268,7 +268,7 @@
     }
   }
 
-  /* E3: Active modal (critical confirmations, payment, KYC) */
+  /* E3: Active modal (critical confirmations, payment, identity verification) */
   .glass-e3 {
     background: var(--glass-bg-e3);
     backdrop-filter: blur(var(--glass-blur-e3));

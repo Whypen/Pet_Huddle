@@ -2,7 +2,7 @@
  * GlassModal — DESIGN_MASTER_SPEC §3.2 + §3.3
  *
  * Strong-overlay modal (E3 glass surface). Use for critical confirmations,
- * payment flows, KYC, and any top-priority modal action.
+ * payment flows, identity verification, and any top-priority modal action.
  *
  * Usage:
  *   <GlassModal isOpen={open} onClose={() => setOpen(false)} title="Confirm action">
