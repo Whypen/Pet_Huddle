@@ -247,8 +247,13 @@ const Index = () => {
   // SPRINT 2: Case-insensitive species matching for wisdom tips
   const getRandomTip = (species: string) => {
     const normalizedSpecies = species.charAt(0).toUpperCase() + species.slice(1).toLowerCase();
-    const tips = wisdomTips[normalizedSpecies] || wisdomTips.Others || wisdomTips.Dog;
-    return tips[Math.floor(Math.random() * tips.length)];
+    const tips = wisdomTips[normalizedSpecies];
+    if (!tips?.length) return null;
+    const tipKey = tips[Math.floor(Math.random() * tips.length)];
+    const tipText = t(tipKey).trim();
+    const fallbackLeaf = tipKey.split(".").at(-1) || "";
+    if (!tipText || tipText === tipKey || tipText === fallbackLeaf) return null;
+    return tipText;
   };
 
   const displayName = profile?.display_name || t("Friend");
@@ -264,6 +269,7 @@ const Index = () => {
       : [];
     return roles.length > 0 ? roles.join(" · ") : "Animal Friend";
   })();
+  const selectedPetTip = selectedPet ? getRandomTip(selectedPet.species) : null;
 
   if (loading) {
     return (
@@ -531,7 +537,7 @@ const Index = () => {
           )}
 
           {/* Pet care tip */}
-          {selectedPet && (
+          {selectedPetTip && (
             <section className="px-5 pb-4">
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -543,7 +549,7 @@ const Index = () => {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm text-brandSubtext/80 leading-relaxed">
-                    {t(getRandomTip(selectedPet.species))}
+                    {selectedPetTip}
                   </p>
                 </div>
               </motion.div>
