@@ -570,6 +570,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [replyMediaFiles, setReplyMediaFiles] = useState<ComposerMedia[]>([]);
   const [replyError, setReplyError] = useState("");
   const [replySubmittingByThread, setReplySubmittingByThread] = useState<Set<string>>(new Set());
+  const [commentRetryingThreads, setCommentRetryingThreads] = useState<Set<string>>(new Set());
   const [composerUploadState, setComposerUploadState] = useState<ComposerUploadState>({
     scope: null,
     status: "idle",
@@ -589,6 +590,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const filtersRowRef = useRef<HTMLDivElement | null>(null);
   const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
   const threadRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const commentPanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const replyComposerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const feedSessionIdRef = useRef<string>(typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `feed-${Date.now()}`);
   const trackedImpressionsRef = useRef<Set<string>>(new Set());
   const trackedDwellRef = useRef<Set<string>>(new Set());
@@ -1556,6 +1559,40 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     setReplyError("");
   };
 
+  const snapToCommentArea = useCallback(
+    (threadId: string, target: "panel" | "composer" = "panel", focusComposer: boolean = false) => {
+      window.setTimeout(() => {
+        window.requestAnimationFrame(() => {
+          const node =
+            target === "composer"
+              ? replyComposerRefs.current[threadId] || commentPanelRefs.current[threadId]
+              : commentPanelRefs.current[threadId] || replyComposerRefs.current[threadId];
+          if (!node) return;
+
+          const scroller = scrollContainerRef?.current;
+          if (scroller) {
+            const targetTop =
+              node.getBoundingClientRect().top -
+              scroller.getBoundingClientRect().top +
+              scroller.scrollTop -
+              12;
+            scroller.scrollTo({
+              top: Math.max(0, targetTop),
+              behavior: "smooth",
+            });
+          } else {
+            node.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+
+          if (focusComposer) {
+            replyInputRef.current?.focus({ preventScroll: true });
+          }
+        });
+      }, 80);
+    },
+    [scrollContainerRef]
+  );
+
   const openThreadQuotaDialog = () => {
     const tier = (profile?.effective_tier || profile?.tier || "free").toLowerCase();
     if (tier === "gold" || tier === "plus" || tier === "free") {
@@ -1574,9 +1611,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     });
   };
 
-  const revokeComposerMedia = (items: ComposerMedia[]) => {
+  const revokeComposerMedia = useCallback((items: ComposerMedia[]) => {
     items.forEach((item) => URL.revokeObjectURL(item.previewUrl));
-  };
+  }, []);
+
+  const resetReplyComposerDraft = useCallback(() => {
+    setReplyContent("");
+    setReplyDismissedPreviewUrls(new Set());
+    setReplyMentions([]);
+    setReplyMentionQuery(null);
+    setReplyMentionSuggestions([]);
+    setReplyComposerFocused(false);
+    revokeComposerMedia(replyMediaFiles);
+    setReplyMediaFiles([]);
+    setReplyError("");
+  }, [replyMediaFiles, revokeComposerMedia]);
 
   const removeCreateMediaAt = (index: number) => {
     setCreateMediaFiles((prev) => {
@@ -2083,16 +2132,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         );
       }
 
-      setReplyContent("");
-      setReplyDismissedPreviewUrls(new Set());
-      setReplyMentions([]);
-      setReplyMentionQuery(null);
-      setReplyMentionSuggestions([]);
-      setReplyComposerFocused(false);
-      setReplyFor(null);
-      revokeComposerMedia(replyMediaFiles);
-      setReplyMediaFiles([]);
-      setReplyError("");
+      resetReplyComposerDraft();
+      setReplyFor(thread.id);
+      snapToCommentArea(thread.id, "composer", true);
     } finally {
       setReplySubmittingByThread((prev) => {
         const next = new Set(prev);
@@ -2721,6 +2763,94 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     const displayTags = hasNewsTag ? rowTags.slice(0, 1) : isAlertDerived ? ["News"] : rowTags.slice(0, 1);
     return displayTags[0] || null;
   };
+
+  const retryLoadThreadComments = useCallback(
+    async (notice: Thread) => {
+      if (!notice?.id || commentRetryingThreads.has(notice.id)) return;
+      setCommentRetryingThreads((prev) => new Set([...prev, notice.id]));
+      try {
+        const hydrated = await hydrateRows([notice]);
+        applyHydratedRows(hydrated);
+      } catch (error) {
+        console.error("[social.comments.retry_failed]", { threadId: notice.id, error });
+        toast.error("Unable to load comments.");
+      } finally {
+        setCommentRetryingThreads((prev) => {
+          const next = new Set(prev);
+          next.delete(notice.id);
+          return next;
+        });
+      }
+    },
+    [applyHydratedRows, commentRetryingThreads, hydrateRows]
+  );
+
+  const openCommentsForThread = useCallback(
+    (notice: Thread) => {
+      setExpandedReplies((prev) => {
+        const next = new Set(prev);
+        if (next.has(notice.id)) {
+          next.delete(notice.id);
+          if (replyFor === notice.id) {
+            setReplyFor(null);
+            resetReplyComposerDraft();
+          }
+          return next;
+        }
+
+        next.add(notice.id);
+        void recordSocialFeedEvent(notice.id, "open_comments");
+        if (isSocialPostingBlocked) {
+          setSocialRestrictionModalOpen(true);
+          return next;
+        }
+
+        setReplyFor(notice.id);
+        resetReplyComposerDraft();
+        snapToCommentArea(notice.id, "composer", true);
+        return next;
+      });
+    },
+    [isSocialPostingBlocked, recordSocialFeedEvent, replyFor, resetReplyComposerDraft, snapToCommentArea]
+  );
+
+  const replyToComment = useCallback(
+    (notice: Thread, comment: ThreadComment) => {
+      if (isSocialPostingBlocked) {
+        setSocialRestrictionModalOpen(true);
+        return;
+      }
+
+      const socialId = String(comment.author?.social_id || "").trim();
+      setExpandedReplies((prev) => new Set([...prev, notice.id]));
+      setReplyFor(notice.id);
+      resetReplyComposerDraft();
+
+      if (socialId) {
+        const mentionText = `@${socialId} `;
+        setReplyContent(mentionText);
+        setReplyMentions([
+          {
+            start: 0,
+            end: mentionText.trimEnd().length,
+            mentionedUserId: comment.user_id,
+            socialIdAtTime: socialId,
+          },
+        ]);
+        upsertMentionDirectory([
+          {
+            userId: comment.user_id,
+            socialId,
+            displayName: comment.author?.display_name || socialId,
+            avatarUrl: comment.author?.avatar_url || null,
+          },
+        ]);
+      }
+
+      snapToCommentArea(notice.id, "composer", true);
+    },
+    [isSocialPostingBlocked, resetReplyComposerDraft, snapToCommentArea, upsertMentionDirectory]
+  );
 
   const formatTimeAgo = (date: string) => {
     if (!date) return t("Just now");
@@ -3481,11 +3611,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                 data={visibleNotices}
                 computeItemKey={(_, n) => n.id}
                 increaseViewportBy={{ top: 600, bottom: 1200 }}
-                itemContent={(_, notice) => {
-                  const primaryTag = getPrimaryTag(notice);
-                  const firstUrl = extractFirstHttpUrl(notice.content || "");
-                  const preview = firstUrl ? linkPreviewByUrl[firstUrl] : null;
-                  return (
+	                itemContent={(_, notice) => {
+	                  const primaryTag = getPrimaryTag(notice);
+	                  const firstUrl = extractFirstHttpUrl(notice.content || "");
+	                  const preview = firstUrl ? linkPreviewByUrl[firstUrl] : null;
+	                  const loadedComments = commentsByThread[notice.id];
+	                  const visibleComments = (loadedComments || []).filter((comment) => !hiddenComments.has(comment.id));
+	                  const commentCountForNotice = Math.max((loadedComments || []).length, Number(notice.comment_count ?? 0));
+	                  const commentsAreLoading = expandedReplies.has(notice.id) && commentCountForNotice > 0 && loadedComments === undefined;
+	                  const commentsMayBeMissing =
+	                    expandedReplies.has(notice.id) &&
+	                    !commentsAreLoading &&
+	                    loadedComments !== undefined &&
+	                    commentCountForNotice > loadedComments.length;
+	                  const commentsAreRetrying = commentRetryingThreads.has(notice.id);
+	                  return (
                   <div
                     key={notice.id}
                     ref={(el) => {
@@ -3720,44 +3860,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             </button>
                             <button
                               type="button"
-	                              onClick={() => {
-	                                setExpandedReplies((prev) => {
-	                                  const next = new Set(prev);
-	                                  if (next.has(notice.id)) {
-                                    next.delete(notice.id);
-                                    if (replyFor === notice.id) {
-                                      setReplyFor(null);
-                                      setReplyContent("");
-                                      setReplyDismissedPreviewUrls(new Set());
-                                      setReplyMentions([]);
-                                      setReplyMentionQuery(null);
-                                      setReplyMentionSuggestions([]);
-                                      setReplyComposerFocused(false);
-                                      revokeComposerMedia(replyMediaFiles);
-                                      setReplyMediaFiles([]);
-                                      setReplyError("");
-                                    }
-	                                  } else {
-	                                    next.add(notice.id);
-                                      void recordSocialFeedEvent(notice.id, "open_comments");
-	                                    if (isSocialPostingBlocked) {
-	                                      setSocialRestrictionModalOpen(true);
-                                      return next;
-                                    }
-                                    setReplyFor(notice.id);
-                                    setReplyContent("");
-                                    setReplyDismissedPreviewUrls(new Set());
-                                    setReplyMentions([]);
-                                    setReplyMentionQuery(null);
-                                    setReplyMentionSuggestions([]);
-                                    setReplyComposerFocused(false);
-                                    revokeComposerMedia(replyMediaFiles);
-                                    setReplyMediaFiles([]);
-                                    setReplyError("");
-                                  }
-                                  return next;
-                                });
-                              }}
+	                              onClick={() => openCommentsForThread(notice)}
                               className={cn(
                                 "relative h-8 w-8 inline-flex items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
                                 expandedReplies.has(notice.id) && "bg-primary/10 text-primary"
@@ -3766,11 +3869,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               aria-label="Toggle replies"
                             >
                               <MessageCircle className="w-4 h-4" />
-                              {Math.max((commentsByThread[notice.id] || []).length, Number(notice.comment_count ?? 0)) > 0 ? (
-                                <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-muted px-1 text-[10px] leading-[14px] text-muted-foreground text-center">
-                                  {Math.max((commentsByThread[notice.id] || []).length, Number(notice.comment_count ?? 0))}
-                                </span>
-                              ) : null}
+                              {commentCountForNotice > 0 ? (
+	                                <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-muted px-1 text-[10px] leading-[14px] text-muted-foreground text-center">
+	                                  {commentCountForNotice}
+	                                </span>
+	                              ) : null}
                             </button>
                             <button
                               type="button"
@@ -3832,10 +3935,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                           </div>
                         </div>
 
-                        {expandedReplies.has(notice.id) && (
-                          <div className="mt-4 space-y-3">
-                            {replyFor === notice.id && (
-                              <div className="form-field-rest relative h-auto min-h-[56px] rounded-[22px] bg-[rgba(33,69,207,0.08)] px-4 py-2 shadow-none">
+	                        {expandedReplies.has(notice.id) && (
+	                          <div
+	                            ref={(el) => {
+	                              commentPanelRefs.current[notice.id] = el;
+	                            }}
+	                            className="mt-4 flex flex-col gap-3"
+	                          >
+	                            {replyFor === notice.id && (
+	                              <div
+	                                ref={(el) => {
+	                                  replyComposerRefs.current[notice.id] = el;
+	                                }}
+	                                className="form-field-rest order-last relative h-auto min-h-[56px] rounded-[22px] bg-[rgba(33,69,207,0.08)] px-4 py-2 shadow-none"
+	                              >
                                 <div className="relative min-h-[24px]">
                               <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
                                     {renderComposerTextWithMentions(
@@ -3962,8 +4075,28 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               </div>
                             )}
 
-                            {(commentsByThread[notice.id] || []).filter((c) => !hiddenComments.has(c.id)).map((c) => (
-                              <div key={c.id} className="space-y-2 rounded-2xl bg-muted/25 px-3 py-3">
+	                            {commentsAreLoading && (
+	                              <div className="rounded-2xl bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+	                                Loading comments...
+	                              </div>
+	                            )}
+
+	                            {commentsMayBeMissing && (
+	                              <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+	                                <span>Couldn&apos;t load all comments.</span>
+	                                <button
+	                                  type="button"
+	                                  onClick={() => void retryLoadThreadComments(notice)}
+	                                  disabled={commentsAreRetrying}
+	                                  className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
+	                                >
+	                                  {commentsAreRetrying ? "Retrying..." : "Retry"}
+	                                </button>
+	                              </div>
+	                            )}
+
+	                            {visibleComments.map((c) => (
+	                              <div key={c.id} className="space-y-2 rounded-2xl bg-muted/25 px-3 py-3">
                                 <div className="flex items-start gap-3">
                                   <button
                                     type="button"
@@ -4028,8 +4161,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     }))}
                                   />
                                 )}
-                                <div className="flex items-center justify-end gap-0.5">
-                                  <button
+	                                <div className="flex items-center justify-end gap-0.5">
+	                                  <button
+	                                    type="button"
+	                                    onClick={() => replyToComment(notice, c)}
+	                                    className="inline-flex h-8 items-center justify-center rounded-full px-2 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted"
+	                                  >
+	                                    Reply
+	                                  </button>
+	                                  <button
                                     type="button"
                                     onClick={() =>
                                       setLikedComments((prev) => {
