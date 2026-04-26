@@ -53,6 +53,14 @@ export const mapFeedRowToThread = (row: Record<string, unknown>): Thread => ({
   alert_district: typeof row.alert_district === "string" ? row.alert_district : null,
   has_alert_link: Boolean(row.has_alert_link),
   is_sensitive: row.is_sensitive === true,
+  video_provider: row.video_provider === "bunny_stream" ? "bunny_stream" : null,
+  provider_video_id: typeof row.provider_video_id === "string" ? row.provider_video_id : null,
+  video_playback_url: typeof row.video_playback_url === "string" ? row.video_playback_url : null,
+  video_embed_url: typeof row.video_embed_url === "string" ? row.video_embed_url : null,
+  video_thumbnail_url: typeof row.video_thumbnail_url === "string" ? row.video_thumbnail_url : null,
+  video_preview_url: typeof row.video_preview_url === "string" ? row.video_preview_url : null,
+  video_duration_seconds: typeof row.video_duration_seconds === "number" ? row.video_duration_seconds : Number(row.video_duration_seconds ?? 0) || null,
+  video_status: typeof row.video_status === "string" ? row.video_status : null,
   created_at: String(row.created_at || new Date().toISOString()),
   user_id: String(row.user_id),
   author: {
@@ -104,6 +112,14 @@ export const fetchFocusedThreadRow = async (threadId: string) => {
       tags,
       hashtags,
       images,
+      video_provider,
+      provider_video_id,
+      video_playback_url,
+      video_embed_url,
+      video_thumbnail_url,
+      video_preview_url,
+      video_duration_seconds,
+      video_status,
       map_id,
       alert_type,
       likes,
@@ -133,6 +149,14 @@ export const fetchFocusedThreadRow = async (threadId: string) => {
     tags: focusedRow.tags,
     hashtags: focusedRow.hashtags,
     images: focusedRow.images,
+    video_provider: focusedRow.video_provider,
+    provider_video_id: focusedRow.provider_video_id,
+    video_playback_url: focusedRow.video_playback_url,
+    video_embed_url: focusedRow.video_embed_url,
+    video_thumbnail_url: focusedRow.video_thumbnail_url,
+    video_preview_url: focusedRow.video_preview_url,
+    video_duration_seconds: focusedRow.video_duration_seconds,
+    video_status: focusedRow.video_status,
     like_count: focusedRow.likes,
     support_count: focusedRow.support_count ?? 0,
     comment_count: focusedRow.comment_count ?? 0,
@@ -267,7 +291,7 @@ export const hydrateRowsLegacy = async (
     .in("thread_id", ids)
     .order("created_at", { ascending: true });
 
-  const commentsByThread: Record<string, ThreadComment[]> = {};
+  const commentsByThread: Record<string, ThreadComment[]> = Object.fromEntries(ids.map((id) => [id, []]));
   (((comments || []) as unknown) as Array<Record<string, unknown>>).forEach((comment) => {
     const authorObj = Array.isArray(comment.author) ? comment.author[0] : comment.author;
     const normalizedComment = {
@@ -389,7 +413,7 @@ export const hydrateRows = async (
       .map((row) => [row.thread_id, row]),
   );
 
-  const commentsByThread: Record<string, ThreadComment[]> = {};
+  const commentsByThread: Record<string, ThreadComment[]> = Object.fromEntries(ids.map((id) => [id, []]));
   const threadMentions: Record<string, MentionEntry[]> = {};
   const replyMentions: Record<string, MentionEntry[]> = {};
 
@@ -443,6 +467,14 @@ export const hydrateRows = async (
       alert_type: typeof hydration.alert_type === "string" ? hydration.alert_type : notice.alert_type ?? null,
       alert_district: typeof hydration.alert_district === "string" ? hydration.alert_district : notice.alert_district ?? null,
       has_alert_link: hydration.has_alert_link === true || notice.has_alert_link === true,
+      video_provider: hydration.video_provider === "bunny_stream" ? "bunny_stream" : notice.video_provider ?? null,
+      provider_video_id: hydration.provider_video_id ?? notice.provider_video_id ?? null,
+      video_playback_url: hydration.video_playback_url ?? notice.video_playback_url ?? null,
+      video_embed_url: hydration.video_embed_url ?? notice.video_embed_url ?? null,
+      video_thumbnail_url: hydration.video_thumbnail_url ?? notice.video_thumbnail_url ?? null,
+      video_preview_url: hydration.video_preview_url ?? notice.video_preview_url ?? null,
+      video_duration_seconds: hydration.video_duration_seconds ?? notice.video_duration_seconds ?? null,
+      video_status: hydration.video_status ?? notice.video_status ?? null,
       author: {
         ...notice.author,
         display_name:

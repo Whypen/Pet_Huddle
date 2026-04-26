@@ -38,6 +38,15 @@ import { PostMediaCarousel } from "@/components/social/PostMediaCarousel";
 import { quotaConfig } from "@/config/quotaConfig";
 import { buildShareModel, type ShareModel } from "@/lib/shareModel";
 import { detectSensitiveImage } from "@/lib/sensitiveContent";
+import {
+  SOCIAL_VIDEO_MAX_SECONDS,
+  attachSocialVideoToThread,
+  compressAndTrimVideo,
+  deleteSocialVideo,
+  getVideoDuration,
+  uploadSocialVideoToBunny,
+  type SocialVideoMetadata,
+} from "@/lib/socialVideo";
 import emptyChatImage from "@/assets/Notifications/Empty Chat.png";
 import { useSafetyRestrictions } from "@/hooks/useSafetyRestrictions";
 import { NoticeBoardComposerModal } from "@/components/social/noticeboard/NoticeBoardComposerModal";
@@ -187,6 +196,29 @@ type SocialFeedEventType =
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
 const MENTION_LIVE_SUGGESTIONS_ENABLED = true;
+
+const getNoticeMediaItems = (notice: Thread) => {
+  const images = (notice.images || [])
+    .filter((src): src is string => typeof src === "string" && src.trim().length > 0)
+    .map((src, index) => ({
+      src,
+      alt: `${notice.title || "Post"} ${index + 1}`,
+      kind: "image" as const,
+    }));
+  if (notice.video_provider !== "bunny_stream" || !notice.provider_video_id) return images;
+  return [
+    ...images,
+    {
+      src: notice.video_playback_url || notice.video_embed_url || notice.provider_video_id,
+      alt: `${notice.title || "Post"} video`,
+      kind: "video" as const,
+      poster: notice.video_thumbnail_url || notice.video_preview_url || null,
+      previewSrc: notice.video_preview_url || null,
+      embedUrl: notice.video_embed_url || null,
+      status: notice.video_status || null,
+    },
+  ];
+};
 
 const countWords = (value: string) => {
   const trimmed = value.trim();
@@ -1562,8 +1594,34 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     });
   };
 
-  const prepareComposerMedia = useCallback(async (files: FileList | null, existingCount: number) => {
+  const updateCreateVideoTrimStart = (index: number, value: number) => {
+    setCreateMediaFiles((prev) =>
+      prev.map((item, currentIndex) =>
+        currentIndex === index && item.kind === "video"
+          ? { ...item, trimStartSeconds: Math.max(0, value) }
+          : item,
+      ),
+    );
+  };
+
+  const prepareComposerMedia = useCallback(async (files: FileList | null, existingItems: ComposerMedia[], options: { allowVideo: boolean }) => {
     if (!files?.length) return [] as ComposerMedia[];
+
+    const existingCount = existingItems.length;
+    const existingVideoCount = existingItems.filter((item) => item.kind === "video").length;
+    const incomingVideoCount = Array.from(files).filter(isVideoFile).length;
+    if (!options.allowVideo && incomingVideoCount > 0) {
+      toast.error("Video can only be added to a post.");
+      return [];
+    }
+    if (existingVideoCount > 0 && incomingVideoCount > 0) {
+      toast.error("Only one video can be added to a post.");
+      return [];
+    }
+    if (incomingVideoCount > 1) {
+      toast.error("Only one video can be added to a post.");
+      return [];
+    }
 
     const availableSlots = Math.max(0, MAX_COMPOSER_MEDIA - existingCount);
     if (availableSlots === 0) {
@@ -1585,6 +1643,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
 
       let nextFile = file;
+      let durationSeconds: number | undefined;
+      let needsTrim = false;
       if (kind === "image") {
         try {
           const { default: imageCompression } = await import("browser-image-compression");
@@ -1597,12 +1657,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           toast.error("Failed to process image");
           continue;
         }
+      } else {
+        try {
+          durationSeconds = await getVideoDuration(file);
+          needsTrim = durationSeconds > SOCIAL_VIDEO_MAX_SECONDS + 0.2;
+        } catch {
+          toast.error("Failed to read video duration");
+          continue;
+        }
       }
 
       prepared.push({
         file: nextFile,
         kind,
         previewUrl: URL.createObjectURL(nextFile),
+        durationSeconds,
+        needsTrim,
+        trimStartSeconds: 0,
       });
     }
 
@@ -1610,7 +1681,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, [isGoldUser]);
 
   const handleCreateMediaChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const prepared = await prepareComposerMedia(event.target.files, createMediaFiles.length);
+    const prepared = await prepareComposerMedia(event.target.files, createMediaFiles, { allowVideo: true });
     if (prepared.length > 0) {
       setCreateMediaFiles((prev) => [...prev, ...prepared]);
       const firstImage = prepared.find((item) => item.kind === "image");
@@ -1630,7 +1701,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const handleReplyMediaChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const prepared = await prepareComposerMedia(event.target.files, replyMediaFiles.length);
+    const prepared = await prepareComposerMedia(event.target.files, replyMediaFiles, { allowVideo: false });
     if (prepared.length > 0) {
       setReplyMediaFiles((prev) => [...prev, ...prepared]);
     }
@@ -1645,11 +1716,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const uploadComposerMedia = useCallback(async (items: ComposerMedia[], scope: "thread" | "reply") => {
     if (!user?.id || items.length === 0) return [] as string[];
+    const imageItems = items.filter((media) => media.kind === "image");
+    if (imageItems.length === 0) return [] as string[];
 
     startComposerUploadTicker(scope);
     const uploadedUrls: string[] = [];
     try {
-      for (const [index, item] of items.entries()) {
+      for (const [index, item] of imageItems.entries()) {
         const fileExt = item.file.name.split(".").pop() || (item.kind === "video" ? "mp4" : "jpg");
         const fileName = `${user.id}/${scope}/${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
         const { error: uploadError } = await supabase.storage.from("notices").upload(fileName, item.file);
@@ -1675,6 +1748,41 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
     return uploadedUrls;
   }, [clearComposerUploadTicker, startComposerUploadTicker, user?.id]);
+
+  const uploadCreateVideo = useCallback(async (items: ComposerMedia[]) => {
+    const videoItem = items.find((item) => item.kind === "video");
+    if (!videoItem) return null as SocialVideoMetadata | null;
+    if (!isGoldUser) throw new Error("Video upload is available for Gold members only.");
+
+    startComposerUploadTicker("thread");
+    try {
+      const trimmedFile = videoItem.needsTrim
+        ? await compressAndTrimVideo(videoItem.file, {
+            startSeconds: videoItem.trimStartSeconds || 0,
+            durationSeconds: SOCIAL_VIDEO_MAX_SECONDS,
+          })
+        : await compressAndTrimVideo(videoItem.file, {
+            startSeconds: 0,
+            durationSeconds: Math.min(videoItem.durationSeconds || SOCIAL_VIDEO_MAX_SECONDS, SOCIAL_VIDEO_MAX_SECONDS),
+          });
+      const duration = await getVideoDuration(trimmedFile);
+      if (duration > SOCIAL_VIDEO_MAX_SECONDS + 0.5) {
+        throw new Error("Video must be trimmed to 15 seconds before upload.");
+      }
+      const video = await uploadSocialVideoToBunny(trimmedFile, {
+        title: title.trim() || "Social video",
+        durationSeconds: duration,
+        onProgress: (progress) => setComposerUploadState({ scope: "thread", status: "uploading", progress }),
+      });
+      clearComposerUploadTicker();
+      setComposerUploadState({ scope: "thread", status: "success", progress: 100 });
+      return video;
+    } catch (error) {
+      clearComposerUploadTicker();
+      setComposerUploadState({ scope: "thread", status: "error", progress: 0 });
+      throw error;
+    }
+  }, [clearComposerUploadTicker, isGoldUser, startComposerUploadTicker, title]);
 
   const enqueueSocialNotification = useCallback(
     async (args: {
@@ -1849,6 +1957,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         .eq("id", notice.id)
         .eq("user_id", user.id);
       if (error) throw error;
+      if (notice.provider_video_id) {
+        void deleteSocialVideo(notice.provider_video_id);
+      }
       toast.success(t("Post deleted"));
     } catch (error: unknown) {
       setNotices(previous);
@@ -1902,6 +2013,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           thread_id: thread.id,
           user_id: user.id,
           content: replyText,
+          text: replyText,
           images: uploadedUrls,
         } as Record<string, unknown>)
         .select("id")
@@ -2166,14 +2278,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     }
 
     setCreating(true);
+    let pendingVideoCleanup: SocialVideoMetadata | null = null;
 
     try {
       if (editingNoticeId) {
         const editingNotice = notices.find((item) => item.id === editingNoticeId);
+        if (editingNotice?.provider_video_id && createMediaFiles.some((item) => item.kind === "video")) {
+          throw new Error("Only one video can be added to a post.");
+        }
         const existingImages = Array.isArray(editingNotice?.images)
           ? editingNotice.images.filter((url): url is string => typeof url === "string" && url.length > 0)
           : [];
         const uploadedUrls = await uploadComposerMedia(createMediaFiles, "thread");
+        const uploadedVideo = await uploadCreateVideo(createMediaFiles);
+        pendingVideoCleanup = uploadedVideo;
         const mergedImages = [...existingImages, ...uploadedUrls];
         const { data: updatedThread, error } = await supabase
           .from("threads" as "profiles")
@@ -2183,6 +2301,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             tags: [category],
             images: mergedImages,
             is_sensitive: createIsSensitive,
+            ...(uploadedVideo
+              ? {
+                  video_provider: uploadedVideo.provider,
+                  provider_video_id: uploadedVideo.providerVideoId,
+                  video_playback_url: uploadedVideo.playbackUrl,
+                  video_embed_url: uploadedVideo.embedUrl,
+                  video_thumbnail_url: uploadedVideo.thumbnailUrl,
+                  video_preview_url: uploadedVideo.previewUrl,
+                  video_duration_seconds: uploadedVideo.duration,
+                  video_status: uploadedVideo.status,
+                }
+              : {}),
           } as Record<string, unknown>)
           .eq("id", editingNoticeId)
           .eq("user_id", user.id)
@@ -2204,10 +2334,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     map_id: (updatedThread.map_id as string | null) ?? item.map_id ?? null,
                     alert_type: item.alert_type ?? null,
                     is_sensitive: createIsSensitive,
+                    ...(uploadedVideo
+                      ? {
+                          video_provider: uploadedVideo.provider,
+                          provider_video_id: uploadedVideo.providerVideoId,
+                          video_playback_url: uploadedVideo.playbackUrl,
+                          video_embed_url: uploadedVideo.embedUrl,
+                          video_thumbnail_url: uploadedVideo.thumbnailUrl,
+                          video_preview_url: uploadedVideo.previewUrl,
+                          video_duration_seconds: uploadedVideo.duration,
+                          video_status: uploadedVideo.status,
+                        }
+                      : {}),
                   }
                 : item
             )
           );
+          if (uploadedVideo) {
+            await attachSocialVideoToThread(uploadedVideo, String(updatedThread.id));
+            pendingVideoCleanup = null;
+          }
 
           {
             const { error: deleteMentionsError } = await supabase
@@ -2232,6 +2378,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         toast.success(t("Post updated"));
       } else {
         const uploadedUrls = await uploadComposerMedia(createMediaFiles, "thread");
+        const uploadedVideo = await uploadCreateVideo(createMediaFiles);
+        pendingVideoCleanup = uploadedVideo;
 
         const { data: createdThread, error } = await supabase
           .from("threads" as "profiles")
@@ -2244,6 +2392,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             images: uploadedUrls,
             likes: 0,
             is_sensitive: createIsSensitive,
+            ...(uploadedVideo
+              ? {
+                  video_provider: uploadedVideo.provider,
+                  provider_video_id: uploadedVideo.providerVideoId,
+                  video_playback_url: uploadedVideo.playbackUrl,
+                  video_embed_url: uploadedVideo.embedUrl,
+                  video_thumbnail_url: uploadedVideo.thumbnailUrl,
+                  video_preview_url: uploadedVideo.previewUrl,
+                  video_duration_seconds: uploadedVideo.duration,
+                  video_status: uploadedVideo.status,
+                }
+              : {}),
           } as Record<string, unknown>)
           .select("id, title, content, tags, hashtags, images, map_id, likes, created_at, user_id")
           .single();
@@ -2264,6 +2424,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             created_at: String(createdThread.created_at),
             user_id: String(createdThread.user_id),
             is_sensitive: createIsSensitive,
+            ...(uploadedVideo
+              ? {
+                  video_provider: uploadedVideo.provider,
+                  provider_video_id: uploadedVideo.providerVideoId,
+                  video_playback_url: uploadedVideo.playbackUrl,
+                  video_embed_url: uploadedVideo.embedUrl,
+                  video_thumbnail_url: uploadedVideo.thumbnailUrl,
+                  video_preview_url: uploadedVideo.previewUrl,
+                  video_duration_seconds: uploadedVideo.duration,
+                  video_status: uploadedVideo.status,
+                }
+              : {}),
             author: {
               display_name: profile?.display_name || "You",
               avatar_url: profile?.avatar_url || null,
@@ -2272,6 +2444,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             },
           };
           setNotices((prev) => [optimisticThread, ...prev.filter((item) => item.id !== optimisticThread.id)]);
+          if (uploadedVideo) {
+            await attachSocialVideoToThread(uploadedVideo, String(createdThread.id));
+            pendingVideoCleanup = null;
+          }
           const finalMentions = await resolveMentionsFromText(String(createdThread.content ?? ""), createMentions);
           if (finalMentions.length > 0) {
             await persistPostMentions(String(createdThread.id), finalMentions);
@@ -2302,6 +2478,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setCreateErrors({});
       void fetchNotices(true);
     } catch (error: unknown) {
+      if (pendingVideoCleanup?.providerVideoId) {
+        void deleteSocialVideo(pendingVideoCleanup.providerVideoId);
+      }
       toast.error(getErrorMessage(error, t("Failed to post notice")));
     } finally {
       setCreating(false);
@@ -2448,7 +2627,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
     const { error } = await supabase
       .from("thread_comments" as "profiles")
-      .update({ content: trimmed } as Record<string, unknown>)
+      .update({ content: trimmed, text: trimmed } as Record<string, unknown>)
       .eq("id", comment.id)
       .eq("user_id", user.id);
     if (error) {
@@ -3500,14 +3679,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                             {(notice.hashtags || []).slice(0, 3).map((h) => (h.startsWith("#") ? h : `#${h}`)).join(" ")}
                           </p>
                         )}
-                        {notice.images && notice.images.length > 0 && (
+                        {getNoticeMediaItems(notice).length > 0 && (
                           <PostMediaCarousel
                             className="mt-2"
                             isSensitive={notice.is_sensitive === true}
-                            items={notice.images.map((src, index) => ({
-                              src,
-                              alt: `${notice.title || "Post"} ${index + 1}`,
-                            }))}
+                            items={getNoticeMediaItems(notice)}
                           />
                         )}
                         <div className="mt-3 flex items-center">
@@ -3590,9 +3766,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                               aria-label="Toggle replies"
                             >
                               <MessageCircle className="w-4 h-4" />
-                              {(commentsByThread[notice.id] || []).length > 0 ? (
+                              {Math.max((commentsByThread[notice.id] || []).length, Number(notice.comment_count ?? 0)) > 0 ? (
                                 <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-muted px-1 text-[10px] leading-[14px] text-muted-foreground text-center">
-                                  {(commentsByThread[notice.id] || []).length}
+                                  {Math.max((commentsByThread[notice.id] || []).length, Number(notice.comment_count ?? 0))}
                                 </span>
                               ) : null}
                             </button>
@@ -3986,6 +4162,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         }}
         onSubmit={handleCreateNotice}
         onTitleChange={setTitle}
+        onVideoTrimStartChange={updateCreateVideoTrimStart}
         previewUrlLabel={formatUrlLabel}
         remainingCreateWords={remainingCreateWords}
         renderComposerTextWithMentions={renderComposerTextWithMentions}

@@ -34,6 +34,7 @@ import { ManageFamilySheet } from "@/components/monetization/ManageFamilySheet";
 import { SettingsProfileSummary } from "@/components/layout/SettingsProfileSummary";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { HelpSupportDialog } from "@/components/support/HelpSupportDialog";
+import { shouldSuppressWebHeaderForNativeShell } from "@/lib/nativeShell";
 
 // ─── Notification types & helpers ────────────────────────────────────────────
 
@@ -596,8 +597,11 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
   };
 
   const handleLogoClick = () => navigate("/");
+  const suppressForNativeShell = shouldSuppressWebHeaderForNativeShell();
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  if (suppressForNativeShell) return null;
+
   return (
     <header className="sticky top-0 z-[1700] bg-background border-b border-border/20">
       <div className="flex items-center justify-between px-4 w-full max-w-[430px] mx-auto h-14">
@@ -663,7 +667,7 @@ export const GlobalHeader = ({ onUpgradeClick, onMenuClick, closeButton }: Globa
                 <div className="pt-10">
                   <EmptyStateCard
                     icon={<Bell size={28} strokeWidth={1.75} aria-hidden />}
-                    headline={t("You're all caught up.")}
+                    headline={t("You're all caught up")}
                   />
                 </div>
               )}

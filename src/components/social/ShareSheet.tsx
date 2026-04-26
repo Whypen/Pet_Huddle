@@ -40,6 +40,32 @@ type MatchRow = {
   user2_id: string;
 };
 
+const SHARE_LOGO_PATH = "/huddle-logo.jpg";
+
+const getShareFileName = (url: string) => {
+  try {
+    const pathname = new URL(url, window.location.origin).pathname;
+    const name = pathname.split("/").filter(Boolean).pop() || "huddle-share.jpg";
+    return /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}.jpg`;
+  } catch {
+    return "huddle-share.jpg";
+  }
+};
+
+const getImageShareFile = async (url: string): Promise<File | null> => {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return null;
+  try {
+    const response = await fetch(trimmed, { credentials: "omit" });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) return null;
+    return new File([blob], getShareFileName(trimmed), { type: blob.type || "image/jpeg" });
+  } catch {
+    return null;
+  }
+};
+
 export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetProps) => {
   const { profile } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
@@ -277,7 +303,7 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
 
   const handleNativeShare = useCallback(async () => {
     onShareAction?.();
-    const payload: ShareData = {
+    const basePayload: ShareData = {
       title: share.title,
       text: share.nativeShareText,
       url: share.canonicalUrl,
@@ -295,7 +321,27 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
     }
 
     try {
-      await navigator.share(payload);
+      const imageCandidates = Array.from(
+        new Set(
+          [share.imageUrl, `${window.location.origin}${SHARE_LOGO_PATH}`]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      );
+      let sharedWithFile = false;
+      for (const imageUrl of imageCandidates) {
+        const file = await getImageShareFile(imageUrl);
+        if (!file) continue;
+        const filePayload = { ...basePayload, files: [file] };
+        if (navigator.canShare?.(filePayload)) {
+          await navigator.share(filePayload);
+          sharedWithFile = true;
+          break;
+        }
+      }
+      if (!sharedWithFile) {
+        await navigator.share(basePayload);
+      }
       toast.success("Shared");
       onClose();
     } catch (error) {
@@ -305,7 +351,7 @@ export const ShareSheet = ({ open, onClose, share, onShareAction }: ShareSheetPr
       }
       toast.error("Unable to share right now");
     }
-  }, [onClose, onShareAction, share.canonicalUrl, share.nativeShareText, share.title]);
+  }, [onClose, onShareAction, share.canonicalUrl, share.imageUrl, share.nativeShareText, share.title]);
 
   const handleShareToChat = useCallback(async () => {
     if (!profile?.id) {

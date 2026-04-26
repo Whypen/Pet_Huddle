@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -245,8 +245,13 @@ const Index = () => {
   }, [selectedPet?.dob, selectedPet?.id, selectedPet?.is_active, user?.id]);
 
   // SPRINT 2: Case-insensitive species matching for wisdom tips
-  const getRandomTip = (species: string) => {
-    const normalizedSpecies = species.charAt(0).toUpperCase() + species.slice(1).toLowerCase();
+  const getRandomTip = useCallback((species: string) => {
+    const normalizedValue = species.trim().toLowerCase();
+    const normalizedSpecies =
+      normalizedValue === "dogs" ? "Dog" :
+      normalizedValue === "cats" ? "Cat" :
+      normalizedValue === "other" || normalizedValue === "others" ? "Others" :
+      species.charAt(0).toUpperCase() + species.slice(1).toLowerCase();
     const tips = wisdomTips[normalizedSpecies];
     if (!tips?.length) return null;
     const tipKey = tips[Math.floor(Math.random() * tips.length)];
@@ -254,7 +259,7 @@ const Index = () => {
     const fallbackLeaf = tipKey.split(".").at(-1) || "";
     if (!tipText || tipText === tipKey || tipText === fallbackLeaf) return null;
     return tipText;
-  };
+  }, [t]);
 
   const displayName = profile?.display_name || t("Friend");
   const firstName = displayName.split(" ")[0];
@@ -269,7 +274,8 @@ const Index = () => {
       : [];
     return roles.length > 0 ? roles.join(" · ") : "Animal Friend";
   })();
-  const selectedPetTip = selectedPet ? getRandomTip(selectedPet.species) : null;
+  const selectedPetSpecies = selectedPet?.species;
+  const selectedPetTip = useMemo(() => selectedPetSpecies ? getRandomTip(selectedPetSpecies) : null, [getRandomTip, selectedPetSpecies]);
 
   if (loading) {
     return (
