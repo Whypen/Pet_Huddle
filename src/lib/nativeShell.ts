@@ -70,6 +70,12 @@ declare global {
     ReactNativeWebView?: {
       postMessage: (message: string) => void;
     };
+    __HUDDLE_NATIVE_ROUTE_CHROME__?: {
+      suppressWebHeader?: boolean;
+      suppressWebBottomNav?: boolean;
+      nativeBottomNav?: boolean;
+      activeTab?: string | null;
+    } | null;
     webkit?: {
       messageHandlers?: Record<string, { postMessage: (message: unknown) => void }>;
     };
@@ -207,6 +213,14 @@ export const hasNativeShell = () => {
     typeof window.ReactNativeWebView?.postMessage === "function"
     || typeof window.webkit?.messageHandlers?.huddle?.postMessage === "function"
   );
+};
+
+export const shouldSuppressWebHeaderForNativeShell = () => {
+  return hasNativeShell() && window.__HUDDLE_NATIVE_ROUTE_CHROME__?.suppressWebHeader === true;
+};
+
+export const shouldSuppressWebBottomNavForNativeShell = () => {
+  return hasNativeShell() && window.__HUDDLE_NATIVE_ROUTE_CHROME__?.suppressWebBottomNav === true;
 };
 
 export const syncNativeAuthState = (signedIn: boolean, userId?: string | null) => {
