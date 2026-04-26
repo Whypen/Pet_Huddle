@@ -154,11 +154,6 @@ const SignupName = () => {
 
         setFlowState("signup");
         sessionStorage.removeItem(SIGNUP_TURNSTILE_TOKEN_KEY);
-        if (data.email_opt_in) {
-          void supabase.functions
-            .invoke("send-marketing-doi-email", { body: { user_id: (createdUser as { id?: string } | null)?.id } })
-            .catch((err) => console.warn("[signup-name] marketing DOI email failed silently", err));
-        }
         navigate("/signup/verify", { replace: true });
         return;
       }
