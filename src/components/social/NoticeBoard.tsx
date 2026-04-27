@@ -4276,13 +4276,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                {depth > 0 ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute left-[34px] top-[-12px] z-0 h-[46px] w-px bg-[rgba(74,73,101,0.18)]"
+	                                    className="pointer-events-none absolute left-0 top-[-12px] z-0 h-3 w-px bg-[rgba(74,73,101,0.28)]"
 	                                  />
 	                                ) : null}
 	                                {hasChildComments ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute bottom-[-12px] left-[34px] top-[58px] z-0 w-px bg-[rgba(74,73,101,0.18)]"
+	                                    className="pointer-events-none absolute bottom-[-12px] left-[18px] z-0 h-3 w-px bg-[rgba(74,73,101,0.28)]"
 	                                  />
 	                                ) : null}
                                 <div className="flex items-start gap-3">
