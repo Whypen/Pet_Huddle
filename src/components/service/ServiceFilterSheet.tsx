@@ -104,7 +104,7 @@ export function ServiceFilterSheet({ isOpen, onClose, filters, onApply }: Servic
       isOpen={isOpen}
       onClose={onClose}
       title="Filters"
-      className="pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+30px)]"
+      className="pb-4 [--huddle-sheet-bottom-padding:16px] huddle-sheet-bottom-padding"
       contentClassName="pb-2 overflow-x-visible"
     >
       <div className="space-y-4 pb-2 pr-1">

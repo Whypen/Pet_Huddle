@@ -93,7 +93,7 @@ export function ServiceDateSheet({
       isOpen={isOpen}
       onClose={onClose}
       title="Service date"
-      className="pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+30px)]"
+      className="pb-4 [--huddle-sheet-bottom-padding:16px] huddle-sheet-bottom-padding"
       contentClassName="overflow-x-visible"
     >
       <div className="space-y-4">

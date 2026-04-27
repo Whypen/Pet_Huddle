@@ -56,6 +56,7 @@ export function GlassSheet({
 
           {/* Sheet — slides up from bottom, E2 glass */}
           <motion.div
+            data-huddle-bottom-sheet="true"
             key="glass-sheet-panel"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
@@ -63,7 +64,7 @@ export function GlassSheet({
             transition={{ type: "spring", damping: 30, stiffness: 280 }}
             className={cn(
               "fixed left-0 right-0 z-[4210] mx-auto w-full max-w-[var(--app-max-width,430px)] glass-e2",
-              "rounded-t-[20px] p-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+18px)] max-h-[calc(100vh-env(safe-area-inset-bottom)-8px)]",
+              "rounded-t-[20px] px-5 pt-5 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)]",
               "flex flex-col",
               className,
             )}

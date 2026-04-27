@@ -542,6 +542,7 @@ interface PinDetailModalProps {
           onClick={onClose}
         >
           <motion.div
+            data-huddle-bottom-sheet="true"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
@@ -550,7 +551,7 @@ interface PinDetailModalProps {
             className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-hidden flex min-h-0 flex-col"
           >
             {/* Content area */}
-            <div className="min-h-0 flex-1 overflow-y-auto p-6 pb-4 overscroll-contain">
+            <div className="min-h-0 max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-120px)] overflow-y-auto p-6 pb-4 overscroll-contain">
               {/* Header */}
               <div className="flex items-center justify-between mb-4 gap-3">
                 <div className="flex items-center gap-2">
@@ -648,7 +649,7 @@ interface PinDetailModalProps {
             </div>
 
             {/* Footer row (See on Social left, support + 3-dot menu right) */}
-            <div className="sticky bottom-0 border-t border-border bg-card px-6 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] flex items-center justify-end">
+            <div className="border-t border-border bg-card px-6 pt-3 pb-4 [--huddle-sheet-bottom-padding:16px] huddle-sheet-bottom-padding flex items-center justify-end">
               {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
                 <button
                   type="button"
@@ -769,12 +770,12 @@ interface PinDetailModalProps {
           onClick={() => setIsEditing(false)}
         >
           <motion.div
+            data-huddle-bottom-sheet="true"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl p-6 max-h-[calc(100svh-var(--nav-height,64px)-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto"
-            style={{ marginBottom: "calc(var(--nav-height,64px) + env(safe-area-inset-bottom,0px))" }}
+            className="w-full max-w-[var(--app-max-width,430px)] bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold text-brandText">Edit Alert</h3>

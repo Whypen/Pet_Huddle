@@ -221,6 +221,9 @@
    5. Design system utilities
    ============================================ */
 @layer utilities {
+  .huddle-sheet-bottom-padding {
+    padding-bottom: var(--huddle-sheet-bottom-padding, calc(env(safe-area-inset-bottom, 0px) + 16px));
+  }
 
   /* ── Scrollbar utilities ──────────────────── */
   .scrollbar-hide {
