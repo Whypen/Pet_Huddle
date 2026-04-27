@@ -4312,17 +4312,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     )}
                                   </button>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex min-w-0 items-baseline gap-1.5">
-                                      <button
-                                        type="button"
-                                        className="min-w-0 truncate text-sm font-semibold text-brandText underline-offset-2 hover:underline"
-                                        onClick={() => openProfile(c.user_id, commentSocialId)}
-                                      >
-                                        {commentSocialId}
-                                      </button>
-                                      {(c.author as (ThreadComment["author"] & { is_verified?: boolean | null }))?.is_verified === true ? (
-                                        <BadgeCheck className="h-3.5 w-3.5 shrink-0 fill-brandBlue text-white" aria-label="Verified" />
-                                      ) : null}
+                                    <div className="flex min-w-0 items-baseline justify-between gap-3">
+                                      <div className="flex min-w-0 items-baseline gap-1.5">
+                                        <button
+                                          type="button"
+                                          className="min-w-0 truncate text-sm font-semibold text-brandText underline-offset-2 hover:underline"
+                                          onClick={() => openProfile(c.user_id, commentSocialId)}
+                                        >
+                                          {commentSocialId}
+                                        </button>
+                                        {(c.author as (ThreadComment["author"] & { is_verified?: boolean | null }))?.is_verified === true ? (
+                                          <BadgeCheck className="h-3.5 w-3.5 shrink-0 fill-brandBlue text-white" aria-label="Verified" />
+                                        ) : null}
+                                      </div>
                                       <span className="shrink-0 text-xs text-[rgba(74,73,101,0.45)]">
                                         {formatCompactTimeAgo(c.created_at)}
                                       </span>
@@ -4351,7 +4353,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         }))}
                                       />
                                     )}
-		                                <div className="mt-2 flex items-center gap-1">
+		                                <div className="mt-2 flex items-center justify-end gap-1">
 		                                  <button
 		                                    type="button"
 		                                    onClick={() => replyToComment(notice, c)}
