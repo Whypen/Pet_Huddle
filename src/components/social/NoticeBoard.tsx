@@ -3782,11 +3782,50 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    }
 	                    childCommentsByParent.set(parentId, [...(childCommentsByParent.get(parentId) || []), comment]);
 	                  });
-	                  const flattenComments = (comments: ThreadComment[], depth = 0): Array<{ comment: ThreadComment; depth: number }> =>
-	                    comments.flatMap((comment) => [
-	                      { comment, depth },
-	                      ...flattenComments(childCommentsByParent.get(comment.id) || [], Math.min(depth + 1, 2)),
-	                    ]);
+	                  const flattenComments = (
+	                    comments: ThreadComment[],
+	                    depth = 0,
+	                    activeRailColumns: boolean[] = [],
+	                    parentRailColumn: number | null = null,
+	                    parentVisualDepth: number | null = null
+	                  ): Array<{
+	                    comment: ThreadComment;
+	                    visualDepth: number;
+	                    activeRailColumns: boolean[];
+	                    parentRailColumn: number | null;
+	                    childRailColumn: number;
+	                    isMaxDepthContinuation: boolean;
+	                    isLastSibling: boolean;
+	                    hasChildComments: boolean;
+	                  }> =>
+	                    comments.flatMap((comment, index) => {
+	                      const children = childCommentsByParent.get(comment.id) || [];
+	                      const visualDepth = Math.min(depth, 2);
+	                      const isMaxDepthContinuation = visualDepth === 2 && parentVisualDepth === 2;
+	                      const childParentRailColumn = visualDepth;
+	                      const isLastSibling = index === comments.length - 1;
+	                      const currentRailColumns = Array.from({ length: 3 }, (_, column) => activeRailColumns[column] === true);
+	                      const childRailColumns = currentRailColumns.slice();
+	                      if (parentRailColumn !== null) {
+	                        childRailColumns[parentRailColumn] = !isLastSibling;
+	                      }
+	                      if (children.length > 0) {
+	                        childRailColumns[childParentRailColumn] = true;
+	                      }
+	                      return [
+	                        {
+	                          comment,
+	                          visualDepth,
+	                          activeRailColumns: currentRailColumns,
+	                          parentRailColumn,
+	                          childRailColumn: childParentRailColumn,
+	                          isMaxDepthContinuation,
+	                          isLastSibling,
+	                          hasChildComments: children.length > 0,
+	                        },
+	                        ...flattenComments(children, depth + 1, childRailColumns, childParentRailColumn, visualDepth),
+	                      ];
+	                    });
 	                  const threadedComments = flattenComments(topLevelComments);
 	                  const commentCountForNotice = Math.max((loadedComments || []).length, Number(notice.comment_count ?? 0));
 	                  const commentsAreLoading = expandedReplies.has(notice.id) && commentsLoadingThreads.has(notice.id);
@@ -4296,10 +4335,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              </div>
 	                            )}
 
-	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
-	                              const visualDepth = depth > 0 ? 1 : 0;
+	                            {threadedComments.map(({ comment: c, visualDepth, activeRailColumns, parentRailColumn, childRailColumn, isMaxDepthContinuation, isLastSibling, hasChildComments }, commentIndex) => {
 	                              const commentIndent = visualDepth * 40;
-	                              const hasVisibleChildComments = (childCommentsByParent.get(c.id)?.length || 0) > 0;
+	                              const railColumnLeft = (column: number) => `${column * 40 + 18 - commentIndent}px`;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
@@ -4316,23 +4354,40 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                }}
 	                                className="relative box-border max-w-full py-2"
 	                              >
-	                                {visualDepth === 0 && hasVisibleChildComments ? (
+	                                {activeRailColumns.map((isActive, column) => {
+	                                  if (!isActive) return null;
+	                                  const isDirectParentRail = column === parentRailColumn && !isMaxDepthContinuation;
+	                                  return (
+	                                    <span
+	                                      key={`rail-${c.id}-${column}`}
+	                                      aria-hidden="true"
+	                                      data-comment-rail-column={column}
+	                                      data-comment-rail-kind="spine"
+	                                      style={{ left: railColumnLeft(column) }}
+	                                      className={cn(
+	                                        "pointer-events-none absolute top-0 z-0 w-px bg-[rgba(74,73,101,0.14)]",
+	                                        isDirectParentRail && isLastSibling ? "h-[28px]" : "bottom-[-8px]"
+	                                      )}
+	                                    />
+	                                  );
+	                                })}
+	                                {parentRailColumn !== null && !isMaxDepthContinuation ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute bottom-[-8px] left-[18px] top-[44px] z-0 w-px bg-[rgba(74,73,101,0.14)]"
+	                                    data-comment-rail-column={parentRailColumn}
+	                                    data-comment-rail-kind="dot"
+	                                    style={{ left: railColumnLeft(parentRailColumn) }}
+	                                    className="pointer-events-none absolute top-[25px] z-[1] h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[#C6CAD6] ring-2 ring-white"
 	                                  />
 	                                ) : null}
-	                                {visualDepth > 0 ? (
-	                                  <>
-	                                    <span
-	                                      aria-hidden="true"
-	                                      className="pointer-events-none absolute bottom-0 left-[-22px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.14)]"
-	                                    />
-	                                    <span
-	                                      aria-hidden="true"
-	                                      className="pointer-events-none absolute left-[-21.5px] top-[25px] z-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[#dddfe7]"
-	                                    />
-	                                  </>
+	                                {hasChildComments && !activeRailColumns[childRailColumn] ? (
+	                                  <span
+	                                    aria-hidden="true"
+	                                    data-comment-rail-column={childRailColumn}
+	                                    data-comment-rail-kind="spine"
+	                                    style={{ left: railColumnLeft(childRailColumn) }}
+	                                    className="pointer-events-none absolute bottom-[-8px] top-[44px] z-0 w-px bg-[rgba(74,73,101,0.14)]"
+	                                  />
 	                                ) : null}
                                 <div className="flex items-start gap-3">
                                   <button
