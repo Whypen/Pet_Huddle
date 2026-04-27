@@ -4299,7 +4299,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                    />
 	                                    <span
 	                                      aria-hidden="true"
-	                                      className="pointer-events-none absolute left-[-20px] top-[25px] z-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[rgba(74,73,101,0.18)]"
+	                                      className="pointer-events-none absolute left-[-19.5px] top-[25px] z-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[#dddfe7]"
 	                                    />
 	                                  </>
 	                                ) : null}
