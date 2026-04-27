@@ -4274,7 +4274,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
 	                              const visualDepth = depth > 0 ? 1 : 0;
-	                              const commentIndent = visualDepth * 52;
+	                              const commentIndent = visualDepth * 44;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
@@ -4292,10 +4292,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                className="relative box-border max-w-full py-2"
 	                              >
 	                                {visualDepth > 0 ? (
-	                                  <span
-	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute bottom-0 left-[-34px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.16)]"
-	                                  />
+	                                  <>
+	                                    <span
+	                                      aria-hidden="true"
+	                                      className="pointer-events-none absolute bottom-0 left-[-26px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.16)]"
+	                                    />
+	                                    <span
+	                                      aria-hidden="true"
+	                                      className="pointer-events-none absolute left-[-26px] top-[24px] z-0 h-3 w-3 rounded-bl-[10px] border-b border-l border-[rgba(74,73,101,0.16)]"
+	                                    />
+	                                  </>
 	                                ) : null}
                                 <div className="flex items-start gap-3">
                                   <button
