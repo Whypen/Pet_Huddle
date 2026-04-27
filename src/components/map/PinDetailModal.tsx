@@ -649,7 +649,10 @@ interface PinDetailModalProps {
             </div>
 
             {/* Footer row (See on Social left, support + 3-dot menu right) */}
-            <div className="border-t border-border bg-card px-6 pt-3 pb-4 [--huddle-sheet-bottom-padding:16px] huddle-sheet-bottom-padding flex items-center justify-end">
+            <div
+              className="border-t border-border bg-card px-6 pt-3 pb-4 [--huddle-sheet-bottom-padding:16px] huddle-sheet-bottom-padding flex items-center justify-end"
+              style={{ paddingBottom: 16 }}
+            >
               {(!alert.is_demo || DEMO_SEEDED) && isSocial ? (
                 <button
                   type="button"
