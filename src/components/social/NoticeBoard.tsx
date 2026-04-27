@@ -4273,7 +4273,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            )}
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
-	                              const commentIndent = Math.min(depth * 26, 52);
+	                              const visualDepth = depth > 0 ? 1 : 0;
+	                              const commentIndent = visualDepth * 52;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
@@ -4290,10 +4291,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                }}
 	                                className="relative box-border max-w-full py-2"
 	                              >
-	                                {depth > 0 ? (
+	                                {visualDepth > 0 ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute bottom-0 left-[-13px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.18)]"
+	                                    className="pointer-events-none absolute bottom-0 left-[-34px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.16)]"
 	                                  />
 	                                ) : null}
                                 <div className="flex items-start gap-3">
