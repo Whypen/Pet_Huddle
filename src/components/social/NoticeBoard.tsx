@@ -4391,7 +4391,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                      style={{ left: railColumnLeft(column) }}
 	                                      className={cn(
 	                                        "pointer-events-none absolute top-0 z-0 w-px bg-[rgba(74,73,101,0.14)]",
-	                                        isDirectParentRail && isLastSibling && !hasVisibleChildComments ? "h-[28px]" : "bottom-[-8px]"
+	                                        isDirectParentRail && isLastSibling && (!isMaxDepthContinuation || !hasVisibleChildComments)
+	                                          ? "h-[28px]"
+	                                          : "bottom-[-8px]"
 	                                      )}
 	                                    />
 	                                  );
