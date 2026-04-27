@@ -18,6 +18,14 @@ export interface Thread {
   alert_district?: string | null;
   has_alert_link?: boolean;
   is_sensitive?: boolean | null;
+  video_provider?: "bunny_stream" | null;
+  provider_video_id?: string | null;
+  video_playback_url?: string | null;
+  video_embed_url?: string | null;
+  video_thumbnail_url?: string | null;
+  video_preview_url?: string | null;
+  video_duration_seconds?: number | null;
+  video_status?: string | null;
   author: {
     display_name: string | null;
     social_id?: string | null;
@@ -108,6 +116,14 @@ export type FeedHydrationRpcRow = {
   alert_type?: string | null;
   alert_district?: string | null;
   has_alert_link?: boolean | null;
+  video_provider?: string | null;
+  provider_video_id?: string | null;
+  video_playback_url?: string | null;
+  video_embed_url?: string | null;
+  video_thumbnail_url?: string | null;
+  video_preview_url?: string | null;
+  video_duration_seconds?: number | null;
+  video_status?: string | null;
   comments?: unknown;
   thread_mentions?: unknown;
   reply_mentions?: unknown;
@@ -123,6 +139,21 @@ export type ComposerMedia = {
   file: File;
   kind: "image" | "video";
   previewUrl: string;
+  aspectRatio?: number;
+  durationSeconds?: number;
+  needsTrim?: boolean;
+  trimStartSeconds?: number;
+  processedFile?: File;
+  videoMetadata?: {
+    provider: "bunny_stream";
+    providerVideoId: string;
+    playbackUrl: string;
+    embedUrl: string;
+    thumbnailUrl: string | null;
+    previewUrl: string | null;
+    duration: number | null;
+    status: string;
+  };
 };
 
 export type UploadLifecycleStatus = "idle" | "uploading" | "success" | "error";

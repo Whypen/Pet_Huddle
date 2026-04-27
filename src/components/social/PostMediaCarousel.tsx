@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type MediaItem = {
   src: string;
   alt?: string;
+  kind?: "image" | "video";
+  poster?: string | null;
+  previewSrc?: string | null;
+  embedUrl?: string | null;
+  status?: string | null;
 };
 
 type PostMediaCarouselProps = {
@@ -16,7 +21,7 @@ type PostMediaCarouselProps = {
 };
 
 const MIN_ASPECT = 3 / 4;
-const MAX_ASPECT = 4 / 3;
+const MAX_ASPECT = 16 / 9;
 const DEFAULT_CAROUSEL_ASPECT = 1;
 const mediaAspectCache = new Map<string, number>();
 
@@ -42,6 +47,101 @@ const TapHintIcon = () => (
   </span>
 );
 
+const FeedVideo = ({
+  item,
+  isSensitive,
+  sensitiveRevealed,
+  onReadyAspect,
+}: {
+  item: MediaItem;
+  isSensitive: boolean;
+  sensitiveRevealed: boolean;
+  onReadyAspect: (width: number, height: number) => void;
+}) => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [intent, setIntent] = useState(false);
+  const [loadPlayer, setLoadPlayer] = useState(false);
+
+  useEffect(() => {
+    if (intent || isSensitive) return;
+    const node = rootRef.current;
+    if (!node) return;
+    let timer: number | null = null;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.72) {
+          timer = window.setTimeout(() => setIntent(true), 1000);
+        } else if (timer) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+      },
+      { threshold: [0, 0.72, 1] },
+    );
+    observer.observe(node);
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [intent, isSensitive]);
+
+  useEffect(() => {
+    if (!intent || (isSensitive && !sensitiveRevealed)) return;
+    const timer = window.setTimeout(() => setLoadPlayer(true), 120);
+    return () => window.clearTimeout(timer);
+  }, [intent, isSensitive, sensitiveRevealed]);
+
+  const poster = item.poster || item.previewSrc || "";
+  const embedUrl = item.embedUrl || item.src;
+
+  return (
+    <div ref={rootRef} className="relative h-full w-full bg-black">
+      {poster ? (
+        <img
+          src={poster}
+          alt={item.alt || ""}
+          className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
+          style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
+          loading="lazy"
+          onLoad={(event) => onReadyAspect(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+        />
+      ) : (
+        <div className="h-full w-full bg-muted/70" />
+      )}
+      {!loadPlayer ? (
+        <button
+          type="button"
+          aria-label="Play video"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIntent(true);
+            setLoadPlayer(true);
+          }}
+          className="absolute inset-0 flex items-center justify-center bg-black/10 text-white"
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
+            <Play className="ml-0.5 h-5 w-5 fill-current" />
+          </span>
+        </button>
+      ) : (
+        <iframe
+          src={embedUrl}
+          title={item.alt || "Social video"}
+          loading="lazy"
+          allow="accelerometer; gyroscope; encrypted-media; picture-in-picture;"
+          allowFullScreen
+          className="absolute inset-0 h-full w-full border-0"
+        />
+      )}
+      {item.status && item.status !== "ready" ? (
+        <span className="absolute left-3 top-3 rounded-full bg-black/55 px-2.5 py-1 text-xs font-medium text-white">
+          Processing
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
 export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive = false }: PostMediaCarouselProps) => {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fullscreenScrollRef = useRef<HTMLDivElement | null>(null);
@@ -51,13 +151,14 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   const [activeIndex, setActiveIndex] = useState(0);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState(0);
-  const [stableAspect] = useState(() =>
+  const [displayAspect, setDisplayAspect] = useState(() =>
     clampAspect(mediaAspectCache.get(primarySrc) || DEFAULT_CAROUSEL_ASPECT)
   );
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
   const [tapHintDismissed, setTapHintDismissed] = useState(
     () => localStorage.getItem(SENSITIVE_TAP_SEEN_KEY) === "1"
   );
+  const activeSrc = items[activeIndex]?.src || primarySrc;
 
   const revealSensitive = useCallback(() => {
     setSensitiveRevealed((prev) => !prev);
@@ -90,7 +191,11 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
 
   const updateAspect = (src: string, width: number, height: number) => {
     if (!width || !height) return;
-    mediaAspectCache.set(src, width / height);
+    const nextAspect = clampAspect(width / height);
+    mediaAspectCache.set(src, nextAspect);
+    if (src === activeSrc) {
+      setDisplayAspect(nextAspect);
+    }
   };
 
   const scrollToIndex = (index: number) => {
@@ -130,6 +235,10 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   const fullscreenItems = fullscreenIndex != null ? items : [];
 
   useEffect(() => {
+    setDisplayAspect(clampAspect(mediaAspectCache.get(activeSrc) || mediaAspectCache.get(primarySrc) || DEFAULT_CAROUSEL_ASPECT));
+  }, [activeSrc, primarySrc]);
+
+  useEffect(() => {
     if (fullscreenIndex == null) return;
     const node = fullscreenScrollRef.current;
     if (!node) return;
@@ -141,14 +250,14 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
   return (
     <>
       <div className={cn("space-y-2", className)}>
-        <div className="overflow-hidden" style={{ aspectRatio: `${stableAspect}` }}>
+        <div className="overflow-hidden" style={{ aspectRatio: `${displayAspect}` }}>
           <div
             ref={scrollRef}
             className="flex h-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
             onScroll={handleScroll}
           >
             {items.map((item, index) => {
-              const isVideo = isVideoSrc(item.src);
+              const isVideo = item.kind === "video" || isVideoSrc(item.src);
               return (
                 <div
                   key={`${item.src}-${index}`}
@@ -185,20 +294,30 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   }}
                 >
                   {isVideo ? (
+                    item.embedUrl ? (
+                      <FeedVideo
+                        item={item}
+                        isSensitive={isSensitive}
+                        sensitiveRevealed={sensitiveRevealed}
+                        onReadyAspect={(width, height) => updateAspect(item.src, width, height)}
+                      />
+                    ) : (
                     <video
                       src={item.src}
-                      className="h-full w-full object-cover object-center transition-[filter] duration-300 ease-out"
+                      className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
                       style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
                       muted
                       playsInline
-                      preload="metadata"
+                      preload="none"
+                      poster={item.poster || undefined}
                       onLoadedMetadata={(event) => updateAspect(item.src, event.currentTarget.videoWidth, event.currentTarget.videoHeight)}
                     />
+                    )
                   ) : (
                     <img
                       src={item.src}
                       alt={item.alt || ""}
-                      className="h-full w-full object-cover object-center transition-[filter] duration-300 ease-out"
+                      className="h-full w-full object-contain object-center transition-[filter] duration-300 ease-out"
                       style={{ filter: isSensitive && !sensitiveRevealed ? "blur(22px)" : "blur(0px)" }}
                       loading="lazy"
                       onLoad={(event) => updateAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
@@ -294,11 +413,21 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                 }}
               >
                 {fullscreenItems.map((item, index) => {
-                  const isVideo = isVideoSrc(item.src);
+                  const isVideo = item.kind === "video" || isVideoSrc(item.src);
                   return (
                     <div key={`${item.src}-fullscreen-${index}`} className="flex h-full w-full shrink-0 snap-center items-center justify-center p-4">
                       {isVideo ? (
+                        item.embedUrl ? (
+                          <iframe
+                            src={item.embedUrl}
+                            title={item.alt || "Social video"}
+                            allow="accelerometer; gyroscope; encrypted-media; picture-in-picture;"
+                            allowFullScreen
+                            className="h-full w-full border-0"
+                          />
+                        ) : (
                         <video src={item.src} controls autoPlay playsInline className="max-h-full max-w-full object-contain" />
+                        )
                       ) : (
                         <img src={item.src} alt={item.alt || ""} className="max-h-full max-w-full object-contain" />
                       )}

@@ -1,7 +1,7 @@
 import { memo, type ChangeEvent, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { Image, Loader2, X } from "lucide-react";
+import { Image, Loader2, Play, Scissors, X } from "lucide-react";
 
 import { MediaThumb } from "@/components/media/MediaThumb";
 import { NeuButton } from "@/components/ui/NeuButton";
@@ -40,6 +40,7 @@ type NoticeBoardComposerModalProps = {
   onRemoveMedia: (index: number) => void;
   onSensitiveChange: (checked: boolean) => void;
   onSubmit: () => void;
+  onVideoTrimStartChange: (index: number, value: number) => void;
   onTitleChange: (value: string) => void;
   previewUrlLabel: (url: string) => string;
   remainingCreateWords: number;
@@ -75,6 +76,7 @@ export const NoticeBoardComposerModal = memo(({
   onRemoveMedia,
   onSensitiveChange,
   onSubmit,
+  onVideoTrimStartChange,
   onTitleChange,
   previewUrlLabel,
   remainingCreateWords,
@@ -100,7 +102,7 @@ export const NoticeBoardComposerModal = memo(({
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             onClick={(event) => event.stopPropagation()}
-            className="fixed bottom-0 left-0 right-0 max-h-[100svh] w-full overflow-y-auto rounded-t-3xl bg-card p-6 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
+            className="fixed bottom-0 left-0 right-0 mx-auto max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] w-full max-w-[var(--app-max-width,430px)] overflow-y-auto rounded-t-3xl bg-card px-6 pt-6 huddle-sheet-bottom-padding"
           >
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold">{editingNoticeId ? translate("Edit Post") : translate("Create Post")}</h3>
@@ -214,27 +216,61 @@ export const NoticeBoardComposerModal = memo(({
             {createMediaFiles.length > 0 ? (
               <div className="mb-4 mt-4 flex flex-wrap items-start gap-3">
                 {createMediaFiles.map((item, index) => (
-                  <div key={`create-media-${index}`} className="relative h-[150px] w-[150px] shrink-0 overflow-hidden rounded-[24px]">
-                    <MediaThumb
-                      src={item.previewUrl}
-                      alt="Thread preview"
-                      className={cn(
-                        "h-full w-full rounded-[24px]",
-                        composerUploadState.scope === "thread" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]",
-                      )}
-                    />
-                    {composerUploadState.scope === "thread" && composerUploadState.status === "uploading" ? (
-                      <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
-                        Uploading {Math.round(composerUploadState.progress)}%
+                  <div key={`create-media-${index}`} className="w-[150px] shrink-0">
+                    <div className="relative overflow-hidden rounded-[24px]">
+                      <MediaThumb
+                        src={item.previewUrl}
+                        alt="Thread preview"
+                        className={cn(
+                          "block w-full rounded-[24px]",
+                          composerUploadState.scope === "thread" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]",
+                        )}
+                        style={{ aspectRatio: `${item.aspectRatio || 1}` }}
+                      />
+                      {item.kind === "video" ? (
+                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-white">
+                          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/45">
+                            <Play className="ml-0.5 h-4 w-4 fill-current" />
+                          </span>
+                        </div>
+                      ) : null}
+                      {composerUploadState.scope === "thread" && composerUploadState.status === "uploading" ? (
+                        <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
+                          Uploading {Math.round(composerUploadState.progress)}%
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => onRemoveMedia(index)}
+                        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
+                      >
+                        <X className="h-4 w-4 text-white" />
+                      </button>
+                    </div>
+                    {item.kind === "video" ? (
+                      <div className="mt-2 rounded-2xl border border-border/70 bg-muted/30 p-2">
+                        <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-[rgba(74,73,101,0.72)]">
+                          <Scissors className="h-3.5 w-3.5" />
+                          <span>
+                            {item.needsTrim
+                              ? `Trim to ${Math.min(15, Math.round(item.durationSeconds || 15))}s`
+                              : `${Math.min(15, Math.round(item.durationSeconds || 0))}s video`}
+                          </span>
+                        </div>
+                        {item.needsTrim ? (
+                          <input
+                            type="range"
+                            min={0}
+                            max={Math.max(0, Math.floor((item.durationSeconds || 15) - 15))}
+                            step={0.5}
+                            value={item.trimStartSeconds || 0}
+                            onChange={(event) => onVideoTrimStartChange(index, Number(event.target.value))}
+                            className="w-full accent-primary"
+                            aria-label="Trim start"
+                          />
+                        ) : null}
                       </div>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => onRemoveMedia(index)}
-                      className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/45"
-                    >
-                      <X className="h-4 w-4 text-white" />
-                    </button>
                   </div>
                 ))}
               </div>

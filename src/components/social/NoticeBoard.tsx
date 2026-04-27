@@ -197,6 +197,26 @@ type SocialFeedEventType =
 const MAX_COMPOSER_WORDS = 500;
 const MAX_COMPOSER_MEDIA = 10;
 const MENTION_LIVE_SUGGESTIONS_ENABLED = true;
+const MIN_SOCIAL_MEDIA_ASPECT = 3 / 4;
+const MAX_SOCIAL_MEDIA_ASPECT = 16 / 9;
+const clampSocialMediaAspect = (aspect: number) =>
+  Math.min(Math.max(aspect || 1, MIN_SOCIAL_MEDIA_ASPECT), MAX_SOCIAL_MEDIA_ASPECT);
+
+const readImageAspect = (file: File) =>
+  new Promise<number>((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      const aspect = clampSocialMediaAspect(image.naturalWidth / image.naturalHeight);
+      URL.revokeObjectURL(objectUrl);
+      resolve(aspect);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(1);
+    };
+    image.src = objectUrl;
+  });
 
 const getNoticeMediaItems = (notice: Thread) => {
   const images = (notice.images || [])
@@ -1707,6 +1727,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
 
       let nextFile = file;
+      let aspectRatio: number | undefined;
       let durationSeconds: number | undefined;
       let needsTrim = false;
       if (kind === "image") {
@@ -1717,6 +1738,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             maxWidthOrHeight: 1800,
             useWebWorker: true,
           });
+          aspectRatio = await readImageAspect(nextFile);
         } catch {
           toast.error("Failed to process image");
           continue;
@@ -1735,6 +1757,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         file: nextFile,
         kind,
         previewUrl: URL.createObjectURL(nextFile),
+        aspectRatio,
         durationSeconds,
         needsTrim,
         trimStartSeconds: 0,
@@ -4169,9 +4192,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                           src={item.previewUrl}
                                           alt={`Reply media ${index + 1}`}
                                           className={cn(
-                                            "h-28 w-full aspect-video",
+                                            "block w-full rounded-xl",
                                             composerUploadState.scope === "reply" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]"
                                           )}
+                                          style={{ aspectRatio: `${item.aspectRatio || 1}` }}
                                         />
                                         {composerUploadState.scope === "reply" && composerUploadState.status === "uploading" ? (
                                           <div className="pointer-events-none absolute inset-0 z-[8] flex items-center justify-center bg-black/25 text-xs font-semibold text-white">
