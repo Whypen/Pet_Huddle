@@ -5,7 +5,6 @@ import type {
   HydratedRowsResult,
   MentionEntry,
   Thread,
-  ThreadComment,
 } from "@/components/social/noticeboard/types";
 
 type DeriveAlertType = (notice: Thread) => "Stray" | "Lost" | "Caution" | "Others" | null;
@@ -277,61 +276,15 @@ export const hydrateRowsLegacy = async (
     }
   }
 
-  const { data: comments } = await supabase
-    .from("thread_comments" as "profiles")
-    .select(`
-      id,
-      thread_id,
-      content,
-      images,
-      created_at,
-      user_id,
-      author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url)
-    `)
-    .in("thread_id", ids)
-    .order("created_at", { ascending: true });
-
-  const commentsByThread: Record<string, ThreadComment[]> = Object.fromEntries(ids.map((id) => [id, []]));
-  (((comments || []) as unknown) as Array<Record<string, unknown>>).forEach((comment) => {
-    const authorObj = Array.isArray(comment.author) ? comment.author[0] : comment.author;
-    const normalizedComment = {
-      id: String(comment.id),
-      thread_id: String(comment.thread_id),
-      content: String(comment.content || ""),
-      images: (comment.images as string[] | null) ?? null,
-      created_at: String(comment.created_at || new Date().toISOString()),
-      user_id: String(comment.user_id),
-      author:
-        typeof authorObj === "object" && authorObj !== null
-          ? {
-              display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
-              social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
-              avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
-            }
-          : null,
-    } as ThreadComment;
-    commentsByThread[normalizedComment.thread_id] = [...(commentsByThread[normalizedComment.thread_id] || []), normalizedComment];
-  });
-
-  const commentIds = ((comments || []) as Array<{ id: string }>).map((comment) => comment.id);
-  const [postMentionResult, replyMentionResult] = await Promise.all([
-    supabase
-      .from("post_mentions" as never)
-      .select("post_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-      .in("post_id", ids)
-      .order("start_idx", { ascending: true }),
-    commentIds.length > 0
-      ? supabase
-          .from("reply_mentions" as never)
-          .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-          .in("reply_id", commentIds)
-          .order("start_idx", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+  const { data: postMentionRows, error: postMentionError } = await supabase
+    .from("post_mentions" as never)
+    .select("post_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
+    .in("post_id", ids)
+    .order("start_idx", { ascending: true });
 
   const threadMentions: Record<string, MentionEntry[]> = {};
-  if (!postMentionResult.error) {
-    ((postMentionResult.data || []) as Array<{ post_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
+  if (!postMentionError) {
+    ((postMentionRows || []) as Array<{ post_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
       threadMentions[row.post_id] = [
         ...(threadMentions[row.post_id] || []),
         {
@@ -343,29 +296,11 @@ export const hydrateRowsLegacy = async (
       ];
     });
   } else if (import.meta.env.DEV) {
-    console.warn("[social.mentions.post] hydrate fallback failed", postMentionResult.error);
-  }
-
-  const replyMentions: Record<string, MentionEntry[]> = {};
-  if (!replyMentionResult.error) {
-    ((replyMentionResult.data || []) as Array<{ reply_id: string; mentioned_user_id: string; start_idx: number; end_idx: number; social_id_at_time: string }>).forEach((row) => {
-      replyMentions[row.reply_id] = [
-        ...(replyMentions[row.reply_id] || []),
-        {
-          start: Number(row.start_idx),
-          end: Number(row.end_idx),
-          mentionedUserId: row.mentioned_user_id,
-          socialIdAtTime: row.social_id_at_time,
-        },
-      ];
-    });
-  } else if (import.meta.env.DEV) {
-    console.warn("[social.mentions.reply] hydrate fallback failed", replyMentionResult.error);
+    console.warn("[social.mentions.post] hydrate fallback failed", postMentionError);
   }
 
   await primeMentionDirectory([
     ...hydratedRows.map((row) => row.content || ""),
-    ...(((comments || []) as ThreadComment[]).map((comment) => comment.content || "")),
   ]);
 
   const alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
@@ -378,9 +313,9 @@ export const hydrateRowsLegacy = async (
 
   return {
     rows: hydratedRows,
-    commentsByThread,
+    commentsByThread: {},
     threadMentions,
-    replyMentions,
+    replyMentions: {},
     alertTypes,
   };
 };
@@ -413,51 +348,13 @@ export const hydrateRows = async (
       .map((row) => [row.thread_id, row]),
   );
 
-  const commentsByThread: Record<string, ThreadComment[]> = Object.fromEntries(ids.map((id) => [id, []]));
   const threadMentions: Record<string, MentionEntry[]> = {};
-  const replyMentions: Record<string, MentionEntry[]> = {};
 
   const hydratedRows = rows.map((notice) => {
     const hydration = hydrationByThreadId.get(notice.id);
     if (!hydration) return notice;
 
-    const rawComments = Array.isArray(hydration.comments) ? hydration.comments : [];
-    commentsByThread[notice.id] = rawComments.map((comment) => {
-      const authorObj =
-        typeof comment === "object" && comment !== null && typeof (comment as Record<string, unknown>).author === "object"
-          ? ((comment as Record<string, unknown>).author as Record<string, unknown> | null)
-          : null;
-      return {
-        id: String((comment as Record<string, unknown>)?.id || ""),
-        thread_id: String((comment as Record<string, unknown>)?.thread_id || notice.id),
-        content: String((comment as Record<string, unknown>)?.content || ""),
-        images: Array.isArray((comment as Record<string, unknown>)?.images)
-          ? (((comment as Record<string, unknown>).images as unknown[]).filter((value): value is string => typeof value === "string"))
-          : null,
-        created_at: String((comment as Record<string, unknown>)?.created_at || new Date().toISOString()),
-        user_id: String((comment as Record<string, unknown>)?.user_id || ""),
-        author: authorObj
-          ? {
-              display_name: typeof authorObj.display_name === "string" ? authorObj.display_name : null,
-              social_id: typeof authorObj.social_id === "string" ? authorObj.social_id : null,
-              avatar_url: typeof authorObj.avatar_url === "string" ? authorObj.avatar_url : null,
-            }
-          : null,
-      } as ThreadComment;
-    });
-
     threadMentions[notice.id] = parseMentionEntries(hydration.thread_mentions);
-
-    const rawReplyMentions =
-      hydration.reply_mentions && typeof hydration.reply_mentions === "object"
-        ? (hydration.reply_mentions as Record<string, unknown>)
-        : {};
-    Object.entries(rawReplyMentions).forEach(([replyId, entries]) => {
-      const parsedEntries = parseMentionEntries(entries);
-      if (parsedEntries.length > 0) {
-        replyMentions[replyId] = parsedEntries;
-      }
-    });
 
     return {
       ...notice,
@@ -496,7 +393,6 @@ export const hydrateRows = async (
 
   await options.primeMentionDirectory([
     ...hydratedRows.map((row) => row.content || ""),
-    ...Object.values(commentsByThread).flat().map((comment) => comment.content || ""),
   ]);
 
   const alertTypes: Record<string, "Stray" | "Lost" | "Caution" | "Others"> = {};
@@ -509,9 +405,9 @@ export const hydrateRows = async (
 
   return {
     rows: hydratedRows,
-    commentsByThread,
+    commentsByThread: {},
     threadMentions,
-    replyMentions,
+    replyMentions: {},
     alertTypes,
   };
 };

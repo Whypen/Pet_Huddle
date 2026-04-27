@@ -570,7 +570,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [replyMediaFiles, setReplyMediaFiles] = useState<ComposerMedia[]>([]);
   const [replyError, setReplyError] = useState("");
   const [replySubmittingByThread, setReplySubmittingByThread] = useState<Set<string>>(new Set());
-  const [commentRetryingThreads, setCommentRetryingThreads] = useState<Set<string>>(new Set());
+  const [commentsLoadingThreads, setCommentsLoadingThreads] = useState<Set<string>>(new Set());
+  const [commentLoadErrors, setCommentLoadErrors] = useState<Record<string, string>>({});
   const [composerUploadState, setComposerUploadState] = useState<ComposerUploadState>({
     scope: null,
     status: "idle",
@@ -1280,8 +1281,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const applyHydratedRows = useCallback((payload: HydratedRowsResult, options?: { reset?: boolean }) => {
     const reset = options?.reset === true;
+    const hydratedThreadIds = Object.keys(payload.commentsByThread);
 
     setCommentsByThread((prev) => (reset ? payload.commentsByThread : { ...prev, ...payload.commentsByThread }));
+    setCommentLoadErrors((prev) => {
+      if (hydratedThreadIds.length === 0) return reset ? {} : prev;
+      const next = reset ? {} : { ...prev };
+      hydratedThreadIds.forEach((threadId) => {
+        delete next[threadId];
+      });
+      return next;
+    });
     setThreadMentionsById((prev) => (reset ? payload.threadMentions : { ...prev, ...payload.threadMentions }));
     setReplyMentionsById((prev) => (reset ? payload.replyMentions : { ...prev, ...payload.replyMentions }));
     setNewsAlertTypeByThread((prev) => (reset ? payload.alertTypes : { ...prev, ...payload.alertTypes }));
@@ -1289,6 +1299,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const resetHydrationState = useCallback(() => {
     setCommentsByThread({});
+    setCommentsLoadingThreads(new Set());
+    setCommentLoadErrors({});
     setThreadMentionsById({});
     setReplyMentionsById({});
     setNewsAlertTypeByThread({});
@@ -2764,54 +2776,148 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     return displayTags[0] || null;
   };
 
-  const retryLoadThreadComments = useCallback(
-    async (notice: Thread) => {
-      if (!notice?.id || commentRetryingThreads.has(notice.id)) return;
-      setCommentRetryingThreads((prev) => new Set([...prev, notice.id]));
+  const loadCommentsForThread = useCallback(
+    async (threadId: string) => {
+      if (!threadId || commentsLoadingThreads.has(threadId)) return;
+
+      setCommentsLoadingThreads((prev) => new Set([...prev, threadId]));
+      setCommentLoadErrors((prev) => {
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
+
       try {
-        const hydrated = await hydrateRows([notice]);
-        applyHydratedRows(hydrated);
+        const { data, error } = await supabase
+          .from("thread_comments" as "profiles")
+          .select(`
+            id,
+            thread_id,
+            content,
+            images,
+            created_at,
+            user_id,
+            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url)
+          `)
+          .eq("thread_id", threadId)
+          .order("created_at", { ascending: true });
+
+        if (error) throw error;
+
+        const comments = (((data || []) as unknown) as Array<Record<string, unknown>>).map((comment) => {
+          const authorObj = Array.isArray(comment.author) ? comment.author[0] : comment.author;
+          return {
+            id: String(comment.id),
+            thread_id: String(comment.thread_id || threadId),
+            content: String(comment.content || ""),
+            images: (comment.images as string[] | null) ?? null,
+            created_at: String(comment.created_at || new Date().toISOString()),
+            user_id: String(comment.user_id || ""),
+            author:
+              typeof authorObj === "object" && authorObj !== null
+                ? {
+                    display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
+                    social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
+                    avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
+                  }
+                : null,
+          } as ThreadComment;
+        });
+
+        setCommentsByThread((prev) => ({ ...prev, [threadId]: comments }));
+        setNotices((prev) =>
+          prev.map((notice) =>
+            notice.id === threadId && comments.length > Number(notice.comment_count ?? 0)
+              ? { ...notice, comment_count: comments.length }
+              : notice
+          )
+        );
+
+        const commentIds = comments.map((comment) => comment.id).filter(Boolean);
+        if (commentIds.length > 0) {
+          const { data: mentionRows, error: mentionError } = await supabase
+            .from("reply_mentions" as never)
+            .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
+            .in("reply_id", commentIds)
+            .order("start_idx", { ascending: true });
+
+          if (mentionError) {
+            console.error("[social.comments.mentions_load_failed]", { threadId, error: mentionError.message });
+          } else {
+            const nextMentions: Record<string, MentionEntry[]> = {};
+            (((mentionRows || []) as unknown) as Array<Record<string, unknown>>).forEach((row) => {
+              const replyId = String(row.reply_id || "");
+              if (!replyId) return;
+              nextMentions[replyId] = [
+                ...(nextMentions[replyId] || []),
+                {
+                  start: Number(row.start_idx ?? 0),
+                  end: Number(row.end_idx ?? 0),
+                  mentionedUserId: String(row.mentioned_user_id || ""),
+                  socialIdAtTime: String(row.social_id_at_time || ""),
+                },
+              ];
+            });
+            setReplyMentionsById((prev) => ({ ...prev, ...nextMentions }));
+          }
+        }
+
+        await primeMentionDirectory(comments.map((comment) => comment.content || ""));
       } catch (error) {
-        console.error("[social.comments.retry_failed]", { threadId: notice.id, error });
-        toast.error("Unable to load comments.");
+        console.error("[social.comments.load_failed]", { threadId, error });
+        setCommentLoadErrors((prev) => ({
+          ...prev,
+          [threadId]: "Comments could not load. Please try again.",
+        }));
       } finally {
-        setCommentRetryingThreads((prev) => {
+        setCommentsLoadingThreads((prev) => {
           const next = new Set(prev);
-          next.delete(notice.id);
+          next.delete(threadId);
           return next;
         });
       }
     },
-    [applyHydratedRows, commentRetryingThreads, hydrateRows]
+    [commentsLoadingThreads, primeMentionDirectory]
   );
 
   const openCommentsForThread = useCallback(
     (notice: Thread) => {
-      setExpandedReplies((prev) => {
-        const next = new Set(prev);
-        if (next.has(notice.id)) {
+      if (expandedReplies.has(notice.id)) {
+        setExpandedReplies((prev) => {
+          const next = new Set(prev);
           next.delete(notice.id);
-          if (replyFor === notice.id) {
-            setReplyFor(null);
-            resetReplyComposerDraft();
-          }
           return next;
+        });
+        if (replyFor === notice.id) {
+          setReplyFor(null);
+          resetReplyComposerDraft();
         }
+        return;
+      }
 
-        next.add(notice.id);
-        void recordSocialFeedEvent(notice.id, "open_comments");
-        if (isSocialPostingBlocked) {
-          setSocialRestrictionModalOpen(true);
-          return next;
-        }
+      setExpandedReplies((prev) => new Set([...prev, notice.id]));
+      void recordSocialFeedEvent(notice.id, "open_comments");
+      if (commentsByThreadRef.current[notice.id] === undefined) {
+        void loadCommentsForThread(notice.id);
+      }
+      if (isSocialPostingBlocked) {
+        setSocialRestrictionModalOpen(true);
+        return;
+      }
 
-        setReplyFor(notice.id);
-        resetReplyComposerDraft();
-        snapToCommentArea(notice.id, "composer", true);
-        return next;
-      });
+      setReplyFor(notice.id);
+      resetReplyComposerDraft();
+      snapToCommentArea(notice.id, "composer", true);
     },
-    [isSocialPostingBlocked, recordSocialFeedEvent, replyFor, resetReplyComposerDraft, snapToCommentArea]
+    [
+      expandedReplies,
+      isSocialPostingBlocked,
+      loadCommentsForThread,
+      recordSocialFeedEvent,
+      replyFor,
+      resetReplyComposerDraft,
+      snapToCommentArea,
+    ]
   );
 
   const replyToComment = useCallback(
@@ -3618,13 +3724,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                  const loadedComments = commentsByThread[notice.id];
 	                  const visibleComments = (loadedComments || []).filter((comment) => !hiddenComments.has(comment.id));
 	                  const commentCountForNotice = Math.max((loadedComments || []).length, Number(notice.comment_count ?? 0));
-	                  const commentsAreLoading = expandedReplies.has(notice.id) && commentCountForNotice > 0 && loadedComments === undefined;
+	                  const commentsAreLoading = expandedReplies.has(notice.id) && commentsLoadingThreads.has(notice.id);
+	                  const commentLoadError = commentLoadErrors[notice.id];
 	                  const commentsMayBeMissing =
 	                    expandedReplies.has(notice.id) &&
 	                    !commentsAreLoading &&
+	                    !commentLoadError &&
 	                    loadedComments !== undefined &&
 	                    commentCountForNotice > loadedComments.length;
-	                  const commentsAreRetrying = commentRetryingThreads.has(notice.id);
 	                  return (
                   <div
                     key={notice.id}
@@ -4077,20 +4184,32 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
 	                            {commentsAreLoading && (
 	                              <div className="rounded-2xl bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-	                                Loading comments...
+	                                Loading comments
+	                              </div>
+	                            )}
+
+	                            {!commentsAreLoading && commentLoadError && (
+	                              <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+	                                <span>{commentLoadError}</span>
+	                                <button
+	                                  type="button"
+	                                  onClick={() => void loadCommentsForThread(notice.id)}
+	                                  className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
+	                                >
+	                                  Try again
+	                                </button>
 	                              </div>
 	                            )}
 
 	                            {commentsMayBeMissing && (
 	                              <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
-	                                <span>Couldn&apos;t load all comments.</span>
+	                                <span>Some comments could not load.</span>
 	                                <button
 	                                  type="button"
-	                                  onClick={() => void retryLoadThreadComments(notice)}
-	                                  disabled={commentsAreRetrying}
+	                                  onClick={() => void loadCommentsForThread(notice.id)}
 	                                  className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-primary hover:bg-primary/10"
 	                                >
-	                                  {commentsAreRetrying ? "Retrying..." : "Retry"}
+	                                  Try again
 	                                </button>
 	                              </div>
 	                            )}
