@@ -34,6 +34,7 @@ export interface Thread {
 export interface ThreadComment {
   id: string;
   thread_id: string;
+  parent_comment_id?: string | null;
   content: string;
   images?: string[] | null;
   created_at: string;

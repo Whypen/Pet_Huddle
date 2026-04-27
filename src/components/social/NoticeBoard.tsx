@@ -561,6 +561,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [confirmBlockName, setConfirmBlockName] = useState<string>("this user");
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
   const [replyFor, setReplyFor] = useState<string | null>(null);
+  const [replyTargetCommentId, setReplyTargetCommentId] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
   const [replyDismissedPreviewUrls, setReplyDismissedPreviewUrls] = useState<Set<string>>(new Set());
   const [replyMentions, setReplyMentions] = useState<MentionEntry[]>([]);
@@ -1628,6 +1629,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   }, []);
 
   const resetReplyComposerDraft = useCallback(() => {
+    setReplyTargetCommentId(null);
     setReplyContent("");
     setReplyDismissedPreviewUrls(new Set());
     setReplyMentions([]);
@@ -2072,6 +2074,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         .from("thread_comments" as "profiles")
         .insert({
           thread_id: thread.id,
+          parent_comment_id: replyTargetCommentId,
           user_id: user.id,
           content: replyText,
           text: replyText,
@@ -2120,6 +2123,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	        const optimisticReply: ThreadComment = {
           id: String(createdReply.id),
           thread_id: thread.id,
+          parent_comment_id: replyTargetCommentId,
           content: replyText,
           images: uploadedUrls,
           created_at: new Date().toISOString(),
@@ -2793,6 +2797,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           .select(`
             id,
             thread_id,
+            parent_comment_id,
             content,
             images,
             created_at,
@@ -2809,6 +2814,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           return {
             id: String(comment.id),
             thread_id: String(comment.thread_id || threadId),
+            parent_comment_id: typeof comment.parent_comment_id === "string" ? comment.parent_comment_id : null,
             content: String(comment.content || ""),
             images: (comment.images as string[] | null) ?? null,
             created_at: String(comment.created_at || new Date().toISOString()),
@@ -2833,36 +2839,44 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           )
         );
 
-        const commentIds = comments.map((comment) => comment.id).filter(Boolean);
-        if (commentIds.length > 0) {
-          const { data: mentionRows, error: mentionError } = await supabase
-            .from("reply_mentions" as never)
-            .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
-            .in("reply_id", commentIds)
-            .order("start_idx", { ascending: true });
+        setCommentsLoadingThreads((prev) => {
+          const next = new Set(prev);
+          next.delete(threadId);
+          return next;
+        });
 
-          if (mentionError) {
-            console.error("[social.comments.mentions_load_failed]", { threadId, error: mentionError.message });
-          } else {
-            const nextMentions: Record<string, MentionEntry[]> = {};
-            (((mentionRows || []) as unknown) as Array<Record<string, unknown>>).forEach((row) => {
-              const replyId = String(row.reply_id || "");
-              if (!replyId) return;
-              nextMentions[replyId] = [
-                ...(nextMentions[replyId] || []),
-                {
-                  start: Number(row.start_idx ?? 0),
-                  end: Number(row.end_idx ?? 0),
-                  mentionedUserId: String(row.mentioned_user_id || ""),
-                  socialIdAtTime: String(row.social_id_at_time || ""),
-                },
-              ];
-            });
-            setReplyMentionsById((prev) => ({ ...prev, ...nextMentions }));
+        void (async () => {
+          const commentIds = comments.map((comment) => comment.id).filter(Boolean);
+          if (commentIds.length > 0) {
+            const { data: mentionRows, error: mentionError } = await supabase
+              .from("reply_mentions" as never)
+              .select("reply_id, mentioned_user_id, start_idx, end_idx, social_id_at_time")
+              .in("reply_id", commentIds)
+              .order("start_idx", { ascending: true });
+
+            if (mentionError) {
+              console.error("[social.comments.mentions_load_failed]", { threadId, error: mentionError.message });
+            } else {
+              const nextMentions: Record<string, MentionEntry[]> = {};
+              (((mentionRows || []) as unknown) as Array<Record<string, unknown>>).forEach((row) => {
+                const replyId = String(row.reply_id || "");
+                if (!replyId) return;
+                nextMentions[replyId] = [
+                  ...(nextMentions[replyId] || []),
+                  {
+                    start: Number(row.start_idx ?? 0),
+                    end: Number(row.end_idx ?? 0),
+                    mentionedUserId: String(row.mentioned_user_id || ""),
+                    socialIdAtTime: String(row.social_id_at_time || ""),
+                  },
+                ];
+              });
+              setReplyMentionsById((prev) => ({ ...prev, ...nextMentions }));
+            }
           }
-        }
 
-        await primeMentionDirectory(comments.map((comment) => comment.content || ""));
+          await primeMentionDirectory(comments.map((comment) => comment.content || ""));
+        })();
       } catch (error) {
         console.error("[social.comments.load_failed]", { threadId, error });
         setCommentLoadErrors((prev) => ({
@@ -2907,6 +2921,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
       setReplyFor(notice.id);
       resetReplyComposerDraft();
+      setReplyTargetCommentId(null);
       snapToCommentArea(notice.id, "composer", true);
     },
     [
@@ -2927,22 +2942,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
         return;
       }
 
-      const socialId = String(comment.author?.social_id || "").trim();
+      if (replyFor === notice.id && replyTargetCommentId === comment.id) {
+        setReplyFor(null);
+        resetReplyComposerDraft();
+        return;
+      }
+
       setExpandedReplies((prev) => new Set([...prev, notice.id]));
       setReplyFor(notice.id);
       resetReplyComposerDraft();
+      setReplyTargetCommentId(comment.id);
 
+      const socialId = String(comment.author?.social_id || "").trim();
       if (socialId) {
-        const mentionText = `@${socialId} `;
-        setReplyContent(mentionText);
-        setReplyMentions([
-          {
-            start: 0,
-            end: mentionText.trimEnd().length,
-            mentionedUserId: comment.user_id,
-            socialIdAtTime: socialId,
-          },
-        ]);
         upsertMentionDirectory([
           {
             userId: comment.user_id,
@@ -2955,7 +2967,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
       snapToCommentArea(notice.id, "composer", true);
     },
-    [isSocialPostingBlocked, resetReplyComposerDraft, snapToCommentArea, upsertMentionDirectory]
+    [isSocialPostingBlocked, replyFor, replyTargetCommentId, resetReplyComposerDraft, snapToCommentArea, upsertMentionDirectory]
   );
 
   const formatTimeAgo = (date: string) => {
@@ -3723,6 +3735,26 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                  const preview = firstUrl ? linkPreviewByUrl[firstUrl] : null;
 	                  const loadedComments = commentsByThread[notice.id];
 	                  const visibleComments = (loadedComments || []).filter((comment) => !hiddenComments.has(comment.id));
+	                  const visibleCommentIds = new Set(visibleComments.map((comment) => comment.id));
+	                  const childCommentsByParent = new Map<string, ThreadComment[]>();
+	                  const topLevelComments: ThreadComment[] = [];
+	                  visibleComments.forEach((comment) => {
+	                    const parentId =
+	                      comment.parent_comment_id && visibleCommentIds.has(comment.parent_comment_id)
+	                        ? comment.parent_comment_id
+	                        : null;
+	                    if (!parentId) {
+	                      topLevelComments.push(comment);
+	                      return;
+	                    }
+	                    childCommentsByParent.set(parentId, [...(childCommentsByParent.get(parentId) || []), comment]);
+	                  });
+	                  const flattenComments = (comments: ThreadComment[], depth = 0): Array<{ comment: ThreadComment; depth: number }> =>
+	                    comments.flatMap((comment) => [
+	                      { comment, depth },
+	                      ...flattenComments(childCommentsByParent.get(comment.id) || [], Math.min(depth + 1, 2)),
+	                    ]);
+	                  const threadedComments = flattenComments(topLevelComments);
 	                  const commentCountForNotice = Math.max((loadedComments || []).length, Number(notice.comment_count ?? 0));
 	                  const commentsAreLoading = expandedReplies.has(notice.id) && commentsLoadingThreads.has(notice.id);
 	                  const commentLoadError = commentLoadErrors[notice.id];
@@ -3732,6 +3764,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    !commentLoadError &&
 	                    loadedComments !== undefined &&
 	                    commentCountForNotice > loadedComments.length;
+	                  const activeReplyCommentIndex =
+	                    replyFor === notice.id && replyTargetCommentId
+	                      ? threadedComments.findIndex(({ comment }) => comment.id === replyTargetCommentId)
+	                      : -1;
+	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.depth ?? 0 : 0;
 	                  return (
                   <div
                     key={notice.id}
@@ -4054,7 +4091,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                ref={(el) => {
 	                                  replyComposerRefs.current[notice.id] = el;
 	                                }}
-	                                className="form-field-rest order-last relative h-auto min-h-[56px] rounded-[22px] bg-[rgba(33,69,207,0.08)] px-4 py-2 shadow-none"
+	                                style={
+	                                  replyTargetCommentId
+	                                    ? { order: 2, marginLeft: `${Math.min((activeReplyDepth + 1) * 18, 42)}px` }
+	                                    : undefined
+	                                }
+	                                className={cn(
+	                                  "form-field-rest relative h-auto min-h-[56px] rounded-[22px] bg-muted/25 px-4 py-2 shadow-none",
+	                                  !replyTargetCommentId && "order-last"
+	                                )}
 	                              >
                                 <div className="relative min-h-[24px]">
                               <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
@@ -4214,8 +4259,21 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              </div>
 	                            )}
 
-	                            {visibleComments.map((c) => (
-	                              <div key={c.id} className="space-y-2 rounded-2xl bg-muted/25 px-3 py-3">
+	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => (
+	                              <div
+	                                key={c.id}
+	                                style={
+	                                  activeReplyCommentIndex >= 0
+	                                    ? { order: commentIndex <= activeReplyCommentIndex ? 1 : 3, marginLeft: `${Math.min(depth * 18, 42)}px` }
+	                                    : depth > 0
+	                                      ? { marginLeft: `${Math.min(depth * 18, 42)}px` }
+	                                    : undefined
+	                                }
+	                                className={cn(
+	                                  "space-y-2 rounded-2xl bg-muted/25 px-3 py-3",
+	                                  depth > 0 && "border-l-2 border-primary/15"
+	                                )}
+	                              >
                                 <div className="flex items-start gap-3">
                                   <button
                                     type="button"
@@ -4284,9 +4342,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                  <button
 	                                    type="button"
 	                                    onClick={() => replyToComment(notice, c)}
-	                                    className="inline-flex h-8 items-center justify-center rounded-full px-2 text-xs font-semibold text-muted-foreground transition-all hover:bg-muted"
+	                                    className={cn(
+	                                      "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
+	                                      replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
+	                                    )}
+	                                    title="Reply"
+	                                    aria-label="Reply to comment"
 	                                  >
-	                                    Reply
+	                                    <MessageCircle className="h-4 w-4" />
 	                                  </button>
 	                                  <button
                                     type="button"
