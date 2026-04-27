@@ -18,7 +18,8 @@ import {
   MoreHorizontal,
   Bookmark,
   Pencil,
-  Trash2
+  Trash2,
+  BadgeCheck
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -2133,7 +2134,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             display_name: profile?.display_name || "You",
             social_id: profile?.social_id || null,
             avatar_url: profile?.avatar_url || null,
-          },
+            is_verified: profile?.is_verified === true,
+          } as ThreadComment["author"] & { is_verified?: boolean | null },
         };
 
         setCommentsByThread((prev) => ({
@@ -2807,7 +2809,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
             images,
             created_at,
             user_id,
-            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url)
+            author:profiles!thread_comments_user_id_fkey(display_name, social_id, avatar_url, is_verified)
           `)
           .eq("thread_id", threadId)
           .order("created_at", { ascending: true });
@@ -2830,6 +2832,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                     display_name: ((authorObj as Record<string, unknown>).display_name as string | null) ?? null,
                     social_id: ((authorObj as Record<string, unknown>).social_id as string | null) ?? null,
                     avatar_url: ((authorObj as Record<string, unknown>).avatar_url as string | null) ?? null,
+                    is_verified: (authorObj as Record<string, unknown>).is_verified === true,
                   }
                 : null,
           } as ThreadComment;
@@ -2976,6 +2979,20 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     if (hours < 24) return `${hours} hours ago`;
     const days = Math.floor(hours / 24);
     return `${days} days ago`;
+  };
+
+  const formatCompactTimeAgo = (date: string) => {
+    if (!date) return "now";
+    const then = new Date(date);
+    if (Number.isNaN(then.getTime())) return "now";
+    const diff = Date.now() - then.getTime();
+    if (diff < 60 * 1000) return "now";
+    const minutes = Math.floor(diff / (1000 * 60));
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
   };
 
   const renderMentionSuggestions = useCallback((
@@ -4256,7 +4273,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            )}
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
-	                              const commentIndent = Math.min(depth * 24, 48);
+	                              const commentIndent = Math.min(depth * 26, 52);
+	                              const commentSocialId = c.author?.social_id || "";
+	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
+	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4268,155 +4288,145 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                    ? { marginLeft: `${commentIndent}px`, width: `calc(100% - ${commentIndent}px)` }
 	                                    : {}),
 	                                }}
-	                                className={cn(
-	                                  "relative box-border max-w-full space-y-2 rounded-2xl bg-muted/25 px-3 py-3"
-	                                )}
+	                                className="relative box-border max-w-full py-2"
 	                              >
 	                                {depth > 0 ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className="pointer-events-none absolute bottom-0 left-[-12px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.22)]"
+	                                    className="pointer-events-none absolute bottom-0 left-[-13px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.18)]"
 	                                  />
 	                                ) : null}
                                 <div className="flex items-start gap-3">
                                   <button
                                     type="button"
-                                    className="relative z-[1] h-11 w-11 shrink-0 overflow-hidden rounded-full bg-muted"
-                                    onClick={() => openProfile(c.user_id, c.author?.display_name || "User")}
+                                    className="relative z-[1] h-9 w-9 shrink-0 overflow-hidden rounded-full bg-muted"
+                                    onClick={() => openProfile(c.user_id, commentSocialId)}
                                   >
                                     {c.author?.avatar_url ? (
                                       <img src={c.author.avatar_url} alt="" className="h-full w-full object-cover" />
                                     ) : (
                                       <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-brandText/70">
-                                        {(c.author?.display_name || "U").charAt(0)}
+                                        {commentSocialId.charAt(0).toUpperCase()}
                                       </span>
                                     )}
                                   </button>
                                   <div className="min-w-0 flex-1">
-                                    <div className="flex items-start justify-between gap-3">
+                                    <div className="flex min-w-0 items-baseline gap-1.5">
                                       <button
                                         type="button"
-                                        className="min-w-0"
-                                        onClick={() => openProfile(c.user_id, c.author?.display_name || "User")}
+                                        className="min-w-0 truncate text-sm font-semibold text-brandText underline-offset-2 hover:underline"
+                                        onClick={() => openProfile(c.user_id, commentSocialId)}
                                       >
-                                        <AuthorHandle
-                                          displayName={c.author?.display_name || t("Anonymous")}
-                                          socialId={c.author?.social_id || null}
-                                          className="max-w-full text-sm"
-                                        />
+                                        {commentSocialId}
                                       </button>
+                                      {(c.author as (ThreadComment["author"] & { is_verified?: boolean | null }))?.is_verified === true ? (
+                                        <BadgeCheck className="h-3.5 w-3.5 shrink-0 fill-brandBlue text-white" aria-label="Verified" />
+                                      ) : null}
                                       <span className="shrink-0 text-xs text-[rgba(74,73,101,0.45)]">
-                                        {formatTimeAgo(c.created_at)}
+                                        {formatCompactTimeAgo(c.created_at)}
                                       </span>
                                     </div>
-                                    <div className="mt-1 text-sm text-muted-foreground break-words whitespace-pre-wrap">
+                                    <div className="mt-1 text-sm leading-5 text-brandText break-words whitespace-pre-wrap">
                                       {renderTextWithMentions(
-                                        (() => {
-                                          const previewUrl = extractFirstHttpUrl(c.content || "");
-                                          return previewUrl ? stripExternalUrlFromText(c.content, previewUrl) : c.content;
-                                        })(),
+                                        commentPreviewUrl ? stripExternalUrlFromText(c.content, commentPreviewUrl) : c.content,
                                         replyMentionsById[c.id],
                                         `reply-${c.id}`
                                       )}
                                     </div>
-                                    {(() => {
-                                      const previewUrl = extractFirstHttpUrl(c.content || "");
-                                      const preview = previewUrl ? linkPreviewByUrl[previewUrl] || null : null;
-                                      if (!previewUrl) return null;
-                                      return (
-                                        <ExternalLinkPreviewCard
-                                          url={previewUrl}
-                                          preview={preview}
-                                          className="mt-3"
-                                        />
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                                {c.images && c.images.length > 0 && (
-                                  <PostMediaCarousel
-                                    isSensitive={notice.is_sensitive === true}
-                                    items={c.images.map((src, index) => ({
-                                      src,
-                                      alt: `${c.content.slice(0, 40) || "Reply"} ${index + 1}`,
-                                    }))}
-                                  />
-                                )}
-	                                <div className="flex items-center justify-end gap-0.5">
-	                                  <button
-	                                    type="button"
-	                                    onClick={() => replyToComment(notice, c)}
-	                                    className={cn(
-	                                      "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
-	                                      replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
-	                                    )}
-	                                    title="Reply"
-	                                    aria-label="Reply to comment"
-	                                  >
-	                                    <MessageCircle className="h-4 w-4" />
-	                                  </button>
-	                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setLikedComments((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(c.id)) next.delete(c.id);
-                                        else next.add(c.id);
-                                        return next;
-                                      })
-                                    }
-                                    className={cn(
-                                      "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all",
-                                      likedComments.has(c.id) ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                                    {commentPreviewUrl ? (
+                                      <ExternalLinkPreviewCard
+                                        url={commentPreviewUrl}
+                                        preview={commentPreview}
+                                        className="mt-3"
+                                      />
+                                    ) : null}
+                                    {c.images && c.images.length > 0 && (
+                                      <PostMediaCarousel
+                                        className="mt-3"
+                                        isSensitive={notice.is_sensitive === true}
+                                        items={c.images.map((src, index) => ({
+                                          src,
+                                          alt: `${c.content.slice(0, 40) || "Reply"} ${index + 1}`,
+                                        }))}
+                                      />
                                     )}
-                                    title={t("Support")}
-                                  >
-                                    <ThumbsUp className={cn("h-4 w-4", likedComments.has(c.id) && "fill-primary")} />
-                                  </button>
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <button className="inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted">
-                                        <MoreHorizontal className="h-4 w-4" />
+		                                <div className="mt-2 flex items-center gap-1">
+		                                  <button
+		                                    type="button"
+		                                    onClick={() => replyToComment(notice, c)}
+		                                    className={cn(
+		                                      "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
+		                                      replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
+		                                    )}
+		                                    title="Reply"
+		                                    aria-label="Reply to comment"
+		                                  >
+		                                    <MessageCircle className="h-4 w-4" />
+		                                  </button>
+		                                  <button
+                                        type="button"
+                                        onClick={() =>
+                                          setLikedComments((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(c.id)) next.delete(c.id);
+                                            else next.add(c.id);
+                                            return next;
+                                          })
+                                        }
+                                        className={cn(
+                                          "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all",
+                                          likedComments.has(c.id) ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                                        )}
+                                        title={t("Support")}
+                                      >
+                                        <ThumbsUp className={cn("h-4 w-4", likedComments.has(c.id) && "fill-primary")} />
                                       </button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                      {c.user_id === user?.id ? (
-                                        <>
-                                          <DropdownMenuItem onClick={() => void handleEditComment(notice.id, c)}>
-                                            <Pencil className="w-4 h-4 mr-2" />
-                                            {t("Edit")}
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem
-                                            onClick={() => void handleDeleteComment(notice.id, c)}
-                                            className="text-destructive"
-                                          >
-                                            <Trash2 className="w-4 h-4 mr-2" />
-                                            {t("Delete")}
-                                          </DropdownMenuItem>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <DropdownMenuItem onClick={() => openReportModal(c.user_id, c.author?.display_name ?? null)}>
-                                            <Flag className="w-4 h-4 mr-2" />
-                                            {t("Report")}
-                                          </DropdownMenuItem>
-                                          {notice.user_id === user?.id && (
-                                            <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
-                                              <EyeOff className="w-4 h-4 mr-2" />
-                                              {t("Hide")}
-                                            </DropdownMenuItem>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <button className="inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted">
+                                            <MoreHorizontal className="h-4 w-4" />
+                                          </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                          {c.user_id === user?.id ? (
+                                            <>
+                                              <DropdownMenuItem onClick={() => void handleEditComment(notice.id, c)}>
+                                                <Pencil className="w-4 h-4 mr-2" />
+                                                {t("Edit")}
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={() => void handleDeleteComment(notice.id, c)}
+                                                className="text-destructive"
+                                              >
+                                                <Trash2 className="w-4 h-4 mr-2" />
+                                                {t("Delete")}
+                                              </DropdownMenuItem>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <DropdownMenuItem onClick={() => openReportModal(c.user_id, commentSocialId)}>
+                                                <Flag className="w-4 h-4 mr-2" />
+                                                {t("Report")}
+                                              </DropdownMenuItem>
+                                              {notice.user_id === user?.id && (
+                                                <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
+                                                  <EyeOff className="w-4 h-4 mr-2" />
+                                                  {t("Hide")}
+                                                </DropdownMenuItem>
+                                              )}
+                                              <DropdownMenuItem
+                                                onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(commentSocialId); }}
+                                                className="text-destructive"
+                                              >
+                                                <Ban className="w-4 h-4 mr-2" />
+                                                {t("Block User")}
+                                              </DropdownMenuItem>
+                                            </>
                                           )}
-                                          <DropdownMenuItem
-                                            onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(c.author?.display_name ?? "this user"); }}
-                                            className="text-destructive"
-                                          >
-                                            <Ban className="w-4 h-4 mr-2" />
-                                            {t("Block User")}
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </div>
                                 </div>
 	                              </div>
 	                              );
