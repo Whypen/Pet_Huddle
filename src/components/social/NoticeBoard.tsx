@@ -2070,11 +2070,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
 
       const replyText = replyContent.trim();
+      const submittedParentCommentId = replyTargetCommentId;
       const { data: createdReply, error } = await supabase
         .from("thread_comments" as "profiles")
         .insert({
           thread_id: thread.id,
-          parent_comment_id: replyTargetCommentId,
+          parent_comment_id: submittedParentCommentId,
           user_id: user.id,
           content: replyText,
           text: replyText,
@@ -2123,7 +2124,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	        const optimisticReply: ThreadComment = {
           id: String(createdReply.id),
           thread_id: thread.id,
-          parent_comment_id: replyTargetCommentId,
+          parent_comment_id: submittedParentCommentId,
           content: replyText,
           images: uploadedUrls,
           created_at: new Date().toISOString(),
@@ -2149,8 +2150,12 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       }
 
       resetReplyComposerDraft();
-      setReplyFor(thread.id);
-      snapToCommentArea(thread.id, "composer", true);
+      if (submittedParentCommentId) {
+        setReplyFor(null);
+      } else {
+        setReplyFor(thread.id);
+        snapToCommentArea(thread.id, "composer", true);
+      }
     } finally {
       setReplySubmittingByThread((prev) => {
         const next = new Set(prev);
@@ -2953,21 +2958,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       resetReplyComposerDraft();
       setReplyTargetCommentId(comment.id);
 
-      const socialId = String(comment.author?.social_id || "").trim();
-      if (socialId) {
-        upsertMentionDirectory([
-          {
-            userId: comment.user_id,
-            socialId,
-            displayName: comment.author?.display_name || socialId,
-            avatarUrl: comment.author?.avatar_url || null,
-          },
-        ]);
-      }
-
       snapToCommentArea(notice.id, "composer", true);
     },
-    [isSocialPostingBlocked, replyFor, replyTargetCommentId, resetReplyComposerDraft, snapToCommentArea, upsertMentionDirectory]
+    [isSocialPostingBlocked, replyFor, replyTargetCommentId, resetReplyComposerDraft, snapToCommentArea]
   );
 
   const formatTimeAgo = (date: string) => {
@@ -3769,6 +3762,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                      ? threadedComments.findIndex(({ comment }) => comment.id === replyTargetCommentId)
 	                      : -1;
 	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.depth ?? 0 : 0;
+	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 18, 42) : 0;
+	                  const replyComposerWidth = `calc(100% - ${replyComposerIndent + 4}px)`;
 	                  return (
                   <div
                     key={notice.id}
@@ -4092,12 +4087,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                  replyComposerRefs.current[notice.id] = el;
 	                                }}
 	                                style={
-	                                  replyTargetCommentId
-	                                    ? { order: 2, marginLeft: `${Math.min((activeReplyDepth + 1) * 18, 42)}px` }
-	                                    : undefined
+	                                  {
+	                                    ...(replyTargetCommentId ? { order: 2, marginLeft: `${replyComposerIndent}px` } : {}),
+	                                    width: replyComposerWidth,
+	                                  }
 	                                }
 	                                className={cn(
-	                                  "form-field-rest relative h-auto min-h-[56px] rounded-[22px] bg-muted/25 px-4 py-2 shadow-none",
+	                                  "form-field-rest relative box-border h-auto min-h-[56px] max-w-full overflow-hidden rounded-[22px] bg-muted/25 px-4 py-2 shadow-none",
 	                                  !replyTargetCommentId && "order-last"
 	                                )}
 	                              >
@@ -4259,25 +4255,40 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              </div>
 	                            )}
 
-	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => (
+	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
+	                              const commentIndent = Math.min(depth * 18, 42);
+	                              const hasChildComments = (childCommentsByParent.get(c.id)?.length ?? 0) > 0;
+	                              const commentOrder =
+	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
+	                              return (
 	                              <div
 	                                key={c.id}
-	                                style={
-	                                  activeReplyCommentIndex >= 0
-	                                    ? { order: commentIndex <= activeReplyCommentIndex ? 1 : 3, marginLeft: `${Math.min(depth * 18, 42)}px` }
-	                                    : depth > 0
-	                                      ? { marginLeft: `${Math.min(depth * 18, 42)}px` }
-	                                    : undefined
-	                                }
+	                                style={{
+	                                  ...(commentOrder !== undefined ? { order: commentOrder } : {}),
+	                                  ...(commentIndent > 0
+	                                    ? { marginLeft: `${commentIndent}px`, width: `calc(100% - ${commentIndent}px)` }
+	                                    : {}),
+	                                }}
 	                                className={cn(
-	                                  "space-y-2 rounded-2xl bg-muted/25 px-3 py-3",
-	                                  depth > 0 && "border-l-2 border-primary/15"
+	                                  "relative box-border max-w-full space-y-2 rounded-2xl bg-muted/25 px-3 py-3"
 	                                )}
 	                              >
+	                                {depth > 0 ? (
+	                                  <span
+	                                    aria-hidden="true"
+	                                    className="pointer-events-none absolute left-[34px] top-[-12px] z-0 h-[46px] w-px bg-[rgba(74,73,101,0.18)]"
+	                                  />
+	                                ) : null}
+	                                {hasChildComments ? (
+	                                  <span
+	                                    aria-hidden="true"
+	                                    className="pointer-events-none absolute bottom-[-12px] left-[34px] top-[58px] z-0 w-px bg-[rgba(74,73,101,0.18)]"
+	                                  />
+	                                ) : null}
                                 <div className="flex items-start gap-3">
                                   <button
                                     type="button"
-                                    className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-muted"
+                                    className="relative z-[1] h-11 w-11 shrink-0 overflow-hidden rounded-full bg-muted"
                                     onClick={() => openProfile(c.user_id, c.author?.display_name || "User")}
                                   >
                                     {c.author?.avatar_url ? (
@@ -4414,8 +4425,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 </div>
-                              </div>
-                            ))}
+	                              </div>
+	                              );
+	                            })}
                           </div>
                         )}
                       </div>
