@@ -3762,8 +3762,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                      ? threadedComments.findIndex(({ comment }) => comment.id === replyTargetCommentId)
 	                      : -1;
 	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.depth ?? 0 : 0;
-	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 18, 42) : 0;
-	                  const replyComposerWidth = `calc(100% - ${replyComposerIndent + 4}px)`;
+	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 24, 48) : 0;
+	                  const replyComposerWidth = replyTargetCommentId ? `calc(100% - ${replyComposerIndent}px)` : "100%";
 	                  return (
                   <div
                     key={notice.id}
@@ -4079,7 +4079,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            ref={(el) => {
 	                              commentPanelRefs.current[notice.id] = el;
 	                            }}
-	                            className="mt-4 flex flex-col gap-3"
+	                            className="mt-4 flex flex-col gap-2"
 	                          >
 	                            {replyFor === notice.id && (
 	                              <div
@@ -4256,7 +4256,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            )}
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
-	                              const commentIndent = Math.min(depth * 18, 42);
+	                              const commentIndent = Math.min(depth * 24, 48);
 	                              const nextCommentDepth = threadedComments[commentIndex + 1]?.depth ?? -1;
 	                              const railContinues = depth > 0 && nextCommentDepth >= depth;
 	                              const commentOrder =
@@ -4278,8 +4278,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                  <span
 	                                    aria-hidden="true"
 	                                    className={cn(
-	                                      "pointer-events-none absolute left-0 top-[-12px] z-0 w-px bg-[rgba(74,73,101,0.24)]",
-	                                      railContinues ? "bottom-[-12px]" : "bottom-0"
+	                                      "pointer-events-none absolute left-[-12px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.22)]",
+	                                      railContinues ? "bottom-[-8px]" : "bottom-0"
 	                                    )}
 	                                  />
 	                                ) : null}
