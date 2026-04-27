@@ -581,6 +581,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   const [confirmBlockId, setConfirmBlockId] = useState<string | null>(null);
   const [confirmBlockName, setConfirmBlockName] = useState<string>("this user");
   const [commentsByThread, setCommentsByThread] = useState<Record<string, ThreadComment[]>>({});
+  const [expandedCommentBranches, setExpandedCommentBranches] = useState<Set<string>>(new Set());
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyTargetCommentId, setReplyTargetCommentId] = useState<string | null>(null);
   const [replyContent, setReplyContent] = useState("");
@@ -1321,6 +1322,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const resetHydrationState = useCallback(() => {
     setCommentsByThread({});
+    setExpandedCommentBranches(new Set());
     setCommentsLoadingThreads(new Set());
     setCommentLoadErrors({});
     setThreadMentionsById({});
@@ -2172,6 +2174,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
               : notice
           )
         );
+        if (submittedParentCommentId) {
+          setExpandedCommentBranches((prev) => new Set([...prev, submittedParentCommentId]));
+        }
       }
 
       resetReplyComposerDraft();
@@ -2788,6 +2793,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
+  const toggleCommentBranch = useCallback((commentId: string) => {
+    setExpandedCommentBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) next.delete(commentId);
+      else next.add(commentId);
+      return next;
+    });
+  }, []);
   const socialPinsKey = useMemo(() => `huddle_social_pins:${profile?.id || "anon"}`, [profile?.id]);
   const socialSavesKey = useMemo(() => `huddle_social_saves:${profile?.id || "anon"}`, [profile?.id]);
   const [pinnedNotices, setPinnedNotices] = useState<Set<string>>(new Set());
@@ -3790,6 +3803,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    parentVisualDepth: number | null = null
 	                  ): Array<{
 	                    comment: ThreadComment;
+	                    depth: number;
 	                    visualDepth: number;
 	                    activeRailColumns: boolean[];
 	                    parentRailColumn: number | null;
@@ -3797,10 +3811,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    isMaxDepthContinuation: boolean;
 	                    isLastSibling: boolean;
 	                    hasChildComments: boolean;
+	                    hasVisibleChildComments: boolean;
+	                    canToggleBranch: boolean;
 	                  }> =>
 	                    comments.flatMap((comment, index) => {
 	                      const children = childCommentsByParent.get(comment.id) || [];
+	                      const branchIsExpanded = expandedCommentBranches.has(comment.id);
 	                      const visualDepth = Math.min(depth, 2);
+	                      const canToggleBranch = depth < 2 && children.length > 0;
+	                      const visibleChildren = depth >= 2 || branchIsExpanded ? children : [];
 	                      const isMaxDepthContinuation = visualDepth === 2 && parentVisualDepth === 2;
 	                      const childParentRailColumn = visualDepth;
 	                      const isLastSibling = index === comments.length - 1;
@@ -3809,12 +3828,13 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                      if (parentRailColumn !== null) {
 	                        childRailColumns[parentRailColumn] = !isLastSibling;
 	                      }
-	                      if (children.length > 0) {
+	                      if (visibleChildren.length > 0) {
 	                        childRailColumns[childParentRailColumn] = true;
 	                      }
 	                      return [
 	                        {
 	                          comment,
+	                          depth,
 	                          visualDepth,
 	                          activeRailColumns: currentRailColumns,
 	                          parentRailColumn,
@@ -3822,8 +3842,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                          isMaxDepthContinuation,
 	                          isLastSibling,
 	                          hasChildComments: children.length > 0,
+	                          hasVisibleChildComments: visibleChildren.length > 0,
+	                          canToggleBranch,
 	                        },
-	                        ...flattenComments(children, depth + 1, childRailColumns, childParentRailColumn, visualDepth),
+	                        ...flattenComments(visibleChildren, depth + 1, childRailColumns, childParentRailColumn, visualDepth),
 	                      ];
 	                    });
 	                  const threadedComments = flattenComments(topLevelComments);
@@ -3840,7 +3862,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    replyFor === notice.id && replyTargetCommentId
 	                      ? threadedComments.findIndex(({ comment }) => comment.id === replyTargetCommentId)
 	                      : -1;
-	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.depth ?? 0 : 0;
+	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.visualDepth ?? 0 : 0;
 	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 24, 48) : 0;
 	                  const replyComposerWidth = replyTargetCommentId ? `calc(100% - ${replyComposerIndent}px)` : "100%";
 	                  return (
@@ -4335,12 +4357,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              </div>
 	                            )}
 
-	                            {threadedComments.map(({ comment: c, visualDepth, activeRailColumns, parentRailColumn, childRailColumn, isMaxDepthContinuation, isLastSibling, hasChildComments }, commentIndex) => {
+	                            {threadedComments.map(({ comment: c, depth, visualDepth, activeRailColumns, parentRailColumn, childRailColumn, isMaxDepthContinuation, isLastSibling, hasVisibleChildComments, canToggleBranch }, commentIndex) => {
 	                              const commentIndent = visualDepth * 40;
 	                              const railColumnLeft = (column: number) => `${column * 40 + 18 - commentIndent}px`;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
+	                              const childCommentCount = childCommentsByParent.get(c.id)?.length || 0;
+	                              const branchIsExpanded = expandedCommentBranches.has(c.id);
+	                              const shouldShowBranchControl = canToggleBranch && (!branchIsExpanded || depth === 0);
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4356,7 +4381,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              >
 	                                {activeRailColumns.map((isActive, column) => {
 	                                  if (!isActive) return null;
-	                                  const isDirectParentRail = column === parentRailColumn && !isMaxDepthContinuation;
+	                                  const isDirectParentRail = column === parentRailColumn;
 	                                  return (
 	                                    <span
 	                                      key={`rail-${c.id}-${column}`}
@@ -4366,7 +4391,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                      style={{ left: railColumnLeft(column) }}
 	                                      className={cn(
 	                                        "pointer-events-none absolute top-0 z-0 w-px bg-[rgba(74,73,101,0.14)]",
-	                                        isDirectParentRail && isLastSibling ? "h-[28px]" : "bottom-[-8px]"
+	                                        isDirectParentRail && isLastSibling && !hasVisibleChildComments ? "h-[28px]" : "bottom-[-8px]"
 	                                      )}
 	                                    />
 	                                  );
@@ -4380,7 +4405,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                    className="pointer-events-none absolute top-[25px] z-[1] h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[#C6CAD6] ring-2 ring-white"
 	                                  />
 	                                ) : null}
-	                                {hasChildComments && !activeRailColumns[childRailColumn] ? (
+	                                {hasVisibleChildComments && !activeRailColumns[childRailColumn] ? (
 	                                  <span
 	                                    aria-hidden="true"
 	                                    data-comment-rail-column={childRailColumn}
@@ -4445,81 +4470,102 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         }))}
                                       />
                                     )}
-		                                <div className="mt-2 flex items-center justify-end gap-1">
-		                                  <button
-		                                    type="button"
-		                                    onClick={() => replyToComment(notice, c)}
-		                                    className={cn(
-		                                      "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
-		                                      replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
-		                                    )}
-		                                    title="Reply"
-		                                    aria-label="Reply to comment"
-		                                  >
-		                                    <MessageCircle className="h-4 w-4" />
-		                                  </button>
-		                                  <button
-                                        type="button"
-                                        onClick={() =>
-                                          setLikedComments((prev) => {
-                                            const next = new Set(prev);
-                                            if (next.has(c.id)) next.delete(c.id);
-                                            else next.add(c.id);
-                                            return next;
-                                          })
-                                        }
-                                        className={cn(
-                                          "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all",
-                                          likedComments.has(c.id) ? "bg-primary/10 text-primary" : "hover:bg-muted"
-                                        )}
-                                        title={t("Support")}
-                                      >
-                                        <ThumbsUp className={cn("h-4 w-4", likedComments.has(c.id) && "fill-primary")} />
-                                      </button>
-                                      <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                          <button className="inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted">
-                                            <MoreHorizontal className="h-4 w-4" />
+                                    <div className="mt-2 flex items-center justify-between gap-2">
+                                      <div className="min-w-0 flex-1">
+                                        {shouldShowBranchControl ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleCommentBranch(c.id)}
+                                            className="inline-flex h-8 max-w-full items-center rounded-full px-0 text-xs font-semibold text-[rgba(74,73,101,0.62)] transition-colors hover:text-brandText"
+                                            aria-expanded={branchIsExpanded}
+                                            aria-label={branchIsExpanded ? "Hide replies" : `See ${childCommentCount} ${childCommentCount === 1 ? "reply" : "replies"}`}
+                                          >
+                                            <span className="truncate">
+                                              {branchIsExpanded
+                                                ? "Hide replies"
+                                                : childCommentCount === 1
+                                                  ? "See reply"
+                                                  : `See ${childCommentCount} replies`}
+                                            </span>
                                           </button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                          {c.user_id === user?.id ? (
-                                            <>
-                                              <DropdownMenuItem onClick={() => void handleEditComment(notice.id, c)}>
-                                                <Pencil className="w-4 h-4 mr-2" />
-                                                {t("Edit")}
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={() => void handleDeleteComment(notice.id, c)}
-                                                className="text-destructive"
-                                              >
-                                                <Trash2 className="w-4 h-4 mr-2" />
-                                                {t("Delete")}
-                                              </DropdownMenuItem>
-                                            </>
-                                          ) : (
-                                            <>
-                                              <DropdownMenuItem onClick={() => openReportModal(c.user_id, commentSocialId)}>
-                                                <Flag className="w-4 h-4 mr-2" />
-                                                {t("Report")}
-                                              </DropdownMenuItem>
-                                              {notice.user_id === user?.id && (
-                                                <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
-                                                  <EyeOff className="w-4 h-4 mr-2" />
-                                                  {t("Hide")}
-                                                </DropdownMenuItem>
-                                              )}
-                                              <DropdownMenuItem
-                                                onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(commentSocialId); }}
-                                                className="text-destructive"
-                                              >
-                                                <Ban className="w-4 h-4 mr-2" />
-                                                {t("Block User")}
-                                              </DropdownMenuItem>
-                                            </>
+                                        ) : null}
+                                      </div>
+                                      <div className="flex shrink-0 items-center justify-end gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => replyToComment(notice, c)}
+                                          className={cn(
+                                            "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
+                                            replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
                                           )}
-                                        </DropdownMenuContent>
-                                      </DropdownMenu>
+                                          title="Reply"
+                                          aria-label="Reply to comment"
+                                        >
+                                          <MessageCircle className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setLikedComments((prev) => {
+                                              const next = new Set(prev);
+                                              if (next.has(c.id)) next.delete(c.id);
+                                              else next.add(c.id);
+                                              return next;
+                                            })
+                                          }
+                                          className={cn(
+                                            "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all",
+                                            likedComments.has(c.id) ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                                          )}
+                                          title={t("Support")}
+                                        >
+                                          <ThumbsUp className={cn("h-4 w-4", likedComments.has(c.id) && "fill-primary")} />
+                                        </button>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <button className="inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted">
+                                              <MoreHorizontal className="h-4 w-4" />
+                                            </button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent align="end">
+                                            {c.user_id === user?.id ? (
+                                              <>
+                                                <DropdownMenuItem onClick={() => void handleEditComment(notice.id, c)}>
+                                                  <Pencil className="w-4 h-4 mr-2" />
+                                                  {t("Edit")}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem
+                                                  onClick={() => void handleDeleteComment(notice.id, c)}
+                                                  className="text-destructive"
+                                                >
+                                                  <Trash2 className="w-4 h-4 mr-2" />
+                                                  {t("Delete")}
+                                                </DropdownMenuItem>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <DropdownMenuItem onClick={() => openReportModal(c.user_id, commentSocialId)}>
+                                                  <Flag className="w-4 h-4 mr-2" />
+                                                  {t("Report")}
+                                                </DropdownMenuItem>
+                                                {notice.user_id === user?.id && (
+                                                  <DropdownMenuItem onClick={() => handleHideComment(c.id)}>
+                                                    <EyeOff className="w-4 h-4 mr-2" />
+                                                    {t("Hide")}
+                                                  </DropdownMenuItem>
+                                                )}
+                                                <DropdownMenuItem
+                                                  onClick={() => { setConfirmBlockId(c.user_id); setConfirmBlockName(commentSocialId); }}
+                                                  className="text-destructive"
+                                                >
+                                                  <Ban className="w-4 h-4 mr-2" />
+                                                  {t("Block User")}
+                                                </DropdownMenuItem>
+                                              </>
+                                            )}
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
