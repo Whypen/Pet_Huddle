@@ -4274,7 +4274,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
 	                              const visualDepth = depth > 0 ? 1 : 0;
-	                              const commentIndent = visualDepth * 44;
+	                              const commentIndent = visualDepth * 40;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
@@ -4295,11 +4295,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                  <>
 	                                    <span
 	                                      aria-hidden="true"
-	                                      className="pointer-events-none absolute bottom-0 left-[-26px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.14)]"
+	                                      className="pointer-events-none absolute bottom-0 left-[-20px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.14)]"
 	                                    />
 	                                    <span
 	                                      aria-hidden="true"
-	                                      className="pointer-events-none absolute left-[-25px] top-[25px] z-0 h-px w-5 bg-[rgba(74,73,101,0.14)]"
+	                                      className="pointer-events-none absolute left-[-20px] top-[25px] z-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-[rgba(74,73,101,0.18)]"
 	                                    />
 	                                  </>
 	                                ) : null}
