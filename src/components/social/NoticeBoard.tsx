@@ -4257,8 +4257,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
 	                            {threadedComments.map(({ comment: c, depth }, commentIndex) => {
 	                              const commentIndent = Math.min(depth * 24, 48);
-	                              const nextCommentDepth = threadedComments[commentIndex + 1]?.depth ?? -1;
-	                              const railContinues = depth > 0 && nextCommentDepth >= depth;
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4277,10 +4275,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                {depth > 0 ? (
 	                                  <span
 	                                    aria-hidden="true"
-	                                    className={cn(
-	                                      "pointer-events-none absolute left-[-12px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.22)]",
-	                                      railContinues ? "bottom-[-8px]" : "bottom-0"
-	                                    )}
+	                                    className="pointer-events-none absolute bottom-0 left-[-12px] top-[-8px] z-0 w-px bg-[rgba(74,73,101,0.22)]"
 	                                  />
 	                                ) : null}
                                 <div className="flex items-start gap-3">
