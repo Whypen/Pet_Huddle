@@ -263,7 +263,7 @@ export const PostMediaCarousel = ({ items, className, mode = "peek", isSensitive
                   key={`${item.src}-${index}`}
                   role="button"
                   tabIndex={0}
-                  className="relative h-full shrink-0 snap-start overflow-hidden rounded-2xl bg-muted/60 cursor-pointer"
+                  className="relative h-full shrink-0 snap-start overflow-hidden rounded-[14px] bg-muted/60 cursor-pointer"
                   style={{
                     width: slideWidth ? `${slideWidth}px` : undefined,
                   }}

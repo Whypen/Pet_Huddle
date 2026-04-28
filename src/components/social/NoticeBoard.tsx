@@ -3944,9 +3944,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    const targetText = targetPreviewUrl ? stripExternalUrlFromText(target.content, targetPreviewUrl) : target.content;
 	                    const targetImage = target.images?.[0] || "";
 	                    return (
-	                      <div className={cn("flex min-w-0 gap-2 rounded-[22px] border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2", className)}>
+	                      <div className={cn("flex min-w-0 gap-2 rounded-[14px] border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2", className)}>
 	                        {targetImage ? (
-	                          <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-muted/20">
+	                          <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-muted/20">
 	                            <img
 	                              src={targetImage}
 	                              alt=""
@@ -4360,7 +4360,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                           src={item.previewUrl}
                                           alt={`Reply media ${index + 1}`}
                                           className={cn(
-                                            "block w-full rounded-xl",
+                                            "block w-full rounded-[14px]",
                                             composerUploadState.scope === "reply" && composerUploadState.status === "uploading" && "opacity-70 blur-[1.5px]"
                                           )}
                                           style={{ aspectRatio: `${item.aspectRatio || 1}` }}
