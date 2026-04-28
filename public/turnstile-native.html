@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>huddle verification</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    #native-turnstile {
+      min-height: 65px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+    }
+  </style>
+</head>
+<body>
+  <div id="native-turnstile"></div>
+  <script>
+    (function () {
+      var SITE_KEY = "0x4AAAAAAC1AMILxX8-lFNmm";
+      var SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      var ACTION_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+      var params = new URLSearchParams(window.location.search || "");
+      var requestedAction = String(params.get("action") || "support_ticket");
+      var action = ACTION_PATTERN.test(requestedAction) ? requestedAction : "support_ticket";
+      var rendered = false;
+      var postedTimeout = false;
+
+      var post = function (payload) {
+        try {
+          window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        } catch (error) {}
+      };
+
+      var render = function () {
+        if (rendered || !window.turnstile) return;
+        var slot = document.getElementById("native-turnstile");
+        if (!slot) return;
+        rendered = true;
+
+        try {
+          window.turnstile.render(slot, {
+            sitekey: SITE_KEY,
+            action: action,
+            theme: "light",
+            retry: "auto",
+            "retry-interval": 800,
+            "refresh-expired": "auto",
+            "refresh-timeout": "auto",
+            callback: function (token) {
+              post({ type: "turnstile-token", token: String(token || "") });
+            },
+            "expired-callback": function () {
+              post({ type: "turnstile-expired" });
+            },
+            "error-callback": function () {
+              post({ type: "turnstile-error", message: "Verification failed to load. Please retry." });
+            }
+          });
+          post({ type: "turnstile-rendered" });
+        } catch (error) {
+          post({ type: "turnstile-error", message: String(error && error.message || error || "Verification failed to load.") });
+        }
+      };
+
+      var script = document.createElement("script");
+      script.src = SCRIPT_SRC;
+      script.async = true;
+      script.defer = true;
+      script.onload = render;
+      script.onerror = function () {
+        post({ type: "turnstile-error", message: "Verification failed to load. Please retry." });
+      };
+      document.head.appendChild(script);
+
+      var timer = window.setInterval(function () {
+        if (window.turnstile) {
+          window.clearInterval(timer);
+          render();
+        }
+      }, 100);
+
+      window.setTimeout(function () {
+        if (!rendered && !postedTimeout) {
+          postedTimeout = true;
+          post({ type: "turnstile-error", message: "Verification timed out. Please retry." });
+        }
+      }, 10000);
+    })();
+  </script>
+</body>
+</html>
