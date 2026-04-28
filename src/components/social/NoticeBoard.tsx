@@ -2793,11 +2793,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
   };
 
   const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set());
-  const toggleCommentBranch = useCallback((commentId: string) => {
+  const expandCommentBranch = useCallback((commentId: string) => {
     setExpandedCommentBranches((prev) => {
+      if (prev.has(commentId)) return prev;
       const next = new Set(prev);
-      if (next.has(commentId)) next.delete(commentId);
-      else next.add(commentId);
+      next.add(commentId);
       return next;
     });
   }, []);
@@ -3795,6 +3795,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    }
 	                    childCommentsByParent.set(parentId, [...(childCommentsByParent.get(parentId) || []), comment]);
 	                  });
+	                  const countDescendantComments = (commentId: string): number => {
+	                    const children = childCommentsByParent.get(commentId) || [];
+	                    return children.reduce((total, child) => total + 1 + countDescendantComments(child.id), 0);
+	                  };
 	                  const flattenComments = (
 	                    comments: ThreadComment[],
 	                    depth = 0,
@@ -4363,9 +4367,8 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
-	                              const childCommentCount = childCommentsByParent.get(c.id)?.length || 0;
+	                              const descendantCommentCount = countDescendantComments(c.id);
 	                              const branchIsExpanded = expandedCommentBranches.has(c.id);
-	                              const shouldShowBranchControl = canToggleBranch && (!branchIsExpanded || depth === 0);
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4472,38 +4475,33 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         }))}
                                       />
                                     )}
-                                    <div className="mt-2 flex items-center justify-between gap-2">
-                                      <div className="min-w-0 flex-1">
-                                        {shouldShowBranchControl ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleCommentBranch(c.id)}
-                                            className="inline-flex h-8 max-w-full items-center rounded-full px-0 text-xs font-semibold text-[rgba(74,73,101,0.62)] transition-colors hover:text-brandText"
-                                            aria-expanded={branchIsExpanded}
-                                            aria-label={branchIsExpanded ? "Hide replies" : `See ${childCommentCount} ${childCommentCount === 1 ? "reply" : "replies"}`}
-                                          >
-                                            <span className="truncate">
-                                              {branchIsExpanded
-                                                ? "Hide replies"
-                                                : childCommentCount === 1
-                                                  ? "See reply"
-                                                  : `See ${childCommentCount} replies`}
-                                            </span>
-                                          </button>
-                                        ) : null}
-                                      </div>
+                                    <div className="mt-2 flex items-center justify-end gap-1">
                                       <div className="flex shrink-0 items-center justify-end gap-1">
                                         <button
                                           type="button"
-                                          onClick={() => replyToComment(notice, c)}
+                                          onClick={() => {
+                                            if (canToggleBranch && descendantCommentCount > 0 && !branchIsExpanded) {
+                                              expandCommentBranch(c.id);
+                                            }
+                                            replyToComment(notice, c);
+                                          }}
                                           className={cn(
-                                            "inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
+                                            "relative inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
                                             replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
                                           )}
-                                          title="Reply"
-                                          aria-label="Reply to comment"
+                                          title={descendantCommentCount > 0 ? `${descendantCommentCount} ${descendantCommentCount === 1 ? "reply" : "replies"}` : "Reply"}
+                                          aria-label={
+                                            descendantCommentCount > 0
+                                              ? `View ${descendantCommentCount} ${descendantCommentCount === 1 ? "reply" : "replies"} and reply`
+                                              : "Reply to comment"
+                                          }
                                         >
                                           <MessageCircle className="h-4 w-4" />
+                                          {descendantCommentCount > 0 ? (
+                                            <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-muted px-1 text-center text-[10px] leading-[14px] text-muted-foreground">
+                                              {descendantCommentCount}
+                                            </span>
+                                          ) : null}
                                         </button>
                                         <button
                                           type="button"
