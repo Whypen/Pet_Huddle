@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Plus, Lightbulb, Clock, Loader2, Settings } from "lucide-react";
+import { Plus, Lightbulb, Clock, Settings } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { EmptyPetState } from "@/components/pets/EmptyPetState";
@@ -78,6 +78,73 @@ const formatSpeciesLabel = (value: string) =>
     .join(" ");
 
 const HOME_PETS_LOAD_TIMEOUT_MS = 8_000;
+const HOME_PETS_CACHE_VERSION = 1;
+const HOME_PETS_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+interface HomePetsCachePayload {
+  version: number;
+  cachedAt: number;
+  pets: Pet[];
+}
+
+const getHomePetsCacheKey = (userId: string) => `huddle_home_pets:${userId}`;
+
+const isCachedPet = (value: unknown): value is Pet => {
+  if (!value || typeof value !== "object") return false;
+  const pet = value as Partial<Pet>;
+  return (
+    typeof pet.id === "string" &&
+    typeof pet.name === "string" &&
+    typeof pet.species === "string" &&
+    (pet.breed === null || typeof pet.breed === "string") &&
+    (pet.weight === null || typeof pet.weight === "number") &&
+    typeof pet.weight_unit === "string" &&
+    (pet.dob === null || typeof pet.dob === "string") &&
+    (pet.photo_url === null || typeof pet.photo_url === "string") &&
+    typeof pet.is_active === "boolean"
+  );
+};
+
+const readHomePetsCache = (userId: string): Pet[] | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(getHomePetsCacheKey(userId));
+    if (!raw) return null;
+    const payload = JSON.parse(raw) as Partial<HomePetsCachePayload>;
+    if (
+      payload.version !== HOME_PETS_CACHE_VERSION ||
+      typeof payload.cachedAt !== "number" ||
+      Date.now() - payload.cachedAt > HOME_PETS_CACHE_MAX_AGE_MS ||
+      !Array.isArray(payload.pets)
+    ) {
+      window.localStorage.removeItem(getHomePetsCacheKey(userId));
+      return null;
+    }
+    const pets = payload.pets.filter(isCachedPet);
+    if (pets.length !== payload.pets.length) {
+      window.localStorage.removeItem(getHomePetsCacheKey(userId));
+      return null;
+    }
+    return pets;
+  } catch {
+    window.localStorage.removeItem(getHomePetsCacheKey(userId));
+    return null;
+  }
+};
+
+const writeHomePetsCache = (userId: string, pets: Pet[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: HomePetsCachePayload = {
+      version: HOME_PETS_CACHE_VERSION,
+      cachedAt: Date.now(),
+      pets,
+    };
+    window.localStorage.setItem(getHomePetsCacheKey(userId), JSON.stringify(payload));
+  } catch {
+    // localStorage can be unavailable in private or constrained browser contexts.
+  }
+};
 
 const Index = () => {
   const navigate = useNavigate();
@@ -87,7 +154,7 @@ const Index = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [petsLoading, setPetsLoading] = useState(true);
   const [nextEventLabel, setNextEventLabel] = useState<string>("—");
   const [selectedPetIndex, setSelectedPetIndex] = useState(0);
   const [firstTimeNoPetView, setFirstTimeNoPetView] = useState(false);
@@ -95,12 +162,24 @@ const Index = () => {
   const cardRefs = useRef<Array<HTMLDivElement | null>>([]);
   const petsDebounceRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
-  const fetchPets = useCallback(async () => {
+  const applyPets = useCallback((nextPets: Pet[]) => {
+    setPets(nextPets);
+    if (nextPets.length > 0) {
+      setSelectedPetIndex(0);
+      setSelectedPet(nextPets[0]);
+    } else {
+      setSelectedPetIndex(0);
+      setSelectedPet(null);
+    }
+  }, []);
+
+  const fetchPets = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     try {
       if (!user?.id) {
-        setLoading(false);
+        setPetsLoading(false);
         return;
       }
+      if (showLoading) setPetsLoading(true);
       const petsQuery = supabase
         .from("pets")
         .select("id, name, species, breed, weight, weight_unit, dob, photo_url, is_active")
@@ -114,21 +193,15 @@ const Index = () => {
 
       if (error) throw error;
 
-      const nextPets = data || [];
-      setPets(nextPets);
-      if (nextPets.length > 0) {
-        setSelectedPetIndex(0);
-        setSelectedPet(nextPets[0]);
-      } else {
-        setSelectedPetIndex(0);
-        setSelectedPet(null);
-      }
+      const nextPets = (data || []) as Pet[];
+      applyPets(nextPets);
+      writeHomePetsCache(user.id, nextPets);
     } catch (error) {
       console.error("Error fetching pets:", error);
     } finally {
-      setLoading(false);
+      setPetsLoading(false);
     }
-  }, [user?.id]);
+  }, [applyPets, user?.id]);
 
   useEffect(() => {
     if ((location.state as { fromSetProfileNoPet?: boolean } | null)?.fromSetProfileNoPet === true) {
@@ -138,10 +211,20 @@ const Index = () => {
   }, [location.pathname, location.state, navigate]);
 
   useEffect(() => {
-    if (user?.id) {
-      void fetchPets();
+    if (!user?.id) {
+      applyPets([]);
+      setPetsLoading(false);
+      return;
     }
-  }, [user?.id, fetchPets]);
+    const cachedPets = readHomePetsCache(user.id);
+    if (cachedPets) {
+      applyPets(cachedPets);
+      setPetsLoading(false);
+      void fetchPets({ showLoading: false });
+      return;
+    }
+    void fetchPets({ showLoading: true });
+  }, [applyPets, fetchPets, user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -154,7 +237,7 @@ const Index = () => {
           if (petsDebounceRef.current !== null) window.clearTimeout(petsDebounceRef.current);
           petsDebounceRef.current = window.setTimeout(() => {
             petsDebounceRef.current = null;
-            void fetchPets();
+            void fetchPets({ showLoading: false });
           }, 350);
         }
       )
@@ -286,14 +369,6 @@ const Index = () => {
   const selectedPetSpecies = selectedPet?.species;
   const selectedPetTip = useMemo(() => selectedPetSpecies ? getRandomTip(selectedPetSpecies) : null, [getRandomTip, selectedPetSpecies]);
 
-  if (loading) {
-    return (
-      <div className="min-h-full bg-background flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
     <div className="h-full min-h-0 overflow-y-auto touch-pan-y bg-background pb-nav">
       <GlobalHeader
@@ -339,10 +414,17 @@ const Index = () => {
       {pets.length === 0 ? (
         /* Empty State */
         <section className="px-5 pt-1 pb-24">
-          <EmptyPetState
-            onAddPet={() => navigate("/edit-pet-profile")}
-            firstTimeFromSetProfile={firstTimeNoPetView}
-          />
+          {petsLoading ? (
+            <div
+              className="h-[clamp(320px,52svh,500px)] w-full rounded-2xl border border-border/70 bg-muted/30 shadow-card animate-pulse"
+              aria-hidden
+            />
+          ) : (
+            <EmptyPetState
+              onAddPet={() => navigate("/edit-pet-profile")}
+              firstTimeFromSetProfile={firstTimeNoPetView}
+            />
+          )}
         </section>
       ) : (
         <>
