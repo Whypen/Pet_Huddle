@@ -1608,17 +1608,18 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
           const scroller = scrollContainerRef?.current;
           if (scroller) {
+            const composerContextOffset = target === "composer" ? 160 : 12;
             const targetTop =
               node.getBoundingClientRect().top -
               scroller.getBoundingClientRect().top +
               scroller.scrollTop -
-              12;
+              composerContextOffset;
             scroller.scrollTo({
               top: Math.max(0, targetTop),
               behavior: "smooth",
             });
           } else {
-            node.scrollIntoView({ behavior: "smooth", block: "start" });
+            node.scrollIntoView({ behavior: "smooth", block: target === "composer" ? "center" : "start" });
           }
 
           if (focusComposer) {
@@ -2948,6 +2949,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
   const openCommentsForThread = useCallback(
     (notice: Thread) => {
+      if (expandedReplies.has(notice.id)) {
+        setExpandedReplies((prev) => {
+          const next = new Set(prev);
+          next.delete(notice.id);
+          return next;
+        });
+        if (replyFor === notice.id) {
+          setReplyFor(null);
+          resetReplyComposerDraft();
+        }
+        return false;
+      }
+
       setExpandedReplies((prev) => new Set([...prev, notice.id]));
       void recordSocialFeedEvent(notice.id, "open_comments");
       if (commentsByThreadRef.current[notice.id] === undefined) {
@@ -2963,11 +2977,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       setReplyTargetCommentId(null);
       setReplyComposerAnchorCommentId(null);
       snapToCommentArea(notice.id, "composer", true);
+      return true;
     },
     [
+      expandedReplies,
       isSocialPostingBlocked,
       loadCommentsForThread,
       recordSocialFeedEvent,
+      replyFor,
       resetReplyComposerDraft,
       snapToCommentArea,
     ]
@@ -4121,7 +4138,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            <button
 	                              type="button"
 	                              onClick={() => {
-	                                expandLoadedCommentTree();
+	                                if (!expandedReplies.has(notice.id)) {
+	                                  expandLoadedCommentTree();
+	                                }
 	                                openCommentsForThread(notice);
 	                              }}
                               className={cn(
