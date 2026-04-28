@@ -3821,18 +3821,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    const children = childCommentsByParent.get(commentId) || [];
 	                    return children.reduce((total, child) => total + 1 + countDescendantComments(child.id), 0);
 	                  };
-	                  const collectDescendantCommentIds = (commentId: string): string[] => {
-	                    const children = childCommentsByParent.get(commentId) || [];
-	                    return children.flatMap((child) => [child.id, ...collectDescendantCommentIds(child.id)]);
-	                  };
-	                  const getLastDescendantCommentId = (commentId: string): string => {
+	                  const getLastChildCommentId = (commentId: string): string => {
 	                    const children = childCommentsByParent.get(commentId) || [];
 	                    if (children.length === 0) return commentId;
-	                    return getLastDescendantCommentId(children[children.length - 1].id);
-	                  };
-	                  const expandLoadedCommentTree = () => {
-	                    if (visibleComments.length === 0) return;
-	                    expandCommentBranches(visibleComments.map((comment) => comment.id));
+	                    return children[children.length - 1].id;
 	                  };
 	                  const flattenComments = (
 	                    comments: ThreadComment[],
@@ -3856,7 +3848,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                      const children = childCommentsByParent.get(comment.id) || [];
 	                      const branchIsExpanded = expandedCommentBranches.has(comment.id);
 	                      const visualDepth = Math.min(depth, 2);
-	                      const visibleChildren = depth >= 2 || branchIsExpanded || (replyFor === notice.id && !replyTargetCommentId) ? children : [];
+	                      const visibleChildren = depth >= 2 || branchIsExpanded ? children : [];
 	                      const isMaxDepthContinuation = visualDepth === 2 && parentVisualDepth === 2;
 	                      const childParentRailColumn = visualDepth;
 	                      const isLastSibling = index === comments.length - 1;
@@ -4138,9 +4130,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                            <button
 	                              type="button"
 	                              onClick={() => {
-	                                if (!expandedReplies.has(notice.id)) {
-	                                  expandLoadedCommentTree();
-	                                }
 	                                openCommentsForThread(notice);
 	                              }}
                               className={cn(
@@ -4517,11 +4506,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                        <button
 	                                          type="button"
 	                                          onClick={() => {
-	                                            const descendantIds = collectDescendantCommentIds(c.id);
-	                                            if (descendantIds.length > 0) {
-	                                              expandCommentBranches([c.id, ...descendantIds]);
+	                                            if (descendantCommentCount > 0) {
+	                                              expandCommentBranches([c.id]);
 	                                            }
-	                                            replyToComment(notice, c, getLastDescendantCommentId(c.id));
+	                                            replyToComment(notice, c, getLastChildCommentId(c.id));
 	                                          }}
 	                                          className={cn(
                                             "relative inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
