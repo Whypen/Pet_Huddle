@@ -1915,7 +1915,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
     async (args: {
       ownerUserId: string;
       subjectId: string;
-      subjectType: "thread" | "alert";
+      subjectType: "thread" | "comment" | "alert";
       kind: "like" | "comment" | "reply" | "alert_like";
       category: "social" | "map";
       href: string;
@@ -2100,6 +2100,9 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
       const replyText = replyContent.trim();
       const submittedParentCommentId = replyTargetCommentId;
+      const parentComment = submittedParentCommentId
+        ? (commentsByThreadRef.current[thread.id] || []).find((comment) => comment.id === submittedParentCommentId) || null
+        : null;
       const { data: createdReply, error } = await supabase
         .from("thread_comments" as "profiles")
         .insert({
@@ -2141,6 +2144,23 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
           subjectId: thread.id,
           subjectType: "thread",
           kind: "comment",
+          category: "social",
+          href: `/social?focus=${thread.id}`,
+          actorId: user.id,
+          actorName: profile?.display_name || "Someone",
+        });
+      }
+
+      if (
+        parentComment?.user_id &&
+        parentComment.user_id !== user.id &&
+        parentComment.user_id !== thread.user_id
+      ) {
+        await upsertNotificationWindow({
+          ownerUserId: parentComment.user_id,
+          subjectId: parentComment.id,
+          subjectType: "comment",
+          kind: "reply",
           category: "social",
           href: `/social?focus=${thread.id}`,
           actorId: user.id,
@@ -3918,10 +3938,33 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    ? threadedComments.find(({ comment }) => comment.id === replyTargetCommentId)
 	                    : null;
 	                  const quotedReplyTarget = activeReplyTarget && activeReplyTarget.visualDepth >= 2 ? activeReplyTarget.comment : null;
-	                  const quotedReplyTargetPreviewUrl = quotedReplyTarget ? extractFirstHttpUrl(quotedReplyTarget.content || "") : "";
-	                  const quotedReplyTargetText = quotedReplyTarget
-	                    ? (quotedReplyTargetPreviewUrl ? stripExternalUrlFromText(quotedReplyTarget.content, quotedReplyTargetPreviewUrl) : quotedReplyTarget.content)
-	                    : "";
+	                  const commentById = new Map(visibleComments.map((comment) => [comment.id, comment]));
+	                  const renderCompactReplyQuote = (target: ThreadComment, className = "") => {
+	                    const targetPreviewUrl = extractFirstHttpUrl(target.content || "");
+	                    const targetText = targetPreviewUrl ? stripExternalUrlFromText(target.content, targetPreviewUrl) : target.content;
+	                    const targetImage = target.images?.[0] || "";
+	                    return (
+	                      <div className={cn("flex min-w-0 gap-2 rounded-[22px] border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2", className)}>
+	                        {targetImage ? (
+	                          <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[16px] bg-muted/20">
+	                            <img
+	                              src={targetImage}
+	                              alt=""
+	                              className="h-full w-full object-contain"
+	                            />
+	                          </div>
+	                        ) : null}
+	                        <div className="min-w-0 flex-1">
+	                          <p className="truncate text-xs font-semibold text-brandText">
+	                            {target.author?.social_id || target.author?.display_name || "Reply"}
+	                          </p>
+	                          <p className="mt-0.5 line-clamp-3 text-xs leading-4 text-[rgba(74,73,101,0.68)]">
+	                            {targetText || "Media reply"}
+	                          </p>
+	                        </div>
+	                      </div>
+	                    );
+	                  };
 	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 24, 48) : 0;
 	                  const replyComposerOuterInset = 8;
 	                  const replyComposerWidth = `calc(100% - ${replyComposerIndent + replyComposerOuterInset}px)`;
@@ -4261,25 +4304,6 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                  !replyTargetCommentId && "order-last"
 	                                )}
 	                              >
-	                                {quotedReplyTarget ? (
-	                                  <div className="mb-2 flex min-w-0 gap-2 rounded-2xl border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2">
-	                                    {quotedReplyTarget.images?.[0] ? (
-	                                      <img
-	                                        src={quotedReplyTarget.images[0]}
-	                                        alt=""
-	                                        className="h-12 w-12 shrink-0 rounded-xl object-cover"
-	                                      />
-	                                    ) : null}
-	                                    <div className="min-w-0 flex-1">
-	                                      <p className="truncate text-xs font-semibold text-brandText">
-	                                        {quotedReplyTarget.author?.social_id || quotedReplyTarget.author?.display_name || "Reply"}
-	                                      </p>
-	                                      <p className="mt-0.5 line-clamp-3 text-xs leading-4 text-[rgba(74,73,101,0.68)]">
-	                                        {quotedReplyTargetText || "Media reply"}
-	                                      </p>
-	                                    </div>
-	                                  </div>
-	                                ) : null}
                                 <div className="relative min-h-[24px]">
                               <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
                                     {renderComposerTextWithMentions(
@@ -4312,6 +4336,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                     aria-invalid={Boolean(replyError)}
                                   />
                                 </div>
+	                                {quotedReplyTarget ? renderCompactReplyQuote(quotedReplyTarget, "mt-2") : null}
                                 {MENTION_LIVE_SUGGESTIONS_ENABLED
                                   ? renderMentionSuggestions(
                                       replyMentionSuggestions,
@@ -4450,6 +4475,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              const canExpandBranch = depth < 2 && directChildCommentCount > 0;
 	                              const replyBadgeCount = depth === 0 ? directChildCommentCount : depth === 1 ? descendantCommentCount : 0;
 	                              const branchIsExpanded = expandedCommentBranches.has(c.id);
+	                              const quotedParentComment =
+	                                visualDepth === 2 && depth > 2 && c.parent_comment_id
+	                                  ? commentById.get(c.parent_comment_id) || null
+	                                  : null;
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4475,7 +4504,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                      style={{ left: railColumnLeft(column) }}
 	                                      className={cn(
 	                                        "pointer-events-none absolute top-0 z-0 w-px bg-[rgba(74,73,101,0.14)]",
-	                                        isDirectParentRail && isLastSibling && (!isMaxDepthContinuation || !hasVisibleChildComments)
+	                                        isDirectParentRail && isLastSibling && !hasVisibleChildComments
 	                                          ? "h-[28px]"
 	                                          : "bottom-[-8px]"
 	                                      )}
@@ -4539,6 +4568,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
                                         `reply-${c.id}`
                                       )}
                                     </div>
+	                                    {quotedParentComment ? renderCompactReplyQuote(quotedParentComment, "mt-2") : null}
                                     {commentPreviewUrl ? (
                                       <ExternalLinkPreviewCard
                                         url={commentPreviewUrl}
