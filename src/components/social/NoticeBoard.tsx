@@ -1608,7 +1608,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 
           const scroller = scrollContainerRef?.current;
           if (scroller) {
-            const composerContextOffset = target === "composer" ? 160 : 12;
+            const composerContextOffset = target === "composer" ? 280 : 12;
             const targetTop =
               node.getBoundingClientRect().top -
               scroller.getBoundingClientRect().top +
@@ -2810,6 +2810,19 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
       return changed ? next : prev;
     });
   }, []);
+  const collapseCommentBranches = useCallback((commentIds: string[]) => {
+    if (commentIds.length === 0) return;
+    setExpandedCommentBranches((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      commentIds.forEach((commentId) => {
+        if (next.delete(commentId)) {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, []);
   const socialPinsKey = useMemo(() => `huddle_social_pins:${profile?.id || "anon"}`, [profile?.id]);
   const socialSavesKey = useMemo(() => `huddle_social_saves:${profile?.id || "anon"}`, [profile?.id]);
   const [pinnedNotices, setPinnedNotices] = useState<Set<string>>(new Set());
@@ -3826,6 +3839,10 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    if (children.length === 0) return commentId;
 	                    return children[children.length - 1].id;
 	                  };
+	                  const collectDescendantCommentIds = (commentId: string): string[] => {
+	                    const children = childCommentsByParent.get(commentId) || [];
+	                    return children.flatMap((child) => [child.id, ...collectDescendantCommentIds(child.id)]);
+	                  };
 	                  const flattenComments = (
 	                    comments: ThreadComment[],
 	                    depth = 0,
@@ -4395,6 +4412,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
 	                              const descendantCommentCount = countDescendantComments(c.id);
+	                              const branchIsExpanded = expandedCommentBranches.has(c.id);
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
 	                              return (
@@ -4507,6 +4525,14 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                          type="button"
 	                                          onClick={() => {
 	                                            if (descendantCommentCount > 0) {
+	                                              if (branchIsExpanded) {
+	                                                collapseCommentBranches([c.id, ...collectDescendantCommentIds(c.id)]);
+	                                                if (replyFor === notice.id && replyComposerAnchorCommentId && [c.id, ...collectDescendantCommentIds(c.id)].includes(replyComposerAnchorCommentId)) {
+	                                                  setReplyFor(null);
+	                                                  resetReplyComposerDraft();
+	                                                }
+	                                                return;
+	                                              }
 	                                              expandCommentBranches([c.id]);
 	                                            }
 	                                            replyToComment(notice, c, getLastChildCommentId(c.id));
