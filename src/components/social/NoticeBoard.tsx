@@ -3944,7 +3944,7 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    const targetText = targetPreviewUrl ? stripExternalUrlFromText(target.content, targetPreviewUrl) : target.content;
 	                    const targetImage = target.images?.[0] || "";
 	                    return (
-	                      <div className={cn("flex min-w-0 gap-2 rounded-[14px] border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2", className)}>
+	                      <div className={cn("flex min-w-0 gap-2 rounded-[14px] border border-[rgba(74,73,101,0.12)] bg-muted/25 px-3 py-2", className)}>
 	                        {targetImage ? (
 	                          <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-muted/20">
 	                            <img
