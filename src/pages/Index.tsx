@@ -77,6 +77,8 @@ const formatSpeciesLabel = (value: string) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
 
+const HOME_PETS_LOAD_TIMEOUT_MS = 8_000;
+
 const Index = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -95,13 +97,20 @@ const Index = () => {
 
   const fetchPets = useCallback(async () => {
     try {
-      if (!user?.id) return;
-      const { data, error } = await supabase
+      if (!user?.id) {
+        setLoading(false);
+        return;
+      }
+      const petsQuery = supabase
         .from("pets")
         .select("id, name, species, breed, weight, weight_unit, dob, photo_url, is_active")
-        .eq("owner_id", user?.id)
+        .eq("owner_id", user.id)
         .order("is_active", { ascending: false })
         .order("created_at", { ascending: true });
+      const timeout = new Promise<never>((_, reject) => {
+        window.setTimeout(() => reject(new Error("Home pets request timed out")), HOME_PETS_LOAD_TIMEOUT_MS);
+      });
+      const { data, error } = await Promise.race([petsQuery, timeout]);
 
       if (error) throw error;
 
