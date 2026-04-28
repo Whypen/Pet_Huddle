@@ -3839,6 +3839,11 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                    if (children.length === 0) return commentId;
 	                    return children[children.length - 1].id;
 	                  };
+	                  const getLastDescendantCommentId = (commentId: string): string => {
+	                    const children = childCommentsByParent.get(commentId) || [];
+	                    if (children.length === 0) return commentId;
+	                    return getLastDescendantCommentId(children[children.length - 1].id);
+	                  };
 	                  const collectDescendantCommentIds = (commentId: string): string[] => {
 	                    const children = childCommentsByParent.get(commentId) || [];
 	                    return children.flatMap((child) => [child.id, ...collectDescendantCommentIds(child.id)]);
@@ -3909,8 +3914,17 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                      ? threadedComments.findIndex(({ comment }) => comment.id === replyComposerAnchorId)
 	                      : -1;
 	                  const activeReplyDepth = activeReplyCommentIndex >= 0 ? threadedComments[activeReplyCommentIndex]?.visualDepth ?? 0 : 0;
+	                  const activeReplyTarget = replyFor === notice.id && replyTargetCommentId
+	                    ? threadedComments.find(({ comment }) => comment.id === replyTargetCommentId)
+	                    : null;
+	                  const quotedReplyTarget = activeReplyTarget && activeReplyTarget.visualDepth >= 2 ? activeReplyTarget.comment : null;
+	                  const quotedReplyTargetPreviewUrl = quotedReplyTarget ? extractFirstHttpUrl(quotedReplyTarget.content || "") : "";
+	                  const quotedReplyTargetText = quotedReplyTarget
+	                    ? (quotedReplyTargetPreviewUrl ? stripExternalUrlFromText(quotedReplyTarget.content, quotedReplyTargetPreviewUrl) : quotedReplyTarget.content)
+	                    : "";
 	                  const replyComposerIndent = replyTargetCommentId ? Math.min((activeReplyDepth + 1) * 24, 48) : 0;
-	                  const replyComposerWidth = replyTargetCommentId ? `calc(100% - ${replyComposerIndent}px)` : "100%";
+	                  const replyComposerOuterInset = 8;
+	                  const replyComposerWidth = `calc(100% - ${replyComposerIndent + replyComposerOuterInset}px)`;
 	                  return (
                   <div
                     key={notice.id}
@@ -4237,15 +4251,35 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                }}
 	                                style={
 	                                  {
-	                                    ...(replyTargetCommentId ? { order: 2, marginLeft: `${replyComposerIndent}px` } : {}),
+	                                    ...(replyTargetCommentId ? { order: 2 } : {}),
+	                                    marginLeft: `${replyComposerIndent + 4}px`,
 	                                    width: replyComposerWidth,
 	                                  }
 	                                }
 	                                className={cn(
-	                                  "form-field-rest relative box-border h-auto min-h-[56px] max-w-full overflow-hidden rounded-[22px] bg-muted/25 px-4 py-2 shadow-none",
+	                                  "form-field-rest relative box-border h-auto min-h-[56px] max-w-full overflow-visible rounded-[22px] bg-muted/25 px-4 py-2 shadow-none",
 	                                  !replyTargetCommentId && "order-last"
 	                                )}
 	                              >
+	                                {quotedReplyTarget ? (
+	                                  <div className="mb-2 flex min-w-0 gap-2 rounded-2xl border border-[rgba(74,73,101,0.12)] bg-background/70 px-3 py-2">
+	                                    {quotedReplyTarget.images?.[0] ? (
+	                                      <img
+	                                        src={quotedReplyTarget.images[0]}
+	                                        alt=""
+	                                        className="h-12 w-12 shrink-0 rounded-xl object-cover"
+	                                      />
+	                                    ) : null}
+	                                    <div className="min-w-0 flex-1">
+	                                      <p className="truncate text-xs font-semibold text-brandText">
+	                                        {quotedReplyTarget.author?.social_id || quotedReplyTarget.author?.display_name || "Reply"}
+	                                      </p>
+	                                      <p className="mt-0.5 line-clamp-3 text-xs leading-4 text-[rgba(74,73,101,0.68)]">
+	                                        {quotedReplyTargetText || "Media reply"}
+	                                      </p>
+	                                    </div>
+	                                  </div>
+	                                ) : null}
                                 <div className="relative min-h-[24px]">
                               <div className="pointer-events-none min-h-[20px] whitespace-pre-wrap break-words text-sm leading-5">
                                     {renderComposerTextWithMentions(
@@ -4405,13 +4439,16 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                              </div>
 	                            )}
 
-	                            {threadedComments.map(({ comment: c, visualDepth, activeRailColumns, parentRailColumn, childRailColumn, isMaxDepthContinuation, isLastSibling, hasVisibleChildComments }, commentIndex) => {
+	                            {threadedComments.map(({ comment: c, depth, visualDepth, activeRailColumns, parentRailColumn, childRailColumn, isMaxDepthContinuation, isLastSibling, hasVisibleChildComments }, commentIndex) => {
 	                              const commentIndent = visualDepth * 40;
 	                              const railColumnLeft = (column: number) => `${column * 40 + 18 - commentIndent}px`;
 	                              const commentSocialId = c.author?.social_id || "";
 	                              const commentPreviewUrl = extractFirstHttpUrl(c.content || "");
 	                              const commentPreview = commentPreviewUrl ? linkPreviewByUrl[commentPreviewUrl] || null : null;
+	                              const directChildCommentCount = (childCommentsByParent.get(c.id) || []).length;
 	                              const descendantCommentCount = countDescendantComments(c.id);
+	                              const canExpandBranch = depth < 2 && directChildCommentCount > 0;
+	                              const replyBadgeCount = depth === 0 ? directChildCommentCount : depth === 1 ? descendantCommentCount : 0;
 	                              const branchIsExpanded = expandedCommentBranches.has(c.id);
 	                              const commentOrder =
 	                                activeReplyCommentIndex >= 0 ? (commentIndex <= activeReplyCommentIndex ? 1 : 3) : undefined;
@@ -4524,10 +4561,15 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                        <button
 	                                          type="button"
 	                                          onClick={() => {
-	                                            if (descendantCommentCount > 0) {
+	                                            if (canExpandBranch) {
+	                                              const branchIds = [c.id, ...collectDescendantCommentIds(c.id)];
 	                                              if (branchIsExpanded) {
-	                                                collapseCommentBranches([c.id, ...collectDescendantCommentIds(c.id)]);
-	                                                if (replyFor === notice.id && replyComposerAnchorCommentId && [c.id, ...collectDescendantCommentIds(c.id)].includes(replyComposerAnchorCommentId)) {
+	                                                collapseCommentBranches(branchIds);
+	                                                if (
+	                                                  replyFor === notice.id &&
+	                                                  ((replyTargetCommentId && branchIds.includes(replyTargetCommentId)) ||
+	                                                    (replyComposerAnchorCommentId && branchIds.includes(replyComposerAnchorCommentId)))
+	                                                ) {
 	                                                  setReplyFor(null);
 	                                                  resetReplyComposerDraft();
 	                                                }
@@ -4535,23 +4577,31 @@ export const NoticeBoard = ({ onPremiumClick, composeSignal, scrollContainerRef 
 	                                              }
 	                                              expandCommentBranches([c.id]);
 	                                            }
-	                                            replyToComment(notice, c, getLastChildCommentId(c.id));
+	                                            replyToComment(
+	                                              notice,
+	                                              c,
+	                                              canExpandBranch
+	                                                ? depth === 1
+	                                                  ? getLastDescendantCommentId(c.id)
+	                                                  : getLastChildCommentId(c.id)
+	                                                : c.id
+	                                            );
 	                                          }}
 	                                          className={cn(
                                             "relative inline-flex h-8 w-8 items-center justify-center rounded-full p-1.5 transition-all hover:bg-muted",
                                             replyFor === notice.id && replyTargetCommentId === c.id && "bg-primary/10 text-primary"
                                           )}
-                                          title={descendantCommentCount > 0 ? `${descendantCommentCount} ${descendantCommentCount === 1 ? "reply" : "replies"}` : "Reply"}
+                                          title={canExpandBranch ? `${replyBadgeCount} ${replyBadgeCount === 1 ? "reply" : "replies"}` : "Reply"}
                                           aria-label={
-                                            descendantCommentCount > 0
-                                              ? `View ${descendantCommentCount} ${descendantCommentCount === 1 ? "reply" : "replies"} and reply`
+                                            canExpandBranch
+                                              ? `${branchIsExpanded ? "Hide" : "View"} ${replyBadgeCount} ${replyBadgeCount === 1 ? "reply" : "replies"} and reply`
                                               : "Reply to comment"
                                           }
                                         >
                                           <MessageCircle className="h-4 w-4" />
-                                          {descendantCommentCount > 0 ? (
+                                          {canExpandBranch ? (
                                             <span className="absolute -right-1 -top-1 min-w-[14px] rounded-full bg-muted px-1 text-center text-[10px] leading-[14px] text-muted-foreground">
-                                              {descendantCommentCount}
+                                              {replyBadgeCount}
                                             </span>
                                           ) : null}
                                         </button>
