@@ -30,6 +30,7 @@ import { ProfilePhotoSlots } from "@/components/profile/edit/ProfilePhotoSlots";
 import {
   deleteProfilePhotoPath,
   emptyProfilePhotos,
+  getProfilePhotoPublicUrl,
   normalizeProfilePhotos,
 } from "@/lib/profilePhotos";
 import type { ProfilePhotos } from "@/types/profilePhotos";
@@ -1827,7 +1828,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (fieldSet.has("social_album")) payload.social_album = canonicalizeSocialAlbumEntries(draft.social_album);
       if (fieldSet.has("photos")) {
         payload.photos = draft.photos;
-        payload.avatar_url = draft.photos.cover || null;
+        payload.avatar_url = getProfilePhotoPublicUrl(draft.photos.cover);
         payload.social_album = canonicalizeSocialAlbumEntries([
           draft.photos.establishing,
           draft.photos.pack,
@@ -1923,7 +1924,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       .from("profiles")
       .update({
         photos,
-        avatar_url: photos.cover || null,
+        avatar_url: getProfilePhotoPublicUrl(photos.cover),
         social_album: nextSocialAlbum,
         updated_at: new Date().toISOString(),
       })
@@ -2111,7 +2112,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         nextPhotos.solo,
         nextPhotos.closer,
       ].filter((item): item is string => Boolean(item)));
-      const nextAvatarUrl = isProfileEditorialEnabled ? nextPhotos.cover : avatarUrl;
+      const nextAvatarUrl = isProfileEditorialEnabled ? getProfilePhotoPublicUrl(nextPhotos.cover) : avatarUrl;
       const nextSocialAlbum = isProfileEditorialEnabled
         ? editorialAlbum
         : canonicalizeSocialAlbumEntries(formData.social_album);

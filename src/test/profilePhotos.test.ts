@@ -13,6 +13,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("heic2any", () => ({ default: vi.fn() }));
 
 import {
+  getProfilePhotoPublicUrl,
   getProfilePhotoUploadPath,
   resolveProfilePhotoDisplayUrl,
 } from "@/lib/profilePhotos";
@@ -40,6 +41,12 @@ describe("profile photo storage paths", () => {
     );
 
     expect(storageFrom).toHaveBeenCalledWith("profile_photos");
+  });
+
+  it("converts canonical cover paths to browser-ready avatar URLs", () => {
+    expect(getProfilePhotoPublicUrl("profile_photos/user-1/cover-123.webp")).toBe(
+      "public:profile_photos:profile_photos/user-1/cover-123.webp",
+    );
   });
 
   it("keeps legacy capital Profiles paths readable with signed URLs", async () => {

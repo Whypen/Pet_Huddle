@@ -141,6 +141,16 @@ export const getProfilePhotoUploadPath = (
   extension = "webp",
 ): string => `${PROFILE_PHOTOS_BUCKET}/${userId}/${slot}-${Date.now()}.${extension}`;
 
+export const getProfilePhotoPublicUrl = (value: string | null | undefined): string | null => {
+  const cleanValue = cleanString(value);
+  if (!cleanValue) return null;
+  if (/^https?:\/\//i.test(cleanValue) || cleanValue.startsWith("data:") || cleanValue.startsWith("blob:")) {
+    return cleanValue;
+  }
+  if (!cleanValue.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) return cleanValue;
+  return supabase.storage.from(PROFILE_PHOTOS_BUCKET).getPublicUrl(cleanValue).data?.publicUrl ?? null;
+};
+
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 const shouldRetryStorageUpload = (error: unknown): boolean => {
@@ -197,8 +207,7 @@ export const resolveProfilePhotoDisplayUrl = async (
   }
 
   if (cleanValue.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
-    const publicUrl = supabase.storage.from(PROFILE_PHOTOS_BUCKET).getPublicUrl(cleanValue).data?.publicUrl;
-    return publicUrl ?? null;
+    return getProfilePhotoPublicUrl(cleanValue);
   }
 
   if (cleanValue.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
