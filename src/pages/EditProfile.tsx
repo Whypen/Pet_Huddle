@@ -26,6 +26,13 @@ import "react-phone-number-input/style.css";
 import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
+import { ProfilePhotoSlots } from "@/components/profile/edit/ProfilePhotoSlots";
+import {
+  deleteProfilePhotoPath,
+  emptyProfilePhotos,
+  normalizeProfilePhotos,
+} from "@/lib/profilePhotos";
+import type { ProfilePhotos } from "@/types/profilePhotos";
 import {
   clearPendingSignupVerification,
   loadPendingSignupVerification,
@@ -85,6 +92,12 @@ const describeSupabaseWriteError = (error: unknown) => {
 const normalizeSocialRole = (value: string) => (value === "Vet" ? "Veterinarian" : value);
 const DEFAULT_ROLE_WITH_PETS = "Pet Parent";
 const DEFAULT_ROLE_WITHOUT_PETS = "Animal Friend (No Pet)";
+const PROFILE_PHOTO_STORAGE_PATH_REGEX = /^Profiles\/[^/]+\/(?:cover|establishing|pack|solo|closer)-\d+\.(?:webp|jpg)$/;
+
+const isPersistableProfilePhotoValue = (value: string | null): boolean => {
+  if (!value) return true;
+  return isPersistableStoragePath(value) || isPersistableImageUrl(value);
+};
 
 const inferCountryCodeFromPhone = (phone: string): string => {
   const normalized = phone.replace(/\s+/g, "");
@@ -240,7 +253,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [petsProfileCount, setPetsProfileCount] = useState(0);
-  const [activePetHeads, setActivePetHeads] = useState<Array<{ id: string; name?: string | null; species?: string | null; photoUrl?: string | null }>>([]);
+  const [activePetHeads, setActivePetHeads] = useState<Array<{ id: string; name?: string | null; species?: string | null; dob?: string | null; photoUrl?: string | null }>>([]);
   const [selectedCountry, setSelectedCountry] = useState("");
   const [resolvedLocationCountry, setResolvedLocationCountry] = useState("");
   const [locationQuery, setLocationQuery] = useState("");
@@ -272,6 +285,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const phoneDuplicateCheckRef = useRef(0);
   const [dobEditMode, setDobEditMode] = useState(false);
   const [profileMode, setProfileMode] = useState<"edit" | "view">("edit");
+  const editScrollRef = useRef<HTMLDivElement | null>(null);
+  const viewScrollRef = useRef<HTMLDivElement | null>(null);
+  const [memberNumber, setMemberNumber] = useState<number | null>(null);
   const isIdentityLocked = profile?.is_verified === true;
   const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
   const [socialAlbumFallbackPreviews, setSocialAlbumFallbackPreviews] = useState<Record<string, string>>({});
@@ -282,6 +298,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const pendingPhotoUploadRef = useRef<Promise<string | null> | null>(null);
   const pendingSocialUploadRefs = useRef<Map<string, Promise<string | null>>>(new Map());
   const socialAlbumRef = useRef<string[]>([]);
+  const profilePhotoDeleteQueueRef = useRef<Set<string>>(new Set());
+  const profilePhotosMigratedToastRef = useRef(false);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
 
@@ -317,6 +335,35 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       // best-effort cleanup only
     }
   }, [signupData.email, user?.id]);
+
+  useEffect(() => {
+    if (onboardingMode || profilePhotosMigratedToastRef.current || !profile?.id) return;
+    if (profile.profile_photos_migrated_seen_at) return;
+    const hadLegacyPhotos = Boolean(profile.avatar_url || (Array.isArray(profile.social_album) && profile.social_album.length > 0));
+    if (!hadLegacyPhotos) return;
+
+    profilePhotosMigratedToastRef.current = true;
+    const seenAt = new Date().toISOString();
+    void supabase
+      .from("profiles")
+      .update({ profile_photos_migrated_seen_at: seenAt } as Record<string, unknown>)
+      .eq("id", profile.id)
+      .then(({ error }) => {
+        if (error) {
+          profilePhotosMigratedToastRef.current = false;
+          return;
+        }
+        toast.info("We've reorganised your photos into the new layout. Take a look.");
+        void refreshProfile();
+      });
+  }, [
+    onboardingMode,
+    profile?.avatar_url,
+    profile?.id,
+    profile?.profile_photos_migrated_seen_at,
+    profile?.social_album,
+    refreshProfile,
+  ]);
 
   const [fieldErrors, setFieldErrors] = useState({
     legalName: "",
@@ -369,6 +416,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     location_country: "",
     location_district: "",
     social_album: [] as string[],
+    photos: emptyProfilePhotos(),
 
     // Pet Experience
     pet_experience: [] as string[],
@@ -427,6 +475,19 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     location_country: value.location_country,
     location_district: value.location_district,
     social_album: canonicalizeSocialAlbumEntries(value.social_album.filter((entry) => isPersistableStoragePath(entry))),
+    photos: {
+      cover: isPersistableProfilePhotoValue(value.photos.cover) ? value.photos.cover : null,
+      establishing: isPersistableProfilePhotoValue(value.photos.establishing) ? value.photos.establishing : null,
+      pack: isPersistableProfilePhotoValue(value.photos.pack) ? value.photos.pack : null,
+      solo: isPersistableProfilePhotoValue(value.photos.solo) ? value.photos.solo : null,
+      closer: isPersistableProfilePhotoValue(value.photos.closer) ? value.photos.closer : null,
+      cover_caption: value.photos.cover_caption,
+      establishing_caption: value.photos.establishing_caption,
+      pack_caption: value.photos.pack_caption,
+      solo_caption: value.photos.solo_caption,
+      closer_caption: value.photos.closer_caption,
+      solo_aspect: value.photos.solo_aspect,
+    } satisfies ProfilePhotos,
     pet_experience: value.pet_experience,
     experience_years: value.experience_years,
     owns_pets: value.owns_pets,
@@ -445,6 +506,27 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_location: value.show_location && Boolean(value.location_country.trim() && value.location_district.trim()),
     avatar_url: isPersistableImageUrl(photoPreview) ? photoPreview : "",
   }), [photoPreview]);
+  const isProfileEditorialEnabled = profile?.profile_editorial_v1 === true;
+
+  useEffect(() => {
+    const memberSince = profile?.created_at ?? user?.created_at ?? null;
+    if (!memberSince) {
+      setMemberNumber(null);
+      return;
+    }
+    let cancelled = false;
+    const loadMemberNumber = async () => {
+      const { count, error } = await supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .lte("created_at", memberSince);
+      if (!cancelled) setMemberNumber(error ? null : count ?? null);
+    };
+    void loadMemberNumber();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.created_at, user?.created_at]);
   const hasVerifiedLegalName = Boolean(formData.legal_name?.trim()) && (
     profile?.is_verified === true
     || String(profile?.verification_status || "").toLowerCase() === "verified"
@@ -936,6 +1018,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         return [] as string[];
       }
     })();
+    const cachedPhotos = normalizeProfilePhotos(safeCachedDraft?.photos, {
+      avatarUrl: typeof safeCachedPrefill.avatar_url === "string" ? safeCachedPrefill.avatar_url : null,
+      socialAlbum: cachedSocialAlbum,
+    });
     const signupSeedOwner = normalizeStorageOwner(signupData.email || "");
     const authSeedOwner = normalizeStorageOwner(user?.email || user?.id || "");
     const allowSignupSeed = onboardingMode && Boolean(signupSeedOwner) && (!user?.id || signupSeedOwner === authSeedOwner);
@@ -1035,6 +1121,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       show_languages: Boolean(((profile?.prefs as Record<string, unknown> | null)?.show_languages ?? safeCachedDraft?.show_languages ?? false) && (profile?.languages ?? cachedLanguages).length > 0),
       show_location: Boolean(((profile?.prefs as Record<string, unknown> | null)?.show_location ?? safeCachedDraft?.show_location ?? false) && locationCountry.trim() && locationDistrict.trim()),
       social_album: canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum),
+      photos: normalizeProfilePhotos((profile as { photos?: unknown } | null)?.photos ?? cachedPhotos, {
+        avatarUrl: profile?.avatar_url ?? cachedPhotos.cover,
+        socialAlbum: profile?.social_album ?? cachedSocialAlbum,
+      }),
     };
     setFormData(nextForm);
     socialAlbumRef.current = canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum);
@@ -1413,7 +1503,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     if (!user?.id) return;
     supabase
       .from("pets")
-      .select("id, name, species, photo_url, is_active")
+      .select("id, name, species, dob, photo_url, is_active")
       .eq("owner_id", user.id)
       .then(({ data }) => {
         const activePets = (data || []).filter((pet) => pet.is_active !== false);
@@ -1425,6 +1515,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             id: pet.id,
             name: pet.name,
             species: pet.species,
+            dob: pet.dob,
             photoUrl: pet.photo_url || null,
           }))
         );
@@ -1765,6 +1856,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (fieldSet.has("location_country")) payload.location_country = draft.location_country || null;
       if (fieldSet.has("location_district")) payload.location_district = draft.location_district || null;
       if (fieldSet.has("social_album")) payload.social_album = canonicalizeSocialAlbumEntries(draft.social_album);
+      if (fieldSet.has("photos")) {
+        payload.photos = draft.photos;
+        if (profile?.profile_editorial_v1 === true) {
+          payload.avatar_url = draft.photos.cover || null;
+          payload.social_album = canonicalizeSocialAlbumEntries([
+            draft.photos.establishing,
+            draft.photos.pack,
+            draft.photos.solo,
+            draft.photos.closer,
+          ].filter((item): item is string => Boolean(item)));
+        }
+      }
       if (fieldSet.has("avatar_url")) payload.avatar_url = draft.avatar_url || null;
       if (fieldSet.has("pet_experience")) payload.pet_experience = draft.pet_experience.length > 0 ? draft.pet_experience : null;
       if (fieldSet.has("experience_years") || fieldSet.has("pet_experience")) {
@@ -1832,6 +1935,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
   };
 
+  const queueProfilePhotoDeletion = useCallback((path: string | null) => {
+    if (!path || !PROFILE_PHOTO_STORAGE_PATH_REGEX.test(path)) return;
+    profilePhotoDeleteQueueRef.current.add(path);
+  }, []);
+
   const handleSave = async () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const activeUser = user ?? sessionData.session?.user ?? null;
@@ -1840,6 +1948,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       validateRequiredFields();
       focusFirstMissingRequiredField(missingFields);
       toast.error(formatMissingFieldsToast(missingFields));
+      return;
+    }
+    if (isProfileEditorialEnabled && !formData.photos.cover) {
+      toast.error("Add a cover photo before saving your profile.");
       return;
     }
 
@@ -1987,6 +2099,20 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       } else if (photoFile) {
         avatarUrl = await uploadProfilePhotoFile(photoFile, activeUser.id);
       }
+      const nextPhotos = normalizeProfilePhotos(formData.photos, {
+        avatarUrl,
+        socialAlbum: formData.social_album,
+      });
+      const editorialAlbum = canonicalizeSocialAlbumEntries([
+        nextPhotos.establishing,
+        nextPhotos.pack,
+        nextPhotos.solo,
+        nextPhotos.closer,
+      ].filter((item): item is string => Boolean(item)));
+      const nextAvatarUrl = isProfileEditorialEnabled ? nextPhotos.cover : avatarUrl;
+      const nextSocialAlbum = isProfileEditorialEnabled
+        ? editorialAlbum
+        : canonicalizeSocialAlbumEntries(formData.social_album);
       const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
       const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
       const persistedPhone = getPersistedPhoneValue();
@@ -2043,8 +2169,9 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             show_languages: isVisibilityOn("show_languages"),
             show_location: isVisibilityOn("show_location"),
           },
-          social_album: canonicalizeSocialAlbumEntries(formData.social_album),
-          avatar_url: avatarUrl,
+          social_album: nextSocialAlbum,
+          avatar_url: nextAvatarUrl,
+          photos: nextPhotos,
           ...(shouldRevokePhoneVerification
             ? {
                 phone_verification_status: "unverified" as const,
@@ -2157,14 +2284,17 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
 
       await refreshProfile();
-      if (avatarUrl && isPersistableImageUrl(avatarUrl)) {
-        setPhotoPreview(avatarUrl);
+      const queuedPhotoDeletes = Array.from(profilePhotoDeleteQueueRef.current);
+      profilePhotoDeleteQueueRef.current.clear();
+      await Promise.allSettled(queuedPhotoDeletes.map((path) => deleteProfilePhotoPath(path)));
+      if (nextAvatarUrl && isPersistableImageUrl(nextAvatarUrl)) {
+        setPhotoPreview(nextAvatarUrl);
       }
       commitProfileDraftAsBaseline(
         String((profileWrite.data?.[0] as { updated_at?: string } | undefined)?.updated_at || new Date().toISOString()),
         {
           ...getProfileDraftValue(formData),
-          avatar_url: avatarUrl && isPersistableImageUrl(avatarUrl) ? avatarUrl : "",
+          avatar_url: nextAvatarUrl && isPersistableImageUrl(nextAvatarUrl) ? nextAvatarUrl : "",
         },
       );
       try {
@@ -2223,6 +2353,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const mediaUploadInProgress =
     photoUploadState.status === "uploading" ||
     pendingSocialUploads.some((item) => item.status === "uploading");
+  const saveBlockedByProfilePhotos = isProfileEditorialEnabled && !formData.photos.cover;
+  const saveDisabled = loading || mediaUploadInProgress || saveBlockedByProfilePhotos;
   const phoneChangedFromOriginal =
     normalizePhoneForCompare(formData.phone) !== normalizePhoneForCompare(phoneOriginalValue);
   const showPhoneChangeVerifiedWarning =
@@ -2249,7 +2381,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             size="icon-md"
             variant="tertiary"
             onClick={handleSave}
-            disabled={loading}
+            disabled={saveDisabled}
             aria-label={t("Save")}
           >
             {loading
@@ -2264,7 +2396,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         <div className="grid grid-cols-2 border-b border-border">
           <button
             type="button"
-            onClick={() => setProfileMode("edit")}
+            onClick={() => {
+              setProfileMode("edit");
+              requestAnimationFrame(() => editScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+            }}
             className={cn(
               "h-9 text-sm font-medium transition-colors border-b-2 -mb-px focus:outline-none",
               profileMode === "edit" ? "text-brandText border-[rgba(66,73,101,0.22)]" : "text-muted-foreground border-transparent"
@@ -2274,7 +2409,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           </button>
           <button
             type="button"
-            onClick={() => { void silentSave(); setProfileMode("view"); }}
+            onClick={() => {
+              void silentSave();
+              setProfileMode("view");
+              requestAnimationFrame(() => viewScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+            }}
             className={cn(
               "h-9 text-sm font-medium transition-colors border-b-2 -mb-px focus:outline-none",
               profileMode === "view" ? "text-brandText border-[rgba(66,73,101,0.22)]" : "text-muted-foreground border-transparent"
@@ -2287,9 +2426,17 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
 
       {profileMode === "edit" ? (
       <>
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-6" style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset + 24}px` : undefined }}>
+      <div ref={editScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-6" style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset + 24}px` : undefined }}>
         <div className="space-y-6">
           {/* Photo Upload */}
+          {isProfileEditorialEnabled ? (
+            <ProfilePhotoSlots
+              photos={formData.photos}
+              userId={user?.id ?? null}
+              onChange={(photos) => setFormData((prev) => ({ ...prev, photos }))}
+              onPreviousPathQueued={queueProfilePhotoDeletion}
+            />
+          ) : (
           <div className="flex justify-center">
             <label className="relative cursor-pointer group">
               <div className="relative w-28 h-28 rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
@@ -2335,6 +2482,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               />
             </label>
           </div>
+          )}
 
           {/* BASIC INFO */}
           <div className="space-y-4">
@@ -2742,6 +2890,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             </div>
 
             {/* Social Album */}
+            {!isProfileEditorialEnabled && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Moments with furry friends in up to 5 photos</label>
@@ -2860,6 +3009,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           {/* DEMOGRAPHICS */}
@@ -3223,78 +3373,76 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{t("Pet Experience")}</h3>
 
-            {/* Pet Experience Types */}
-            <div id="profile-field-pet-experience">
-              <label className="text-sm font-medium mb-2 block">{t("Experience with")}</label>
-              <div className="space-y-2">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      type="button"
-                      className="form-field-rest w-full h-[44px] px-4 flex items-center justify-between text-[14px]"
+            <div className="grid grid-cols-[minmax(0,1fr)_112px] gap-3">
+              <div id="profile-field-pet-experience" className="min-w-0">
+                <label className="text-sm font-medium mb-2 block">{t("Experience with")}</label>
+                <div className="space-y-2">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className="form-field-rest w-full h-[44px] px-4 flex items-center justify-between text-[14px]"
+                      >
+                        <span className={cn("truncate", formData.pet_experience.length === 0 && "text-muted-foreground")}>
+                          {formData.pet_experience.length > 0 ? formData.pet_experience.join(", ") : "Select pet experience"}
+                        </span>
+                        <span className="text-muted-foreground">⌄</span>
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="start"
+                      sideOffset={6}
+                      className="z-[95] w-[min(360px,calc(100vw-40px))] p-2 rounded-[14px] border border-brandText/10 bg-white"
                     >
-                      <span className={cn("truncate", formData.pet_experience.length === 0 && "text-muted-foreground")}>
-                        {formData.pet_experience.length > 0 ? formData.pet_experience.join(", ") : "Select pet experience"}
-                      </span>
-                      <span className="text-muted-foreground">⌄</span>
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    align="start"
-                    sideOffset={6}
-                    className="z-[95] w-[min(360px,calc(100vw-40px))] p-2 rounded-[14px] border border-brandText/10 bg-white"
-                  >
-                    <div className="max-h-[220px] overflow-y-auto pr-1">
-                      {petExperienceOptions.map((exp) => {
-                        const hasPets = petsProfileCount > 0 || formData.owns_pets;
-                        const noneDisabled = exp === "None" && hasPets;
-                        return (
-                          <button
-                            key={exp}
-                            type="button"
-                            onClick={() => {
-                              if (noneDisabled) {
-                                setFieldErrors((prev) => ({ ...prev, petExperience: REQUIRED_CONNECT_ERROR }));
-                                return;
-                              }
-                              if (exp === "None") {
-                                setFormData((prev) => ({
-                                  ...prev,
-                                  pet_experience: prev.pet_experience.includes("None") ? [] : ["None"],
-                                  experience_years: "",
-                                }));
-                                return;
-                              }
-                              setFormData((prev) => {
-                                const withoutNone = prev.pet_experience.filter((item) => item !== "None");
-                                const next = withoutNone.includes(exp)
-                                  ? withoutNone.filter((item) => item !== exp)
-                                  : [...withoutNone, exp];
-                                return { ...prev, pet_experience: next };
-                              });
-                            }}
-                            disabled={noneDisabled}
-                            className={cn(
-                              "w-full flex items-center justify-between rounded-[10px] px-3 py-2 text-sm text-left hover:bg-muted/40",
-                              noneDisabled && "opacity-45 cursor-not-allowed",
-                            )}
-                          >
-                            <span>{exp}</span>
-                            {formData.pet_experience.includes(exp) ? <Check className="w-4 h-4 text-brandBlue" strokeWidth={2} /> : <span className="w-4 h-4" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                      <div className="max-h-[220px] overflow-y-auto pr-1">
+                        {petExperienceOptions.map((exp) => {
+                          const hasPets = petsProfileCount > 0 || formData.owns_pets;
+                          const noneDisabled = exp === "None" && hasPets;
+                          return (
+                            <button
+                              key={exp}
+                              type="button"
+                              onClick={() => {
+                                if (noneDisabled) {
+                                  setFieldErrors((prev) => ({ ...prev, petExperience: REQUIRED_CONNECT_ERROR }));
+                                  return;
+                                }
+                                if (exp === "None") {
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    pet_experience: prev.pet_experience.includes("None") ? [] : ["None"],
+                                    experience_years: "",
+                                  }));
+                                  return;
+                                }
+                                setFormData((prev) => {
+                                  const withoutNone = prev.pet_experience.filter((item) => item !== "None");
+                                  const next = withoutNone.includes(exp)
+                                    ? withoutNone.filter((item) => item !== exp)
+                                    : [...withoutNone, exp];
+                                  return { ...prev, pet_experience: next };
+                                });
+                              }}
+                              disabled={noneDisabled}
+                              className={cn(
+                                "w-full flex items-center justify-between rounded-[10px] px-3 py-2 text-sm text-left hover:bg-muted/40",
+                                noneDisabled && "opacity-45 cursor-not-allowed",
+                              )}
+                            >
+                              <span>{exp}</span>
+                              {formData.pet_experience.includes(exp) ? <Check className="w-4 h-4 text-brandBlue" strokeWidth={2} /> : <span className="w-4 h-4" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                {fieldErrors.petExperience && <ErrorLabel message={fieldErrors.petExperience} />}
               </div>
-              {fieldErrors.petExperience && <ErrorLabel message={fieldErrors.petExperience} />}
-            </div>
 
-            {/* Years of Experience */}
-            {formData.pet_experience.length > 0 && !formData.pet_experience.includes("None") && (
-              <div id="profile-field-experience-years">
-                <label className="text-sm font-medium mb-2 block">{t("Years of Experience")}</label>
+              <div id="profile-field-experience-years" className={cn(formData.pet_experience.length === 0 || formData.pet_experience.includes("None") ? "opacity-45" : "")}>
+                <label className="text-sm font-medium mb-2 block">Years</label>
                 <div className="form-field-rest relative flex items-center w-28">
                   <input
                     type="number"
@@ -3320,6 +3468,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                     inputMode="decimal"
                     step="any"
                     aria-invalid={Boolean(fieldErrors.experienceYears)}
+                    disabled={formData.pet_experience.length === 0 || formData.pet_experience.includes("None")}
                   />
                 </div>
                 {fieldErrors.experienceYears && <ErrorLabel message={fieldErrors.experienceYears} />}
@@ -3327,7 +3476,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                   <p className="text-xs text-muted-foreground mt-1">{t("Less than 1 year")}</p>
                 )}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Pet Ownership */}
@@ -3421,16 +3570,22 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           <NeuButton
             variant="primary"
             className="w-full h-12"
-            disabled={loading}
+            disabled={saveDisabled}
             onClick={handleSave}
           >
-            {loading ? "Saving…" : mediaUploadInProgress ? "Complete profile (wait for uploads)" : "Complete profile"}
+            {loading
+              ? "Saving…"
+              : mediaUploadInProgress
+              ? "Complete profile (wait for uploads)"
+              : saveBlockedByProfilePhotos
+              ? "Add cover photo to complete"
+              : "Complete profile"}
           </NeuButton>
 
           <NeuButton
             variant="ghost"
             className="w-full h-11"
-            disabled={loading}
+            disabled={loading || mediaUploadInProgress}
             onClick={handleSaveDraft}
           >
             {mediaUploadInProgress ? "Save draft (wait for uploads)" : "Save draft"}
@@ -3439,10 +3594,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       )}
       </>
       ) : (
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4" style={{ paddingBottom: "calc(var(--nav-height, 64px) + env(safe-area-inset-bottom) + 20px)" }}>
+      <div ref={viewScrollRef} className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-0 pt-0" style={{ paddingBottom: "calc(var(--nav-height, 64px) + env(safe-area-inset-bottom) + 20px)" }}>
         <PublicProfileView
           displayName={formData.display_name}
           bio={formData.bio}
+          memberSince={profile?.created_at ?? user?.created_at ?? null}
+          memberNumber={memberNumber}
+          membershipTier={profile?.effective_tier ?? profile?.tier ?? null}
           availabilityStatus={formData.availability_status}
           isVerified={isIdentityLocked}
           hasCar={formData.has_car}
@@ -3463,6 +3621,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           languages={formData.languages}
           socialAlbum={formData.social_album}
           socialAlbumUrls={socialAlbumUrls}
+          editorialEnabled={isProfileEditorialEnabled}
+          photos={formData.photos}
           petHeads={activePetHeads}
           visibility={{
             show_age: formData.show_age,

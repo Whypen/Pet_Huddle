@@ -1,9 +1,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Hand, Heart, Star } from "lucide-react";
-import { ProfileBadges } from "@/components/ui/ProfileBadges";
 import { resolveCopy } from "@/lib/copy";
-import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { PublicProfileView } from "@/components/profile/PublicProfileView";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -23,6 +22,7 @@ interface ProfileModalProps {
       id: string;
       name: string;
       species: string;
+      dob?: string | null;
       photoUrl?: string;
     }>;
   };
@@ -82,104 +82,52 @@ export const ProfileModal = ({
 
             {/* Scrollable Content */}
             <div className="overflow-y-auto max-h-[calc(70vh-80px)]">
-              {/* Header with Avatar */}
-              <div className="relative h-48 bg-gradient-to-br from-primary to-accent">
-                {profile.avatarUrl && (
-                  <img
-                    src={profile.avatarUrl}
-                    alt={profile.name}
-                    className="w-full h-full object-cover"
-                  />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-card via-transparent to-transparent" />
-              </div>
-
-              {/* Profile Info */}
-              <div className="px-6 -mt-10 relative">
-                <div className="flex items-end gap-3 mb-4">
-                  <div className="w-20 h-20 rounded-full border-4 border-card overflow-hidden bg-muted">
-                    {profile.avatarUrl ? (
-                      <img
-                        src={profile.avatarUrl}
-                        alt={profile.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground">
-                        {profile.name.charAt(0)}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 pb-1">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold">{profile.name}</h2>
-                      {profile.age && <span className="text-muted-foreground">{profile.age}</span>}
-                      <ProfileBadges
-                        isVerified={profile.isVerified}
-                        hasCar={profile.hasCar}
-                        size="md"
-                      />
-                    </div>
-                    {profile.isVerified && (
-                      <span className="text-xs text-accent font-medium">✓ {t("social.verified")}</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Bio */}
-                {profile.bio && (
-                  <p className="text-sm text-muted-foreground mb-4">{profile.bio}</p>
-                )}
-
-                {/* Details */}
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {profile.education && (
-                    <span className="px-3 py-1.5 rounded-full bg-muted text-xs font-medium">
-                      🎓 {profile.education}
-                    </span>
-                  )}
-                  {profile.height && (
-                    <span className="px-3 py-1.5 rounded-full bg-muted text-xs font-medium">
-                      📏 {profile.height}cm
-                    </span>
-                  )}
-                  {profile.occupation && (
-                    <span className="px-3 py-1.5 rounded-full bg-muted text-xs font-medium">
-                      💼 {profile.occupation}
-                    </span>
-                  )}
-                </div>
-
-                {/* Pet Gallery */}
-                {profile.pets && profile.pets.length > 0 && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold mb-2">{t("Pets")}</h3>
-                    <div className="flex gap-3 overflow-x-auto pb-2">
-                      {profile.pets.map((pet) => (
-                        <div key={pet.id} className="flex-shrink-0 text-center">
-                          <div className="w-16 h-16 rounded-xl overflow-hidden bg-muted mb-1">
-                            {pet.photoUrl ? (
-                              <img
-                                src={pet.photoUrl}
-                                alt={pet.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-lg">
-                                🐾
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-xs font-medium">{pet.name}</span>
-                          <span className="text-xs text-muted-foreground block capitalize">
-                            {pet.species}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <PublicProfileView
+                displayName={profile.name}
+                bio={profile.bio || ""}
+                memberSince={null}
+                memberNumber={null}
+                membershipTier={null}
+                availabilityStatus={[]}
+                isVerified={profile.isVerified === true}
+                hasCar={profile.hasCar === true}
+                photoUrl={profile.avatarUrl || null}
+                dob=""
+                gender=""
+                orientation=""
+                height={profile.height ? String(profile.height) : ""}
+                petExperience={[]}
+                experienceYears=""
+                relationshipStatus=""
+                degree={profile.education || ""}
+                school=""
+                major=""
+                occupation={profile.occupation || ""}
+                affiliation=""
+                locationName=""
+                languages={[]}
+                socialAlbum={[]}
+                socialAlbumUrls={{}}
+                petHeads={(profile.pets || []).map((pet) => ({
+                  id: pet.id,
+                  name: pet.name,
+                  species: pet.species,
+                  dob: pet.dob,
+                  photoUrl: pet.photoUrl || null,
+                  isPublic: true,
+                }))}
+                visibility={{
+                  show_age: false,
+                  show_gender: false,
+                  show_orientation: false,
+                  show_height: Boolean(profile.height),
+                  show_relationship_status: false,
+                  show_academic: Boolean(profile.education),
+                  show_occupation: Boolean(profile.occupation),
+                  show_affiliation: false,
+                  show_bio: Boolean(profile.bio),
+                }}
+              />
             </div>
 
             {/* Action Bar */}
@@ -234,7 +182,7 @@ export const ProfileModal = ({
                     transition={{ duration: 0.5 }}
                     className="text-6xl mb-4"
                   >
-                    🎉
+                    *
                   </motion.div>
                   <h2 className="text-2xl font-bold text-primary-foreground mb-2">
                     {t("social.match")}

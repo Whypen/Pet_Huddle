@@ -2739,7 +2739,10 @@ export type Database = {
             | Database["public"]["Enums"]["verification_status_enum"]
             | null
           phone_verified_at: string | null
+          photos: Json
           posted_to_threads: boolean
+          profile_editorial_v1: boolean
+          profile_photos_migrated_seen_at: string | null
           prefs: Json
           relationship_status: string | null
           restriction_expires_at: string | null
@@ -2875,7 +2878,10 @@ export type Database = {
             | Database["public"]["Enums"]["verification_status_enum"]
             | null
           phone_verified_at?: string | null
+          photos?: Json
           posted_to_threads?: boolean
+          profile_editorial_v1?: boolean
+          profile_photos_migrated_seen_at?: string | null
           prefs?: Json
           relationship_status?: string | null
           restriction_expires_at?: string | null
@@ -3011,7 +3017,10 @@ export type Database = {
             | Database["public"]["Enums"]["verification_status_enum"]
             | null
           phone_verified_at?: string | null
+          photos?: Json
           posted_to_threads?: boolean
+          profile_editorial_v1?: boolean
+          profile_photos_migrated_seen_at?: string | null
           prefs?: Json
           relationship_status?: string | null
           restriction_expires_at?: string | null

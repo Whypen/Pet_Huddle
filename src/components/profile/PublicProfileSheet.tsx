@@ -6,6 +6,7 @@ import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
+import { normalizeProfilePhotos } from "@/lib/profilePhotos";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
 import { resolveStarQuotaTier } from "@/lib/starQuota";
@@ -13,8 +14,12 @@ import { StarUpgradeSheet } from "@/components/monetization/StarUpgradeSheet";
 import { handoffStripeCheckout } from "@/lib/stripeCheckout";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { sendStarChat } from "@/lib/starChat";
+import { GlassModal } from "@/components/ui/GlassModal";
+import { GlassSheet } from "@/components/ui/GlassSheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type PublicProfileSheetData = {
+  created_at?: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
   bio?: string | null;
@@ -40,10 +45,15 @@ type PublicProfileSheetData = {
   location_name?: string | null;
   languages?: string[] | null;
   social_album?: string[] | null;
+  photos?: unknown;
+  profile_editorial_v1?: boolean | null;
+  tier?: string | null;
+  effective_tier?: string | null;
   pet_heads?: Array<{
     id: string;
     name?: string | null;
     species?: string | null;
+    dob?: string | null;
     photo_url?: string | null;
     photoUrl?: string | null;
     is_public?: boolean | null;
@@ -78,6 +88,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
   const [resolvedData, setResolvedData] = useState<PublicProfileSheetData | null>(data);
   const [resolvedLoading, setResolvedLoading] = useState(false);
   const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
+  const [memberNumber, setMemberNumber] = useState<number | null>(null);
   const [petViewOpen, setPetViewOpen] = useState(false);
   const [petViewLoading, setPetViewLoading] = useState(false);
   const [petViewData, setPetViewData] = useState<Record<string, unknown> | null>(null);
@@ -87,6 +98,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
   const [confirmStarOpen, setConfirmStarOpen] = useState(false);
   const [starSending, setStarSending] = useState(false);
   const [starFlightVisible, setStarFlightVisible] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     setResolvedData(data);
@@ -118,7 +130,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
         }
         const { data: pets } = await supabase
           .from("pets")
-          .select("id, name, species, photo_url, is_active, is_public")
+          .select("id, name, species, dob, photo_url, is_active, is_public")
           .eq("owner_id", viewedUserId);
         const petHeads = (pets || []).filter((pet) => pet.is_active !== false);
         if (!cancelled) {
@@ -139,6 +151,25 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
       cancelled = true;
     };
   }, [data, isOpen, viewedUserId]);
+
+  useEffect(() => {
+    if (!isOpen || !resolvedData?.created_at) {
+      setMemberNumber(null);
+      return;
+    }
+    let cancelled = false;
+    const loadMemberNumber = async () => {
+      const { count, error } = await supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .lte("created_at", resolvedData.created_at);
+      if (!cancelled) setMemberNumber(error ? null : count ?? null);
+    };
+    void loadMemberNumber();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, resolvedData?.created_at]);
 
   const socialAlbum = useMemo(
     () => canonicalizeSocialAlbumEntries(Array.isArray(resolvedData?.social_album) ? resolvedData.social_album : []),
@@ -177,6 +208,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
         id: pet.id,
         name: pet.name ?? null,
         species: pet.species ?? null,
+        dob: pet.dob ?? null,
         photoUrl: pet.photoUrl ?? pet.photo_url ?? null,
         isPublic: pet.is_public ?? false,
       }))
@@ -313,124 +345,139 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
     return years >= 0 ? years : null;
   })();
 
+  const profileContent = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="min-w-0 flex items-baseline gap-2">
+          <div className="truncate text-sm font-semibold text-brandText">
+            {resolvedData?.display_name || fallbackName || "Profile"}
+          </div>
+          {resolvedData?.social_id ? (
+            <div className="truncate text-xs font-medium text-[rgba(74,73,101,0.55)]">
+              @{resolvedData.social_id}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {canInteract && starAllowedByAge && !hideStartChatAction ? (
+            <button
+              type="button"
+              onClick={() => setConfirmStarOpen(true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
+              aria-label="Start chat"
+            >
+              <Star className="h-4 w-4 text-brandBlue" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
+            aria-label="Close profile"
+          >
+            <X className="h-4 w-4 text-brandText/70" />
+          </button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        {(loading || resolvedLoading) ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-brandBlue" />
+          </div>
+        ) : resolvedData?.non_social === true ? (
+          <div className="flex h-full items-center justify-center p-4">
+            <div className="w-full max-w-sm rounded-2xl border border-border bg-white p-5 text-center">
+              <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-muted/70">
+                <User className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <p className="text-sm font-semibold text-brandText">{resolvedData?.display_name || fallbackName || "User"}</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                This user has enabled Non-Social mode and is not available for discovery or chat.
+              </p>
+            </div>
+          </div>
+        ) : resolvedData ? (
+          <PublicProfileView
+            displayName={resolvedData.display_name || fallbackName || ""}
+            bio={resolvedData.bio || ""}
+            memberSince={resolvedData.created_at ?? null}
+            memberNumber={memberNumber}
+            membershipTier={resolvedData.effective_tier ?? resolvedData.tier ?? null}
+            availabilityStatus={availabilityStatus}
+            isVerified={resolvedData.is_verified === true}
+            hasCar={Boolean(resolvedData.has_car)}
+            photoUrl={resolvedData.avatar_url || null}
+            dob={resolvedData.dob || ""}
+            gender={resolvedData.gender_genre || ""}
+            orientation={resolvedData.orientation || ""}
+            height={String(resolvedData.height ?? "")}
+            petExperience={Array.isArray(resolvedData.pet_experience) ? resolvedData.pet_experience : []}
+            experienceYears={String(experienceYearsValue ?? "")}
+            relationshipStatus={resolvedData.relationship_status || ""}
+            degree={resolvedData.degree || ""}
+            school={resolvedData.school || ""}
+            major={resolvedData.major || ""}
+            occupation={resolvedData.occupation || ""}
+            affiliation={resolvedData.affiliation || ""}
+            locationName={resolvedData.location_name || ""}
+            languages={Array.isArray(resolvedData.languages) ? resolvedData.languages : []}
+            socialAlbum={socialAlbum}
+            socialAlbumUrls={socialAlbumUrls}
+            editorialEnabled={resolvedData.profile_editorial_v1 === true}
+            photos={normalizeProfilePhotos(resolvedData.photos, {
+              avatarUrl: resolvedData.avatar_url ?? null,
+              socialAlbum,
+            })}
+            petHeads={petHeads}
+            onPetClick={(petId, isPublic) => { void openPetView(petId, isPublic); }}
+            visibility={{
+              show_age: resolvedData.show_age !== false,
+              show_gender: resolvedData.show_gender !== false,
+              show_orientation: resolvedData.show_orientation !== false,
+              show_height: resolvedData.show_height !== false,
+              show_relationship_status: resolvedData.show_relationship_status !== false,
+              show_academic: resolvedData.show_academic !== false,
+              show_occupation: resolvedData.show_occupation !== false,
+              show_affiliation: resolvedData.show_affiliation !== false,
+              show_bio: resolvedData.show_bio !== false,
+            }}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+            Profile not found
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <AnimatePresence>
       {isOpen && (
         <>
-          <motion.div
-            className="fixed inset-0 bg-black/50"
-            style={{ zIndex: zIndexBase }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div
-            className="fixed inset-0 flex items-center justify-center px-3 pt-[max(60px,env(safe-area-inset-top))] pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]"
-            style={{ zIndex: zIndexBase + 1 }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-          >
-            <div className="h-[80svh] max-h-[80svh] w-[min(calc(100vw-24px),560px)] rounded-3xl border border-border bg-card shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div className="min-w-0 flex items-baseline gap-2">
-                <div className="truncate text-sm font-semibold text-brandText">
-                  {resolvedData?.display_name || fallbackName || "Profile"}
-                </div>
-                {resolvedData?.social_id ? (
-                  <div className="truncate text-xs font-medium text-[rgba(74,73,101,0.55)]">
-                    @{resolvedData.social_id}
-                  </div>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-2">
-                {canInteract && starAllowedByAge && !hideStartChatAction ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmStarOpen(true)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
-                      aria-label="Start chat"
-                    >
-                      <Star className="h-4 w-4 text-brandBlue" />
-                    </button>
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-white/80"
-                  aria-label="Close profile"
-                >
-                  <X className="h-4 w-4 text-brandText/70" />
-                </button>
-              </div>
-            </div>
-            <div className="h-[calc(80svh-57px)] overflow-y-auto px-4 py-4">
-              {(loading || resolvedLoading) ? (
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-brandBlue" />
-                </div>
-              ) : resolvedData?.non_social === true ? (
-                <div className="flex h-full items-center justify-center p-4">
-                  <div className="w-full max-w-sm rounded-2xl border border-border bg-white p-5 text-center">
-                    <div className="mx-auto mb-3 inline-flex h-12 w-12 items-center justify-center rounded-full border border-border bg-muted/70">
-                      <User className="h-6 w-6 text-muted-foreground" />
-                    </div>
-                    <p className="text-sm font-semibold text-brandText">{resolvedData?.display_name || fallbackName || "User"}</p>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      This user has enabled Non-Social mode and is not available for discovery or chat.
-                    </p>
-                  </div>
-                </div>
-              ) : resolvedData ? (
-                <PublicProfileView
-                  displayName={resolvedData.display_name || fallbackName || ""}
-                  bio={resolvedData.bio || ""}
-                  availabilityStatus={availabilityStatus}
-                  isVerified={resolvedData.is_verified === true}
-                  hasCar={Boolean(resolvedData.has_car)}
-                  photoUrl={resolvedData.avatar_url || null}
-                  dob={resolvedData.dob || ""}
-                  gender={resolvedData.gender_genre || ""}
-                  orientation={resolvedData.orientation || ""}
-                  height={String(resolvedData.height ?? "")}
-                  petExperience={Array.isArray(resolvedData.pet_experience) ? resolvedData.pet_experience : []}
-                  experienceYears={String(experienceYearsValue ?? "")}
-                  relationshipStatus={resolvedData.relationship_status || ""}
-                  degree={resolvedData.degree || ""}
-                  school={resolvedData.school || ""}
-                  major={resolvedData.major || ""}
-                  occupation={resolvedData.occupation || ""}
-                  affiliation={resolvedData.affiliation || ""}
-                  locationName={resolvedData.location_name || ""}
-                  languages={Array.isArray(resolvedData.languages) ? resolvedData.languages : []}
-                  socialAlbum={socialAlbum}
-                  socialAlbumUrls={socialAlbumUrls}
-                  petHeads={petHeads}
-                  onPetClick={(petId, isPublic) => { void openPetView(petId, isPublic); }}
-                  visibility={{
-                    show_age: resolvedData.show_age !== false,
-                    show_gender: resolvedData.show_gender !== false,
-                    show_orientation: resolvedData.show_orientation !== false,
-                    show_height: resolvedData.show_height !== false,
-                    show_relationship_status: resolvedData.show_relationship_status !== false,
-                    show_academic: resolvedData.show_academic !== false,
-                    show_occupation: resolvedData.show_occupation !== false,
-                    show_affiliation: resolvedData.show_affiliation !== false,
-                    show_bio: resolvedData.show_bio !== false,
-                  }}
-                />
-              ) : (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  Profile not found
-                </div>
-              )}
-            </div>
-            </div>
-          </motion.div>
+          {isMobile ? (
+            <GlassSheet
+              isOpen={isOpen}
+              onClose={onClose}
+              className="h-[88svh] max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] p-0"
+              contentClassName="p-0 pr-0 overflow-hidden"
+              hideClose
+              zIndexBase={zIndexBase}
+            >
+              {profileContent}
+            </GlassSheet>
+          ) : (
+            <GlassModal
+              isOpen={isOpen}
+              onClose={onClose}
+              maxWidth="max-w-[560px]"
+              className="h-[80svh] max-h-[80svh] overflow-hidden p-0"
+              hideClose
+              zIndexBase={zIndexBase}
+            >
+              {profileContent}
+            </GlassModal>
+          )}
           <Dialog open={confirmStarOpen} onOpenChange={(open) => {
             if (starSending) return;
             setConfirmStarOpen(open);

@@ -94,17 +94,32 @@
   :root {
     /* ── Core brand palette ───────────────────── */
     --huddle-blue:         #2145CF;   /* canonical — was #2D37C8 */
+    --huddle-blue-light:   #3A5FE8;
+    --huddle-blue-dark:    #1C3ECC;
     --plus-gold:           #CFAB21;
+    --premium-gold:        #CFAB21;
+    --premium-gold-light:  #E0BC2A;
+    --coral-orange:        #FF7F50;
+    --lime-green:          #BFFF00;
     --text-primary:        #424965;
     --text-subtext:        #4a4a4a;
+    --fg-1:                #424965;
+    --fg-2:                #4A4A4A;
+    --fg-3:                rgba(74, 73, 101, 0.55);
+    --fg-on-dark:          #FFFFFF;
+    --fg-on-gold:          #2A2400;
     --error-red:           #EF4444;  /* validation/errors ONLY */
+    --validation-red:      #EF4444;
     --success-green:       #10b981;
     --warning-amber:       #F59E0B;
     --emergency-warm-red:  #F97316;  /* emergency broadcasts ONLY */
     --bg-white:            #FFFFFF;
+    --bg-canvas:           #FFFFFF;
     --bg-muted:            #F3F4F6;
     --bg-blue-soft:        #EBF5FF;
     --bg-yellow-soft:      #FFF9E6;
+    --bg-blue-surface:     rgba(33, 69, 207, 0.08);
+    --bg-gold-surface:     rgba(207, 171, 33, 0.10);
 
     /* ── Glass depth tokens (DESIGN_MASTER_SPEC §1.2) ─ */
     --glass-bg-e2:         rgba(255, 255, 255, 0.80);
@@ -154,7 +169,13 @@
     /* ── Radius tokens ───────────────────────── */
     --radius:       0.75rem;  /* 12px — card */
     --radius-sm:    0.5rem;   /* 8px  — btn/input */
+    --radius-md:    12px;
     --radius-lg:    1rem;     /* 16px — glass */
+    --radius-xl:    20px;
+    --radius-2xl:   24px;
+    --radius-3xl:   28px;
+    --radius-field: 14px;
+    --radius-pill:  9999px;
     --radius-modal: 1.25rem;  /* 20px — active modal */
 
     /* ── Typography tokens ───────────────────── */
