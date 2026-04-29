@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
+import { canonicalizeSocialAlbumEntries } from "@/lib/socialAlbum";
 import { normalizeProfilePhotos } from "@/lib/profilePhotos";
 import { toast } from "sonner";
 import { quotaConfig } from "@/config/quotaConfig";
@@ -47,7 +47,6 @@ type PublicProfileSheetData = {
   languages?: string[] | null;
   social_album?: string[] | null;
   photos?: unknown;
-  profile_editorial_v1?: boolean | null;
   tier?: string | null;
   effective_tier?: string | null;
   pet_heads?: Array<{
@@ -88,7 +87,6 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
   const navigate = useNavigate();
   const [resolvedData, setResolvedData] = useState<PublicProfileSheetData | null>(data);
   const [resolvedLoading, setResolvedLoading] = useState(false);
-  const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
   const [memberNumber, setMemberNumber] = useState<number | null>(null);
   const [petViewOpen, setPetViewOpen] = useState(false);
   const [petViewLoading, setPetViewLoading] = useState(false);
@@ -176,27 +174,6 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
     () => canonicalizeSocialAlbumEntries(Array.isArray(resolvedData?.social_album) ? resolvedData.social_album : []),
     [resolvedData?.social_album]
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    const resolveAlbumUrls = async () => {
-      const next = await resolveSocialAlbumUrlMap(socialAlbum, 60 * 60);
-      if (!cancelled) {
-        setSocialAlbumUrls((prev) => {
-          const prevKeys = Object.keys(prev);
-          const nextKeys = Object.keys(next);
-          if (prevKeys.length === nextKeys.length && prevKeys.every((k) => prev[k] === next[k])) {
-            return prev;
-          }
-          return next;
-        });
-      }
-    };
-    void resolveAlbumUrls();
-    return () => {
-      cancelled = true;
-    };
-  }, [socialAlbum]);
 
   const experienceYearsValue = resolvedData?.pet_experience_years ?? resolvedData?.experience_years ?? "";
   const availabilityStatus = Array.isArray(resolvedData?.availability_status) && resolvedData?.availability_status.length > 0
@@ -429,7 +406,6 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
             locationName={resolvedData.location_name || ""}
             languages={Array.isArray(resolvedData.languages) ? resolvedData.languages : []}
             socialAlbum={socialAlbum}
-            socialAlbumUrls={socialAlbumUrls}
             photos={normalizeProfilePhotos(resolvedData.photos, {
               avatarUrl: resolvedData.avatar_url ?? null,
               socialAlbum,

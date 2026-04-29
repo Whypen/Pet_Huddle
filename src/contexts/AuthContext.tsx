@@ -15,9 +15,11 @@ import { fetchLivePrices, resolvePricingHints } from "@/lib/stripePrices";
 import { normalizeMembershipTier } from "@/lib/membership";
 import { authLogin, authSignup } from "@/lib/publicAuthApi";
 import { mapAuthFailureMessage } from "@/lib/authErrorMessages";
+import type { ProfilePhotos } from "@/types/profilePhotos";
 
 export interface Profile {
   id: string;
+  created_at?: string | null;
   user_id?: string | null;
   email?: string | null;
   display_name: string | null;
@@ -87,6 +89,8 @@ export interface Profile {
   non_social?: boolean | null;
   availability_status: string[];
   social_album?: string[] | null;
+  photos?: ProfilePhotos | null;
+  profile_photos_migrated_seen_at?: string | null;
   show_gender: boolean;
   show_orientation: boolean;
   show_age: boolean;
@@ -160,7 +164,7 @@ const EXPIRE_RESTRICTIONS_SESSION_KEY = "huddle:expire-restrictions-ts";
 const EXPIRE_RESTRICTIONS_TTL_MS = 10 * 60 * 1000; // 10 minutes per tab session
 
 const PROFILE_COLUMNS = [
-  "id", "user_id", "email", "display_name", "legal_name", "social_id",
+  "id", "created_at", "user_id", "email", "display_name", "legal_name", "social_id",
   "phone", "phone_verification_status", "phone_verified_at",
   "avatar_url", "bio", "gender_genre", "orientation", "dob",
   "height", "weight", "weight_unit", "degree", "school", "major",
@@ -189,6 +193,24 @@ const PROFILE_COLUMNS = [
   "hide_from_map", "last_active_at",
 ] as const;
 const PROFILE_SELECT = PROFILE_COLUMNS.join(", ");
+const PROFILE_OPTIONAL_COLUMNS = [
+  "photos",
+  "profile_photos_migrated_seen_at",
+] as const;
+const PROFILE_SELECT_WITH_OPTIONAL = [...PROFILE_COLUMNS, ...PROFILE_OPTIONAL_COLUMNS].join(", ");
+
+const isMissingOptionalProfileColumnError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { code?: unknown; message?: unknown; details?: unknown };
+  const code = typeof record.code === "string" ? record.code : "";
+  const text = `${String(record.message || "")} ${String(record.details || "")}`.toLowerCase();
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    text.includes("photos") ||
+    text.includes("profile_photos_migrated_seen_at")
+  );
+};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -336,11 +358,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     _options: { preserveExisting?: boolean } = {},
   ) => {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("profiles")
-        .select(PROFILE_SELECT)
+        .select(PROFILE_SELECT_WITH_OPTIONAL)
         .eq("id", userId)
         .maybeSingle();
+      if (error && isMissingOptionalProfileColumnError(error)) {
+        const fallback = await supabase
+          .from("profiles")
+          .select(PROFILE_SELECT)
+          .eq("id", userId)
+          .maybeSingle();
+        data = fallback.data;
+        error = fallback.error;
+      }
       if (!isHydrationRunCurrent(runId)) return;
       if (error) throw error;
       if (!data) {

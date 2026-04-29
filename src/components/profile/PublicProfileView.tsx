@@ -26,7 +26,6 @@ type PublicProfileViewProps = {
   locationName: string;
   languages: string[];
   socialAlbum: string[];
-  socialAlbumUrls: Record<string, string>;
   photos?: ProfilePhotos | null;
   petHeads: Array<{
     id: string;

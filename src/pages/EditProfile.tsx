@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
-import { Camera, Loader2, Check, Save, Car, X, Pencil, MapPin, Plus, Eye, Calendar, ArrowLeft, Mail } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Loader2, Check, Save, Car, Pencil, MapPin, Eye, Calendar, ArrowLeft, Mail } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { resolveCopy } from "@/lib/copy";
 import { useSignup } from "@/contexts/SignupContext";
-import imageCompression from "browser-image-compression";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/constants";
 import { requestPhoneOtp as requestPhoneOtpCode, verifyPhoneOtp as verifyPhoneOtpCode } from "@/lib/phoneOtp";
 import { useTurnstile } from "@/hooks/useTurnstile";
@@ -25,7 +24,7 @@ import PhoneInput, { isValidPhoneNumber } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
 import { isPhoneCountryAllowed } from "@/config/allowedSmsCountries";
 import { CANONICAL_GENDER_OPTIONS, CANONICAL_ORIENTATION_OPTIONS, CANONICAL_PET_EXPERIENCE_SPECIES_OPTIONS, CANONICAL_SOCIAL_ROLE_OPTIONS } from "@/lib/profileOptions";
-import { canonicalizeSocialAlbumEntries, resolveSocialAlbumUrlMap } from "@/lib/socialAlbum";
+import { canonicalizeSocialAlbumEntries } from "@/lib/socialAlbum";
 import { ProfilePhotoSlots } from "@/components/profile/edit/ProfilePhotoSlots";
 import {
   deleteProfilePhotoPath,
@@ -145,13 +144,6 @@ const isCanonicalPhoneVerified = (
   );
 };
 
-const isRenderableImageSrc = (value: string): boolean => {
-  const src = String(value || "").trim();
-  if (!src) return false;
-  if (src.startsWith("blob:") || src.startsWith("data:")) return true;
-  return /^https?:\/\//i.test(src);
-};
-
 const extractDistrictFromPlaceLabel = (label: string): string => {
   const parts = label.split(",").map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[1];
@@ -210,20 +202,6 @@ type EditProfileProps = {
   onboardingMode?: boolean;
 };
 
-type UploadLifecycleStatus = "idle" | "uploading" | "success" | "error";
-
-type UploadProgressState = {
-  status: UploadLifecycleStatus;
-  progress: number;
-};
-
-type PendingSocialUpload = {
-  id: string;
-  previewUrl: string;
-  progress: number;
-  status: UploadLifecycleStatus;
-};
-
 const VISIBILITY_FIELDS = [
   "show_gender",
   "show_orientation",
@@ -251,8 +229,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const { data: signupData, reset: resetSignup, setFlowState } = useSignup();
   const [loading, setLoading] = useState(false);
   const [isPremiumOpen, setIsPremiumOpen] = useState(false);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [petsProfileCount, setPetsProfileCount] = useState(0);
   const [activePetHeads, setActivePetHeads] = useState<Array<{ id: string; name?: string | null; species?: string | null; dob?: string | null; photoUrl?: string | null }>>([]);
   const [selectedCountry, setSelectedCountry] = useState("");
@@ -290,16 +266,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const viewScrollRef = useRef<HTMLDivElement | null>(null);
   const [memberNumber, setMemberNumber] = useState<number | null>(null);
   const isIdentityLocked = profile?.is_verified === true;
-  const [socialAlbumUrls, setSocialAlbumUrls] = useState<Record<string, string>>({});
-  const [socialAlbumFallbackPreviews, setSocialAlbumFallbackPreviews] = useState<Record<string, string>>({});
-  const [socialAlbumLoadErrors, setSocialAlbumLoadErrors] = useState<Record<string, boolean>>({});
-  const [photoUploadState, setPhotoUploadState] = useState<UploadProgressState>({ status: "idle", progress: 0 });
-  const [pendingSocialUploads, setPendingSocialUploads] = useState<PendingSocialUpload[]>([]);
-  const [recentlyUploadedAlbumPaths, setRecentlyUploadedAlbumPaths] = useState<Record<string, boolean>>({});
-  const pendingPhotoUploadRef = useRef<Promise<string | null> | null>(null);
-  const pendingSocialUploadRefs = useRef<Map<string, Promise<string | null>>>(new Map());
-  const socialAlbumRef = useRef<string[]>([]);
   const profilePhotoDeleteQueueRef = useRef<Set<string>>(new Set());
+  const profileCaptionAutosaveTimerRef = useRef<number | null>(null);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
 
@@ -417,6 +385,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   useEffect(() => {
     formDataRef.current = formData;
   }, [formData]);
+
+  useEffect(() => () => {
+    if (profileCaptionAutosaveTimerRef.current !== null) {
+      window.clearTimeout(profileCaptionAutosaveTimerRef.current);
+    }
+  }, []);
   const [draftHydrationSeed, setDraftHydrationSeed] = useState<{
     baselineValue: Record<string, unknown>;
     baselineUpdatedAt: string;
@@ -479,9 +453,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_relationship_status: value.show_relationship_status && Boolean(value.relationship_status.trim()),
     show_languages: value.show_languages && value.languages.length > 0,
     show_location: value.show_location && Boolean(value.location_country.trim() && value.location_district.trim()),
-    avatar_url: isPersistableImageUrl(photoPreview) ? photoPreview : "",
-  }), [photoPreview]);
-  const isProfileEditorialEnabled = true;
+  }), []);
 
   useEffect(() => {
     const memberSince = profile?.created_at ?? user?.created_at ?? null;
@@ -666,66 +638,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     return new File([blob], filename, { type: blob.type || "image/jpeg" });
   };
 
-  const startUploadProgressTicker = useCallback(
-    (setter: Dispatch<SetStateAction<UploadProgressState>>) => {
-      setter({ status: "uploading", progress: 8 });
-      const interval = window.setInterval(() => {
-        setter((prev) => {
-          if (prev.status !== "uploading") return prev;
-          return { ...prev, progress: Math.min(prev.progress + 6, 92) };
-        });
-      }, 180);
-      return () => window.clearInterval(interval);
-    },
-    [],
-  );
-
-  const uploadProfilePhotoFile = useCallback(async (file: File, activeUserId: string): Promise<string | null> => {
-    const stopTicker = startUploadProgressTicker(setPhotoUploadState);
-    try {
-      const fileExt = file.name.split(".").pop() || "jpg";
-      const fileName = `${activeUserId}/avatar_${Date.now()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from("avatars").upload(fileName, file, { upsert: true });
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(fileName);
-      setPhotoPreview(publicUrl);
-      setPhotoFile(null);
-      setPhotoUploadState({ status: "success", progress: 100 });
-      window.setTimeout(() => setPhotoUploadState({ status: "idle", progress: 0 }), 1400);
-      return publicUrl;
-    } catch (error) {
-      console.warn("[EditProfile.photoUpload]", error);
-      setPhotoUploadState({ status: "error", progress: 0 });
-      window.setTimeout(() => setPhotoUploadState({ status: "idle", progress: 0 }), 2200);
-      throw error;
-    } finally {
-      stopTicker();
-    }
-  }, [startUploadProgressTicker]);
-
-  const waitForMediaUploads = useCallback(async () => {
-    const allPromises: Promise<string | null>[] = [];
-    if (pendingPhotoUploadRef.current) {
-      allPromises.push(pendingPhotoUploadRef.current);
-    }
-    if (pendingSocialUploadRefs.current.size > 0) {
-      allPromises.push(...pendingSocialUploadRefs.current.values());
-    }
-    if (allPromises.length === 0) return;
-    await Promise.all(allPromises);
-  }, []);
-
-  const markAlbumUploadSuccess = useCallback((path: string) => {
-    setRecentlyUploadedAlbumPaths((prev) => ({ ...prev, [path]: true }));
-    window.setTimeout(() => {
-      setRecentlyUploadedAlbumPaths((prev) => {
-        const next = { ...prev };
-        delete next[path];
-        return next;
-      });
-    }, 1800);
-  }, []);
-
   const finalizePendingVerification = async (activeUserId: string) => {
     const pendingVerification = loadPendingSignupVerification(signupData.email || user?.id || "");
     if (!pendingVerification) return;
@@ -895,50 +807,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     };
   }, []);
 
-  const releaseSocialAlbumFallbackPreview = useCallback((path: string) => {
-    setSocialAlbumFallbackPreviews((prev) => {
-      const current = prev[path];
-      if (!current) return prev;
-      window.setTimeout(() => URL.revokeObjectURL(current), 0);
-      const next = { ...prev };
-      delete next[path];
-      return next;
-    });
-  }, []);
-
-  const refreshSocialAlbumUrls = useCallback(async (
-    paths: string[],
-    options?: { allowClear?: boolean },
-  ): Promise<Record<string, string>> => {
-    const normalizedPaths = canonicalizeSocialAlbumEntries(paths);
-    if (!normalizedPaths.length) {
-      if (options?.allowClear) {
-        setSocialAlbumUrls({});
-      }
-      return {};
-    }
-    const next = await resolveSocialAlbumUrlMap(normalizedPaths, 60 * 60);
-    if (!Object.keys(next).length) return {};
-    setSocialAlbumUrls((prev) => ({ ...prev, ...next }));
-    setSocialAlbumLoadErrors((prev) => {
-      const hasAny = Object.keys(prev).length > 0;
-      if (!hasAny) return prev;
-      const updated = { ...prev };
-      let changed = false;
-      for (const path of Object.keys(next)) {
-        if (updated[path]) {
-          delete updated[path];
-          changed = true;
-        }
-      }
-      return changed ? updated : prev;
-    });
-    Object.keys(next).forEach((path) => {
-      releaseSocialAlbumFallbackPreview(path);
-    });
-    return next;
-  }, [releaseSocialAlbumFallbackPreview]);
-
   useEffect(() => {
     const prefillKey = resolveSetProfilePrefillKey();
     // Allow reading from localStorage prefill in onboardingMode regardless of auth state,
@@ -1101,25 +969,17 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         socialAlbum: profile?.social_album ?? cachedSocialAlbum,
       }),
     };
-    setFormData(nextForm);
-    socialAlbumRef.current = canonicalizeSocialAlbumEntries(profile?.social_album ?? cachedSocialAlbum);
+    setFormData((previous) => ({
+      ...nextForm,
+      photos: {
+        ...nextForm.photos,
+        establishing_caption: nextForm.photos.establishing_caption ?? previous.photos.establishing_caption,
+        pack_caption: nextForm.photos.pack_caption ?? previous.photos.pack_caption,
+        solo_caption: nextForm.photos.solo_caption ?? previous.photos.solo_caption,
+        closer_caption: nextForm.photos.closer_caption ?? previous.photos.closer_caption,
+      },
+    }));
     setSelectedCountry(matchedCountry?.code || "");
-    if (profile?.avatar_url) {
-      setPhotoPreview(profile.avatar_url);
-    } else if (
-      allowLocalPrefill &&
-      trustedPrefill &&
-      typeof safeCachedPrefill.avatar_url === "string"
-    ) {
-      setPhotoPreview(safeCachedPrefill.avatar_url);
-    } else {
-      setPhotoPreview(null);
-    }
-    if (profile?.social_album && profile.social_album.length > 0) {
-      refreshSocialAlbumUrls(canonicalizeSocialAlbumEntries(profile.social_album));
-    } else if (allowLocalPrefill && cachedSocialAlbum.length > 0) {
-      refreshSocialAlbumUrls(canonicalizeSocialAlbumEntries(cachedSocialAlbum));
-    }
     setPhoneOriginalValue(phone);
     void resolvePhoneVerifiedForValue(phone, user?.id || profile?.id || null).then((isVerified) => {
       setSavedPhoneVerified(isVerified);
@@ -1141,17 +1001,12 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     signupData.legal_name,
     signupData.phone,
     signupData.social_id,
-    refreshSocialAlbumUrls,
     resolvePhoneVerifiedForValue,
     user?.email,
     user?.id,
     user?.user_metadata,
     user?.phone,
   ]);
-
-  useEffect(() => {
-    socialAlbumRef.current = canonicalizeSocialAlbumEntries(formData.social_album);
-  }, [formData.social_album]);
 
   useEffect(() => {
     if (!onboardingMode) return;
@@ -1352,128 +1207,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     return () => clearTimeout(timer);
   }, [formData.phone, phoneEditMode, phoneOriginalValue]);
 
-  const handleSocialAlbumUpload = async (file: File) => {
-    const uploadId = crypto.randomUUID();
-    const previewUrl = URL.createObjectURL(file);
-    setPendingSocialUploads((prev) => [
-      ...prev,
-      { id: uploadId, previewUrl, progress: 8, status: "uploading" },
-    ]);
-
-    if (!user) {
-      const localReadPromise = new Promise<string | null>((resolve) => {
-        const reader = new FileReader();
-        reader.onprogress = (event) => {
-          if (!event.lengthComputable) return;
-          const ratio = event.total > 0 ? event.loaded / event.total : 0;
-          const progress = Math.max(8, Math.min(95, Math.round(ratio * 100)));
-          setPendingSocialUploads((prev) =>
-            prev.map((item) => (item.id === uploadId ? { ...item, progress } : item)),
-          );
-        };
-        reader.onerror = () => {
-          setPendingSocialUploads((prev) =>
-            prev.map((item) => (item.id === uploadId ? { ...item, status: "error", progress: 0 } : item)),
-          );
-          resolve(null);
-        };
-        reader.onloadend = () => {
-          const encoded = String(reader.result || "");
-          if (!encoded) {
-            setPendingSocialUploads((prev) =>
-              prev.map((item) => (item.id === uploadId ? { ...item, status: "error", progress: 0 } : item)),
-            );
-            resolve(null);
-            return;
-          }
-          setFormData((prev) => ({
-            ...prev,
-            social_album: canonicalizeSocialAlbumEntries([...prev.social_album, encoded]).slice(0, 5),
-          }));
-          resolve(encoded);
-        };
-        reader.readAsDataURL(file);
-      }).finally(() => {
-        window.setTimeout(() => {
-          URL.revokeObjectURL(previewUrl);
-          setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
-          pendingSocialUploadRefs.current.delete(uploadId);
-        }, 0);
-      });
-      pendingSocialUploadRefs.current.set(uploadId, localReadPromise);
-      return;
-    }
-
-    const uploadPromise = (async () => {
-      let keepPreviewForResolvedImage = false;
-      let removePendingDelayMs = 1000;
-      const tick = window.setInterval(() => {
-        setPendingSocialUploads((prev) =>
-          prev.map((item) =>
-            item.id === uploadId && item.status === "uploading"
-              ? { ...item, progress: Math.min(item.progress + 7, 92) }
-              : item,
-          ),
-        );
-      }, 180);
-      try {
-        const options = { maxSizeMB: 0.5, maxWidthOrHeight: 1600, useWebWorker: true };
-        const compressed = await imageCompression(file, options);
-        if (compressed.size > 500 * 1024) {
-          toast.error(t("Image must be under 500KB"));
-          setPendingSocialUploads((prev) =>
-            prev.map((item) => (item.id === uploadId ? { ...item, status: "error", progress: 0 } : item)),
-          );
-          return null;
-        }
-        const ext = compressed.name.split(".").pop() || "jpg";
-        const filePath = `${user.id}/${crypto.randomUUID()}.${ext}`;
-        const { error: uploadError } = await supabase.storage.from("social_album").upload(filePath, compressed, { upsert: false });
-        if (uploadError) throw uploadError;
-        const nextAlbum = canonicalizeSocialAlbumEntries([...socialAlbumRef.current, filePath]).slice(0, 5);
-        socialAlbumRef.current = nextAlbum;
-        setFormData((prev) => ({ ...prev, social_album: nextAlbum }));
-        setSocialAlbumLoadErrors((prev) => {
-          if (!prev[filePath]) return prev;
-          const next = { ...prev };
-          delete next[filePath];
-          return next;
-        });
-        setSocialAlbumFallbackPreviews((prev) => ({ ...prev, [filePath]: previewUrl }));
-        keepPreviewForResolvedImage = true;
-        removePendingDelayMs = 0;
-        setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
-        pendingSocialUploadRefs.current.delete(uploadId);
-        const refreshed = await refreshSocialAlbumUrls(nextAlbum);
-        if (refreshed[filePath]) {
-          markAlbumUploadSuccess(filePath);
-        } else {
-          window.setTimeout(() => {
-            void refreshSocialAlbumUrls(socialAlbumRef.current);
-          }, 500);
-        }
-        return filePath;
-      } catch (error) {
-        const message = describeSupabaseWriteError(error);
-        toast.error(message || t("Upload failed"));
-        setPendingSocialUploads((prev) =>
-          prev.map((item) => (item.id === uploadId ? { ...item, status: "error", progress: 0 } : item)),
-        );
-        return null;
-      } finally {
-        window.clearInterval(tick);
-        window.setTimeout(() => {
-          if (!keepPreviewForResolvedImage) {
-            URL.revokeObjectURL(previewUrl);
-          }
-          setPendingSocialUploads((prev) => prev.filter((item) => item.id !== uploadId));
-          pendingSocialUploadRefs.current.delete(uploadId);
-        }, removePendingDelayMs);
-      }
-    })();
-    pendingSocialUploadRefs.current.set(uploadId, uploadPromise);
-  };
-
   useEffect(() => {
     if (!user?.id) return;
     supabase
@@ -1517,79 +1250,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [onboardingMode, refreshProfile]);
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPhotoFile(file);
-      const localPreview = URL.createObjectURL(file);
-      setPhotoPreview(localPreview);
-      if (user?.id) {
-        const uploadPromise = uploadProfilePhotoFile(file, user.id)
-          .catch(() => null)
-          .finally(() => {
-            pendingPhotoUploadRef.current = null;
-          });
-        pendingPhotoUploadRef.current = uploadPromise;
-      } else {
-        const stopTicker = startUploadProgressTicker(setPhotoUploadState);
-        const localReadPromise = new Promise<string | null>((resolve) => {
-          const reader = new FileReader();
-          reader.onprogress = (event) => {
-            if (!event.lengthComputable) return;
-            const ratio = event.total > 0 ? event.loaded / event.total : 0;
-            const progress = Math.max(8, Math.min(95, Math.round(ratio * 100)));
-            setPhotoUploadState({ status: "uploading", progress });
-          };
-          reader.onerror = () => {
-            setPhotoUploadState({ status: "error", progress: 0 });
-            window.setTimeout(() => setPhotoUploadState({ status: "idle", progress: 0 }), 2200);
-            resolve(null);
-          };
-          reader.onloadend = () => {
-            const encoded = String(reader.result || "");
-            if (!encoded) {
-              setPhotoUploadState({ status: "error", progress: 0 });
-              window.setTimeout(() => setPhotoUploadState({ status: "idle", progress: 0 }), 2200);
-              resolve(null);
-              return;
-            }
-            setPhotoPreview(encoded);
-            setPhotoFile(null);
-            setPhotoUploadState({ status: "success", progress: 100 });
-            window.setTimeout(() => setPhotoUploadState({ status: "idle", progress: 0 }), 1400);
-            resolve(encoded);
-          };
-          reader.readAsDataURL(file);
-        }).finally(() => {
-          stopTicker();
-          URL.revokeObjectURL(localPreview);
-          pendingPhotoUploadRef.current = null;
-        });
-        pendingPhotoUploadRef.current = localReadPromise;
-      }
-    }
-  };
-
-  const handleRemoveSocialAlbum = async (path: string) => {
-    const next = canonicalizeSocialAlbumEntries(formData.social_album.filter((p) => p !== path));
-    socialAlbumRef.current = next;
-    setFormData((prev) => ({ ...prev, social_album: next }));
-    setSocialAlbumUrls((prev) => {
-      if (!prev[path]) return prev;
-      const updated = { ...prev };
-      delete updated[path];
-      return updated;
-    });
-    setSocialAlbumLoadErrors((prev) => {
-      if (!prev[path]) return prev;
-      const updated = { ...prev };
-      delete updated[path];
-      return updated;
-    });
-    releaseSocialAlbumFallbackPreview(path);
-    await refreshSocialAlbumUrls(next, { allowClear: next.length === 0 });
-  };
 
   const requestPhoneOtp = async () => {
     if (!formData.phone.trim()) {
@@ -1766,12 +1426,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       const draft = parsedDraft as typeof formData;
       return {
         version: 1,
-        form: {
-          ...getProfileDraftValue(draft),
-          avatar_url: typeof cachedPrefill.avatar_url === "string" && isPersistableImageUrl(cachedPrefill.avatar_url)
-            ? cachedPrefill.avatar_url
-            : "",
-        },
+        form: getProfileDraftValue(draft),
         draft_updated_at: String(cachedPrefill.updated_at || new Date().toISOString()),
         baseline_updated_at: null,
         baseline_hash: null,
@@ -1856,7 +1511,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           draft.photos.closer,
         ].filter((item): item is string => Boolean(item)));
       }
-      if (fieldSet.has("avatar_url")) payload.avatar_url = draft.avatar_url || null;
       if (fieldSet.has("pet_experience")) payload.pet_experience = draft.pet_experience.length > 0 ? draft.pet_experience : null;
       if (fieldSet.has("experience_years") || fieldSet.has("pet_experience")) {
         payload.experience_years =
@@ -1929,14 +1583,33 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     refreshProfile,
   ]);
 
-  const persistProfilePhotos = useCallback((photos: ProfilePhotos, warningLabel: string) => {
+  const mergeProfilePhotosForPersist = useCallback((
+    photos: ProfilePhotos,
+    options: { preserveLiveCaptions?: boolean } = {},
+  ): ProfilePhotos => {
+    const currentPhotos = formDataRef.current.photos;
+    const latestPhotos: ProfilePhotos = {
+      ...currentPhotos,
+      ...photos,
+    };
+    if (!options.preserveLiveCaptions) return latestPhotos;
+    return {
+      ...latestPhotos,
+      establishing_caption: currentPhotos.establishing_caption,
+      pack_caption: currentPhotos.pack_caption,
+      solo_caption: currentPhotos.solo_caption,
+      closer_caption: currentPhotos.closer_caption,
+    };
+  }, []);
+
+  const persistProfilePhotos = useCallback((
+    photos: ProfilePhotos,
+    warningLabel: string,
+    options: { preserveLiveCaptions?: boolean } = {},
+  ) => {
     if (profileDraftMode !== "local-and-remote" || !user?.id) return;
     window.setTimeout(() => {
-      const currentPhotos = formDataRef.current.photos;
-      const latestPhotos: ProfilePhotos = {
-        ...currentPhotos,
-        ...photos,
-      };
+      const latestPhotos = mergeProfilePhotosForPersist(photos, options);
       const nextSocialAlbum = canonicalizeSocialAlbumEntries([
         latestPhotos.establishing,
         latestPhotos.pack,
@@ -1958,13 +1631,27 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           }
         });
     }, 0);
-  }, [profileDraftMode, user?.id]);
+  }, [mergeProfilePhotosForPersist, profileDraftMode, user?.id]);
 
   const handleProfilePhotosCommit = useCallback((photos: ProfilePhotos) => {
-    persistProfilePhotos(photos, "profile photos");
+    persistProfilePhotos(photos, "profile photos", { preserveLiveCaptions: true });
+  }, [persistProfilePhotos]);
+
+  const handleProfilePhotoCaptionAutosave = useCallback((photos: ProfilePhotos) => {
+    if (profileCaptionAutosaveTimerRef.current !== null) {
+      window.clearTimeout(profileCaptionAutosaveTimerRef.current);
+    }
+    profileCaptionAutosaveTimerRef.current = window.setTimeout(() => {
+      profileCaptionAutosaveTimerRef.current = null;
+      persistProfilePhotos(photos, "profile photo captions");
+    }, 500);
   }, [persistProfilePhotos]);
 
   const handleProfilePhotoCaptionCommit = useCallback((photos: ProfilePhotos) => {
+    if (profileCaptionAutosaveTimerRef.current !== null) {
+      window.clearTimeout(profileCaptionAutosaveTimerRef.current);
+      profileCaptionAutosaveTimerRef.current = null;
+    }
     persistProfilePhotos(photos, "profile photo captions");
   }, [persistProfilePhotos]);
 
@@ -1983,7 +1670,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       toast.error(formatMissingFieldsToast(missingFields));
       return;
     }
-    if (isProfileEditorialEnabled && !formData.photos.cover) {
+    if (!formData.photos.cover) {
       toast.error("Add a cover photo before saving your profile.");
       return;
     }
@@ -2124,16 +1811,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     setLoading(true);
 
     try {
-      await waitForMediaUploads();
-
-      let avatarUrl = photoPreview || profile?.avatar_url;
-      if (pendingPhotoUploadRef.current) {
-        avatarUrl = await pendingPhotoUploadRef.current;
-      } else if (photoFile) {
-        avatarUrl = await uploadProfilePhotoFile(photoFile, activeUser.id);
-      }
       const nextPhotos = normalizeProfilePhotos(formData.photos, {
-        avatarUrl,
+        avatarUrl: profile?.avatar_url ?? null,
         socialAlbum: formData.social_album,
       });
       const editorialAlbum = canonicalizeSocialAlbumEntries([
@@ -2142,10 +1821,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         nextPhotos.solo,
         nextPhotos.closer,
       ].filter((item): item is string => Boolean(item)));
-      const nextAvatarUrl = isProfileEditorialEnabled ? getProfilePhotoPublicUrl(nextPhotos.cover) : avatarUrl;
-      const nextSocialAlbum = isProfileEditorialEnabled
-        ? editorialAlbum
-        : canonicalizeSocialAlbumEntries(formData.social_album);
+      const nextAvatarUrl = getProfilePhotoPublicUrl(nextPhotos.cover);
+      const nextSocialAlbum = editorialAlbum;
       const isOAuthUser = (activeUser.app_metadata?.provider ?? "email") !== "email";
       const emailVerifiedByAuth = isOAuthUser || Boolean(activeUser.email_confirmed_at);
       const persistedPhone = getPersistedPhoneValue();
@@ -2320,14 +1997,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       const queuedPhotoDeletes = Array.from(profilePhotoDeleteQueueRef.current);
       profilePhotoDeleteQueueRef.current.clear();
       await Promise.allSettled(queuedPhotoDeletes.map((path) => deleteProfilePhotoPath(path)));
-      if (nextAvatarUrl && isPersistableImageUrl(nextAvatarUrl)) {
-        setPhotoPreview(nextAvatarUrl);
-      }
       commitProfileDraftAsBaseline(
         String((profileWrite.data?.[0] as { updated_at?: string } | undefined)?.updated_at || new Date().toISOString()),
         {
           ...getProfileDraftValue(formData),
-          avatar_url: nextAvatarUrl && isPersistableImageUrl(nextAvatarUrl) ? nextAvatarUrl : "",
         },
       );
       try {
@@ -2383,11 +2056,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     }
   };
 
-  const mediaUploadInProgress =
-    photoUploadState.status === "uploading" ||
-    pendingSocialUploads.some((item) => item.status === "uploading");
-  const saveBlockedByProfilePhotos = isProfileEditorialEnabled && !formData.photos.cover;
-  const saveDisabled = loading || mediaUploadInProgress || saveBlockedByProfilePhotos;
+  const saveBlockedByProfilePhotos = !formData.photos.cover;
+  const saveDisabled = loading || saveBlockedByProfilePhotos;
   const phoneChangedFromOriginal =
     normalizePhoneForCompare(formData.phone) !== normalizePhoneForCompare(phoneOriginalValue);
   const showPhoneChangeVerifiedWarning =
@@ -2461,66 +2131,18 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       <>
       <div ref={editScrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-6" style={{ paddingBottom: keyboardOffset > 0 ? `${keyboardOffset + 24}px` : undefined }}>
         <div className="space-y-6">
-          {/* Photo Upload */}
-          {isProfileEditorialEnabled ? (
-            <ProfilePhotoSlots
-              photos={formData.photos}
-              userId={user?.id ?? null}
-              onChange={(next) => setFormData((prev) => ({
-                ...prev,
-                photos: typeof next === "function" ? next(prev.photos) : next,
-              }))}
-              onPhotosCommit={handleProfilePhotosCommit}
-              onCaptionCommit={handleProfilePhotoCaptionCommit}
-              onPreviousPathQueued={queueProfilePhotoDeletion}
-            />
-          ) : (
-          <div className="flex justify-center">
-            <label className="relative cursor-pointer group">
-              <div className="relative w-28 h-28 rounded-full flex items-center justify-center overflow-hidden bg-muted border-4 border-dashed border-border group-hover:border-accent transition-colors">
-                {photoPreview ? (
-                  <img
-                    src={photoPreview}
-                    alt={t("Profile")}
-                    className={cn(
-                      "w-full h-full object-cover transition-all",
-                      photoUploadState.status === "uploading" && "blur-[2px] opacity-70",
-                    )}
-                  />
-                ) : (
-                  <Camera className="w-8 h-8 text-muted-foreground" />
-                )}
-                {photoUploadState.status === "uploading" && (
-                  <div className="absolute inset-0 rounded-full bg-black/35 flex flex-col items-center justify-center text-white text-xs font-semibold">
-                    <span>{Math.round(photoUploadState.progress)}%</span>
-                    <span className="text-[10px] font-medium mt-1">Uploading</span>
-                  </div>
-                )}
-                {photoUploadState.status === "success" && (
-                  <div className="absolute inset-0 rounded-full bg-emerald-600/35 flex items-center justify-center text-white">
-                    <Check className="w-5 h-5" />
-                  </div>
-                )}
-              </div>
-              <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center">
-                <Camera className="w-4 h-4 text-accent-foreground" />
-              </div>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoChange}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  opacity: 0,
-                  width: "100%",
-                  height: "100%",
-                  cursor: "pointer",
-                }}
-              />
-            </label>
-          </div>
-          )}
+          <ProfilePhotoSlots
+            photos={formData.photos}
+            userId={user?.id ?? null}
+            onChange={(next) => setFormData((prev) => ({
+              ...prev,
+              photos: typeof next === "function" ? next(prev.photos) : next,
+            }))}
+            onPhotosCommit={handleProfilePhotosCommit}
+            onCaptionAutosave={handleProfilePhotoCaptionAutosave}
+            onCaptionCommit={handleProfilePhotoCaptionCommit}
+            onPreviousPathQueued={queueProfilePhotoDeletion}
+          />
 
           {/* BASIC INFO */}
           <div className="space-y-4">
@@ -2926,128 +2548,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 />
               </div>
             </div>
-
-            {/* Social Album */}
-            {!isProfileEditorialEnabled && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">Moments with furry friends in up to 5 photos</label>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {formData.social_album.map((path) => {
-                  const resolvedSrc = socialAlbumUrls[path] || "";
-                  const fallbackSrc = socialAlbumFallbackPreviews[path] || "";
-                  const canUseResolvedSrc = isRenderableImageSrc(resolvedSrc) && !socialAlbumLoadErrors[path];
-                  const canUseFallbackSrc = isRenderableImageSrc(fallbackSrc);
-                  const displaySrc = canUseResolvedSrc ? resolvedSrc : canUseFallbackSrc ? fallbackSrc : "";
-                  return (
-                  <div key={path} className="relative rounded-xl overflow-hidden border border-border bg-muted">
-                    {displaySrc ? (
-                      <img
-                        src={displaySrc}
-                        alt={t("Social Album")}
-                        className="w-full h-24 object-cover"
-                        loading="lazy"
-                        onError={() => {
-                          const hasFallback = isRenderableImageSrc(socialAlbumFallbackPreviews[path] || "");
-                          setSocialAlbumUrls((prev) => {
-                            if (!prev[path]) return prev;
-                            const next = { ...prev };
-                            delete next[path];
-                            return next;
-                          });
-                          if (!hasFallback) {
-                            setSocialAlbumLoadErrors((prev) => ({ ...prev, [path]: true }));
-                            return;
-                          }
-                          setSocialAlbumLoadErrors((prev) => {
-                            if (!prev[path]) return prev;
-                            const next = { ...prev };
-                            delete next[path];
-                            return next;
-                          });
-                          window.setTimeout(() => {
-                            void refreshSocialAlbumUrls(socialAlbumRef.current);
-                          }, 500);
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-24 bg-[rgba(66,73,101,0.08)] flex flex-col items-center justify-center gap-1 text-[11px] text-[rgba(74,73,101,0.55)]">
-                        <span>Unavailable</span>
-                        <button
-                          type="button"
-                          className="text-[10px] underline underline-offset-2 text-[var(--brandBlue,#2145CF)]"
-                          onClick={() => {
-                            setSocialAlbumLoadErrors((prev) => {
-                              if (!prev[path]) return prev;
-                              const next = { ...prev };
-                              delete next[path];
-                              return next;
-                            });
-                            void refreshSocialAlbumUrls(socialAlbumRef.current);
-                          }}
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    )}
-                    {recentlyUploadedAlbumPaths[path] &&
-                      isRenderableImageSrc(socialAlbumUrls[path] || "") &&
-                      !socialAlbumLoadErrors[path] && (
-                      <div className="absolute inset-0 bg-emerald-600/35 flex items-center justify-center text-white">
-                        <Check className="w-4 h-4" />
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSocialAlbum(path)}
-                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                )})}
-                {pendingSocialUploads.map((item) => (
-                  <div key={item.id} className="relative rounded-xl overflow-hidden border border-border bg-muted">
-                    <img
-                      src={item.previewUrl}
-                      alt={t("Social Album upload")}
-                      className={cn("w-full h-24 object-cover", item.status === "uploading" && "blur-[2px] opacity-70")}
-                      loading="lazy"
-                    />
-                    <div className="absolute inset-0 bg-black/35 flex flex-col items-center justify-center text-white text-xs font-semibold">
-                      {item.status === "uploading" ? (
-                        <>
-                          <span>{Math.round(item.progress)}%</span>
-                          <span className="text-[10px] font-medium mt-1">Uploading</span>
-                        </>
-                      ) : (
-                        <span className="text-[10px]">Upload failed</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {formData.social_album.length + pendingSocialUploads.length < 5 && (
-                  <label className="h-24 rounded-xl border border-dashed border-border flex items-center justify-center cursor-pointer">
-                    <div className="w-9 h-9 rounded-full bg-brandBlue text-white flex items-center justify-center shadow-[0_2px_8px_rgba(33,69,207,0.35)]">
-                      <Plus className="w-5 h-5" />
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        handleSocialAlbumUpload(file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
-            )}
           </div>
 
           {/* DEMOGRAPHICS */}
@@ -3613,8 +3113,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           >
             {loading
               ? "Saving…"
-              : mediaUploadInProgress
-              ? "Complete profile (wait for uploads)"
               : saveBlockedByProfilePhotos
               ? "Add cover photo to complete"
               : "Complete profile"}
@@ -3623,10 +3121,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           <NeuButton
             variant="ghost"
             className="w-full h-11"
-            disabled={loading || mediaUploadInProgress}
+            disabled={loading}
             onClick={handleSaveDraft}
           >
-            {mediaUploadInProgress ? "Save draft (wait for uploads)" : "Save draft"}
+            Save draft
           </NeuButton>
         </div>
       )}
@@ -3642,7 +3140,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           availabilityStatus={formData.availability_status}
           isVerified={isIdentityLocked}
           hasCar={formData.has_car}
-          photoUrl={photoPreview}
+          photoUrl={getProfilePhotoPublicUrl(formData.photos.cover)}
           dob={formData.dob}
           gender={formData.gender_genre}
           orientation={formData.orientation}
@@ -3658,7 +3156,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           locationName={formData.location_name}
           languages={formData.languages}
           socialAlbum={formData.social_album}
-          socialAlbumUrls={socialAlbumUrls}
           photos={formData.photos}
           petHeads={activePetHeads}
           visibility={{

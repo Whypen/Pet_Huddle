@@ -7,6 +7,7 @@ type ProfilePhotoSlotsProps = {
   userId: string | null;
   onChange: (next: ProfilePhotos | ((previous: ProfilePhotos) => ProfilePhotos)) => void;
   onPhotosCommit?: (photos: ProfilePhotos) => void;
+  onCaptionAutosave?: (photos: ProfilePhotos) => void;
   onCaptionCommit?: (photos: ProfilePhotos) => void;
   onPreviousPathQueued?: (path: string | null) => void;
 };
@@ -32,6 +33,7 @@ export function ProfilePhotoSlots({
   userId,
   onChange,
   onPhotosCommit,
+  onCaptionAutosave,
   onCaptionCommit,
   onPreviousPathQueued,
 }: ProfilePhotoSlotsProps) {
@@ -99,7 +101,17 @@ export function ProfilePhotoSlots({
               userId={userId}
               soloAspect={photos.solo_aspect}
               captionValue={captionKey ? photos[captionKey] : null}
-              onCaptionChange={captionKey ? (caption) => onChange((previous) => ({ ...previous, [captionKey]: caption })) : undefined}
+              onCaptionChange={captionKey ? (caption) => {
+                let changedPhotos: ProfilePhotos | null = null;
+                onChange((previous) => {
+                  const nextPhotos = { ...previous, [captionKey]: caption };
+                  changedPhotos = nextPhotos;
+                  return nextPhotos;
+                });
+                window.setTimeout(() => {
+                  if (changedPhotos) onCaptionAutosave?.(changedPhotos);
+                }, 0);
+              } : undefined}
               onCaptionCommit={captionKey ? (caption) => {
                 let committedPhotos: ProfilePhotos | null = null;
                 onChange((previous) => {
