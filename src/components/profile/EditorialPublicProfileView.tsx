@@ -165,9 +165,9 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
       {props.visibility.show_bio ? <ProfilePullQuote bio={props.bio} /> : null}
       <ProfilePlate src={resolvedPhotoUrls.establishing} aspect="4/5" caption={photos.establishing_caption} alt={`${props.displayName || "Profile"} photo`} onClick={setLightboxSrc} />
       <ProfilePack pets={props.petHeads} displayName={props.displayName} experienceYears={props.experienceYears} petExperience={props.petExperience} onPetClick={props.onPetClick} />
-      <ProfilePlate src={resolvedPhotoUrls.pack} aspect="3/2" align="inset-left" caption={photos.pack_caption} alt={`${props.displayName || "Profile"} with pets`} onClick={setLightboxSrc} />
+      <ProfilePlate src={resolvedPhotoUrls.pack} aspect="3/2" caption={photos.pack_caption} alt={`${props.displayName || "Profile"} with pets`} onClick={setLightboxSrc} />
       <ProfileVitals rows={vitalsRows} />
-      <ProfileAdaptivePlate src={resolvedPhotoUrls.solo} aspect={photos.solo_aspect ?? "4:5"} align="inset-right" caption={photos.solo_caption} alt={`${props.displayName || "Profile"} solo photo`} onClick={setLightboxSrc} />
+      <ProfileAdaptivePlate src={resolvedPhotoUrls.solo} aspect={photos.solo_aspect ?? "4:5"} caption={photos.solo_caption} alt={`${props.displayName || "Profile"} solo photo`} onClick={setLightboxSrc} />
       <ProfilePlate src={resolvedPhotoUrls.closer} aspect="4/5" caption={photos.closer_caption} alt={`${props.displayName || "Profile"} final photo`} onClick={setLightboxSrc} />
       <ProfileColophon memberSince={props.memberSince} memberNumber={props.memberNumber} />
       {lightboxSrc ? (

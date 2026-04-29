@@ -57,7 +57,7 @@ export function ProfileHero({ src, name, roleLabels, membershipTier, caption, is
         </div>
         <div className="mt-3 flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-hidden">
           {roleLabel ? (
-            <span className="inline-flex min-h-10 min-w-0 flex-1 items-center gap-2 overflow-hidden border border-[var(--huddle-blue)] bg-[var(--bg-blue-surface)] px-4 py-2 text-sm font-semibold text-[var(--huddle-blue)] backdrop-blur-sm" style={pillRadiusStyle}>
+            <span className="inline-flex min-h-10 min-w-0 flex-1 items-center gap-2 overflow-hidden border border-[rgba(33,69,207,0.28)] bg-[var(--bg-blue-soft)] px-4 py-2 text-sm font-semibold text-[var(--huddle-blue)] shadow-sm" style={pillRadiusStyle}>
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--huddle-blue)]" />
               <span className="truncate">{roleLabel}</span>
             </span>

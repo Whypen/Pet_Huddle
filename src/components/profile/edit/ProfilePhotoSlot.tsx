@@ -100,6 +100,11 @@ export function ProfilePhotoSlot({
         )}
         style={{ touchAction: "pan-x pan-y" }}
       >
+        {slot === "cover" ? (
+          <span className="absolute left-3 top-3 z-10 rounded-[var(--radius-field,14px)] bg-white/88 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.16em] text-[var(--fg-1)] shadow-sm backdrop-blur-sm">
+            Profile Image
+          </span>
+        ) : null}
         {hasPhoto ? (
           <>
             {displayUrl ? (
