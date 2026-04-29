@@ -1,6 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
 
 const SOCIAL_ALBUM_BUCKET = "social_album";
+const PROFILE_PHOTOS_BUCKET = "profile_photos";
+const LEGACY_PROFILE_PHOTOS_BUCKET = "Profiles";
+const PROFILE_PHOTO_BUCKETS = new Set([PROFILE_PHOTOS_BUCKET, LEGACY_PROFILE_PHOTOS_BUCKET]);
 
 const isDataOrBlob = (value: string) => value.startsWith("data:") || value.startsWith("blob:");
 
@@ -15,6 +18,14 @@ const extractBucketKeyFromUrl = (value: string): string | null => {
     if (signMatch?.[1]) return sanitizePathLike(signMatch[1]);
     const publicMatch = pathname.match(/\/storage\/v1\/object\/public\/social_album\/(.+)$/);
     if (publicMatch?.[1]) return sanitizePathLike(publicMatch[1]);
+    const profilePublicMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos|Profiles)\/(.+)$/);
+    if (profilePublicMatch?.[1] && profilePublicMatch?.[2]) {
+      return sanitizePathLike(`${profilePublicMatch[1]}/${profilePublicMatch[2]}`);
+    }
+    const profileSignMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos|Profiles)\/(.+)$/);
+    if (profileSignMatch?.[1] && profileSignMatch?.[2]) {
+      return sanitizePathLike(`${profileSignMatch[1]}/${profileSignMatch[2]}`);
+    }
     const genericMatch = pathname.match(/\/social_album\/(.+)$/);
     if (genericMatch?.[1]) return sanitizePathLike(genericMatch[1]);
     return null;
@@ -54,6 +65,22 @@ const expandCandidateKeys = (value: string): string[] => {
   );
 };
 
+const isProfilePhotoKey = (value: string) => {
+  const bucket = sanitizePathLike(value).split("/")[0] || "";
+  return PROFILE_PHOTO_BUCKETS.has(bucket);
+};
+
+const resolveProfilePhotoCandidate = async (candidate: string, ttlSeconds: number): Promise<string | null> => {
+  if (candidate.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
+    return supabase.storage.from(PROFILE_PHOTOS_BUCKET).getPublicUrl(candidate).data?.publicUrl ?? null;
+  }
+  if (candidate.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
+    const signed = await supabase.storage.from(LEGACY_PROFILE_PHOTOS_BUCKET).createSignedUrl(candidate, ttlSeconds);
+    return signed.data?.signedUrl ?? null;
+  }
+  return null;
+};
+
 export const canonicalizeSocialAlbumEntries = (entries: string[]): string[] => {
   const unique = new Set<string>();
   for (const item of entries) {
@@ -82,6 +109,10 @@ export const resolveSocialAlbumUrlMap = async (
   if (!entries.length) return result;
 
   const resolveByCandidates = async (candidateKeys: string[]): Promise<string | null> => {
+    const profilePhotoCandidate = candidateKeys.find(isProfilePhotoKey);
+    if (profilePhotoCandidate) {
+      return resolveProfilePhotoCandidate(profilePhotoCandidate, ttlSeconds);
+    }
     for (const candidate of candidateKeys) {
       const signed = await supabase.storage.from(SOCIAL_ALBUM_BUCKET).createSignedUrl(candidate, ttlSeconds);
       if (signed.data?.signedUrl) return signed.data.signedUrl;

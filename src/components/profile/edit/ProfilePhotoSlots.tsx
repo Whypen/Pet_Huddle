@@ -5,8 +5,8 @@ import { SLOT_ORDER } from "./copy/slotBriefs";
 type ProfilePhotoSlotsProps = {
   photos: ProfilePhotos;
   userId: string | null;
-  onChange: (photos: ProfilePhotos) => void;
-  onCaptionCommit?: () => void;
+  onChange: (next: ProfilePhotos | ((previous: ProfilePhotos) => ProfilePhotos)) => void;
+  onCaptionCommit?: (photos: ProfilePhotos) => void;
   onPreviousPathQueued?: (path: string | null) => void;
 };
 
@@ -43,22 +43,22 @@ export function ProfilePhotoSlots({
     previousPath: string | null,
   ) => {
     onPreviousPathQueued?.(previousPath);
-    onChange({
-      ...photos,
+    onChange((previous) => ({
+      ...previous,
       [slot]: path,
-      solo_aspect: slot === "solo" ? soloAspect ?? photos.solo_aspect ?? "4:5" : photos.solo_aspect,
-    });
+      solo_aspect: slot === "solo" ? soloAspect ?? previous.solo_aspect ?? "4:5" : previous.solo_aspect,
+    }));
   };
 
   const removeSlot = (slot: ProfilePhotoSlotName, previousPath: string | null) => {
     onPreviousPathQueued?.(previousPath);
     const captionKey = captionKeyForSlot(slot);
-    onChange({
-      ...photos,
+    onChange((previous) => ({
+      ...previous,
       [slot]: null,
       ...(captionKey ? { [captionKey]: null } : {}),
-      solo_aspect: slot === "solo" ? null : photos.solo_aspect,
-    });
+      solo_aspect: slot === "solo" ? null : previous.solo_aspect,
+    }));
   };
 
   return (
@@ -81,8 +81,18 @@ export function ProfilePhotoSlots({
               userId={userId}
               soloAspect={photos.solo_aspect}
               captionValue={captionKey ? photos[captionKey] : null}
-              onCaptionChange={captionKey ? (caption) => onChange({ ...photos, [captionKey]: caption }) : undefined}
-              onCaptionCommit={onCaptionCommit}
+              onCaptionChange={captionKey ? (caption) => onChange((previous) => ({ ...previous, [captionKey]: caption })) : undefined}
+              onCaptionCommit={captionKey ? (caption) => {
+                let committedPhotos: ProfilePhotos | null = null;
+                onChange((previous) => {
+                  const nextPhotos = { ...previous, [captionKey]: caption };
+                  committedPhotos = nextPhotos;
+                  return nextPhotos;
+                });
+                window.setTimeout(() => {
+                  if (committedPhotos) onCaptionCommit?.(committedPhotos);
+                }, 0);
+              } : undefined}
               onUploaded={updateSlot}
               onRemoved={removeSlot}
             />

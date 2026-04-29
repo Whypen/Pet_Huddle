@@ -105,6 +105,7 @@ describe("ProfilePhotoSlot upload flow", () => {
 
   it("commits the current caption text on blur", async () => {
     const onCaptionChange = vi.fn();
+    const onCaptionCommit = vi.fn();
     const { container } = render(
       <ProfilePhotoSlot
         slot="pack"
@@ -113,6 +114,7 @@ describe("ProfilePhotoSlot upload flow", () => {
         soloAspect={null}
         captionValue="old caption"
         onCaptionChange={onCaptionChange}
+        onCaptionCommit={onCaptionCommit}
         onUploaded={vi.fn()}
         onRemoved={vi.fn()}
       />,
@@ -127,5 +129,6 @@ describe("ProfilePhotoSlot upload flow", () => {
     fireEvent.blur(caption);
 
     expect(onCaptionChange).toHaveBeenLastCalledWith("new park caption");
+    expect(onCaptionCommit).toHaveBeenLastCalledWith("new park caption");
   });
 });

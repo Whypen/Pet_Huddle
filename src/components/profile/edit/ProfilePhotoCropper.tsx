@@ -50,12 +50,14 @@ const cropToBlob = async (imageSrc: string, area: Area): Promise<Blob> => {
   ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, width, height);
 
   try {
-    const primary = await encodeCanvas(canvas, "image/webp", 0.82);
-    if (primary.size <= PROFILE_PHOTO_FINAL_MAX_BYTES) return primary;
-    return await encodeCanvas(canvas, "image/webp", 0.72);
+    for (const quality of [0.82, 0.72, 0.62, 0.52]) {
+      const compressed = await encodeCanvas(canvas, "image/webp", quality);
+      if (compressed.size <= PROFILE_PHOTO_FINAL_MAX_BYTES || quality === 0.52) return compressed;
+    }
   } catch {
     return encodeCanvas(canvas, "image/jpeg", 0.85);
   }
+  return encodeCanvas(canvas, "image/jpeg", 0.85);
 };
 
 export function ProfilePhotoCropper({ file, aspect, onCancel, onSave }: ProfilePhotoCropperProps) {

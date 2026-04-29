@@ -1908,11 +1908,34 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     refreshProfile,
   ]);
 
-  const handleProfilePhotoCaptionCommit = useCallback(() => {
+  const handleProfilePhotoCaptionCommit = useCallback((photos: ProfilePhotos) => {
     window.setTimeout(() => {
       void silentSave();
     }, 0);
-  }, [silentSave]);
+    if (profileDraftMode !== "local-and-remote" || !user?.id) return;
+    const nextSocialAlbum = canonicalizeSocialAlbumEntries([
+      photos.establishing,
+      photos.pack,
+      photos.solo,
+      photos.closer,
+    ].filter((item): item is string => Boolean(item)));
+    void supabase
+      .from("profiles")
+      .update({
+        photos,
+        avatar_url: photos.cover || null,
+        social_album: nextSocialAlbum,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn("[EditProfile] Failed to persist profile photo caption", error.message);
+          return;
+        }
+        void refreshProfile();
+      });
+  }, [profileDraftMode, refreshProfile, silentSave, user?.id]);
 
   const queueProfilePhotoDeletion = useCallback((path: string | null) => {
     if (!path || !PROFILE_PHOTO_STORAGE_PATH_REGEX.test(path)) return;
@@ -2412,7 +2435,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
             <ProfilePhotoSlots
               photos={formData.photos}
               userId={user?.id ?? null}
-              onChange={(photos) => setFormData((prev) => ({ ...prev, photos }))}
+              onChange={(next) => setFormData((prev) => ({
+                ...prev,
+                photos: typeof next === "function" ? next(prev.photos) : next,
+              }))}
               onCaptionCommit={handleProfilePhotoCaptionCommit}
               onPreviousPathQueued={queueProfilePhotoDeletion}
             />
