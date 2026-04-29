@@ -32,6 +32,7 @@ type UseFormDraftAutosaveOptions<TValue, TDraft extends Record<string, unknown>>
   value: TValue;
   setValue: Dispatch<SetStateAction<TValue>>;
   getDraftValue: (value: TValue) => TDraft;
+  mergeStoredDraft?: (args: { baselineValue: TValue; storedForm: TDraft }) => TDraft;
   debounceMs?: number;
   saveRemote?: (args: SaveRemoteArgs<TDraft>) => Promise<SaveRemoteResult<TDraft> | void>;
 };
@@ -106,6 +107,7 @@ export function useFormDraftAutosave<TValue, TDraft extends Record<string, unkno
   value,
   setValue,
   getDraftValue,
+  mergeStoredDraft,
   debounceMs = 1000,
   saveRemote,
 }: UseFormDraftAutosaveOptions<TValue, TDraft>) {
@@ -257,10 +259,13 @@ export function useFormDraftAutosave<TValue, TDraft extends Record<string, unkno
 
     setHasLocalDraft(true);
     if (isNewerThanBaseline(stored.draft_updated_at, args.baselineUpdatedAt)) {
+      const restoredForm = mergeStoredDraft
+        ? mergeStoredDraft({ baselineValue: args.baselineValue, storedForm: stored.form })
+        : stored.form;
       suppressNextPersistRef.current = true;
       setValue({
         ...(args.baselineValue as Record<string, unknown>),
-        ...(stored.form as Record<string, unknown>),
+        ...(restoredForm as Record<string, unknown>),
       } as TValue);
       setStatus("restored");
     } else {
@@ -269,7 +274,7 @@ export function useFormDraftAutosave<TValue, TDraft extends Record<string, unkno
       setStatus("idle");
     }
     hydratedRef.current = true;
-  }, [draftKey, enabled, getDraftValue, setValue]);
+  }, [draftKey, enabled, getDraftValue, mergeStoredDraft, setValue]);
 
   const discardDraft = useCallback((args: DiscardArgs = {}) => {
     removeStoredDraft(draftKey, legacyKeysRef.current);

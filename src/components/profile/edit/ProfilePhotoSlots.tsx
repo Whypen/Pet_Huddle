@@ -6,6 +6,7 @@ type ProfilePhotoSlotsProps = {
   photos: ProfilePhotos;
   userId: string | null;
   onChange: (next: ProfilePhotos | ((previous: ProfilePhotos) => ProfilePhotos)) => void;
+  onPhotosCommit?: (photos: ProfilePhotos) => void;
   onCaptionCommit?: (photos: ProfilePhotos) => void;
   onPreviousPathQueued?: (path: string | null) => void;
 };
@@ -30,6 +31,7 @@ export function ProfilePhotoSlots({
   photos,
   userId,
   onChange,
+  onPhotosCommit,
   onCaptionCommit,
   onPreviousPathQueued,
 }: ProfilePhotoSlotsProps) {
@@ -54,7 +56,7 @@ export function ProfilePhotoSlots({
       return nextPhotos;
     });
     window.setTimeout(() => {
-      if (committedPhotos) onCaptionCommit?.(committedPhotos);
+      if (committedPhotos) onPhotosCommit?.(committedPhotos);
     }, 0);
   };
 
@@ -73,7 +75,7 @@ export function ProfilePhotoSlots({
       return nextPhotos;
     });
     window.setTimeout(() => {
-      if (committedPhotos) onCaptionCommit?.(committedPhotos);
+      if (committedPhotos) onPhotosCommit?.(committedPhotos);
     }, 0);
   };
 

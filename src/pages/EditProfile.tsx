@@ -1788,6 +1788,21 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     value: formData,
     setValue: setFormData,
     getDraftValue: getProfileDraftValue,
+    mergeStoredDraft: ({ baselineValue, storedForm }) => {
+      const baselinePhotos = normalizeProfilePhotos((baselineValue as { photos?: unknown }).photos);
+      const storedPhotos = normalizeProfilePhotos(storedForm.photos);
+      return {
+        ...storedForm,
+        photos: {
+          ...baselinePhotos,
+          ...storedPhotos,
+          establishing_caption: storedPhotos.establishing_caption ?? baselinePhotos.establishing_caption,
+          pack_caption: storedPhotos.pack_caption ?? baselinePhotos.pack_caption,
+          solo_caption: storedPhotos.solo_caption ?? baselinePhotos.solo_caption,
+          closer_caption: storedPhotos.closer_caption ?? baselinePhotos.closer_caption,
+        },
+      };
+    },
     debounceMs: 1000,
     saveRemote: async ({ changedFields, draft }) => {
       if (profileDraftMode !== "local-and-remote" || !user?.id) return;
@@ -1914,19 +1929,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     refreshProfile,
   ]);
 
-  const handleProfilePhotoCaptionCommit = useCallback((photos: ProfilePhotos) => {
-    window.setTimeout(() => {
-      void silentSave();
-    }, 0);
+  const persistProfilePhotos = useCallback((photos: ProfilePhotos, warningLabel: string) => {
     if (profileDraftMode !== "local-and-remote" || !user?.id) return;
     window.setTimeout(() => {
       const currentPhotos = formDataRef.current.photos;
       const latestPhotos: ProfilePhotos = {
         ...currentPhotos,
-        establishing_caption: photos.establishing_caption,
-        pack_caption: photos.pack_caption,
-        solo_caption: photos.solo_caption,
-        closer_caption: photos.closer_caption,
+        ...photos,
       };
       const nextSocialAlbum = canonicalizeSocialAlbumEntries([
         latestPhotos.establishing,
@@ -1945,11 +1954,19 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         .eq("id", user.id)
         .then(({ error }) => {
           if (error) {
-            console.warn("[EditProfile] Failed to persist profile photos", error.message);
+            console.warn(`[EditProfile] Failed to persist ${warningLabel}`, error.message);
           }
         });
     }, 0);
-  }, [profileDraftMode, silentSave, user?.id]);
+  }, [profileDraftMode, user?.id]);
+
+  const handleProfilePhotosCommit = useCallback((photos: ProfilePhotos) => {
+    persistProfilePhotos(photos, "profile photos");
+  }, [persistProfilePhotos]);
+
+  const handleProfilePhotoCaptionCommit = useCallback((photos: ProfilePhotos) => {
+    persistProfilePhotos(photos, "profile photo captions");
+  }, [persistProfilePhotos]);
 
   const queueProfilePhotoDeletion = useCallback((path: string | null) => {
     if (!path || !PROFILE_PHOTO_STORAGE_PATH_REGEX.test(path)) return;
@@ -2453,6 +2470,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
                 ...prev,
                 photos: typeof next === "function" ? next(prev.photos) : next,
               }))}
+              onPhotosCommit={handleProfilePhotosCommit}
               onCaptionCommit={handleProfilePhotoCaptionCommit}
               onPreviousPathQueued={queueProfilePhotoDeletion}
             />
