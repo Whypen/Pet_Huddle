@@ -3628,7 +3628,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           languages={formData.languages}
           socialAlbum={formData.social_album}
           socialAlbumUrls={socialAlbumUrls}
-          editorialEnabled={isProfileEditorialEnabled}
           photos={formData.photos}
           petHeads={activePetHeads}
           visibility={{

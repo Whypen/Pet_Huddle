@@ -27,7 +27,6 @@ type PublicProfileViewProps = {
   languages: string[];
   socialAlbum: string[];
   socialAlbumUrls: Record<string, string>;
-  editorialEnabled?: boolean;
   photos?: ProfilePhotos | null;
   petHeads: Array<{
     id: string;

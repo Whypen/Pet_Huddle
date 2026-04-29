@@ -430,7 +430,6 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
             languages={Array.isArray(resolvedData.languages) ? resolvedData.languages : []}
             socialAlbum={socialAlbum}
             socialAlbumUrls={socialAlbumUrls}
-            editorialEnabled
             photos={normalizeProfilePhotos(resolvedData.photos, {
               avatarUrl: resolvedData.avatar_url ?? null,
               socialAlbum,

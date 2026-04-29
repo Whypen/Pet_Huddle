@@ -100,7 +100,9 @@ export function ProfilePhotoSlots({
         })}
       </div>
 
-      <div className="sr-only" aria-live="polite" />
+      <div className="sr-only" aria-live="polite">
+        Profile photos {completion}% complete.
+      </div>
     </section>
   );
 }
