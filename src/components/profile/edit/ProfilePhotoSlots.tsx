@@ -9,7 +9,15 @@ type ProfilePhotoSlotsProps = {
   onPreviousPathQueued?: (path: string | null) => void;
 };
 
-const captionKeyForSlot = (slot: ProfilePhotoSlotName) => `${slot}_caption` as const;
+const CAPTION_KEYS = {
+  establishing: "establishing_caption",
+  pack: "pack_caption",
+  solo: "solo_caption",
+  closer: "closer_caption",
+} as const;
+
+const captionKeyForSlot = (slot: ProfilePhotoSlotName) =>
+  slot === "cover" ? null : CAPTION_KEYS[slot];
 
 const progressClass = (completion: number) => {
   if (completion < 30) return "bg-[var(--coral-orange)] text-white";
@@ -46,7 +54,7 @@ export function ProfilePhotoSlots({
     onChange({
       ...photos,
       [slot]: null,
-      [captionKey]: null,
+      ...(captionKey ? { [captionKey]: null } : {}),
       solo_aspect: slot === "solo" ? null : photos.solo_aspect,
     });
   };
@@ -61,19 +69,22 @@ export function ProfilePhotoSlots({
       </div>
 
       <div className="flex snap-x snap-mandatory gap-[6px] overflow-x-auto overflow-y-visible scrollbar-hide pb-3 pt-1" style={{ touchAction: "pan-x pan-y" }}>
-        {SLOT_ORDER.map((slot) => (
-          <ProfilePhotoSlot
-            key={slot}
-            slot={slot}
-            value={photos[slot]}
-            userId={userId}
-            soloAspect={photos.solo_aspect}
-            captionValue={photos[captionKeyForSlot(slot)]}
-            onCaptionChange={(caption) => onChange({ ...photos, [captionKeyForSlot(slot)]: caption })}
-            onUploaded={updateSlot}
-            onRemoved={removeSlot}
-          />
-        ))}
+        {SLOT_ORDER.map((slot) => {
+          const captionKey = captionKeyForSlot(slot);
+          return (
+            <ProfilePhotoSlot
+              key={slot}
+              slot={slot}
+              value={photos[slot]}
+              userId={userId}
+              soloAspect={photos.solo_aspect}
+              captionValue={captionKey ? photos[captionKey] : null}
+              onCaptionChange={captionKey ? (caption) => onChange({ ...photos, [captionKey]: caption }) : undefined}
+              onUploaded={updateSlot}
+              onRemoved={removeSlot}
+            />
+          );
+        })}
       </div>
 
       <div className="sr-only" aria-live="polite" />

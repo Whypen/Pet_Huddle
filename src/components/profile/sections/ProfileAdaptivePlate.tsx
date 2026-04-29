@@ -18,8 +18,8 @@ const aspectClass = {
 
 const alignClass = {
   "full-bleed": "w-full",
-  "inset-left": "w-full",
-  "inset-right": "w-full",
+  "inset-left": "ml-0 mr-auto w-[88%]",
+  "inset-right": "ml-auto mr-0 w-[88%]",
 };
 
 export function ProfileAdaptivePlate({

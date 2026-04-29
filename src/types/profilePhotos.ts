@@ -13,7 +13,6 @@ export type ProfilePhotos = {
   pack: string | null;
   solo: string | null;
   closer: string | null;
-  cover_caption: string | null;
   establishing_caption: string | null;
   pack_caption: string | null;
   solo_caption: string | null;

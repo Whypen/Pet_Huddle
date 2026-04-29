@@ -27,7 +27,6 @@ export const emptyProfilePhotos = (): ProfilePhotos => ({
   pack: null,
   solo: null,
   closer: null,
-  cover_caption: null,
   establishing_caption: null,
   pack_caption: null,
   solo_caption: null,
@@ -61,7 +60,6 @@ export const curateLegacyProfilePhotos = (
     pack: album[1] ?? null,
     solo: album[2] ?? null,
     closer: album[3] ?? null,
-    cover_caption: null,
     establishing_caption: null,
     pack_caption: null,
     solo_caption: null,
@@ -87,7 +85,6 @@ export const normalizeProfilePhotos = (
     normalized[slot] = cleanString(record[slot]) ?? legacy[slot];
   }
 
-  normalized.cover_caption = cleanString(record.cover_caption);
   normalized.establishing_caption = cleanString(record.establishing_caption);
   normalized.pack_caption = cleanString(record.pack_caption);
   normalized.solo_caption = cleanString(record.solo_caption);
@@ -143,6 +140,12 @@ export const getProfilePhotoUploadPath = (
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
+const shouldRetryStorageUpload = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return true;
+  const status = Number((error as { statusCode?: unknown; status?: unknown }).statusCode ?? (error as { status?: unknown }).status);
+  return ![401, 403, 409].includes(status);
+};
+
 export const uploadProfilePhotoBlob = async (
   userId: string,
   slot: ProfilePhotoSlot,
@@ -158,9 +161,10 @@ export const uploadProfilePhotoBlob = async (
       .upload(path, blob, {
         contentType: blob.type || "image/webp",
         upsert: false,
-      });
+    });
     if (!error) return path;
     lastError = error;
+    if (!shouldRetryStorageUpload(error)) break;
     const retryDelay = retryDelays[attempt];
     if (retryDelay) await delay(retryDelay);
   }
@@ -183,8 +187,10 @@ export const resolveProfilePhotoDisplayUrl = async (
     return cleanValue;
   }
 
-  const profileSigned = await supabase.storage.from(PROFILE_PHOTOS_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
-  if (profileSigned.data?.signedUrl) return profileSigned.data.signedUrl;
+  if (cleanValue.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
+    const profileSigned = await supabase.storage.from(PROFILE_PHOTOS_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
+    return profileSigned.data?.signedUrl ?? null;
+  }
 
   const legacySigned = await supabase.storage.from("social_album").createSignedUrl(cleanValue, ttlSeconds);
   if (legacySigned.data?.signedUrl) return legacySigned.data.signedUrl;

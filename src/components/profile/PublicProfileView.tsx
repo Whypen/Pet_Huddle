@@ -1,6 +1,5 @@
 import type { ProfilePhotos } from "@/types/profilePhotos";
 import { EditorialPublicProfileView } from "@/components/profile/EditorialPublicProfileView";
-import { LegacyPublicProfileView } from "@/components/profile/LegacyPublicProfileView";
 
 type PublicProfileViewProps = {
   displayName: string;
@@ -55,7 +54,5 @@ type PublicProfileViewProps = {
 };
 
 export const PublicProfileView = (props: PublicProfileViewProps) => {
-  return props.editorialEnabled
-    ? <EditorialPublicProfileView {...props} />
-    : <LegacyPublicProfileView {...props} />;
+  return <EditorialPublicProfileView {...props} />;
 };

@@ -299,7 +299,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   const pendingSocialUploadRefs = useRef<Map<string, Promise<string | null>>>(new Map());
   const socialAlbumRef = useRef<string[]>([]);
   const profilePhotoDeleteQueueRef = useRef<Set<string>>(new Set());
-  const profilePhotosMigratedToastRef = useRef(false);
   // RULE 14 — keyboard-safe layout: track virtual keyboard offset
   const [keyboardOffset, setKeyboardOffset] = useState(0);
 
@@ -335,35 +334,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       // best-effort cleanup only
     }
   }, [signupData.email, user?.id]);
-
-  useEffect(() => {
-    if (onboardingMode || profilePhotosMigratedToastRef.current || !profile?.id) return;
-    if (profile.profile_photos_migrated_seen_at) return;
-    const hadLegacyPhotos = Boolean(profile.avatar_url || (Array.isArray(profile.social_album) && profile.social_album.length > 0));
-    if (!hadLegacyPhotos) return;
-
-    profilePhotosMigratedToastRef.current = true;
-    const seenAt = new Date().toISOString();
-    void supabase
-      .from("profiles")
-      .update({ profile_photos_migrated_seen_at: seenAt } as Record<string, unknown>)
-      .eq("id", profile.id)
-      .then(({ error }) => {
-        if (error) {
-          profilePhotosMigratedToastRef.current = false;
-          return;
-        }
-        toast.info("We've reorganised your photos into the new layout. Take a look.");
-        void refreshProfile();
-      });
-  }, [
-    onboardingMode,
-    profile?.avatar_url,
-    profile?.id,
-    profile?.profile_photos_migrated_seen_at,
-    profile?.social_album,
-    refreshProfile,
-  ]);
 
   const [fieldErrors, setFieldErrors] = useState({
     legalName: "",
@@ -481,7 +451,6 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       pack: isPersistableProfilePhotoValue(value.photos.pack) ? value.photos.pack : null,
       solo: isPersistableProfilePhotoValue(value.photos.solo) ? value.photos.solo : null,
       closer: isPersistableProfilePhotoValue(value.photos.closer) ? value.photos.closer : null,
-      cover_caption: value.photos.cover_caption,
       establishing_caption: value.photos.establishing_caption,
       pack_caption: value.photos.pack_caption,
       solo_caption: value.photos.solo_caption,
@@ -506,7 +475,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_location: value.show_location && Boolean(value.location_country.trim() && value.location_district.trim()),
     avatar_url: isPersistableImageUrl(photoPreview) ? photoPreview : "",
   }), [photoPreview]);
-  const isProfileEditorialEnabled = profile?.profile_editorial_v1 === true;
+  const isProfileEditorialEnabled = true;
 
   useEffect(() => {
     const memberSince = profile?.created_at ?? user?.created_at ?? null;
@@ -1858,15 +1827,13 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (fieldSet.has("social_album")) payload.social_album = canonicalizeSocialAlbumEntries(draft.social_album);
       if (fieldSet.has("photos")) {
         payload.photos = draft.photos;
-        if (profile?.profile_editorial_v1 === true) {
-          payload.avatar_url = draft.photos.cover || null;
-          payload.social_album = canonicalizeSocialAlbumEntries([
-            draft.photos.establishing,
-            draft.photos.pack,
-            draft.photos.solo,
-            draft.photos.closer,
-          ].filter((item): item is string => Boolean(item)));
-        }
+        payload.avatar_url = draft.photos.cover || null;
+        payload.social_album = canonicalizeSocialAlbumEntries([
+          draft.photos.establishing,
+          draft.photos.pack,
+          draft.photos.solo,
+          draft.photos.closer,
+        ].filter((item): item is string => Boolean(item)));
       }
       if (fieldSet.has("avatar_url")) payload.avatar_url = draft.avatar_url || null;
       if (fieldSet.has("pet_experience")) payload.pet_experience = draft.pet_experience.length > 0 ? draft.pet_experience : null;

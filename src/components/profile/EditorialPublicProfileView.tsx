@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { BriefcaseBusiness, CakeSlice, GraduationCap, Heart, Languages, MapPin, Ruler, UserRound } from "lucide-react";
+import { BriefcaseBusiness, CakeSlice, GraduationCap, Heart, Languages, MapPin, Ruler, UserRound, X } from "lucide-react";
 import { normalizeProfilePhotos, resolveProfilePhotoDisplayUrl } from "@/lib/profilePhotos";
 import type { ProfilePhotoSlot, ProfilePhotos } from "@/types/profilePhotos";
 import { ProfileAdaptivePlate } from "@/components/profile/sections/ProfileAdaptivePlate";
@@ -144,6 +144,15 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
     };
   }, [photos]);
 
+  useEffect(() => {
+    if (!lightboxSrc) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLightboxSrc(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [lightboxSrc]);
+
   return (
     <div className="overflow-hidden rounded-t-[var(--radius-3xl,28px)] bg-[var(--bg-canvas,#fff)]">
       <ProfileHero
@@ -151,19 +160,23 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
         name={props.displayName}
         roleLabels={roleLabels}
         membershipTier={props.membershipTier}
-        caption={photos.cover_caption}
         isVerified={props.isVerified}
       />
       {props.visibility.show_bio ? <ProfilePullQuote bio={props.bio} /> : null}
       <ProfilePlate src={resolvedPhotoUrls.establishing} aspect="4/5" caption={photos.establishing_caption} alt={`${props.displayName || "Profile"} photo`} onClick={setLightboxSrc} />
       <ProfilePack pets={props.petHeads} displayName={props.displayName} experienceYears={props.experienceYears} petExperience={props.petExperience} onPetClick={props.onPetClick} />
-      <ProfilePlate src={resolvedPhotoUrls.pack} aspect="3/2" caption={photos.pack_caption} alt={`${props.displayName || "Profile"} with pets`} onClick={setLightboxSrc} />
+      <ProfilePlate src={resolvedPhotoUrls.pack} aspect="3/2" align="inset-left" caption={photos.pack_caption} alt={`${props.displayName || "Profile"} with pets`} onClick={setLightboxSrc} />
       <ProfileVitals rows={vitalsRows} />
-      <ProfileAdaptivePlate src={resolvedPhotoUrls.solo} aspect={photos.solo_aspect ?? "4:5"} caption={photos.solo_caption} alt={`${props.displayName || "Profile"} solo photo`} onClick={setLightboxSrc} />
+      <ProfileAdaptivePlate src={resolvedPhotoUrls.solo} aspect={photos.solo_aspect ?? "4:5"} align="inset-right" caption={photos.solo_caption} alt={`${props.displayName || "Profile"} solo photo`} onClick={setLightboxSrc} />
       <ProfilePlate src={resolvedPhotoUrls.closer} aspect="4/5" caption={photos.closer_caption} alt={`${props.displayName || "Profile"} final photo`} onClick={setLightboxSrc} />
       <ProfileColophon memberSince={props.memberSince} memberNumber={props.memberNumber} />
       {lightboxSrc ? (
-        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 p-4" onClick={() => setLightboxSrc(null)}>
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-black/70 p-4" onClick={() => setLightboxSrc(null)} onKeyDown={(event) => {
+          if (event.key === "Escape") setLightboxSrc(null);
+        }} role="dialog" aria-modal="true" tabIndex={-1}>
+          <button type="button" className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-[var(--fg-1)]" onClick={() => setLightboxSrc(null)} aria-label="Close photo preview">
+            <X className="h-5 w-5" strokeWidth={1.8} />
+          </button>
           <img src={lightboxSrc} alt="" className="max-h-[80svh] max-w-full object-contain" onError={() => setLightboxSrc(null)} />
         </div>
       ) : null}
