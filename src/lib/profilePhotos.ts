@@ -8,7 +8,10 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import heic2any from "heic2any";
 
-export const PROFILE_PHOTOS_BUCKET = "Profiles";
+export const PROFILE_PHOTOS_BUCKET = "profile_photos";
+export const LEGACY_PROFILE_PHOTOS_BUCKET = "Profiles";
+const LEGACY_AVATARS_BUCKET = "avatars";
+const LEGACY_SOCIAL_ALBUM_BUCKET = "social_album";
 export const PROFILE_PHOTO_RAW_MAX_BYTES = 25 * 1024 * 1024;
 export const PROFILE_PHOTO_FINAL_MAX_BYTES = 1.2 * 1024 * 1024;
 export const PROFILE_PHOTO_LONG_EDGE = 1600;
@@ -136,7 +139,7 @@ export const getProfilePhotoUploadPath = (
   userId: string,
   slot: ProfilePhotoSlot,
   extension = "webp",
-): string => `Profiles/${userId}/${slot}-${Date.now()}.${extension}`;
+): string => `${PROFILE_PHOTOS_BUCKET}/${userId}/${slot}-${Date.now()}.${extension}`;
 
 const delay = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -174,7 +177,13 @@ export const uploadProfilePhotoBlob = async (
 export const deleteProfilePhotoPath = async (path: string | null | undefined): Promise<void> => {
   const cleanPath = cleanString(path);
   if (!cleanPath) return;
-  await supabase.storage.from(PROFILE_PHOTOS_BUCKET).remove([cleanPath]);
+  if (cleanPath.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
+    await supabase.storage.from(PROFILE_PHOTOS_BUCKET).remove([cleanPath]);
+    return;
+  }
+  if (cleanPath.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
+    await supabase.storage.from(LEGACY_PROFILE_PHOTOS_BUCKET).remove([cleanPath]);
+  }
 };
 
 export const resolveProfilePhotoDisplayUrl = async (
@@ -188,12 +197,18 @@ export const resolveProfilePhotoDisplayUrl = async (
   }
 
   if (cleanValue.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) {
-    const profileSigned = await supabase.storage.from(PROFILE_PHOTOS_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
+    const publicUrl = supabase.storage.from(PROFILE_PHOTOS_BUCKET).getPublicUrl(cleanValue).data?.publicUrl;
+    return publicUrl ?? null;
+  }
+
+  if (cleanValue.startsWith(`${LEGACY_PROFILE_PHOTOS_BUCKET}/`)) {
+    const profileSigned = await supabase.storage.from(LEGACY_PROFILE_PHOTOS_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
     return profileSigned.data?.signedUrl ?? null;
   }
 
-  const legacySigned = await supabase.storage.from("social_album").createSignedUrl(cleanValue, ttlSeconds);
+  const legacySigned = await supabase.storage.from(LEGACY_SOCIAL_ALBUM_BUCKET).createSignedUrl(cleanValue, ttlSeconds);
   if (legacySigned.data?.signedUrl) return legacySigned.data.signedUrl;
 
-  return null;
+  const avatarPublicUrl = supabase.storage.from(LEGACY_AVATARS_BUCKET).getPublicUrl(cleanValue).data?.publicUrl;
+  return avatarPublicUrl ?? null;
 };

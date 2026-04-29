@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { BriefcaseBusiness, CakeSlice, GraduationCap, Heart, Languages, MapPin, Ruler, UserRound, X } from "lucide-react";
+import { BriefcaseBusiness, Flame, GraduationCap, Heart, Languages, MapPin, PawPrint, Ruler, UserRound, X } from "lucide-react";
 import { normalizeProfilePhotos, resolveProfilePhotoDisplayUrl } from "@/lib/profilePhotos";
 import type { ProfilePhotoSlot, ProfilePhotos } from "@/types/profilePhotos";
 import { ProfileAdaptivePlate } from "@/components/profile/sections/ProfileAdaptivePlate";
@@ -102,9 +102,11 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
   });
   const locationValue = formatLocation(props.locationName);
   const roleLabels = normalizedAvailability.filter(Boolean);
+  const roleValue = roleLabels.join(", ");
   const education = joinValues([props.degree, props.major, props.school]);
   const vitalsRows = [
-    age != null ? { label: "Age", value: String(age), Icon: CakeSlice } : null,
+    roleValue ? { label: "Social role", value: roleValue, Icon: PawPrint } : null,
+    age != null ? { label: "Age", value: String(age), Icon: Flame } : null,
     locationValue ? { label: "Location", value: locationValue, Icon: MapPin } : null,
     props.visibility.show_height && props.height.trim() ? { label: "Height", value: `${props.height} cm`, Icon: Ruler } : null,
     props.gender.trim() ? { label: "Gender", value: props.gender, Icon: UserRound } : null,

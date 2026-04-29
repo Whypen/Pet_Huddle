@@ -61,6 +61,7 @@ describe("profile editorial sections", () => {
     rerender(
       <ProfileVitals
         rows={[
+          { label: "Social role", value: "Pet Parent, Volunteer" },
           { label: "Age", value: "37" },
           { label: "Location", value: "Central and Western" },
           { label: "Speaks", value: "English, Cantonese, Mandarin" },
@@ -69,6 +70,7 @@ describe("profile editorial sections", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Key info" })).toBeInTheDocument();
+    expect(screen.getByText("Pet Parent, Volunteer")).toBeInTheDocument();
     expect(screen.getByText("37")).toBeInTheDocument();
     expect(screen.getByText("Central and Western")).toBeInTheDocument();
     expect(screen.getByText("English, Cantonese, Mandarin")).toBeInTheDocument();

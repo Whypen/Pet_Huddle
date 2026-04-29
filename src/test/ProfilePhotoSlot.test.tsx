@@ -40,7 +40,7 @@ describe("ProfilePhotoSlot upload flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     validateProfilePhotoFile.mockReturnValue(null);
-    uploadProfilePhotoBlob.mockResolvedValue("Profiles/user-1/cover-123.webp");
+    uploadProfilePhotoBlob.mockResolvedValue("profile_photos/user-1/cover-123.webp");
   });
 
   it("adds a photo from an empty slot and reports the uploaded storage path", async () => {
@@ -65,7 +65,7 @@ describe("ProfilePhotoSlot upload flow", () => {
 
     await waitFor(() => {
       expect(uploadProfilePhotoBlob).toHaveBeenCalledWith("user-1", "cover", expect.any(Blob));
-      expect(onUploaded).toHaveBeenCalledWith("cover", "Profiles/user-1/cover-123.webp", null, null);
+      expect(onUploaded).toHaveBeenCalledWith("cover", "profile_photos/user-1/cover-123.webp", null, null);
     });
   });
 
@@ -96,7 +96,7 @@ describe("ProfilePhotoSlot upload flow", () => {
       expect(uploadProfilePhotoBlob).toHaveBeenCalledWith("user-1", "cover", expect.any(Blob));
       expect(onUploaded).toHaveBeenCalledWith(
         "cover",
-        "Profiles/user-1/cover-123.webp",
+        "profile_photos/user-1/cover-123.webp",
         null,
         "Profiles/user-1/cover-old.webp",
       );

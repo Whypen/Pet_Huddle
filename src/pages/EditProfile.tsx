@@ -92,7 +92,7 @@ const describeSupabaseWriteError = (error: unknown) => {
 const normalizeSocialRole = (value: string) => (value === "Vet" ? "Veterinarian" : value);
 const DEFAULT_ROLE_WITH_PETS = "Pet Parent";
 const DEFAULT_ROLE_WITHOUT_PETS = "Animal Friend (No Pet)";
-const PROFILE_PHOTO_STORAGE_PATH_REGEX = /^Profiles\/[^/]+\/(?:cover|establishing|pack|solo|closer)-\d+\.(?:webp|jpg)$/;
+const PROFILE_PHOTO_STORAGE_PATH_REGEX = /^(?:profile_photos|Profiles)\/[^/]+\/(?:cover|establishing|pack|solo|closer)-\d+\.(?:webp|jpg)$/;
 
 const isPersistableProfilePhotoValue = (value: string | null): boolean => {
   if (!value) return true;
