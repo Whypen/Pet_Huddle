@@ -71,6 +71,8 @@ if (!supabaseUrl || !serviceRoleKey) {
   process.exit(1);
 }
 
+const PROFILE_PHOTOS_PUBLIC_BASE = `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/public/${PROFILE_PHOTOS_BUCKET}/`;
+
 const supabase = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
@@ -162,6 +164,19 @@ const inferRef = (value, slot) => {
 
 const isCanonicalRef = (ref) =>
   ref?.bucket === PROFILE_PHOTOS_BUCKET && ref.key?.startsWith(`${PROFILE_PHOTOS_BUCKET}/`);
+
+const isBrowserReadyUrl = (value) => {
+  const raw = cleanString(value);
+  return Boolean(raw && (/^https?:\/\//i.test(raw) || raw.startsWith("data:") || raw.startsWith("blob:")));
+};
+
+const toProfileAvatarUrl = (value, fallbackValue = null) => {
+  const raw = cleanString(value);
+  if (!raw) return null;
+  if (isBrowserReadyUrl(raw)) return raw;
+  if (raw.startsWith(`${PROFILE_PHOTOS_BUCKET}/`)) return `${PROFILE_PHOTOS_PUBLIC_BASE}${encodeURI(raw)}`;
+  return isBrowserReadyUrl(fallbackValue) ? cleanString(fallbackValue) : null;
+};
 
 const extensionFor = (key, contentType) => {
   const lower = String(key || "").toLowerCase();
@@ -270,10 +285,11 @@ const migrateProfile = async (profile, stats) => {
   }
 
   const nextAlbum = ALBUM_SLOTS.map((slot) => next[slot]).filter(Boolean);
+  const nextAvatarUrl = toProfileAvatarUrl(next.cover, profile.avatar_url);
   const needsUpdate =
     PROFILE_SLOTS.some((slot) => next[slot] !== current[slot]) ||
     JSON.stringify(nextAlbum) !== JSON.stringify(Array.isArray(profile.social_album) ? profile.social_album : []) ||
-    next.cover !== (profile.avatar_url || null);
+    nextAvatarUrl !== (profile.avatar_url || null);
 
   if (!needsUpdate) return;
   stats.profilesToUpdate += 1;
@@ -283,7 +299,7 @@ const migrateProfile = async (profile, stats) => {
     .from("profiles")
     .update({
       photos: next,
-      avatar_url: next.cover,
+      avatar_url: nextAvatarUrl,
       social_album: nextAlbum,
       profile_photos_migrated_seen_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
