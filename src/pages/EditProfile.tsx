@@ -1895,12 +1895,24 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
   }, [draftHydrationSeed, hydrateProfileDraftFromBaseline, readLegacySetProfileDraft]);
 
   // ── Silent draft save (View tab) ────────────────────────────────────────────
-  const silentSave = async () => {
+  const silentSave = useCallback(async () => {
     flushProfileLocalDraftNow();
     if (profileDraftMode === "local-and-remote") {
       await flushProfileRemoteDraftNow();
+      await refreshProfile();
     }
-  };
+  }, [
+    flushProfileLocalDraftNow,
+    flushProfileRemoteDraftNow,
+    profileDraftMode,
+    refreshProfile,
+  ]);
+
+  const handleProfilePhotoCaptionCommit = useCallback(() => {
+    window.setTimeout(() => {
+      void silentSave();
+    }, 0);
+  }, [silentSave]);
 
   const queueProfilePhotoDeletion = useCallback((path: string | null) => {
     if (!path || !PROFILE_PHOTO_STORAGE_PATH_REGEX.test(path)) return;
@@ -2401,6 +2413,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
               photos={formData.photos}
               userId={user?.id ?? null}
               onChange={(photos) => setFormData((prev) => ({ ...prev, photos }))}
+              onCaptionCommit={handleProfilePhotoCaptionCommit}
               onPreviousPathQueued={queueProfilePhotoDeletion}
             />
           ) : (

@@ -7,7 +7,7 @@ import { ProfilePullQuote } from "@/components/profile/sections/ProfilePullQuote
 import { ProfileVitals } from "@/components/profile/sections/ProfileVitals";
 
 describe("profile editorial sections", () => {
-  it("renders the hero with uppercase name, role chips, membership tier, and no age text", () => {
+  it("renders the hero with uppercase name, a single role pill, membership tier, and no age text", () => {
     render(
       <ProfileHero
         src="/cover.jpg"
@@ -20,8 +20,7 @@ describe("profile editorial sections", () => {
 
     expect(screen.getByRole("img", { name: "Hyphen Fong" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Hyphen Fong" })).toHaveClass("uppercase");
-    expect(screen.getByText("Pet Parent")).toBeInTheDocument();
-    expect(screen.getByText("Volunteer")).toBeInTheDocument();
+    expect(screen.getByText("Pet Parent · Volunteer")).toHaveClass("truncate");
     expect(screen.getByText("Gold")).toBeInTheDocument();
     expect(screen.queryByText("37")).not.toBeInTheDocument();
   });

@@ -6,6 +6,7 @@ type ProfilePhotoSlotsProps = {
   photos: ProfilePhotos;
   userId: string | null;
   onChange: (photos: ProfilePhotos) => void;
+  onCaptionCommit?: () => void;
   onPreviousPathQueued?: (path: string | null) => void;
 };
 
@@ -29,6 +30,7 @@ export function ProfilePhotoSlots({
   photos,
   userId,
   onChange,
+  onCaptionCommit,
   onPreviousPathQueued,
 }: ProfilePhotoSlotsProps) {
   const completedCount = SLOT_ORDER.filter((slot) => Boolean(photos[slot])).length;
@@ -80,6 +82,7 @@ export function ProfilePhotoSlots({
               soloAspect={photos.solo_aspect}
               captionValue={captionKey ? photos[captionKey] : null}
               onCaptionChange={captionKey ? (caption) => onChange({ ...photos, [captionKey]: caption }) : undefined}
+              onCaptionCommit={onCaptionCommit}
               onUploaded={updateSlot}
               onRemoved={removeSlot}
             />

@@ -19,6 +19,7 @@ type ProfilePhotoSlotProps = {
   soloAspect: SoloAspect | null;
   captionValue?: string | null;
   onCaptionChange?: (value: string | null) => void;
+  onCaptionCommit?: () => void;
   onUploaded: (slot: ProfilePhotoSlotName, path: string, soloAspect: SoloAspect | null, previousPath: string | null) => void;
   onRemoved: (slot: ProfilePhotoSlotName, previousPath: string | null) => void;
 };
@@ -30,6 +31,7 @@ export function ProfilePhotoSlot({
   soloAspect,
   captionValue,
   onCaptionChange,
+  onCaptionCommit,
   onUploaded,
   onRemoved,
 }: ProfilePhotoSlotProps) {
@@ -128,7 +130,10 @@ export function ProfilePhotoSlot({
                     setCaptionDraft(event.target.value);
                     onCaptionChange?.(event.target.value);
                   }}
-                  onBlur={() => onCaptionChange?.(captionDraft.trim() || null)}
+                  onBlur={() => {
+                    onCaptionChange?.(captionDraft.trim() || null);
+                    onCaptionCommit?.();
+                  }}
                   className="block max-h-[48px] min-h-[44px] w-full resize-none overflow-hidden bg-transparent text-sm font-semibold leading-snug text-white placeholder:text-white/72 outline-none focus:outline-none focus:ring-0"
                   onClick={(event) => event.stopPropagation()}
                   onPointerDown={(event) => event.stopPropagation()}

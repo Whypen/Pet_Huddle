@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CakeSlice, Heart, Loader2, PawPrint, Ruler, Star, User, X } from "lucide-react";
+import { Camera, Loader2, Star, User, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PublicProfileView } from "@/components/profile/PublicProfileView";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +17,7 @@ import { sendStarChat } from "@/lib/starChat";
 import { GlassModal } from "@/components/ui/GlassModal";
 import { GlassSheet } from "@/components/ui/GlassSheet";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { PetDetailsBody, getSterilizedLabel, toTitleCase } from "@/components/pets/PetDetailsBody";
 
 type PublicProfileSheetData = {
   created_at?: string | null;
@@ -344,6 +345,12 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
     if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) years -= 1;
     return years >= 0 ? years : null;
   })();
+  const petName = String(petViewData?.name || "Pet");
+  const petSpecies = typeof petViewData?.species === "string" ? toTitleCase(petViewData.species) || "Species" : "Species";
+  const petBreed = typeof petViewData?.breed === "string" ? petViewData.breed.trim() : "";
+  const petGender = typeof petViewData?.gender === "string" ? petViewData.gender : "";
+  const petNeuteredSpayed = Boolean(petViewData?.neutered_spayed);
+  const petAgeLabel = petAge == null ? "" : `${petAge} ${petAge === 1 ? "year" : "years"}`;
 
   const profileContent = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -570,72 +577,82 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
                         </div>
                       ) : petViewData ? (
                         <div className="space-y-4">
-                          <section className="overflow-hidden rounded-2xl border border-border bg-muted">
-                            {typeof petViewData.photo_url === "string" && petViewData.photo_url ? (
-                              <img src={petViewData.photo_url} alt={String(petViewData.name || "Pet")} className="aspect-[4/3] w-full object-cover" />
-                            ) : (
-                              <div className="flex aspect-[4/3] w-full items-center justify-center bg-gradient-to-b from-background to-muted">
-                                <PawPrint className="h-10 w-10 text-brandText/40" />
-                              </div>
-                            )}
-                            <div className="space-y-1 px-4 py-4">
-                              <div className="flex items-center gap-2">
-                                <h3 className="text-lg font-semibold text-brandText">{String(petViewData.name || "Pet")}</h3>
-                                {typeof petViewData.species === "string" && petViewData.species ? (
-                                  <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-white">
-                                    {petViewData.species}
-                                  </span>
-                                ) : null}
-                              </div>
-                              {typeof petViewData.breed === "string" && petViewData.breed ? (
-                                <p className="text-sm text-muted-foreground">{petViewData.breed}</p>
-                              ) : null}
+                          <div
+                            className="relative mx-auto flex aspect-[5/8] w-full flex-col overflow-hidden bg-white"
+                            style={{
+                              borderRadius: 14,
+                              border: "1.5px solid rgba(176,190,220,0.68)",
+                              boxShadow: [
+                                "inset 0 0 0 1px rgba(255,255,255,0.52)",
+                                "inset 0 0 18px rgba(66,73,101,0.04)",
+                                "0 2px 6px rgba(0,0,0,0.06)",
+                                "0 12px 36px rgba(66,73,101,0.14)",
+                              ].join(", "),
+                            }}
+                          >
+                            <div
+                              aria-hidden
+                              className="absolute left-1/2 z-[2] -translate-x-1/2"
+                              style={{
+                                top: 12,
+                                width: "28%",
+                                height: 11,
+                                borderRadius: 999,
+                                background: "#ffffff",
+                                border: "1px solid rgba(140,155,190,0.45)",
+                                boxShadow: "inset 0 2px 4px rgba(0,0,0,0.16), 0 1px 0 rgba(255,255,255,0.7)",
+                              }}
+                            />
+                            <div className="relative flex-1 overflow-hidden">
+                              {typeof petViewData.photo_url === "string" && petViewData.photo_url ? (
+                                <img src={petViewData.photo_url} alt={petName} className="absolute inset-0 h-full w-full object-cover object-center" />
+                              ) : (
+                                <div className="absolute inset-0 flex items-center justify-center bg-[rgba(237,237,250,0.7)]">
+                                  <Camera className="h-10 w-10 text-muted-foreground" />
+                                </div>
+                              )}
                             </div>
-                          </section>
-                          <section className="grid grid-cols-2 gap-2 rounded-2xl border border-border bg-white p-4">
-                            {petAge != null ? (
-                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
-                                <CakeSlice className="h-4 w-4 text-brandText/70" />
-                                <span className="text-sm text-brandText">{petAge} {petAge === 1 ? "year" : "years"}</span>
-                              </div>
-                            ) : null}
-                            {typeof petViewData.gender === "string" && petViewData.gender ? (
-                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
-                                <Heart className="h-4 w-4 text-brandText/70" />
-                                <span className="text-sm text-brandText">{petViewData.gender}</span>
-                              </div>
-                            ) : null}
-                            {typeof petViewData.weight === "number" ? (
-                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
-                                <Ruler className="h-4 w-4 text-brandText/70" />
-                                <span className="text-sm text-brandText">{petViewData.weight} {String(petViewData.weight_unit || "kg")}</span>
-                              </div>
-                            ) : null}
-                            {typeof petViewData.microchip_id === "string" && petViewData.microchip_id ? (
-                              <div className="flex items-center gap-2 rounded-2xl bg-muted/50 px-3 py-2">
-                                <PawPrint className="h-4 w-4 text-brandText/70" />
-                                <span className="truncate text-sm text-brandText">{petViewData.microchip_id}</span>
-                              </div>
-                            ) : null}
-                          </section>
-                          {typeof petViewData.bio === "string" && petViewData.bio.trim() ? (
-                            <section className="rounded-2xl border border-border bg-white p-4">
-                              <h4 className="text-sm font-semibold text-brandText">About</h4>
-                              <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{petViewData.bio}</p>
-                            </section>
-                          ) : null}
-                          {Array.isArray(petViewData.temperament) && petViewData.temperament.length > 0 ? (
-                            <section className="rounded-2xl border border-border bg-white p-4">
-                              <h4 className="text-sm font-semibold text-brandText">Temperament</h4>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                {(petViewData.temperament as string[]).map((item, idx) => (
-                                  <span key={`${String(item || "temperament")}-${idx}`} className="rounded-full border border-border bg-muted/60 px-3 py-1 text-xs text-brandText">
-                                    {item}
-                                  </span>
-                                ))}
-                              </div>
-                            </section>
-                          ) : null}
+                            <div className="h-px shrink-0 bg-[rgba(176,190,220,0.45)]" />
+                            <div className="flex shrink-0 flex-col items-center gap-[5px] px-4 pb-[14px] pt-4 text-center">
+                              <h2 className="w-full truncate text-[clamp(18px,5.5vw,24px)] font-bold leading-tight tracking-[-0.02em] text-[var(--text-primary)]">
+                                {petName}
+                              </h2>
+                              <p className="w-full truncate text-[clamp(14px,4vw,16px)] font-medium text-[var(--text-secondary)]">
+                                {[petSpecies, petBreed].filter(Boolean).join(" · ")}
+                              </p>
+                              {(petGender || petNeuteredSpayed) ? (
+                                <p className="text-[clamp(14px,3.8vw,16px)] text-[rgba(66,73,101,0.58)]">
+                                  {[petGender, petNeuteredSpayed ? getSterilizedLabel(petGender) : null].filter(Boolean).join("  ·  ")}
+                                </p>
+                              ) : null}
+                              {petAgeLabel ? (
+                                <p className="text-[clamp(14px,3.8vw,16px)] text-[rgba(66,73,101,0.58)]">
+                                  {petAgeLabel}
+                                </p>
+                              ) : null}
+                              <p className="mt-1 text-[clamp(9px,2.5vw,11px)] font-semibold uppercase tracking-[0.18em] text-[rgba(66,73,101,0.32)]">
+                                PET ID
+                              </p>
+                            </div>
+                          </div>
+                          <PetDetailsBody
+                            className="pt-1"
+                            data={{
+                              dob: typeof petViewData.dob === "string" ? petViewData.dob : null,
+                              weight: typeof petViewData.weight === "string" || typeof petViewData.weight === "number" ? petViewData.weight : null,
+                              weightUnit: typeof petViewData.weight_unit === "string" ? petViewData.weight_unit : null,
+                              microchipId: typeof petViewData.microchip_id === "string" ? petViewData.microchip_id : null,
+                              bio: typeof petViewData.bio === "string" ? petViewData.bio : null,
+                              routine: typeof petViewData.routine === "string" ? petViewData.routine : null,
+                              temperament: Array.isArray(petViewData.temperament) ? (petViewData.temperament as string[]) : null,
+                              reminder: (petViewData.set_reminder as Parameters<typeof PetDetailsBody>[0]["data"]["reminder"]) ?? null,
+                              vetVisits: Array.isArray(petViewData.vet_visit_records) ? (petViewData.vet_visit_records as Parameters<typeof PetDetailsBody>[0]["data"]["vetVisits"]) : null,
+                              medications: Array.isArray(petViewData.medications) ? (petViewData.medications as Parameters<typeof PetDetailsBody>[0]["data"]["medications"]) : null,
+                              clinicName: typeof petViewData.clinic_name === "string" ? petViewData.clinic_name : null,
+                              preferredVet: typeof petViewData.preferred_vet === "string" ? petViewData.preferred_vet : null,
+                              phoneNo: typeof petViewData.phone_no === "string" ? petViewData.phone_no : null,
+                            }}
+                          />
                         </div>
                       ) : (
                         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
