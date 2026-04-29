@@ -43,22 +43,38 @@ export function ProfilePhotoSlots({
     previousPath: string | null,
   ) => {
     onPreviousPathQueued?.(previousPath);
-    onChange((previous) => ({
-      ...previous,
-      [slot]: path,
-      solo_aspect: slot === "solo" ? soloAspect ?? previous.solo_aspect ?? "4:5" : previous.solo_aspect,
-    }));
+    let committedPhotos: ProfilePhotos | null = null;
+    onChange((previous) => {
+      const nextPhotos = {
+        ...previous,
+        [slot]: path,
+        solo_aspect: slot === "solo" ? soloAspect ?? previous.solo_aspect ?? "4:5" : previous.solo_aspect,
+      };
+      committedPhotos = nextPhotos;
+      return nextPhotos;
+    });
+    window.setTimeout(() => {
+      if (committedPhotos) onCaptionCommit?.(committedPhotos);
+    }, 0);
   };
 
   const removeSlot = (slot: ProfilePhotoSlotName, previousPath: string | null) => {
     onPreviousPathQueued?.(previousPath);
     const captionKey = captionKeyForSlot(slot);
-    onChange((previous) => ({
-      ...previous,
-      [slot]: null,
-      ...(captionKey ? { [captionKey]: null } : {}),
-      solo_aspect: slot === "solo" ? null : previous.solo_aspect,
-    }));
+    let committedPhotos: ProfilePhotos | null = null;
+    onChange((previous) => {
+      const nextPhotos = {
+        ...previous,
+        [slot]: null,
+        ...(captionKey ? { [captionKey]: null } : {}),
+        solo_aspect: slot === "solo" ? null : previous.solo_aspect,
+      };
+      committedPhotos = nextPhotos;
+      return nextPhotos;
+    });
+    window.setTimeout(() => {
+      if (committedPhotos) onCaptionCommit?.(committedPhotos);
+    }, 0);
   };
 
   return (

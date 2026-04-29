@@ -10,6 +10,11 @@ const isDataOrBlob = (value: string) => value.startsWith("data:") || value.start
 const sanitizePathLike = (value: string) =>
   decodeURIComponent(value.split("#")[0].split("?")[0]).replace(/^\/+/, "");
 
+const withBucketPrefix = (bucket: string, key: string) => {
+  const cleanKey = sanitizePathLike(key);
+  return cleanKey.startsWith(`${bucket}/`) ? cleanKey : `${bucket}/${cleanKey}`;
+};
+
 const extractBucketKeyFromUrl = (value: string): string | null => {
   try {
     const url = new URL(value);
@@ -20,11 +25,11 @@ const extractBucketKeyFromUrl = (value: string): string | null => {
     if (publicMatch?.[1]) return sanitizePathLike(publicMatch[1]);
     const profilePublicMatch = pathname.match(/\/storage\/v1\/object\/public\/(profile_photos|Profiles)\/(.+)$/);
     if (profilePublicMatch?.[1] && profilePublicMatch?.[2]) {
-      return sanitizePathLike(`${profilePublicMatch[1]}/${profilePublicMatch[2]}`);
+      return withBucketPrefix(profilePublicMatch[1], profilePublicMatch[2]);
     }
     const profileSignMatch = pathname.match(/\/storage\/v1\/object\/sign\/(profile_photos|Profiles)\/(.+)$/);
     if (profileSignMatch?.[1] && profileSignMatch?.[2]) {
-      return sanitizePathLike(`${profileSignMatch[1]}/${profileSignMatch[2]}`);
+      return withBucketPrefix(profileSignMatch[1], profileSignMatch[2]);
     }
     const genericMatch = pathname.match(/\/social_album\/(.+)$/);
     if (genericMatch?.[1]) return sanitizePathLike(genericMatch[1]);

@@ -36,4 +36,17 @@ describe("social album URL resolution", () => {
 
     expect(createSignedUrl).not.toHaveBeenCalledWith("social_album", path, expect.any(Number));
   });
+
+  it("normalizes public profile_photos URLs without duplicating the bucket prefix", async () => {
+    const path = "profile_photos/735e8908-6dc8-4b41-837e-d4917e93caae/closer-1777493789017.webp";
+    const publicUrl = `https://ztrbourwcnhrpmzwlrcn.supabase.co/storage/v1/object/public/profile_photos/${path}`;
+
+    await expect(resolveSocialAlbumUrlMap([publicUrl])).resolves.toEqual({
+      [publicUrl]: `public:profile_photos:${path}`,
+    });
+
+    expect(getPublicUrl).toHaveBeenCalledWith("profile_photos", path);
+    expect(getPublicUrl).not.toHaveBeenCalledWith("profile_photos", `profile_photos/${path}`);
+    expect(createSignedUrl).not.toHaveBeenCalledWith("social_album", expect.stringContaining(path), expect.any(Number));
+  });
 });

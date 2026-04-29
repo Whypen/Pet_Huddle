@@ -412,6 +412,11 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     show_languages: false,
     show_location: false,
   });
+  const formDataRef = useRef(formData);
+
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
   const [draftHydrationSeed, setDraftHydrationSeed] = useState<{
     baselineValue: Record<string, unknown>;
     baselineUpdatedAt: string;
@@ -1914,29 +1919,37 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       void silentSave();
     }, 0);
     if (profileDraftMode !== "local-and-remote" || !user?.id) return;
-    const nextSocialAlbum = canonicalizeSocialAlbumEntries([
-      photos.establishing,
-      photos.pack,
-      photos.solo,
-      photos.closer,
-    ].filter((item): item is string => Boolean(item)));
-    void supabase
-      .from("profiles")
-      .update({
-        photos,
-        avatar_url: getProfilePhotoPublicUrl(photos.cover),
-        social_album: nextSocialAlbum,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", user.id)
-      .then(({ error }) => {
-        if (error) {
-          console.warn("[EditProfile] Failed to persist profile photo caption", error.message);
-          return;
-        }
-        void refreshProfile();
-      });
-  }, [profileDraftMode, refreshProfile, silentSave, user?.id]);
+    window.setTimeout(() => {
+      const currentPhotos = formDataRef.current.photos;
+      const latestPhotos: ProfilePhotos = {
+        ...currentPhotos,
+        establishing_caption: photos.establishing_caption,
+        pack_caption: photos.pack_caption,
+        solo_caption: photos.solo_caption,
+        closer_caption: photos.closer_caption,
+      };
+      const nextSocialAlbum = canonicalizeSocialAlbumEntries([
+        latestPhotos.establishing,
+        latestPhotos.pack,
+        latestPhotos.solo,
+        latestPhotos.closer,
+      ].filter((item): item is string => Boolean(item)));
+      void supabase
+        .from("profiles")
+        .update({
+          photos: latestPhotos,
+          avatar_url: getProfilePhotoPublicUrl(latestPhotos.cover),
+          social_album: nextSocialAlbum,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+        .then(({ error }) => {
+          if (error) {
+            console.warn("[EditProfile] Failed to persist profile photos", error.message);
+          }
+        });
+    }, 0);
+  }, [profileDraftMode, silentSave, user?.id]);
 
   const queueProfilePhotoDeletion = useCallback((path: string | null) => {
     if (!path || !PROFILE_PHOTO_STORAGE_PATH_REGEX.test(path)) return;
