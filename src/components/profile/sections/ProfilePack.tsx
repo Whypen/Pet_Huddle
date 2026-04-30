@@ -80,8 +80,8 @@ export function ProfilePack({
   const experienceLine = formatExperienceLine(experienceYears, petExperience);
 
   return (
-    <section className="bg-[var(--bg-muted,#f3f4f8)] pb-8 pt-7">
-      <div className="px-5">
+    <section className="pb-8 pt-7" style={{ backgroundColor: "#EEF0F5" }}>
+      <div className="px-5" style={{ backgroundColor: "#EEF0F5" }}>
         <h2 className="text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">The pack</h2>
         {experienceLine ? (
           <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--fg-2)]">
@@ -91,7 +91,7 @@ export function ProfilePack({
       </div>
 
       {publicPets.length > 0 ? (
-        <div className="mt-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 scrollbar-hide">
+        <div className="mt-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 scrollbar-hide" style={{ backgroundColor: "#EEF0F5" }}>
           {publicPets.map((pet) => {
             const isPublic = pet.isPublic !== false;
             return (

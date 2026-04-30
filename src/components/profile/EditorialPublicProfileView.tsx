@@ -114,7 +114,7 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
   );
   const aboutIntro = {
     socialId: String(props.socialId || "").trim() || null,
-    label: "A little about me",
+    label: "Something about me",
   };
   const primaryVitalsRows = [
     roleValue ? { label: "Social role", value: roleValue, Icon: PawPrint } : null,
