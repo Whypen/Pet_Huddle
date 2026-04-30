@@ -4,6 +4,7 @@ import { EditorialPublicProfileView } from "@/components/profile/EditorialPublic
 type PublicProfileViewProps = {
   displayName: string;
   bio: string;
+  socialId?: string | null;
   memberSince?: string | null;
   memberNumber?: number | null;
   membershipTier?: string | null;

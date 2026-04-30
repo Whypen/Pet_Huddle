@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { BriefcaseBusiness, Flame, GraduationCap, Heart, Languages, MapPin, PawPrint, Ruler, UserRound, X } from "lucide-react";
+import { BriefcaseBusiness, Flame, GraduationCap, Heart, Landmark, Languages, MapPin, PawPrint, Ruler, UserRound, X } from "lucide-react";
 import { normalizeProfilePhotos, resolveProfilePhotoDisplayUrl } from "@/lib/profilePhotos";
 import type { ProfilePhotoSlot, ProfilePhotos } from "@/types/profilePhotos";
 import { ProfileAdaptivePlate } from "@/components/profile/sections/ProfileAdaptivePlate";
@@ -14,6 +14,7 @@ import { ProfileVitals } from "@/components/profile/sections/ProfileVitals";
 type EditorialPublicProfileViewProps = {
   displayName: string;
   bio: string;
+  socialId?: string | null;
   memberSince?: string | null;
   memberNumber?: number | null;
   membershipTier?: string | null;
@@ -104,16 +105,29 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
   const roleLabels = normalizedAvailability.filter(Boolean);
   const roleValue = roleLabels.join(", ");
   const education = joinValues([props.degree, props.major, props.school]);
-  const vitalsRows = [
+  const allEditorialPhotosUploaded = Boolean(
+    photos.cover &&
+    photos.establishing &&
+    photos.pack &&
+    photos.solo &&
+    photos.closer,
+  );
+  const introSocialId = String(props.socialId || "").trim();
+  const aboutIntro = introSocialId
+    ? `My Social ID is @${introSocialId}. Here is something about me,`
+    : "Here is something about me,";
+  const primaryVitalsRows = [
     roleValue ? { label: "Social role", value: roleValue, Icon: PawPrint } : null,
     age != null ? { label: "Age", value: String(age), Icon: Flame } : null,
     locationValue ? { label: "Location", value: locationValue, Icon: MapPin } : null,
     props.visibility.show_height && props.height.trim() ? { label: "Height", value: `${props.height} cm`, Icon: Ruler } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string; Icon?: ComponentType<{ className?: string; strokeWidth?: number }> }>;
+  const aboutVitalsRows = [
     props.gender.trim() ? { label: "Gender", value: props.gender, Icon: UserRound } : null,
     props.visibility.show_orientation && props.orientation.trim() ? { label: "Orientation", value: props.orientation, Icon: Heart } : null,
     props.visibility.show_academic && education ? { label: "Education", value: education, Icon: GraduationCap } : null,
     props.visibility.show_occupation && props.occupation.trim() ? { label: "Works at", value: props.occupation, Icon: BriefcaseBusiness } : null,
-    props.visibility.show_affiliation && props.affiliation.trim() ? { label: "AFFILIATION", value: props.affiliation } : null,
+    props.visibility.show_affiliation && props.affiliation.trim() ? { label: "Affiliation", value: props.affiliation, Icon: Landmark } : null,
     (props.visibility.show_languages ?? true) && props.languages.length
       ? { label: "Speaks", value: props.languages.join(", "), Icon: Languages }
       : null,
@@ -121,6 +135,7 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
       ? { label: "Relationship", value: props.relationshipStatus, Icon: Heart }
       : null,
   ].filter(Boolean) as Array<{ label: string; value: string; Icon?: ComponentType<{ className?: string; strokeWidth?: number }> }>;
+  const vitalsRows = [...primaryVitalsRows, ...aboutVitalsRows];
 
   useEffect(() => {
     let cancelled = false;
@@ -168,8 +183,11 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
       <ProfilePlate src={resolvedPhotoUrls.establishing} aspect="4/5" caption={photos.establishing_caption} alt={`${props.displayName || "Profile"} photo`} onClick={setLightboxSrc} />
       <ProfilePack pets={props.petHeads} displayName={props.displayName} experienceYears={props.experienceYears} petExperience={props.petExperience} onPetClick={props.onPetClick} />
       <ProfilePlate src={resolvedPhotoUrls.pack} aspect="3/2" caption={photos.pack_caption} alt={`${props.displayName || "Profile"} with pets`} onClick={setLightboxSrc} />
-      <ProfileVitals rows={vitalsRows} />
+      <ProfileVitals rows={allEditorialPhotosUploaded ? primaryVitalsRows : vitalsRows} />
       <ProfileAdaptivePlate src={resolvedPhotoUrls.solo} aspect={photos.solo_aspect ?? "4:5"} caption={photos.solo_caption} alt={`${props.displayName || "Profile"} solo photo`} onClick={setLightboxSrc} />
+      {allEditorialPhotosUploaded ? (
+        <ProfileVitals rows={aboutVitalsRows} title={null} intro={aboutIntro} />
+      ) : null}
       <ProfilePlate src={resolvedPhotoUrls.closer} aspect="4/5" caption={photos.closer_caption} alt={`${props.displayName || "Profile"} final photo`} onClick={setLightboxSrc} />
       <ProfileColophon memberSince={props.memberSince} memberNumber={props.memberNumber} />
       {lightboxSrc ? (

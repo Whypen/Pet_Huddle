@@ -6,14 +6,21 @@ type ProfileVitalsProps = {
     value: string;
     Icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
   }>;
+  title?: string | null;
+  intro?: string | null;
 };
 
-export function ProfileVitals({ rows }: ProfileVitalsProps) {
+export function ProfileVitals({ rows, title = "Key info", intro = null }: ProfileVitalsProps) {
   if (rows.length === 0) return null;
 
   return (
     <section className="px-5 py-7">
-      <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">Key info</h2>
+      {title ? (
+        <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">{title}</h2>
+      ) : null}
+      {intro ? (
+        <p className="mb-4 max-w-[340px] whitespace-pre-wrap text-left text-[17px] font-medium italic leading-relaxed text-[var(--fg-1)]">{intro}</p>
+      ) : null}
       <div>
         {rows.map((row) => (
           <div key={row.label} className="grid min-h-14 grid-cols-[44px_1fr] items-center gap-3 border-b border-[rgba(66,73,101,0.10)] py-3 last:border-b-0">

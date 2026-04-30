@@ -384,6 +384,7 @@ export const PublicProfileSheet = ({ isOpen, onClose, loading, fallbackName, dat
           <PublicProfileView
             displayName={resolvedData.display_name || fallbackName || ""}
             bio={resolvedData.bio || ""}
+            socialId={resolvedData.social_id || null}
             memberSince={resolvedData.created_at ?? null}
             memberNumber={memberNumber}
             membershipTier={resolvedData.effective_tier ?? resolvedData.tier ?? null}

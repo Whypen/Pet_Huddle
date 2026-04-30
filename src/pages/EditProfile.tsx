@@ -3134,6 +3134,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
         <PublicProfileView
           displayName={formData.display_name}
           bio={formData.bio}
+          socialId={formData.social_id}
           memberSince={profile?.created_at ?? user?.created_at ?? null}
           memberNumber={memberNumber}
           membershipTier={profile?.effective_tier ?? profile?.tier ?? null}
