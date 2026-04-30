@@ -20,6 +20,7 @@ type PolaroidCardProps = {
   onTap?: () => void;
   disabled?: boolean;
   ariaLabel: string;
+  shadow?: "default" | "soft";
 };
 
 export function PolaroidCard({
@@ -33,6 +34,7 @@ export function PolaroidCard({
   onTap,
   disabled = false,
   ariaLabel,
+  shadow = "default",
 }: PolaroidCardProps) {
   return (
     <motion.div
@@ -47,7 +49,9 @@ export function PolaroidCard({
         style={{
           background: "#f0f0f0",
           borderRadius: "4px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)",
+          boxShadow: shadow === "soft"
+            ? "0 8px 22px rgba(33,39,58,0.10), 0 1px 4px rgba(33,39,58,0.06)"
+            : "0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10)",
           aspectRatio: "4 / 5",
           position: "relative",
           overflow: "hidden",

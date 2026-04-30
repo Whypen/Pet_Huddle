@@ -80,43 +80,46 @@ export function ProfilePack({
   const experienceLine = formatExperienceLine(experienceYears, petExperience);
 
   return (
-    <section className="pb-4 pt-7" style={{ backgroundColor: "#EEF0F5" }}>
-      <div className="px-5" style={{ backgroundColor: "#EEF0F5" }}>
-        <h2 className="text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">The pack</h2>
-        {experienceLine ? (
-          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--fg-2)]">
-            {experienceLine}
-          </p>
-        ) : null}
-      </div>
+    <section>
+      <div className="pb-8 pt-8" style={{ backgroundColor: "#EEF0F5" }}>
+        <div className="px-5">
+          <h2 className="text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">The pack</h2>
+          {experienceLine ? (
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--fg-2)]">
+              {experienceLine}
+            </p>
+          ) : null}
+        </div>
 
-      {publicPets.length > 0 ? (
-        <div className="mt-2 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 py-4 scrollbar-hide" style={{ backgroundColor: "#EEF0F5" }}>
-          {publicPets.map((pet) => {
-            const isPublic = pet.isPublic !== false;
-            return (
-              <div key={pet.id} className="w-[46%] min-w-[156px] max-w-[190px] shrink-0 snap-center">
-                <PolaroidCard
-                  photoUrl={pet.photoUrl ?? null}
-                  badges={isPublic ? [] : [privateBadge]}
-                  captionPrimary={pet.name || "Pet"}
-                  captionSecondary={isPublic ? formatPetCaption(pet) : "PRIVATE"}
-                  disabled={!isPublic}
-                  onTap={() => onPetClick?.(pet.id, isPublic)}
-                  ariaLabel={`Open ${pet.name || "pet"}'s profile`}
-                />
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="mx-5 mt-4 rounded-[4px] bg-[var(--bg-blue-soft)] px-5 py-8 text-center">
-          <PawPrint className="mx-auto h-8 w-8 text-[var(--huddle-blue)]" strokeWidth={1.75} />
-          <p className="mx-auto mt-3 max-w-[280px] text-[15px] italic text-[var(--fg-1)]">
-            {displayName || "This member"} is new to pet life — ready to begin.
-          </p>
-        </div>
-      )}
+        {publicPets.length > 0 ? (
+          <div className="mt-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 py-4 scrollbar-hide">
+            {publicPets.map((pet) => {
+              const isPublic = pet.isPublic !== false;
+              return (
+                <div key={pet.id} className="w-[46%] min-w-[156px] max-w-[190px] shrink-0 snap-center">
+                  <PolaroidCard
+                    photoUrl={pet.photoUrl ?? null}
+                    badges={isPublic ? [] : [privateBadge]}
+                    captionPrimary={pet.name || "Pet"}
+                    captionSecondary={isPublic ? formatPetCaption(pet) : "PRIVATE"}
+                    disabled={!isPublic}
+                    onTap={() => onPetClick?.(pet.id, isPublic)}
+                    ariaLabel={`Open ${pet.name || "pet"}'s profile`}
+                    shadow="soft"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mx-5 mt-4 rounded-[4px] bg-[var(--bg-blue-soft)] px-5 py-8 text-center">
+            <PawPrint className="mx-auto h-8 w-8 text-[var(--huddle-blue)]" strokeWidth={1.75} />
+            <p className="mx-auto mt-3 max-w-[280px] text-[15px] italic text-[var(--fg-1)]">
+              {displayName || "This member"} is new to pet life — ready to begin.
+            </p>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
