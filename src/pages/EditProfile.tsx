@@ -1461,11 +1461,14 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
     debounceMs: 1000,
     saveRemote: async ({ changedFields, draft }) => {
       if (profileDraftMode !== "local-and-remote" || !user?.id) return;
+      const fieldSet = new Set(changedFields as string[]);
+      const photosOnlyChange = fieldSet.size === 1 && fieldSet.has("photos");
+      if (photosOnlyChange) {
+        return { baselineUpdatedAt: new Date().toISOString() };
+      }
       const payload: Record<string, unknown> = {
-        id: user.id,
         updated_at: new Date().toISOString(),
       };
-      const fieldSet = new Set(changedFields as string[]);
       const hasPets = petsProfileCount > 0 || draft.owns_pets;
       const persistedPhone = String(draft.phone || "").trim() || null;
       const shouldRevokePhoneVerification =
@@ -1483,7 +1486,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       }
       if (fieldSet.has("dob")) payload.dob = draft.dob || null;
       if (fieldSet.has("bio")) payload.bio = draft.bio;
-      if (fieldSet.has("social_id")) payload.social_id = draft.social_id || null;
+      // Social ID has availability and format validation on explicit save.
+      // Keep draft typing local to avoid repeated remote 400s while the user edits.
       if (fieldSet.has("gender_genre")) payload.gender_genre = draft.gender_genre || null;
       if (fieldSet.has("orientation")) payload.orientation = draft.orientation || null;
       if (fieldSet.has("height")) payload.height = draft.height ? parseInt(draft.height, 10) : null;
@@ -1501,16 +1505,8 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       if (fieldSet.has("location_country")) payload.location_country = draft.location_country || null;
       if (fieldSet.has("location_district")) payload.location_district = draft.location_district || null;
       if (fieldSet.has("social_album")) payload.social_album = canonicalizeSocialAlbumEntries(draft.social_album);
-      if (fieldSet.has("photos")) {
-        payload.photos = draft.photos;
-        payload.avatar_url = getProfilePhotoPublicUrl(draft.photos.cover);
-        payload.social_album = canonicalizeSocialAlbumEntries([
-          draft.photos.establishing,
-          draft.photos.pack,
-          draft.photos.solo,
-          draft.photos.closer,
-        ].filter((item): item is string => Boolean(item)));
-      }
+      // Photo slot and caption writes are persisted through the dedicated photo path.
+      // That keeps media changes isolated from ordinary form autosave.
       if (fieldSet.has("pet_experience")) payload.pet_experience = draft.pet_experience.length > 0 ? draft.pet_experience : null;
       if (fieldSet.has("experience_years") || fieldSet.has("pet_experience")) {
         payload.experience_years =
@@ -1540,11 +1536,10 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
           show_location: draft.show_location,
         };
       }
-      payload.email = getCanonicalProfileEmail(user);
-
       const { data, error } = await supabase
         .from("profiles")
-        .upsert(payload, { onConflict: "id" })
+        .update(payload)
+        .eq("id", user.id)
         .select("updated_at")
         .single();
       if (error) throw error;
@@ -3130,7 +3125,7 @@ const EditProfile = ({ onboardingMode = false }: EditProfileProps) => {
       )}
       </>
       ) : (
-      <div ref={viewScrollRef} className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-0 pt-0" style={{ paddingBottom: "calc(var(--nav-height, 64px) + env(safe-area-inset-bottom) + 20px)" }}>
+      <div ref={viewScrollRef} className="flex-1 min-h-0 overflow-y-auto touch-pan-y px-0 pt-0">
         <PublicProfileView
           displayName={formData.display_name}
           bio={formData.bio}

@@ -224,13 +224,19 @@ window.addEventListener("vite:preloadError", () => {
 });
 
 window.addEventListener("error", (event) => {
-  const target = event.target as (EventTarget & { tagName?: string; src?: string }) | null;
+  const target = event.target as (EventTarget & { tagName?: string; src?: string; href?: string; rel?: string }) | null;
   const scriptSrc = typeof target?.src === "string" ? target.src : "";
+  const linkHref = typeof target?.href === "string" ? target.href : "";
   const isChunkScriptLoadError =
     target?.tagName === "SCRIPT" &&
     scriptSrc.includes("/assets/") &&
     scriptSrc.endsWith(".js");
-  if (isChunkScriptLoadError) {
+  const isEntryStylesheetLoadError =
+    target?.tagName === "LINK" &&
+    String(target.rel || "").toLowerCase() === "stylesheet" &&
+    linkHref.includes("/assets/") &&
+    linkHref.endsWith(".css");
+  if (isChunkScriptLoadError || isEntryStylesheetLoadError) {
     void reloadForChunkFailure();
     return;
   }
