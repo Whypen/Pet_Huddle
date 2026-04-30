@@ -80,7 +80,7 @@ export function ProfilePack({
   const experienceLine = formatExperienceLine(experienceYears, petExperience);
 
   return (
-    <section className="bg-[rgba(66,73,101,0.055)] pb-8 pt-7">
+    <section className="bg-[var(--bg-muted,#f3f4f8)] pb-8 pt-7">
       <div className="px-5">
         <h2 className="text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">The pack</h2>
         {experienceLine ? (

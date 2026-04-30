@@ -7,7 +7,10 @@ type ProfileVitalsProps = {
     Icon?: ComponentType<{ className?: string; strokeWidth?: number }>;
   }>;
   title?: string | null;
-  intro?: string | null;
+  intro?: {
+    socialId: string | null;
+    label: string;
+  } | null;
 };
 
 export function ProfileVitals({ rows, title = "Key info", intro = null }: ProfileVitalsProps) {
@@ -19,7 +22,14 @@ export function ProfileVitals({ rows, title = "Key info", intro = null }: Profil
         <h2 className="mb-3 text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">{title}</h2>
       ) : null}
       {intro ? (
-        <p className="mb-4 max-w-[340px] whitespace-pre-wrap text-left text-[17px] font-medium italic leading-relaxed text-[var(--fg-1)]">{intro}</p>
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-2 text-left">
+          {intro.socialId ? (
+            <span className="text-[17px] font-medium italic leading-relaxed text-[var(--fg-1)]">@{intro.socialId}</span>
+          ) : null}
+          <span className="text-sm font-extrabold uppercase tracking-[0.08em] text-[var(--fg-1)]">
+            {intro.socialId ? "• " : ""}{intro.label}
+          </span>
+        </div>
       ) : null}
       <div>
         {rows.map((row) => (

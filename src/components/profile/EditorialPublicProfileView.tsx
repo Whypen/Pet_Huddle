@@ -112,10 +112,10 @@ export function EditorialPublicProfileView(props: EditorialPublicProfileViewProp
     photos.solo &&
     photos.closer,
   );
-  const introSocialId = String(props.socialId || "").trim();
-  const aboutIntro = introSocialId
-    ? `My Social ID is @${introSocialId}. Here is something about me,`
-    : "Here is something about me,";
+  const aboutIntro = {
+    socialId: String(props.socialId || "").trim() || null,
+    label: "A little about me",
+  };
   const primaryVitalsRows = [
     roleValue ? { label: "Social role", value: roleValue, Icon: PawPrint } : null,
     age != null ? { label: "Age", value: String(age), Icon: Flame } : null,
