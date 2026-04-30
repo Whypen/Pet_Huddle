@@ -133,7 +133,9 @@ const NeuDropdown = React.forwardRef<HTMLButtonElement, NeuDropdownProps>(
               position="popper"
               sideOffset={6}
               className={cn(
-                "z-50 w-[--radix-select-trigger-width]",
+                // z-[5200] sits above the highest sheet/modal layer in the app
+                // (GlassSheet uses 4210, GlassModal uses 4300). Safe inside portals.
+                "z-[5200] w-[--radix-select-trigger-width]",
                 "max-h-[260px] overflow-y-auto",
                 "glass-card",
                 "p-1.5",

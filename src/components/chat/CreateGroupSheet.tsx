@@ -2,12 +2,14 @@
  * CreateGroupSheet — single-scroll bottom sheet for creating public/private pet groups.
  */
 
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ImageIcon } from "lucide-react";
+import { Camera, MapPin, Trash2 } from "lucide-react";
 import { GlassSheet } from "@/components/ui/GlassSheet";
-import { FormField, FormTextArea } from "@/components/ui/FormField";
+import { FormField } from "@/components/ui/FormField";
 import { NeuButton } from "@/components/ui/NeuButton";
+import { NeuDropdown } from "@/components/ui/NeuDropdown";
+import { searchLocations, type LocationSuggestion } from "@/lib/locationSearch";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { updateGroupChatMetadata } from "@/lib/groupChats";
@@ -79,6 +81,24 @@ export function CreateGroupSheet({
   const [photoFile,        setPhotoFile]        = useState<File | null>(null);
   const [isCreating,       setIsCreating]       = useState(false);
 
+  // Pre-fetched country / district hints from the user's profile, populated
+  // when the sheet opens. Country becomes a static pill; district pre-fills as
+  // a one-tap suggestion the user can accept or override.
+  const [profileCountryLabel, setProfileCountryLabel] = useState<string | null>(null);
+  const [profileDistrictHint, setProfileDistrictHint] = useState<string | null>(null);
+
+  // Location autocomplete state
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [locationSearchOpen, setLocationSearchOpen] = useState(false);
+  const [locationSearching, setLocationSearching] = useState(false);
+  const locationAbortRef = useRef<AbortController | null>(null);
+  const locationDebounceRef = useRef<number | null>(null);
+  // Mark when the user accepted a suggestion so the next change doesn't re-fire search.
+  const lastSuggestionAcceptedRef = useRef<string | null>(null);
+
+  // Cover photo file input — referenced by camera pill / empty-state CTA on the preview card.
+  const createCoverInputRef = useRef<HTMLInputElement | null>(null);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const resetForm = () => {
@@ -106,20 +126,71 @@ export function CreateGroupSheet({
     e.target.value = "";
   };
 
-  const togglePetFocus = (option: string) => {
-    if (option === "All Pets") {
-      setSelectedPetFocus(prev =>
-        prev.includes("All Pets") ? [] : ["All Pets"]
-      );
+  // Debounced location search bound to the locationLabel input.
+  // Skip when the value matches a just-accepted suggestion or is too short.
+  useEffect(() => {
+    const trimmed = locationLabel.trim();
+    if (lastSuggestionAcceptedRef.current && lastSuggestionAcceptedRef.current === trimmed) {
       return;
     }
-    setSelectedPetFocus(prev => {
-      const withoutAll = prev.filter(p => p !== "All Pets");
-      return withoutAll.includes(option)
-        ? withoutAll.filter(p => p !== option)
-        : [...withoutAll, option];
-    });
-  };
+    if (trimmed.length < 2) {
+      setLocationSuggestions([]);
+      setLocationSearchOpen(false);
+      return;
+    }
+    if (locationDebounceRef.current) window.clearTimeout(locationDebounceRef.current);
+    locationDebounceRef.current = window.setTimeout(async () => {
+      if (locationAbortRef.current) locationAbortRef.current.abort();
+      const ctrl = new AbortController();
+      locationAbortRef.current = ctrl;
+      setLocationSearching(true);
+      try {
+        const results = await searchLocations(trimmed, profileCountryLabel, ctrl.signal);
+        if (ctrl.signal.aborted) return;
+        setLocationSuggestions(results);
+        setLocationSearchOpen(results.length > 0);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        // Fall back to no suggestions; user can still type freely.
+        setLocationSuggestions([]);
+      } finally {
+        if (!ctrl.signal.aborted) setLocationSearching(false);
+      }
+    }, 280);
+    return () => {
+      if (locationDebounceRef.current) window.clearTimeout(locationDebounceRef.current);
+    };
+  }, [locationLabel, profileCountryLabel]);
+
+  // Fetch profile country + district hint once when the sheet opens so the
+  // location field is pre-contextualised. We don't block submission on this.
+  useEffect(() => {
+    if (!isOpen || !user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("location_country, location_district, location_name")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      const row = data as {
+        location_country?: string | null;
+        location_district?: string | null;
+        location_name?: string | null;
+      };
+      const country = (row.location_country || "").trim();
+      const district =
+        (row.location_district || "").trim() ||
+        // Fall back to first comma-token of `location_name` when district isn't set
+        ((row.location_name || "").split(",")[0] || "").trim();
+      setProfileCountryLabel(country || null);
+      setProfileDistrictHint(district || null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, user?.id]);
 
   // ── Create handler ────────────────────────────────────────────────────────
 
@@ -262,35 +333,13 @@ export function CreateGroupSheet({
       onClose={onClose}
       title="Create a group"
       contentClassName="!pr-0 !pl-0 pb-2"
-      className="!px-3 !pt-4 !pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+16px)]"
+      className="!px-3 !pt-4 huddle-sheet-bottom-padding"
     >
       {/* Scrollable body */}
       <div className="flex flex-col space-y-5 px-1">
 
-        {/* Row 1: Photo + Group name */}
+        {/* Row 1: Group name (full-width — cover upload moved to the preview card below) */}
         <div className="flex flex-row items-start gap-3">
-          {/* Photo circle */}
-          <label className="cursor-pointer flex-shrink-0" aria-label="Upload group photo">
-            <div className="w-[52px] h-[52px] rounded-full overflow-hidden bg-white/40 border border-white/50 flex items-center justify-center">
-              {photoPreview ? (
-                <img
-                  src={photoPreview}
-                  alt="Group photo preview"
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <ImageIcon size={20} strokeWidth={1.75} className="text-[var(--text-tertiary)]" />
-              )}
-            </div>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handlePhotoChange}
-            />
-          </label>
-
-          {/* Group name field */}
           <div className="flex-1 min-w-0">
             <FormField
               label="Group name"
@@ -302,51 +351,202 @@ export function CreateGroupSheet({
           </div>
         </div>
 
-        {/* Field 2: Location — no hint text */}
-        <FormField
-          label="Location"
-          placeholder="Neighbourhood or area"
-          value={locationLabel}
-          className="[&_.form-field-rest]:px-3 [&_.field-input-core]:pl-0 [&_.field-input-core]:pr-0"
-          onChange={e => setLocationLabel(e.target.value)}
-        />
-
-        {/* Field 3: Pet focus */}
-        <div>
+        {/* Field 2: Location — country pill (from profile) + searchable district.
+            Type to search via Nominatim; results are biased to the profile country.
+            User can still type any free-text and submit without picking a suggestion. */}
+        <div className="relative">
           <p className="text-[13px] font-semibold text-[var(--text-primary)] pl-1 mb-[6px]">
-            Pet focus
+            Location
           </p>
-          <div className="rounded-[14px] border border-[rgba(66,73,101,0.12)] bg-white/66 px-3 py-3 shadow-[inset_2px_2px_5px_rgba(163,168,190,0.12),inset_-1px_-1px_4px_rgba(255,255,255,0.78)]">
-            <div className="flex flex-wrap gap-2">
-            {PET_FOCUS_OPTIONS.map(option => (
-              <button
-                key={option}
-                type="button"
-                className="neu-chip text-[13px] px-3 py-1.5"
-                data-active={selectedPetFocus.includes(option) ? "true" : undefined}
-                onClick={() => togglePetFocus(option)}
-              >
-                {option}
-              </button>
-            ))}
+          {profileCountryLabel ? (
+            <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-[rgba(33,69,207,0.16)] bg-[rgba(33,69,207,0.06)] px-2.5 py-1 text-[12px] font-[600] text-[#2145CF]">
+              <MapPin className="h-3 w-3" strokeWidth={1.75} />
+              {profileCountryLabel}
             </div>
-          </div>
+          ) : null}
+          <FormField
+            placeholder="Search district or neighbourhood"
+            value={locationLabel}
+            className="[&_.form-field-rest]:px-3 [&_.field-input-core]:pl-0 [&_.field-input-core]:pr-0"
+            onChange={(e) => {
+              lastSuggestionAcceptedRef.current = null;
+              setLocationLabel(e.target.value);
+            }}
+            onFocus={() => {
+              if (locationSuggestions.length > 0) setLocationSearchOpen(true);
+            }}
+          />
+
+          {/* Suggestion popover — sits below the input.
+              z-[5300] beats GlassSheet (4210) and NeuDropdown (5200). */}
+          {locationSearchOpen && (locationSuggestions.length > 0 || locationSearching) ? (
+            <div
+              className="absolute left-0 right-0 z-[5300] mt-1 rounded-[12px] glass-card max-h-[260px] overflow-y-auto p-1 shadow-[0_10px_24px_rgba(20,24,38,0.12)]"
+              role="listbox"
+            >
+              {locationSearching && locationSuggestions.length === 0 ? (
+                <div className="px-3 py-2 text-[12px] text-[rgba(74,73,101,0.6)]">Searching…</div>
+              ) : (
+                locationSuggestions.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    role="option"
+                    onClick={() => {
+                      setLocationLabel(s.primary);
+                      lastSuggestionAcceptedRef.current = s.primary;
+                      setLocationSearchOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-[10px] hover:bg-[rgba(255,255,255,0.58)] transition-colors"
+                  >
+                    <div className="text-[14px] font-[600] text-[var(--text-primary)]">{s.primary}</div>
+                    <div className="text-[11px] text-[rgba(74,73,101,0.55)] truncate">{s.full}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {/* Quick suggestion: user's own district from profile */}
+          {profileDistrictHint && profileDistrictHint.toLowerCase() !== locationLabel.trim().toLowerCase() ? (
+            <button
+              type="button"
+              onClick={() => {
+                setLocationLabel(profileDistrictHint);
+                lastSuggestionAcceptedRef.current = profileDistrictHint;
+                setLocationSearchOpen(false);
+              }}
+              className="mt-2 inline-flex items-center gap-1 rounded-full border border-[rgba(66,73,101,0.18)] bg-white/72 px-3 py-1 text-[12px] font-[500] text-[rgba(74,73,101,0.85)] transition-colors hover:bg-white"
+            >
+              <span>Use my district —</span>
+              <span className="font-[600] text-[#2145CF]">{profileDistrictHint}</span>
+            </button>
+          ) : null}
         </div>
 
-        {/* Field 4: Description */}
-        <FormTextArea
-          label="Description"
-          placeholder="Tell people what this group is about and how you usually meet."
-          value={description}
-          className="[&_.form-field-rest]:px-3 [&_textarea.field-input-core]:px-0"
-          onChange={e => {
-            const nextValue = e.target.value;
-            const words = countWords(nextValue);
-            if (words > DESCRIPTION_WORD_LIMIT) return;
-            setDescription(nextValue);
-          }}
-          hint={`${countWords(description)}/${DESCRIPTION_WORD_LIMIT} words`}
+        {/* Field 3: Pet focus — single-value dropdown (shared NeuDropdown).
+            DB column `pet_focus` stays an array so multi-value migration later
+            doesn't need a schema change; we always send `[value]`. */}
+        <NeuDropdown
+          label="Pet focus"
+          placeholder="Choose a focus"
+          value={selectedPetFocus[0] ?? undefined}
+          onValueChange={(value) => setSelectedPetFocus(value ? [value] : [])}
+          options={PET_FOCUS_OPTIONS.map((option) => ({ value: option, label: option }))}
         />
+
+        {/* Field 4: Description — unified preview card.
+            Mirrors the Explore card: 16:9 live cover + name + location + pet
+            focus chips overlaid, with description as the editable body. Lets
+            the creator see their group exactly as members will see it. */}
+        <div>
+          <p className="text-[13px] font-semibold text-[var(--text-primary)] pl-1 mb-[6px]">
+            Description
+          </p>
+          <article className="glass-card overflow-hidden">
+            <div className="group/cover relative w-full aspect-[16/9] overflow-hidden rounded-[20px_20px_0_0] bg-[rgba(20,24,38,0.04)]">
+              {photoPreview ? (
+                <img src={photoPreview} alt={groupName || "Group"} className="absolute inset-0 h-full w-full object-cover" />
+              ) : (
+                <div className="absolute inset-0" style={{ background: "linear-gradient(160deg, #2145CF 0%, #3A5FE8 100%)" }} aria-hidden />
+              )}
+              <div className="absolute top-0 inset-x-0 h-[28%] pointer-events-none" style={{ background: "linear-gradient(to bottom, rgba(20,24,38,0.45), transparent)" }} aria-hidden />
+              <div className="absolute bottom-0 inset-x-0 h-[60%] pointer-events-none" style={{ background: "linear-gradient(to top, rgba(20,24,38,0.78), rgba(20,24,38,0.10) 60%, transparent)" }} aria-hidden />
+              <span className="absolute top-3 right-3 text-[11px] font-[500] px-[10px] py-[4px] rounded-full text-white" style={{ background: "rgba(20,24,38,0.55)" }}>
+                1 member
+              </span>
+              <div className="absolute bottom-3 left-4 right-4 pointer-events-none flex flex-col gap-[4px]">
+                <span className="text-[18px] font-[600] leading-[1.2] text-white truncate drop-shadow-sm">
+                  {groupName.trim() || "Your group name"}
+                </span>
+                {locationLabel.trim() ? (
+                  <span className="flex items-center gap-[4px] text-[12px] font-[500] text-white/85 truncate">
+                    <MapPin size={12} strokeWidth={1.75} className="flex-shrink-0" aria-hidden />
+                    {locationLabel}
+                  </span>
+                ) : null}
+                {selectedPetFocus.length > 0 ? (
+                  <div className="flex gap-[6px] overflow-x-auto scrollbar-none -mx-1 px-1 pb-[2px]">
+                    {selectedPetFocus.slice(0, 4).map((tag) => (
+                      <span
+                        key={tag}
+                        className="flex-shrink-0 text-[10px] font-[500] uppercase tracking-[0.04em] px-[8px] py-[3px] rounded-full text-white"
+                        style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.28)" }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Hidden file input — single source for all cover-edit triggers */}
+              <input
+                ref={createCoverInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
+
+              {/* Camera + trash cluster — visible when a cover is set.
+                  Identical to Manage Group: 44×44 pills, hover-reveal trash on desktop. */}
+              {photoPreview ? (
+                <div className="absolute bottom-2 right-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoPreview((prev) => {
+                        if (prev) URL.revokeObjectURL(prev);
+                        return null;
+                      });
+                      setPhotoFile(null);
+                    }}
+                    aria-label="Remove cover photo"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform duration-150 active:scale-[0.94] opacity-0 group-hover/cover:opacity-100 focus-visible:opacity-100 md:opacity-100"
+                    style={{ background: "rgba(20,24,38,0.62)", border: "1px solid rgba(255,255,255,0.30)", boxShadow: "0 4px 12px rgba(0,0,0,0.18)" }}
+                  >
+                    <Trash2 className="h-5 w-5" strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => createCoverInputRef.current?.click()}
+                    aria-label="Change cover photo"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform duration-150 active:scale-[0.94]"
+                    style={{ background: "rgba(20,24,38,0.62)", border: "1px solid rgba(255,255,255,0.30)", boxShadow: "0 4px 12px rgba(0,0,0,0.18)" }}
+                  >
+                    <Camera className="h-5 w-5" strokeWidth={1.75} />
+                  </button>
+                </div>
+              ) : (
+                /* Empty-state — full-cover tap target invites adding a cover */
+                <button
+                  type="button"
+                  onClick={() => createCoverInputRef.current?.click()}
+                  aria-label="Add cover photo"
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white text-[13px] font-[600]"
+                >
+                  <Camera className="h-6 w-6" strokeWidth={1.75} />
+                  <span>Add a cover photo</span>
+                  <span className="text-[11px] font-[500] text-white/75">16:9, daylight is your friend</span>
+                </button>
+              )}
+            </div>
+            <div className="px-4 py-3">
+              <textarea
+                value={description}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  if (countWords(nextValue) > DESCRIPTION_WORD_LIMIT) return;
+                  setDescription(nextValue);
+                }}
+                rows={3}
+                placeholder="Tell people what this group is about and how you usually meet."
+                className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-brandText outline-none focus:outline-none placeholder:text-[rgba(74,73,101,0.55)]"
+              />
+            </div>
+          </article>
+        </div>
 
         {/* Section: Visibility */}
         <div className="mt-5">

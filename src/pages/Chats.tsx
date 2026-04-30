@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate, type MotionValue } from "framer-motion";
-import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Hash, BadgeCheck, Settings, Pencil, Save } from "lucide-react";
+import { Users, MessageSquare, Search, X, Loader2, Star, SlidersHorizontal, Lock, ChevronRight, ChevronLeft, Trash2, DollarSign, MapPin, SendHorizontal, UserPlus, Hash, BadgeCheck, Settings, Pencil, Save, Camera } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { GlobalHeader } from "@/components/layout/GlobalHeader";
 import { PremiumUpsell } from "@/components/social/PremiumUpsell";
 import { CreateGroupSheet } from "@/components/chat/CreateGroupSheet";
+import { ExploreGroupCard, type ExploreGroupCardCTA } from "@/components/chat/ExploreGroupCard";
 import { JoinWithCodeSheet } from "@/components/chat/JoinWithCodeSheet";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { Switch } from "@/components/ui/switch";
@@ -536,6 +537,7 @@ interface Group {
   joinMethod?: string | null;
   description?: string | null;
   isAdmin?: boolean;
+  createdBy?: string | null;
   locationCountry?: string | null;
   visibility?: "public" | "private" | null;
   roomCode?: string | null;
@@ -823,6 +825,7 @@ const Chats = () => {
   const [deleteGroupConfirmId, setDeleteGroupConfirmId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [groupImageUploading, setGroupImageUploading] = useState(false);
+  const groupCoverInputRef = useRef<HTMLInputElement | null>(null);
   const [groupDescriptionDraft, setGroupDescriptionDraft] = useState("");
   const [groupDescriptionSaving, setGroupDescriptionSaving] = useState(false);
   const [groupDescriptionEditing, setGroupDescriptionEditing] = useState(false);
@@ -2627,6 +2630,7 @@ const Chats = () => {
         joinMethod: (row.join_method as string | null) ?? null,
         description: (row.description as string | null) ?? null,
         isAdmin: (row.created_by as string | null) === profile?.id,
+        createdBy: (row.created_by as string | null) ?? null,
         locationCountry: (row.location_country as string | null) ?? null,
         visibility: ((row.visibility as "public" | "private" | null) ?? null),
         roomCode: (row.room_code as string | null) ?? null,
@@ -3755,6 +3759,7 @@ const Chats = () => {
             lastMessageAt: row.last_message_at ?? group.lastMessageAt ?? null,
             memberCount: Number(row.member_count ?? group.memberCount ?? 0),
             isAdmin: group.isAdmin || row.created_by === profile?.id,
+            createdBy: row.created_by ?? group.createdBy ?? null,
           }
         : group;
     inboxCacheRef.current.groups = sortGroups(inboxCacheRef.current.groups.map(apply));
@@ -4820,6 +4825,7 @@ const Chats = () => {
         joinMethod: g.join_method ?? "request",
         description: g.description ?? null,
         isAdmin: g.created_by === profile?.id,
+        createdBy: g.created_by ?? null,
         locationCountry: g.location_country ?? null,
         visibility: g.visibility ?? "public",
         roomCode: g.room_code ?? null,
@@ -5981,7 +5987,7 @@ const Chats = () => {
 
                 {/* Explore tab */}
                 {groupSubTab === "explore" && (
-                  <div className="px-5 space-y-2">
+                  <div className="px-5 space-y-4">
                     {exploreLoading ? (
                       <div className="flex justify-center py-8">
                         <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" strokeWidth={1.75} />
@@ -6000,87 +6006,34 @@ const Chats = () => {
                     ) : (
                       <>
                         {invitedExploreGroups.length > 0 && (
-                          <div className="space-y-2">
-                            {invitedExploreGroups.map((group, index) => {
-                              const handleExploreCardCTA = async (e: React.MouseEvent) => {
-                                e.stopPropagation();
-                                try {
-                                  await acceptGroupInviteAndOpen({
-                                    chatId: group.id,
-                                    chatName: group.name,
-                                    inviteId: group.inviteId,
-                                  });
-                                } catch {
-                                  toast.error("Unable to join group right now.");
-                                }
-                              };
-
-                              return (
-                                <motion.div
-                                  key={`invite-${group.id}`}
-                                  initial={{ opacity: 0, y: 8 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  transition={{ delay: index * 0.04, duration: 0.2 }}
-                                  className="relative rounded-xl bg-card p-3 shadow-card"
-                                >
-                                <div className="flex items-start gap-3">
-                                  <button
-                                    type="button"
-                                    className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                                    onClick={() => void openGroupDetailsSheet(group)}
-                                    aria-label={`Open ${group.name} details`}
-                                    >
-                                      {group.avatarUrl ? (
-                                        <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
-                                      ) : (
-                                        <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                                      )}
-                                    </button>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="relative min-w-0">
-                                        <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-2 text-right">
-                                          <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
-                                          <button
-                                            onClick={handleExploreCardCTA}
-                                            className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
-                                            style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                                          >
-                                            You&apos;re invited
-                                          </button>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="block min-w-0 max-w-full pr-[104px] text-left"
-                                          onClick={() => void openGroupDetailsSheet(group)}
-                                        >
-                                          <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                                        </button>
-                                      </div>
-                                      {group.locationLabel && (
-                                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                                          <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
-                                          {group.locationLabel}
-                                        </p>
-                                      )}
-                                      {group.petFocus && group.petFocus.length > 0 && (
-                                        <div className="mt-1 flex flex-wrap gap-1">
-                                          {group.petFocus.slice(0, 3).map((tag) => (
-                                            <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
-                                              {tag}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
-                                      {group.description && (
-                                        <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
-                                          {group.description}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                </motion.div>
-                              );
-                            })}
+                          <div className="space-y-4">
+                            {invitedExploreGroups.map((group, index) => (
+                              <motion.div
+                                key={`invite-${group.id}`}
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: index * 0.04, duration: 0.2 }}
+                              >
+                                <ExploreGroupCard
+                                  group={group}
+                                  onCardOpen={() => void openGroupDetailsSheet(group)}
+                                  cta={{
+                                    kind: "invited",
+                                    onAccept: async () => {
+                                      try {
+                                        await acceptGroupInviteAndOpen({
+                                          chatId: group.id,
+                                          chatName: group.name,
+                                          inviteId: group.inviteId,
+                                        });
+                                      } catch {
+                                        toast.error("Unable to join group right now.");
+                                      }
+                                    },
+                                  }}
+                                />
+                              </motion.div>
+                            ))}
                           </div>
                         )}
 
@@ -6088,19 +6041,38 @@ const Chats = () => {
                           const isMember = groups.some((g) => g.id === group.id);
                           const hasSentRequest = sentJoinRequests.has(group.id);
 
-                          const handleExploreCardCTA = async (e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            if (!user?.id) { toast.error("Sign in to join groups."); return; }
-                            if (isMember) {
-                              navigate(`/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`);
-                              return;
-                            }
-                            if (group.joinMethod === "instant") {
-                              await joinPublicGroupAndOpen(group);
-                            } else {
-                              await requestGroupJoin(group);
-                            }
-                          };
+                          const cta: ExploreGroupCardCTA = isMember
+                            ? {
+                                kind: "open",
+                                onOpen: () => {
+                                  navigate(
+                                    `/chat-dialogue?room=${encodeURIComponent(group.id)}&name=${encodeURIComponent(group.name)}`,
+                                  );
+                                },
+                              }
+                            : hasSentRequest
+                            ? { kind: "requested" }
+                            : group.joinMethod === "instant"
+                            ? {
+                                kind: "join",
+                                onJoin: () => {
+                                  if (!user?.id) {
+                                    toast.error("Sign in to join groups.");
+                                    return;
+                                  }
+                                  void joinPublicGroupAndOpen(group);
+                                },
+                              }
+                            : {
+                                kind: "request",
+                                onRequest: () => {
+                                  if (!user?.id) {
+                                    toast.error("Sign in to join groups.");
+                                    return;
+                                  }
+                                  void requestGroupJoin(group);
+                                },
+                              };
 
                           return (
                             <motion.div
@@ -6108,84 +6080,12 @@ const Chats = () => {
                               initial={{ opacity: 0, y: 8 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: (invitedExploreGroups.length + index) * 0.04, duration: 0.2 }}
-                              className="relative rounded-xl bg-card p-3 shadow-card"
                             >
-                              <div className="flex items-start gap-3">
-                                <button
-                                  type="button"
-                                  className="mt-1 flex h-14 w-14 shrink-0 self-center items-center justify-center overflow-hidden rounded-full border border-border/30 bg-card"
-                                  onClick={() => void openGroupDetailsSheet(group)}
-                                  aria-label={`Open ${group.name} details`}
-                                >
-                                  {group.avatarUrl ? (
-                                    <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" />
-                                  ) : (
-                                    <Users className="h-6 w-6 text-primary" strokeWidth={1.75} />
-                                  )}
-                                </button>
-                                <div className="min-w-0 flex-1">
-                                  <div className="relative min-w-0">
-                                    <div className="absolute right-0 top-0 flex shrink-0 flex-col items-end gap-2 text-right">
-                                      <p className="text-[11px] leading-[1.25] text-[#8C93AA]">{`Members: ${group.memberCount}`}</p>
-                                      {isMember ? (
-                                        <button
-                                          onClick={handleExploreCardCTA}
-                                          className="flex items-center gap-0.5 text-[13px] font-medium text-primary"
-                                        >
-                                          Open <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
-                                        </button>
-                                      ) : hasSentRequest ? (
-                                        <span className="rounded-full bg-accent/40 px-3 py-1 text-[12px] font-medium text-muted-foreground">
-                                          Requested
-                                        </span>
-                                      ) : group.joinMethod === "instant" ? (
-                                        <button
-                                          onClick={handleExploreCardCTA}
-                                          className="rounded-full px-3 py-1 text-[13px] font-semibold text-white"
-                                          style={{ backgroundColor: "var(--blue, #3B82F6)" }}
-                                        >
-                                          Join
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={handleExploreCardCTA}
-                                          className="rounded-full border px-3 py-1 text-[13px] font-semibold"
-                                          style={{ borderColor: "var(--blue, #3B82F6)", color: "var(--blue, #3B82F6)" }}
-                                        >
-                                          Request
-                                        </button>
-                                      )}
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="block min-w-0 max-w-full pr-[112px] text-left"
-                                      onClick={() => void openGroupDetailsSheet(group)}
-                                    >
-                                      <p className="truncate text-[15px] font-semibold text-brandText">{group.name}</p>
-                                    </button>
-                                  </div>
-                                  {group.locationLabel && (
-                                    <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                                      <MapPin className="mr-0.5 inline h-3 w-3" strokeWidth={1.75} />
-                                      {group.locationLabel}
-                                    </p>
-                                  )}
-                                  {group.petFocus && group.petFocus.length > 0 && (
-                                    <div className="mt-1 flex flex-wrap gap-1">
-                                      {group.petFocus.slice(0, 3).map((tag) => (
-                                        <span key={tag} className="rounded-full bg-accent/60 px-2 py-0.5 text-[11px] font-medium text-accent-foreground">
-                                          {tag}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {group.description && (
-                                    <p className="mt-1 line-clamp-2 break-words text-[11px] leading-relaxed text-muted-foreground">
-                                      {group.description}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                              <ExploreGroupCard
+                                group={group}
+                                onCardOpen={() => void openGroupDetailsSheet(group)}
+                                cta={cta}
+                              />
                             </motion.div>
                           );
                         })}
@@ -6420,6 +6320,18 @@ const Chats = () => {
             memberCount={activeGroupDetails?.memberCount || 0}
             description={activeGroupDetails?.description || null}
             mediaUrls={groupDetailsMediaUrls}
+            chatId={activeGroupDetails?.id}
+            ownerUserId={profile?.id ?? null}
+            createdBy={activeGroupDetails?.createdBy ?? null}
+            onAvatarUpdated={(newUrl) => {
+              if (!activeGroupDetails?.id) return;
+              setGroups((prev) =>
+                prev.map((g) =>
+                  g.id === activeGroupDetails.id ? { ...g, avatarUrl: newUrl, avatar_url: newUrl } : g,
+                ),
+              );
+              void loadConversations("groups");
+            }}
             actions={[
               ...(activeGroupDetails?.isAdmin
                 ? [{
@@ -6477,126 +6389,217 @@ const Chats = () => {
             <DialogDescription>Edit photo, members, and group settings.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Group Image — working upload */}
-            <div className="flex items-center gap-3">
-              {(() => {
-                const grp = groups.find((g) => g.id === groupManageId);
-                return grp?.avatarUrl ? (
-                  <img src={grp.avatarUrl || profilePlaceholder} alt={grp.name} className="w-14 h-14 rounded-full object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
-                    <Users className="w-6 h-6 text-primary" />
+            {/* Explore preview — same layout other users see in Explore.
+                16:9 cover + name + pet-focus chips overlay; camera/trash pills
+                let the creator change or remove the cover inline. */}
+            {(() => {
+              const grp = groups.find((g) => g.id === groupManageId);
+              const coverUrl = grp?.avatarUrl || null;
+              const petTags = (grp?.petFocus || []).slice(0, 4);
+              const memberLabel = `${grp?.memberCount ?? 0} member${(grp?.memberCount ?? 0) === 1 ? "" : "s"}`;
+              const handleCoverPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+                const file = e.target.files?.[0];
+                if (!file || !groupManageId || !profile?.id) return;
+                if (file.size > 15 * 1024 * 1024) {
+                  toast.error("That file's too big. Try a photo under 15MB.");
+                  e.target.value = "";
+                  return;
+                }
+                setGroupImageUploading(true);
+                try {
+                  const { default: compress } = await import("browser-image-compression");
+                  const compressed = await compress(file, { maxSizeMB: 0.6, maxWidthOrHeight: 1280, useWebWorker: true });
+                  const ext = (compressed.name.split(".").pop() || "jpg").toLowerCase();
+                  const path = `${profile.id}/groups/${groupManageId}/${Date.now()}.${ext}`;
+                  const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, compressed, { upsert: true });
+                  if (uploadErr) throw uploadErr;
+                  const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+                  const url = pub.publicUrl;
+                  const row = await updateGroupChatMetadata({ chatId: groupManageId, avatarUrl: url, updateAvatar: true });
+                  syncGroupRowIntoState(row);
+                  void loadConversations("groups");
+                  toast.success(t("Group image updated"));
+                } catch (err) {
+                  console.error("Group image upload failed:", err);
+                  toast.error(t("Failed to upload group image"));
+                } finally {
+                  setGroupImageUploading(false);
+                  e.target.value = "";
+                }
+              };
+              const handleCoverRemove = async () => {
+                if (!groupManageId) return;
+                if (!window.confirm("Remove the cover photo? You can add a new one anytime.")) return;
+                setGroupImageUploading(true);
+                try {
+                  const row = await updateGroupChatMetadata({ chatId: groupManageId, avatarUrl: null, updateAvatar: true });
+                  syncGroupRowIntoState(row);
+                  void loadConversations("groups");
+                  toast.success("Cover removed");
+                } catch (err) {
+                  console.error("Group cover remove failed:", err);
+                  toast.error("Couldn't remove cover. Try again.");
+                } finally {
+                  setGroupImageUploading(false);
+                }
+              };
+              return (
+                <article className="glass-card overflow-hidden">
+                  <div className="group/preview relative w-full aspect-[16/9] overflow-hidden rounded-[20px_20px_0_0] bg-[rgba(20,24,38,0.04)]">
+                    {coverUrl ? (
+                      <img src={coverUrl} alt={grp?.name || "Group"} className="absolute inset-0 h-full w-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0" style={{ background: "linear-gradient(160deg, #2145CF 0%, #3A5FE8 100%)" }} aria-hidden />
+                    )}
+                    <div className="absolute top-0 inset-x-0 h-[28%] pointer-events-none" style={{ background: "linear-gradient(to bottom, rgba(20,24,38,0.45), transparent)" }} aria-hidden />
+                    <div className="absolute bottom-0 inset-x-0 h-[60%] pointer-events-none" style={{ background: "linear-gradient(to top, rgba(20,24,38,0.78), rgba(20,24,38,0.10) 60%, transparent)" }} aria-hidden />
+                    {groupImageUploading ? (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ background: "rgba(20,24,38,0.32)" }} aria-hidden>
+                        <Loader2 className="h-7 w-7 text-white animate-spin" strokeWidth={2} />
+                      </div>
+                    ) : null}
+                    <span className="absolute top-3 right-3 text-[11px] font-[500] px-[10px] py-[4px] rounded-full text-white" style={{ background: "rgba(20,24,38,0.55)" }}>
+                      {memberLabel}
+                    </span>
+                    <div className="absolute bottom-3 left-4 right-24 pointer-events-none flex flex-col gap-[4px]">
+                      <span className="text-[18px] font-[600] leading-[1.2] text-white truncate drop-shadow-sm">
+                        {grp?.name || "Group"}
+                      </span>
+                      {grp?.locationLabel ? (
+                        <span className="flex items-center gap-[4px] text-[12px] font-[500] text-white/85 truncate">
+                          <MapPin size={12} strokeWidth={1.75} className="flex-shrink-0" aria-hidden />
+                          {grp.locationLabel}
+                        </span>
+                      ) : null}
+                      {petTags.length > 0 ? (
+                        <div className="flex gap-[6px] overflow-x-auto scrollbar-none -mx-1 px-1 pb-[2px]">
+                          {petTags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="flex-shrink-0 text-[10px] font-[500] uppercase tracking-[0.04em] px-[8px] py-[3px] rounded-full text-white"
+                              style={{ background: "rgba(255,255,255,0.18)", border: "1px solid rgba(255,255,255,0.28)" }}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <input
+                      ref={groupCoverInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                      className="hidden"
+                      onChange={handleCoverPick}
+                    />
+                    {coverUrl ? (
+                      <div className="absolute bottom-2 right-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCoverRemove}
+                          disabled={groupImageUploading}
+                          aria-label="Remove cover photo"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform duration-150 active:scale-[0.94] disabled:opacity-70 opacity-0 group-hover/preview:opacity-100 focus-visible:opacity-100 md:opacity-100"
+                          style={{ background: "rgba(20,24,38,0.62)", border: "1px solid rgba(255,255,255,0.30)", boxShadow: "0 4px 12px rgba(0,0,0,0.18)" }}
+                        >
+                          <Trash2 className="h-5 w-5" strokeWidth={1.75} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => groupCoverInputRef.current?.click()}
+                          disabled={groupImageUploading}
+                          aria-label="Change cover photo"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white transition-transform duration-150 active:scale-[0.94] disabled:opacity-70"
+                          style={{ background: "rgba(20,24,38,0.62)", border: "1px solid rgba(255,255,255,0.30)", boxShadow: "0 4px 12px rgba(0,0,0,0.18)" }}
+                        >
+                          {groupImageUploading ? (
+                            <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.75} />
+                          ) : (
+                            <Camera className="h-5 w-5" strokeWidth={1.75} />
+                          )}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => groupCoverInputRef.current?.click()}
+                        disabled={groupImageUploading}
+                        aria-label="Add cover photo"
+                        className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white text-[13px] font-[600] disabled:opacity-70"
+                      >
+                        <Camera className="h-6 w-6" strokeWidth={1.75} />
+                        <span>Add a cover photo</span>
+                        <span className="text-[11px] font-[500] text-white/75">16:9, daylight is your friend</span>
+                      </button>
+                    )}
                   </div>
-                );
-              })()}
-              <div className="flex-1">
-                <div className="text-sm font-semibold text-brandText">
-                  {groups.find((g) => g.id === groupManageId)?.name || "Group"}
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  {groups.find((g) => g.id === groupManageId)?.memberCount || 0} members
-                </div>
-              </div>
-              <label className="cursor-pointer">
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file || !groupManageId || !profile?.id) return;
-                    setGroupImageUploading(true);
-                    try {
-                      const { default: compress } = await import("browser-image-compression");
-                      const compressed = await compress(file, { maxSizeMB: 0.5, maxWidthOrHeight: 800, useWebWorker: true });
-                      const ext = compressed.name.split(".").pop() || "jpg";
-                      const path = `${profile.id}/groups/${groupManageId}/${Date.now()}.${ext}`;
-                      const { error: uploadErr } = await supabase.storage.from("avatars").upload(path, compressed, { upsert: true });
-                      if (uploadErr) throw uploadErr;
-                      const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
-                      const url = pub.publicUrl;
-                      const row = await updateGroupChatMetadata({
-                        chatId: groupManageId,
-                        avatarUrl: url,
-                        updateAvatar: true,
-                      });
-                      syncGroupRowIntoState(row);
-                      void loadConversations("groups");
-                      toast.success(t("Group image updated"));
-                    } catch (err) {
-                      console.error("Group image upload failed:", err);
-                      toast.error(t("Failed to upload group image"));
-                    } finally {
-                      setGroupImageUploading(false);
-                      e.target.value = "";
-                    }
-                  }}
-                />
-                <NeuButton size="sm" variant="secondary" className="text-xs pointer-events-none" disabled={groupImageUploading}>
-                  {groupImageUploading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-                  Change Image
-                </NeuButton>
-              </label>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="text-xs font-semibold text-brandText/70">Description</div>
-                <button
-                  type="button"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#8C93AA] transition-colors hover:bg-muted/50"
-                  disabled={groupDescriptionSaving}
-                  onClick={async () => {
-                    if (!groupManageId) return;
-                    if (!groupDescriptionEditing) {
-                      setGroupDescriptionEditing(true);
-                      return;
-                    }
-                    setGroupDescriptionSaving(true);
-                    try {
-                      const row = await updateGroupChatMetadata({
-                        chatId: groupManageId,
-                        description: groupDescriptionDraft.trim() || null,
-                        updateDescription: true,
-                      });
-                      syncGroupRowIntoState(row);
-                      setGroupDescriptionDraft(row.description || "");
-                      setGroupDescriptionEditing(false);
-                      void loadConversations("groups");
-                      toast.success("Group description updated");
-                    } catch {
-                      toast.error("Couldn't save group description.");
-                    } finally {
-                      setGroupDescriptionSaving(false);
-                    }
-                  }}
-                  aria-label={groupDescriptionEditing ? "Save description" : "Edit description"}
-                >
-                  {groupDescriptionSaving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : groupDescriptionEditing ? (
-                    <Save className="h-4 w-4" />
-                  ) : (
-                    <Pencil className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              {groupDescriptionEditing ? (
-                <div className="form-field-rest min-h-[92px] py-3">
-                  <textarea
-                    value={groupDescriptionDraft}
-                    onChange={(event) => setGroupDescriptionDraft(event.target.value)}
-                    className="field-input-core resize-none px-0 text-sm leading-relaxed"
-                    rows={4}
-                    placeholder="Tell members what this group is about."
-                  />
-                </div>
-              ) : (
-                <div className="rounded-[16px] border border-white/60 bg-white px-4 py-3 text-sm leading-relaxed text-brandText shadow-[0_10px_24px_rgba(66,73,101,0.08)]">
-                  {groupDescriptionDraft.trim() || "No description yet."}
-                </div>
-              )}
-            </div>
+                  {/* Description body — editable in place. This is what other
+                      members see on the Explore card under the cover. */}
+                  <div className="px-4 py-3">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        {groupDescriptionEditing ? (
+                          <textarea
+                            value={groupDescriptionDraft}
+                            onChange={(event) => setGroupDescriptionDraft(event.target.value)}
+                            className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-brandText outline-none focus:outline-none"
+                            rows={3}
+                            placeholder="Tell members what this group is about."
+                            autoFocus
+                          />
+                        ) : (
+                          <p
+                            className={`text-[13px] leading-relaxed break-words ${
+                              groupDescriptionDraft.trim() ? "text-brandText" : "text-muted-foreground italic"
+                            }`}
+                          >
+                            {groupDescriptionDraft.trim() || "Tell members what this group is about."}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#8C93AA] transition-colors hover:bg-muted/50 disabled:opacity-60"
+                        disabled={groupDescriptionSaving}
+                        onClick={async () => {
+                          if (!groupManageId) return;
+                          if (!groupDescriptionEditing) {
+                            setGroupDescriptionEditing(true);
+                            return;
+                          }
+                          setGroupDescriptionSaving(true);
+                          try {
+                            const row = await updateGroupChatMetadata({
+                              chatId: groupManageId,
+                              description: groupDescriptionDraft.trim() || null,
+                              updateDescription: true,
+                            });
+                            syncGroupRowIntoState(row);
+                            setGroupDescriptionDraft(row.description || "");
+                            setGroupDescriptionEditing(false);
+                            void loadConversations("groups");
+                            toast.success("Description updated");
+                          } catch {
+                            toast.error("Couldn't save description.");
+                          } finally {
+                            setGroupDescriptionSaving(false);
+                          }
+                        }}
+                        aria-label={groupDescriptionEditing ? "Save description" : "Edit description"}
+                      >
+                        {groupDescriptionSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : groupDescriptionEditing ? (
+                          <Save className="h-4 w-4" />
+                        ) : (
+                          <Pencil className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })()}
 
             {/* Join Requests — approve or decline */}
             {groupJoinRequests.length > 0 && (
@@ -6922,10 +6925,11 @@ const Chats = () => {
               className="fixed inset-0 bg-black/50 z-[2000]"
             />
             <motion.div
+              data-huddle-bottom-sheet="true"
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
-              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-card rounded-t-3xl p-6 z-[2001] shadow-2xl"
+              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-card rounded-t-3xl px-6 pt-6 huddle-sheet-bottom-padding z-[5001] shadow-2xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] overflow-y-auto"
             >
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold">{t("booking.title")}</h3>

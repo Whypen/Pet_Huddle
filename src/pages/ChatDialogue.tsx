@@ -135,6 +135,7 @@ const ChatDialogue = () => {
   const [lockedPreviewUrl, setLockedPreviewUrl] = useState<string | null>(null);
   const [isGroup, setIsGroup] = useState(false);
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
+  const [groupCreatedBy, setGroupCreatedBy] = useState<string | null>(null);
   const [groupMemberCount, setGroupMemberCount] = useState(0);
   const [groupDescription, setGroupDescription] = useState("");
   const [groupVisibility, setGroupVisibility] = useState<"public" | "private" | null>(null);
@@ -349,6 +350,7 @@ const ChatDialogue = () => {
 
     setIsGroup(true);
     setGroupAvatarUrl(row.avatar_url || null);
+    setGroupCreatedBy(row.created_by || null);
     setRoomName(row.name || "Group");
     setGroupDescription(String(row.description || ""));
     setGroupVisibility(row.visibility || null);
@@ -1687,11 +1689,11 @@ const ChatDialogue = () => {
 
       {/* ── Group Info Sheet (WhatsApp-style) ── */}
       <Sheet open={groupInfoOpen} onOpenChange={setGroupInfoOpen}>
-        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[92vh] flex flex-col overflow-hidden">
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] flex flex-col overflow-hidden">
           <SheetHeader className="sr-only">
             <SheetTitle>{roomName}</SheetTitle>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
+          <div className="flex-1 overflow-y-auto">
             <GroupDetailsPanel
               name={roomName}
               avatarUrl={groupAvatarUrl}
@@ -1699,6 +1701,10 @@ const ChatDialogue = () => {
               subtitle={groupLocationLabel ? `${groupMemberCount} members · ${groupLocationLabel}` : `${groupMemberCount} members`}
               description={groupDescription}
               mediaUrls={groupMediaUrls}
+              chatId={roomId ?? undefined}
+              ownerUserId={profile?.id ?? null}
+              createdBy={groupCreatedBy}
+              onAvatarUpdated={(newUrl) => setGroupAvatarUrl(newUrl)}
               actions={[
                 {
                   key: "mute",
@@ -1759,7 +1765,7 @@ const ChatDialogue = () => {
 
       {/* ── Manager Group Sheet (legacy inline path) ── */}
       <Sheet open={groupManageOpen} onOpenChange={(v) => { setGroupManageOpen(v); if (!v) { setGroupManageSearch(""); setGroupManageReturnToInfo(false); } }}>
-        <SheetContent side="bottom" className="!bottom-0 rounded-t-2xl max-h-[88vh] flex flex-col overflow-hidden">
+        <SheetContent side="bottom" className="rounded-t-2xl max-h-[calc(100svh-env(safe-area-inset-bottom,0px)-8px)] flex flex-col overflow-hidden">
           <SheetHeader className="pb-3 shrink-0">
             <div className="flex items-center gap-2">
               {groupManageReturnToInfo ? (
@@ -1783,7 +1789,7 @@ const ChatDialogue = () => {
               </div>
             </div>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto space-y-5 pb-[calc(var(--nav-height,64px)+env(safe-area-inset-bottom)+12px)]">
+          <div className="flex-1 overflow-y-auto space-y-5">
             {groupManageLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
