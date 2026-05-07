@@ -101,6 +101,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
   const [shareTargetKey, setShareTargetKey] = useState("");
   const [shareTargetsLoading, setShareTargetsLoading] = useState(false);
   const [shareSending, setShareSending] = useState(false);
+  const [shareSearchQuery, setShareSearchQuery] = useState("");
   const [sensitiveRevealed, setSensitiveRevealed] = useState(false);
   const [tapHintDismissed, setTapHintDismissed] = useState(false);
   const [aspectByUri, setAspectByUri] = useState<Record<string, number>>({});
@@ -124,6 +125,11 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
   const displayAspect = clampNativeSocialMediaAspect(aspectByUri[activeUri] || huddleSocial.mediaFrameAspectRatio);
   const fallbackMediaFrameHeight = (mediaSlideWidth || huddleSocial.mediaWidth) / displayAspect;
   const editMediaSlideWidth = Math.max(132, Math.min(width - huddleSpacing.x6 * 2 - huddleSocial.mediaPeekWidth, 180));
+  const filteredShareTargets = useMemo(() => {
+    const query = shareSearchQuery.trim().toLowerCase();
+    if (!query) return shareTargets;
+    return shareTargets.filter((target) => `${target.label} ${target.subtitle || ""}`.toLowerCase().includes(query));
+  }, [shareSearchQuery, shareTargets]);
 
   const makeExistingEditImages = (alertMedia: NativeMapAlert | null): EditAlertImage[] => {
     const urls = alertMedia?.media_urls.length ? alertMedia.media_urls : alertMedia?.photo_url ? [alertMedia.photo_url] : [];
@@ -205,6 +211,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     if (!shareOpen || !effectiveUserId) {
       setShareTargets([]);
       setShareTargetKey("");
+      setShareSearchQuery("");
       return;
     }
     let active = true;
@@ -225,6 +232,13 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
       active = false;
     };
   }, [effectiveUserId, shareOpen]);
+
+  useEffect(() => {
+    if (!shareOpen) return;
+    if (filteredShareTargets.length > 0 && !filteredShareTargets.some((target) => target.chatId === shareTargetKey)) {
+      setShareTargetKey(filteredShareTargets[0]?.chatId || "");
+    }
+  }, [filteredShareTargets, shareOpen, shareTargetKey]);
 
   const syncSupportCount = async () => {
     if (!alert) return;
@@ -490,6 +504,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
       if (socialThreadId) void recordNativeSocialShare(String(socialThreadId));
       setMessage(`Shared to ${selectedTarget.label}.`);
       setShareOpen(false);
+      setShareSearchQuery("");
     } catch {
       setMessage("Unable to share to Huddle Chats.");
     } finally {
@@ -540,6 +555,43 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     editMediaRef.current?.scrollTo({ animated: true, x: next * (editMediaSlideWidth + huddleSpacing.x2) });
   };
 
+  const detailBody = (
+    <>
+      {alert.title ? <Text style={styles.title}>{alert.title}</Text> : null}
+      {alert.description ? <Text style={styles.body}>{alert.description}</Text> : null}
+
+      {media.length > 0 ? (
+        <NativeSocialMediaCarousel
+          contentWidth={Math.max(1, width - huddleSpacing.x8)}
+          isSensitive={alert.is_sensitive}
+          items={media}
+          onPress={alert.is_sensitive ? revealSensitive : undefined}
+        />
+      ) : null}
+
+      <View style={styles.creatorRow}>
+        <Pressable
+          accessibilityLabel="Open creator profile"
+          accessibilityRole="button"
+          disabled={!alert.creator_id || !onOpenProfile}
+          onPress={() => alert.creator_id && onOpenProfile?.(alert.creator_id)}
+          style={styles.creatorPressable}
+        >
+          <View style={styles.creatorAvatar}>
+            {creatorAvatarUrl ? (
+              <RNImage source={{ uri: creatorAvatarUrl }} style={styles.creatorAvatarImage} />
+            ) : (
+              <Text style={styles.creatorInitial}>{alert.creator.display_name?.charAt(0) || "?"}</Text>
+            )}
+          </View>
+          <Text style={styles.creatorName}>{alert.creator.display_name || t("Anonymous")}</Text>
+        </Pressable>
+      </View>
+
+      {message ? <Text style={styles.messageText}>{message}</Text> : null}
+    </>
+  );
+
   return (
     <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={onClose} transparent visible={Boolean(alert)}>
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={onClose}>
@@ -565,41 +617,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
                 </Pressable>
               </View>
           </AppBottomSheetHeader>
-          <AppBottomSheetScroll>
-
-            {alert.title ? <Text style={styles.title}>{alert.title}</Text> : null}
-            {alert.description ? <Text style={styles.body}>{alert.description}</Text> : null}
-
-            {media.length > 0 ? (
-              <NativeSocialMediaCarousel
-                contentWidth={Math.max(1, width - huddleSpacing.x8)}
-                isSensitive={alert.is_sensitive}
-                items={media}
-                onPress={alert.is_sensitive ? revealSensitive : undefined}
-              />
-            ) : null}
-
-            <View style={styles.creatorRow}>
-              <Pressable
-                accessibilityLabel="Open creator profile"
-                accessibilityRole="button"
-                disabled={!alert.creator_id || !onOpenProfile}
-                onPress={() => alert.creator_id && onOpenProfile?.(alert.creator_id)}
-                style={styles.creatorPressable}
-              >
-                <View style={styles.creatorAvatar}>
-                  {creatorAvatarUrl ? (
-                    <RNImage source={{ uri: creatorAvatarUrl }} style={styles.creatorAvatarImage} />
-                  ) : (
-                    <Text style={styles.creatorInitial}>{alert.creator.display_name?.charAt(0) || "?"}</Text>
-                  )}
-                </View>
-                <Text style={styles.creatorName}>{alert.creator.display_name || t("Anonymous")}</Text>
-              </Pressable>
-            </View>
-
-            {message ? <Text style={styles.messageText}>{message}</Text> : null}
-          </AppBottomSheetScroll>
+          {media.length > 0 ? <AppBottomSheetScroll>{detailBody}</AppBottomSheetScroll> : <View style={styles.detailStaticContent}>{detailBody}</View>}
 
           <View style={styles.detailFooterShell}>
           <View style={styles.footer}>
@@ -715,12 +733,23 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
                 <Feather color={huddleColors.iconMuted} name="x" size={22} />
               </Pressable>
             </AppBottomSheetHeader>
-            <AppBottomSheetScroll>
             <View style={styles.shareContent}>
+              <View style={styles.shareSearchField}>
+                <Feather color={huddleColors.iconSubtle} name="search" size={huddleSocial.actionIconSize} />
+                <TextInput
+                  accessibilityLabel="Search share targets"
+                  autoCorrect={false}
+                  onChangeText={setShareSearchQuery}
+                  placeholder="Search User name or Social ID"
+                  placeholderTextColor={huddleColors.mutedText}
+                  style={styles.shareSearchInput}
+                  value={shareSearchQuery}
+                />
+              </View>
               <View style={styles.shareTargetsBlock}>
-                {shareTargetsLoading ? <NativeLoadingState variant="inline" /> : shareTargets.length === 0 ? <Text style={styles.shareEmptyText}>No chats found.</Text> : (
+                {shareTargetsLoading ? <NativeLoadingState variant="inline" /> : filteredShareTargets.length === 0 ? <Text style={styles.shareEmptyText}>No chats found.</Text> : (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.shareTargetRow}>
-                    {shareTargets.map((target) => {
+                    {filteredShareTargets.map((target) => {
                       const selected = target.chatId === shareTargetKey;
                       return (
                         <Pressable key={target.chatId} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => setShareTargetKey(target.chatId)} style={({ pressed }) => [styles.shareTarget, pressed ? styles.pressed : null]}>
@@ -736,7 +765,6 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
                 )}
               </View>
             </View>
-            </AppBottomSheetScroll>
             <AppBottomSheetFooter>
               <View style={styles.shareActionRow}>
                 <Pressable accessibilityRole="button" disabled={!shareTargetKey || shareSending || shareTargetsLoading} onPress={() => void handleShareToChat()} style={({ pressed }) => [styles.shareSecondaryButton, !shareTargetKey || shareSending || shareTargetsLoading ? styles.disabled : null, pressed ? styles.pressed : null]}>
@@ -1006,10 +1034,16 @@ const styles = StyleSheet.create({
   disabled: {
     opacity: 0.45,
   },
+  detailStaticContent: {
+    paddingHorizontal: huddleSpacing.x6,
+    paddingTop: huddleSpacing.x3,
+    paddingBottom: huddleSpacing.x5,
+  },
   creatorRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: huddleSpacing.x2,
+    marginBottom: huddleSpacing.x4,
   },
   creatorPressable: {
     flexDirection: "row",
@@ -1199,8 +1233,32 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   shareContent: {
-    paddingTop: 0,
-    paddingBottom: huddleSpacing.x2,
+    gap: huddleSpacing.x4,
+    paddingHorizontal: huddleSpacing.x6,
+    paddingTop: huddleSpacing.x1,
+    paddingBottom: huddleSpacing.x3,
+  },
+  shareSearchField: {
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: huddleSpacing.x2,
+    borderWidth: 1,
+    borderColor: huddleColors.cardBorderSoft,
+    borderRadius: 22,
+    paddingHorizontal: huddleSpacing.x3,
+    backgroundColor: huddleColors.canvas,
+    ...huddleShadows.glassElevation1,
+  },
+  shareSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 42,
+    padding: 0,
+    fontFamily: "Urbanist-500",
+    fontSize: huddleType.label,
+    lineHeight: huddleType.labelLine,
+    color: huddleColors.text,
   },
   shareTargetsBlock: {
     minHeight: 126,
