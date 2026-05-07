@@ -81,7 +81,7 @@ const base64ToArrayBuffer = (base64: string) => {
     }
   }
 
-  return bytes.buffer;
+  return bytes;
 };
 
 export async function createNativeBroadcastNoMedia({
@@ -150,6 +150,7 @@ export async function uploadNativeBroadcastImage(userId: string, uri: string, fi
   const objectName = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
   const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   const body = base64ToArrayBuffer(base64);
+  if (body.byteLength === 0) throw new Error("Selected image is empty.");
   const { error } = await supabase.storage.from("alerts").upload(objectName, body, {
     contentType: mimeType || "image/jpeg",
   });

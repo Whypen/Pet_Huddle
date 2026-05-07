@@ -393,6 +393,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsMultipleSelection: true,
       mediaTypes: ["images"],
+      preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
       quality: 0.9,
       selectionLimit: availableSlots,
     });
