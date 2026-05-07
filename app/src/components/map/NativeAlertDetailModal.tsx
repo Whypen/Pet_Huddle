@@ -18,7 +18,7 @@ import {
 import type { NativeMapAlert } from "../../lib/nativeMapData";
 import { uploadNativeBroadcastImage } from "../../lib/nativeBroadcast";
 import { useLanguage } from "../../lib/nativeLanguage";
-import { fetchNativeSocialShareTargets, recordNativeSocialShare, type NativeSocialShareTarget } from "../../lib/nativeSocial";
+import { fetchNativeSocialShareTargets, recordNativeSocialShare, sendNativeMapAlertShareToChat, type NativeSocialShareTarget } from "../../lib/nativeSocial";
 import { resolveNativeAvatarUrl } from "../../lib/nativeStorageUrlCache";
 import { supabase } from "../../lib/supabase";
 import { NativeLoadingState } from "../NativeLoadingState";
@@ -486,8 +486,9 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     setShareSending(true);
     setMessage(null);
     try {
-      await handleNativeShare();
-      setMessage(`Share sheet opened for ${selectedTarget.label}.`);
+      await sendNativeMapAlertShareToChat(alert, selectedTarget, effectiveUserId);
+      if (socialThreadId) void recordNativeSocialShare(String(socialThreadId));
+      setMessage(`Shared to ${selectedTarget.label}.`);
       setShareOpen(false);
     } catch {
       setMessage("Unable to share to Huddle Chats.");
@@ -543,7 +544,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={onClose} transparent visible={Boolean(alert)}>
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={onClose}>
         <Pressable onPress={(event) => event.stopPropagation()} style={styles.bottomSheetBoundary}>
-          <AppBottomSheet mode="content">
+          <AppBottomSheet mode={media.length > 0 ? "autoMax" : "compact"}>
           <AppBottomSheetHeader>
               <View style={[styles.typePill, { backgroundColor: color }]}>
                 <Text style={styles.typePillText}>{alert.alert_type} · {timeAgo(alert.created_at)}</Text>
@@ -707,7 +708,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
       <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={() => setShareOpen(false)} transparent visible={shareOpen}>
         <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={() => setShareOpen(false)}>
           <Pressable onPress={(event) => event.stopPropagation()} style={styles.bottomSheetBoundary}>
-            <AppBottomSheet mode="content">
+            <AppBottomSheet mode="compact">
             <AppBottomSheetHeader>
               <Text style={styles.shareTitle}>{t("Share")}</Text>
               <Pressable accessibilityLabel="Close share" accessibilityRole="button" onPress={() => setShareOpen(false)} style={styles.iconButton}>

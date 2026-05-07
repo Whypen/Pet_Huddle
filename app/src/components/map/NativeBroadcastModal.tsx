@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import * as ImagePicker from "expo-image-picker";
@@ -119,6 +119,7 @@ export function NativeBroadcastModal({
   const [validationErrors, setValidationErrors] = useState<{ title?: string; description?: string }>({});
   const [resolvedUserId, setResolvedUserId] = useState<string | null>(userId);
   const [creatorProfile, setCreatorProfile] = useState<NativeProfileSummary | null>(null);
+  const composerScrollRef = useRef<ScrollView | null>(null);
 
   const baseCaps = NATIVE_BROADCAST_CAPS_BY_TIER[tier];
   const capRangeKm = extraBroadcast72h > 0 ? NATIVE_SUPER_BROADCAST_CAPS.radiusKm : baseCaps.radiusKm;
@@ -237,6 +238,9 @@ export function NativeBroadcastModal({
       setErrorText(`Only the first ${MAX_BROADCAST_MEDIA} photos are kept.`);
     }
     setMediaFiles((current) => [...current, ...prepared]);
+    requestAnimationFrame(() => {
+      composerScrollRef.current?.scrollToEnd({ animated: true });
+    });
     const uploadOne = async (item: NativeBroadcastMedia) => {
       const asset = result.assets.find((candidate) => candidate.uri === item.uri);
       setMediaFiles((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: "uploading", error: null } : entry));
@@ -430,7 +434,7 @@ export function NativeBroadcastModal({
             <Text style={styles.title}>{t("Broadcast Alert")}</Text>
             <AppModalCloseButton onPress={handleClose} />
           </AppBottomSheetHeader>
-          <AppBottomSheetScroll>
+          <AppBottomSheetScroll scrollRef={composerScrollRef}>
             <View style={styles.topComposerRow}>
               <View style={styles.compoundRow}>
                 <Pressable

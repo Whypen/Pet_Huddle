@@ -191,6 +191,26 @@ const buildShareHeadline = (share: ParsedMessage["share"]) => {
 
 const getShareTargetUrl = (share: ParsedMessage["share"]) => String(share?.appUrl || share?.canonicalUrl || "").trim();
 
+const normalizeMembershipHintText = (text: string) => {
+  const normalized = text.trim();
+  const joined = normalized.match(/^(.+?)\s+has joined the group!$/i);
+  if (joined) return `${joined[1]} just joined the chat.`;
+  return normalized;
+};
+
+const messageTimeValue = (message: NativeChatMessage) => {
+  const value = new Date(message.createdAt).getTime();
+  return Number.isFinite(value) ? value : 0;
+};
+
+const mergeNativeChatMessages = (base: NativeChatMessage[], incoming: NativeChatMessage[]) => {
+  const byId = new Map<string, NativeChatMessage>();
+  [...base, ...incoming].forEach((message) => {
+    if (message.id) byId.set(message.id, message);
+  });
+  return Array.from(byId.values()).sort((left, right) => messageTimeValue(left) - messageTimeValue(right));
+};
+
 const parseMessageContent = (content: string): ParsedMessage => {
   const star = parseStarChatContent(content);
   if (isStarIntroKind(star.kind)) {
@@ -320,6 +340,7 @@ export function NativeChatDialogueScreen({
   const [unmatchState, setUnmatchState] = useState<UnmatchState>("none");
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set());
   const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string | null>>({});
+  const [failedAttachmentKeys, setFailedAttachmentKeys] = useState<Set<string>>(new Set());
   const [linkPreviews, setLinkPreviews] = useState<Record<string, NativeSocialLinkPreview>>({});
   const [input, setInput] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
@@ -363,10 +384,11 @@ export function NativeChatDialogueScreen({
   const [groupMemberReportTarget, setGroupMemberReportTarget] = useState<GroupManageMember | null>(null);
   const [groupMemberBlockTarget, setGroupMemberBlockTarget] = useState<GroupManageMember | null>(null);
   const [groupMemberActionTarget, setGroupMemberActionTarget] = useState<GroupManageMember | null>(null);
-  const readQueueRef = useRef<Set<string>>(new Set());
-	  const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	  const scrollRef = useRef<ScrollView | null>(null);
-	  const nearBottomRef = useRef(true);
+	  const readQueueRef = useRef<Set<string>>(new Set());
+		  const readTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+		  const scrollRef = useRef<ScrollView | null>(null);
+  const loadingOlderRef = useRef(false);
+		  const nearBottomRef = useRef(true);
 	  const messagesRef = useRef<NativeChatMessage[]>([]);
 	  const roomIdRef = useRef<string | null>(roomId);
   const linkPreviewRequestsRef = useRef<Set<string>>(new Set());
@@ -517,10 +539,11 @@ export function NativeChatDialogueScreen({
     }
   }, [userId]);
 
-		  const hydrateMessages = useCallback(async (rows: NativeChatMessage[], options?: { scrollToLatest?: boolean }) => {
-	    messagesRef.current = rows;
-	    setMessages(rows);
-    setAttachmentUrls(await resolveAttachmentUrls(rows));
+			  const hydrateMessages = useCallback(async (rows: NativeChatMessage[], options?: { scrollToLatest?: boolean }) => {
+		    messagesRef.current = rows;
+		    setMessages(rows);
+    setFailedAttachmentKeys(new Set());
+	    setAttachmentUrls(await resolveAttachmentUrls(rows));
     if (userId) setReadMessageIds(await fetchNativeReadReceipts(rows.filter((message) => message.senderId === userId).map((message) => message.id), userId));
     const urls = Array.from(new Set(rows.map((message) => {
       const parsed = parseMessageContent(message.content);
@@ -622,6 +645,7 @@ export function NativeChatDialogueScreen({
     setUnmatchState("none");
     setReadMessageIds(new Set());
     setAttachmentUrls({});
+    setFailedAttachmentKeys(new Set());
     setLinkPreviews({});
     setInput("");
     setUploads([]);
@@ -677,7 +701,7 @@ export function NativeChatDialogueScreen({
         const mapped: NativeChatMessage = { id: row.id, chatId: roomId, senderId: String(row.sender_id || ""), content: String(row.content || ""), createdAt: String(row.created_at || "") };
 	          setMessages((current) => {
 	            if (current.some((message) => message.id === mapped.id)) return current;
-	            const next = [...current, mapped].sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+		            const next = mergeNativeChatMessages(current, [mapped]);
 	            messagesRef.current = next;
 	            void resolveAttachmentUrls(next).then(setAttachmentUrls);
 	            queueReads([mapped]);
@@ -734,18 +758,20 @@ export function NativeChatDialogueScreen({
     setInput((current) => current.includes(typedPreviewUrl) ? stripUrl(current, typedPreviewUrl) : current);
   }, [dismissedPreviewUrls, linkPreviews, typedPreviewUrl]);
 
-  const loadOlder = useCallback(async () => {
-    if (!roomId || loadingOlder || !hasOlder || messages.length === 0) return;
+	  const loadOlder = useCallback(async () => {
+    if (!roomId || loadingOlderRef.current || loadingOlder || !hasOlder || messages.length === 0) return;
+    loadingOlderRef.current = true;
     setLoadingOlder(true);
     try {
       const rows = await fetchNativeChatMessages({ roomId, beforeCreatedAt: messages[0].createdAt, limit: OLDER_MESSAGE_PAGE_SIZE + 1 });
       setHasOlder(rows.length > OLDER_MESSAGE_PAGE_SIZE);
-      const older = rows.slice(0, OLDER_MESSAGE_PAGE_SIZE);
-      const next = [...older, ...messages];
+      const older = rows.length > OLDER_MESSAGE_PAGE_SIZE ? rows.slice(rows.length - OLDER_MESSAGE_PAGE_SIZE) : rows;
+      const next = mergeNativeChatMessages(older, messagesRef.current);
       await hydrateMessages(next, { scrollToLatest: false });
     } catch {
       setNotice("Unable to load older messages.");
     } finally {
+      loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
   }, [hasOlder, hydrateMessages, loadingOlder, messages, roomId]);
@@ -812,7 +838,7 @@ export function NativeChatDialogueScreen({
       setUploads([]);
       setLockedPreviewUrl(null);
       setDismissedPreviewUrls(new Set());
-      await hydrateMessages([...messages.filter((message) => message.id !== sent.id), sent].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+      await hydrateMessages(mergeNativeChatMessages(messagesRef.current, [sent]));
       haptic.success();
     } catch {
       setInput(previousText);
@@ -822,7 +848,7 @@ export function NativeChatDialogueScreen({
     } finally {
       setSending(false);
     }
-  }, [activePreviewUrl, canSendVideo, composerDisabled, hydrateMessages, input, lockedPreviewUrl, messages, roomId, uploads, userId]);
+  }, [activePreviewUrl, canSendVideo, composerDisabled, hydrateMessages, input, lockedPreviewUrl, roomId, uploads, userId]);
 
   const toggleBlock = useCallback(async () => {
     if (!counterpart?.id) return;
@@ -1175,13 +1201,13 @@ export function NativeChatDialogueScreen({
           content: String((data as { content?: string }).content || content),
           createdAt: String((data as { created_at?: string }).created_at || message.createdAt),
         };
-        await hydrateMessages(messages.map((item) => item.id === message.id ? updated : item));
+        await hydrateMessages(messagesRef.current.map((item) => item.id === message.id ? updated : item), { scrollToLatest: false });
       }
       setNotice("Attachment removed.");
     } catch {
       setNotice("Unable to remove attachment right now.");
     }
-  }, [hydrateMessages, messages, userId]);
+  }, [hydrateMessages, userId]);
 
   // Reset manage sheet state on close.
   useEffect(() => {
@@ -1215,6 +1241,7 @@ export function NativeChatDialogueScreen({
         <NativeSocialExternalLinkPreview
           linkPreview={linkPreviews[url] || null}
           onOpen={(nextUrl) => void Linking.openURL(nextUrl)}
+          style={removable ? undefined : styles.messageLinkPreview}
           url={url}
         />
         {removable ? (
@@ -1234,11 +1261,24 @@ export function NativeChatDialogueScreen({
     setMediaPreviewUri(uri);
   };
 
+  const retryAttachmentLoad = useCallback(async (key: string, path: string | null | undefined) => {
+    setFailedAttachmentKeys((current) => {
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+    if (!path) return;
+    setAttachmentUrls((current) => ({ ...current, [path]: null }));
+    const urls = await resolveAttachmentUrls(messagesRef.current);
+    setAttachmentUrls((current) => ({ ...current, ...urls }));
+  }, []);
+
   const renderMessage = (message: NativeChatMessage, index: number) => {
     const mine = message.senderId === userId;
     const parsed = parseMessageContent(message.content);
     const text = parsed.text.trim();
     const isMembershipHint = isGroup && parsed.kind !== "system" && parsed.attachments.length === 0 && text.length > 0 && (parsed.kind === "membership" || /just joined the chat\.$|has joined the group!$|left the group\.$/i.test(text));
+    const membershipText = isMembershipHint ? normalizeMembershipHintText(text) : text;
     const isSystem = parsed.kind === "system";
     const isStarIntro = !isGroup && isStarIntroKind(parsed.kind);
     const isStarFirstUserMessage = !isGroup && firstStarUserMessageId === message.id;
@@ -1258,12 +1298,14 @@ export function NativeChatDialogueScreen({
       return (
         <View key={message.id}>
           {divider ? <Text style={styles.dayDivider}>{divider}</Text> : null}
-          <Text style={styles.membershipPill}>{text}</Text>
+          <Text style={styles.membershipPill}>{membershipText}</Text>
         </View>
       );
     }
     const previewUrl = parsed.linkPreviewUrl || extractFirstHttpUrl(parsed.text);
     const displayText = previewUrl ? stripUrl(parsed.text, previewUrl) : parsed.text;
+    const hasRichContent = parsed.attachments.length > 0 || Boolean(previewUrl);
+    const hasSingleAttachment = parsed.attachments.length === 1 && !previewUrl;
     if (parsed.share) {
       return (
         <View key={message.id}>
@@ -1271,19 +1313,21 @@ export function NativeChatDialogueScreen({
           {isGroup && !mine ? <Text style={styles.senderName}>{senderNames[message.senderId] || ""}</Text> : null}
           <View style={[styles.messageRow, mine && styles.messageRowMine]}>
             <Pressable
-              accessibilityRole={parsed.share.imageUrl ? "imagebutton" : "button"}
-              disabled={!parsed.share.imageUrl}
+              accessibilityRole="link"
               onPress={() => {
-                openMediaPreview(parsed.share?.imageUrl);
+                const url = parsed.share?.appUrl || parsed.share?.canonicalUrl;
+                if (url) void Linking.openURL(url);
               }}
-              style={[nativeModalStyles.appModalShareCard, mine ? nativeModalStyles.appModalShareCardMine : null]}
+              style={[styles.chatShareCard, mine ? styles.chatShareCardMine : null]}
             >
-              <View style={nativeModalStyles.appModalShareCardBody}>
-                <View style={styles.shareThumb}>{parsed.share.imageUrl ? <Image resizeMode="contain" source={{ uri: parsed.share.imageUrl }} style={styles.shareThumbImage} /> : null}</View>
+              <View style={styles.chatShareCardBody}>
+                <View style={styles.shareThumb}>{parsed.share.imageUrl ? <Image resizeMode="cover" source={{ uri: parsed.share.imageUrl }} style={styles.shareThumbImage} /> : null}</View>
                 <View style={styles.shareTextWrap}>
+                  <Text numberOfLines={1} style={styles.shareSurface}>{parsed.share.surface || "Huddle"}</Text>
                   <Text numberOfLines={2} style={styles.shareTitle}>{buildShareHeadline(parsed.share)}</Text>
                   {parsed.share.description ? <Text numberOfLines={2} style={styles.shareDescription}>{parsed.share.description}</Text> : null}
                 </View>
+                <Feather color={huddleColors.iconMuted} name="chevron-right" size={16} />
               </View>
             </Pressable>
           </View>
@@ -1295,7 +1339,7 @@ export function NativeChatDialogueScreen({
         {divider ? <Text style={styles.dayDivider}>{divider}</Text> : null}
         {isGroup && !mine ? <Text style={styles.senderName}>{senderNames[message.senderId] || ""}</Text> : null}
         <View style={[styles.messageRow, mine && styles.messageRowMine]}>
-          <View style={[styles.messageBubble, mine ? styles.messageBubbleMine : styles.messageBubbleTheirs, isStarIntro || isStarFirstUserMessage ? styles.messageBubbleStar : null, !mine && !(isStarIntro || isStarFirstUserMessage) ? styles.messageBubbleCounterpart : null]}>
+          <View style={[styles.messageBubble, hasRichContent && styles.messageBubbleRich, mine ? styles.messageBubbleMine : styles.messageBubbleTheirs, isStarIntro || isStarFirstUserMessage ? styles.messageBubbleStar : null, !mine && !(isStarIntro || isStarFirstUserMessage) ? styles.messageBubbleCounterpart : null]}>
             {isStarIntro ? (
               <Text style={styles.starText}>{mine ? "You sent a Star ⭐" : "New Star Connection ⭐"}</Text>
             ) : null}
@@ -1304,15 +1348,17 @@ export function NativeChatDialogueScreen({
                 {parsed.attachments.map((attachment, attachmentIndex) => {
                   const uri = attachment.url || (attachment.path ? attachmentUrls[attachment.path] : null);
                   const isImage = attachment.mime.startsWith("image/");
+                  const attachmentKey = `${message.id}:${attachment.path || attachment.url || attachmentIndex}`;
+                  const failed = failedAttachmentKeys.has(attachmentKey);
                   return (
                     <Pressable
-                      key={`${message.id}:${attachmentIndex}`}
+                      key={attachmentKey}
                       accessibilityRole={isImage ? "imagebutton" : "button"}
-                      disabled={!uri || !isImage}
-                      onPress={() => openMediaPreview(uri)}
-                      style={styles.attachmentPreview}
+                      disabled={!isImage}
+                      onPress={() => failed ? void retryAttachmentLoad(attachmentKey, attachment.path) : openMediaPreview(uri)}
+                      style={[styles.attachmentPreview, hasSingleAttachment ? styles.attachmentPreviewSingle : styles.attachmentPreviewFixed]}
                     >
-                      {uri && isImage ? <Image accessibilityLabel="native-chat-attachment-tile" testID="native-chat-attachment-tile" source={{ uri }} style={styles.attachmentImage} /> : uri && attachment.mime.startsWith("video/") ? <NativeAttachmentVideo uri={uri} /> : <Feather color={mine ? huddleColors.onPrimary : huddleColors.blue} name={attachment.mime.startsWith("video/") ? "video" : "paperclip"} size={22} />}
+                      {uri && isImage && !failed ? <Image accessibilityLabel="native-chat-attachment-tile" testID="native-chat-attachment-tile" onError={() => setFailedAttachmentKeys((current) => new Set([...current, attachmentKey]))} source={{ uri }} style={styles.attachmentImage} /> : uri && attachment.mime.startsWith("video/") ? <NativeAttachmentVideo uri={uri} /> : <View style={styles.attachmentFallback}><Feather color={huddleColors.blue} name={failed ? "refresh-cw" : attachment.mime.startsWith("video/") ? "video" : "image"} size={22} />{failed ? <Text style={styles.attachmentFallbackText}>Tap to retry</Text> : null}</View>}
                       {mine && attachment.path ? <Pressable accessibilityLabel="Delete attachment" onPress={() => void deleteAttachment(message, attachment.path!)} style={styles.removeUpload}><Feather color={huddleColors.onPrimary} name="x" size={12} /></Pressable> : null}
                     </Pressable>
                   );
@@ -1320,7 +1366,7 @@ export function NativeChatDialogueScreen({
               </View>
             ) : null}
             {!isStarIntro ? renderLinkPreview(previewUrl) : null}
-            {!isStarIntro && displayText ? <Text style={[styles.messageText, mine && styles.messageTextMine, isStarFirstUserMessage ? styles.starText : null]}>{displayText}</Text> : null}
+            {!isStarIntro && displayText ? <Text style={[styles.messageText, hasRichContent && styles.messageTextRich, mine && styles.messageTextMine, isStarFirstUserMessage ? styles.starText : null]}>{displayText}</Text> : null}
           </View>
         </View>
         <View style={[styles.messageMeta, mine && styles.messageMetaMine]}>
@@ -1368,6 +1414,7 @@ export function NativeChatDialogueScreen({
           ref={scrollRef}
           contentContainerStyle={styles.messages}
           keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={() => {
             if (nearBottomRef.current) {
               scrollRef.current?.scrollToEnd({ animated: false });
@@ -1391,7 +1438,6 @@ export function NativeChatDialogueScreen({
           {blockState === "blocked_by_me" ? <Text style={styles.systemPill}>You've blocked {counterpart?.displayName || "this user"}</Text> : null}
           {blockState === "blocked_by_them" ? <Text style={styles.systemPill}>You're blocked by {counterpart?.displayName || "user"}.</Text> : null}
           {unmatchState !== "none" ? <Text style={styles.systemPill}>{unmatchState === "unmatched_by_me" ? "You've unmatched this user." : "You've been unmatched."}</Text> : null}
-          {!isGroup && latestStarIntro ? <Text style={styles.starPill}>{latestStarIntro.senderId === userId ? "Star sent! You've jumped to the front of the line." : `${counterpart?.displayName || "Someone"} used a Star to reach you. Say hi!`}</Text> : null}
           {messages.map(renderMessage)}
           {showLatest ? (
             <Pressable onPress={() => {
@@ -1574,7 +1620,9 @@ export function NativeChatDialogueScreen({
                       <Text style={styles.manageLabel}>Media ({groupMediaAttachments.length})</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.groupMediaRail}>
                         {groupMediaAttachments.map((attachment, index) => (
-                          <Image key={`${attachment.key}:${index}`} source={{ uri: attachment.uri }} style={styles.groupMediaThumb} />
+                          <Pressable key={`${attachment.key}:${index}`} accessibilityRole="imagebutton" onPress={() => openMediaPreview(attachment.uri)}>
+                            <Image source={{ uri: attachment.uri }} style={styles.groupMediaThumb} />
+                          </Pressable>
                         ))}
                       </ScrollView>
                     </>
@@ -1769,18 +1817,19 @@ const styles = StyleSheet.create({
   loadMoreText: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.mutedText },
   systemPill: { alignSelf: "center", maxWidth: "80%", marginVertical: huddleSpacing.x2, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, borderRadius: huddleRadii.pill, overflow: "hidden", backgroundColor: huddleColors.blueSoft, fontFamily: "Urbanist-500", fontSize: 12, lineHeight: 16, color: huddleColors.blue, textAlign: "center" },
   membershipPill: { alignSelf: "center", marginVertical: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, borderRadius: huddleRadii.pill, overflow: "hidden", backgroundColor: huddleColors.toggleOff, fontFamily: "Urbanist-500", fontSize: 12, lineHeight: 16, color: huddleColors.mutedText, textAlign: "center" },
-  starPill: { alignSelf: "center", marginVertical: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1, borderRadius: huddleRadii.pill, overflow: "hidden", backgroundColor: huddleColors.premiumGoldSoft, fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.premiumGold },
   latestButton: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.canvas },
   latestText: { fontFamily: "Urbanist-600", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.text },
   senderName: { marginLeft: huddleSpacing.x1, marginBottom: 2, fontFamily: "Urbanist-600", fontSize: 11, lineHeight: 14, color: huddleColors.mutedText },
   messageRow: { flexDirection: "row", justifyContent: "flex-start" },
   messageRowMine: { justifyContent: "flex-end" },
   messageBubble: { maxWidth: "90%", borderRadius: huddleRadii.card, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, borderWidth: 1 },
+  messageBubbleRich: { paddingTop: 0, paddingHorizontal: 0, paddingBottom: huddleSpacing.x2 },
   messageBubbleMine: { backgroundColor: huddleColors.blueSoft, borderColor: huddleColors.fieldFocusBorder },
   messageBubbleTheirs: { backgroundColor: huddleColors.canvas, borderColor: huddleColors.fieldBorderStrong },
   messageBubbleCounterpart: { backgroundColor: huddleColors.canvas, borderColor: huddleColors.fieldBorderStrong },
   messageBubbleStar: { backgroundColor: huddleColors.premiumGoldSoft, borderColor: huddleColors.premiumGold },
   messageText: { fontFamily: "Urbanist-500", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
+  messageTextRich: { paddingHorizontal: huddleSpacing.x3, paddingTop: huddleSpacing.x2 },
   messageTextMine: { color: huddleColors.blue },
   starText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.premiumGold },
   messageMeta: { flexDirection: "row", gap: huddleSpacing.x1, marginTop: huddleSpacing.x1, paddingLeft: huddleSpacing.x1 },
@@ -1788,14 +1837,23 @@ const styles = StyleSheet.create({
   messageTime: { fontFamily: "Urbanist-500", fontSize: 11, lineHeight: 14, color: huddleColors.mutedText },
   readMark: { fontFamily: "Urbanist-700", fontSize: 11, lineHeight: 14, color: huddleColors.mutedText },
   readMarkSeen: { color: huddleColors.blue },
-  attachmentGrid: { flexDirection: "row", flexWrap: "wrap", gap: huddleSpacing.x1, marginBottom: huddleSpacing.x2 },
-  attachmentPreview: { width: 144, height: 144, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.button, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.glassBorder },
+  attachmentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 0, marginBottom: 0 },
+  attachmentPreview: { alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.card, backgroundColor: huddleColors.canvas, borderWidth: 0 },
+  attachmentPreviewFixed: { width: 144, height: 144 },
+  attachmentPreviewSingle: { width: 144, height: 144 },
   attachmentImage: { width: "100%", height: "100%" },
-  shareThumb: { width: 72, height: 72, overflow: "hidden", borderRadius: huddleRadii.button, backgroundColor: huddleColors.canvas },
+  attachmentFallback: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x1, backgroundColor: huddleColors.primarySoftFill },
+  attachmentFallbackText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  messageLinkPreview: { marginTop: 0, borderWidth: 0, borderRadius: huddleRadii.card, shadowOpacity: 0, elevation: 0 },
+  chatShareCard: { width: 286, maxWidth: "90%", overflow: "hidden", borderRadius: 18, borderWidth: 1, borderColor: "rgba(163,168,190,0.34)", backgroundColor: huddleColors.canvas, shadowColor: "rgba(36,55,120,0.32)", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 22, elevation: 2 },
+  chatShareCardMine: { backgroundColor: "rgba(239,243,255,0.92)", shadowColor: "rgba(11,18,48,0.28)", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 18 },
+  chatShareCardBody: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x3, padding: huddleSpacing.x3 },
+  shareThumb: { width: 72, height: 72, overflow: "hidden", borderRadius: 14, backgroundColor: "rgba(244,247,251,0.95)" },
   shareThumbImage: { width: "100%", height: "100%" },
   shareTextWrap: { flex: 1, minWidth: 0 },
-  shareTitle: { fontFamily: "Urbanist-700", fontSize: 13, lineHeight: huddleType.labelLine, color: huddleColors.blue },
-  shareDescription: { fontFamily: "Urbanist-500", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
+  shareSurface: { marginBottom: 2, fontFamily: "Urbanist-800", fontSize: 10, lineHeight: 13, color: huddleColors.blue, textTransform: "uppercase" },
+  shareTitle: { fontFamily: "Urbanist-700", fontSize: 13, lineHeight: 20, color: "#424965" },
+  shareDescription: { marginTop: huddleSpacing.x1, fontFamily: "Urbanist-500", fontSize: 12, lineHeight: 20, color: "#6B728A" },
   uploadRail: { gap: huddleSpacing.x2, paddingRight: huddleSpacing.x6 },
   uploadThumb: { width: huddleSpacing.x9, height: huddleSpacing.x9, alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: huddleRadii.button, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, backgroundColor: huddleColors.mutedCanvas },
   uploadImage: { width: "100%", height: "100%" },
