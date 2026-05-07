@@ -544,7 +544,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
     <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={onClose} transparent visible={Boolean(alert)}>
       <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={onClose}>
         <Pressable onPress={(event) => event.stopPropagation()} style={styles.bottomSheetBoundary}>
-          <AppBottomSheet mode={media.length > 0 ? "autoMax" : "compact"}>
+          <AppBottomSheet mode="content">
           <AppBottomSheetHeader>
               <View style={[styles.typePill, { backgroundColor: color }]}>
                 <Text style={styles.typePillText}>{alert.alert_type} · {timeAgo(alert.created_at)}</Text>
@@ -708,13 +708,14 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
       <Modal presentationStyle="overFullScreen" animationType="slide" onRequestClose={() => setShareOpen(false)} transparent visible={shareOpen}>
         <Pressable style={[nativeModalStyles.appModalBackdrop, nativeModalStyles.appModalBottomSafeArea]} onPress={() => setShareOpen(false)}>
           <Pressable onPress={(event) => event.stopPropagation()} style={styles.bottomSheetBoundary}>
-            <AppBottomSheet mode="compact">
+            <AppBottomSheet mode="content">
             <AppBottomSheetHeader>
               <Text style={styles.shareTitle}>{t("Share")}</Text>
               <Pressable accessibilityLabel="Close share" accessibilityRole="button" onPress={() => setShareOpen(false)} style={styles.iconButton}>
                 <Feather color={huddleColors.iconMuted} name="x" size={22} />
               </Pressable>
             </AppBottomSheetHeader>
+            <AppBottomSheetScroll>
             <View style={styles.shareContent}>
               <View style={styles.shareTargetsBlock}>
                 {shareTargetsLoading ? <NativeLoadingState variant="inline" /> : shareTargets.length === 0 ? <Text style={styles.shareEmptyText}>No chats found.</Text> : (
@@ -734,6 +735,9 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
                   </ScrollView>
                 )}
               </View>
+            </View>
+            </AppBottomSheetScroll>
+            <AppBottomSheetFooter>
               <View style={styles.shareActionRow}>
                 <Pressable accessibilityRole="button" disabled={!shareTargetKey || shareSending || shareTargetsLoading} onPress={() => void handleShareToChat()} style={({ pressed }) => [styles.shareSecondaryButton, !shareTargetKey || shareSending || shareTargetsLoading ? styles.disabled : null, pressed ? styles.pressed : null]}>
                   {shareSending ? <ActivityIndicator color={huddleColors.blue} /> : <Feather color={huddleColors.blue} name="send" size={18} />}
@@ -744,7 +748,7 @@ export function NativeAlertDetailModal({ alert, onClose, onHidden, onOpenProfile
                   <Text style={styles.shareSecondaryButtonText}>Share</Text>
                 </Pressable>
               </View>
-            </View>
+            </AppBottomSheetFooter>
             </AppBottomSheet>
           </Pressable>
         </Pressable>
@@ -1195,10 +1199,8 @@ const styles = StyleSheet.create({
     color: huddleColors.text,
   },
   shareContent: {
-    gap: huddleSpacing.x5,
-    paddingHorizontal: huddleSpacing.x6,
-    paddingTop: huddleSpacing.x1,
-    paddingBottom: huddleSpacing.x8,
+    paddingTop: 0,
+    paddingBottom: huddleSpacing.x2,
   },
   shareTargetsBlock: {
     minHeight: 126,
@@ -1261,7 +1263,9 @@ const styles = StyleSheet.create({
   },
   shareActionRow: {
     flexDirection: "row",
+    alignItems: "center",
     gap: huddleSpacing.x3,
+    minHeight: 56,
   },
   shareSecondaryButton: {
     minHeight: 46,

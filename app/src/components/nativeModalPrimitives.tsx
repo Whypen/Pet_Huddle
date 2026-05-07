@@ -65,7 +65,7 @@ export function AppModalScroll({ children, edgeToEdge = false }: { children: Rea
   );
 }
 
-export function AppBottomSheet({ children, large = false, mode }: { children: ReactNode; large?: boolean; mode?: "content" | "large" | "autoMax" | "compact" }) {
+export function AppBottomSheet({ children, large = false, mode }: { children: ReactNode; large?: boolean; mode?: "content" | "large" | "autoMax" }) {
   const resolvedMode = mode ?? (large ? "large" : "content");
   return (
     <View
@@ -75,8 +75,6 @@ export function AppBottomSheet({ children, large = false, mode }: { children: Re
           ? nativeModalStyles.appBottomSheetLarge
           : resolvedMode === "autoMax"
           ? nativeModalStyles.appBottomSheetAutoMax
-          : resolvedMode === "compact"
-          ? nativeModalStyles.appBottomSheetCompact
           : nativeModalStyles.appBottomSheetContent,
       ]}
     >

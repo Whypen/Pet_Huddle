@@ -68,7 +68,6 @@ export const nativeModalStyles = StyleSheet.create({
     justifyContent: "flex-end",
     alignItems: "stretch",
     paddingTop: huddleSpacing.x5,
-    paddingBottom: huddleSpacing.x3,
   },
   appBottomSheetEventBoundary: {
     ...StyleSheet.absoluteFillObject,
@@ -126,23 +125,18 @@ export const nativeModalStyles = StyleSheet.create({
     ...huddleShadows.glassElevation2,
   },
   appBottomSheetContent: {
-    maxHeight: "78%",
+    maxHeight: "82%",
     minHeight: 0,
     flexShrink: 1,
   },
   appBottomSheetAutoMax: {
-    maxHeight: "78%",
-    minHeight: 0,
-    flexShrink: 1,
-  },
-  appBottomSheetCompact: {
-    maxHeight: "66%",
+    maxHeight: "82%",
     minHeight: 0,
     flexShrink: 1,
   },
   appBottomSheetLarge: {
-    height: "78%",
-    maxHeight: "78%",
+    height: "82%",
+    maxHeight: "82%",
     minHeight: 0,
     flexShrink: 1,
   },
