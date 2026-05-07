@@ -90,6 +90,17 @@ import {
   AppModalScroll,
 } from "../components/nativeModalPrimitives";
 import { nativeModalStyles } from "../components/nativeModalPrimitives.styles";
+import Reanimated, {
+  Easing as ReanimEasing,
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 type NativeChatsTab = "friends" | "groups" | "service" | "discover";
 type NativeChatsTopTab = "discover" | "chats";
@@ -198,6 +209,11 @@ const FILTER_GROUPS: Array<{ title: string; tier: FilterTier; rows: typeof FILTE
   { title: "Gold", tier: "gold", rows: FILTER_ROWS.filter((row) => row.tier === "gold") },
 ];
 
+const SPECIES_CHIP_EMOJI: Record<string, string> = {
+  Dogs: "🐕", Cats: "🐈", Birds: "🦜", Fish: "🐟",
+  Reptiles: "🦎", "Small Mammals": "🐹", "Farm Animals": "🐄", Others: "🐾", None: "🐾",
+};
+const SPRING_CFG = { damping: 18, stiffness: 200, mass: 0.8 } as const;
 
 const DEFAULT_FILTERS: NativeChatDiscoveryFilters = {
   ageMin: 16,
@@ -361,6 +377,7 @@ const groupMemberRoleFor = (group: NativeExploreGroup | NativeChatInboxRow, memb
 );
 
 const petLine = (profile: NativeChatDiscoveryProfile) => {
+  if (profile.socialRoles.length > 0) return profile.socialRoles.join(" · ");
   const namedPets = profile.pets
     .map((pet) => [pet.name, pet.species].filter(Boolean).join(" the "))
     .filter(Boolean);
@@ -447,12 +464,13 @@ const discoveryTierLabel = (value: unknown) => {
   return null;
 };
 
-const DISCOVERY_CARD_TO_LAYER_GAP = 8;
+const DISCOVERY_CARD_TO_LAYER_GAP = -40;
 const DISCOVERY_LAYER_VISIBLE_GAP = 8;
 const DISCOVERY_LAYER_HEIGHT = 52;
-const DISCOVERY_LAYER_TO_ISLAND_GAP = 40;
+const DISCOVERY_LAYER_TO_ISLAND_GAP = 15;
 const DISCOVERY_ISLAND_HEIGHT = 72;
 const DISCOVERY_STACK_AFTER_CARD = DISCOVERY_CARD_TO_LAYER_GAP + DISCOVERY_LAYER_VISIBLE_GAP * 3 + DISCOVERY_LAYER_HEIGHT + DISCOVERY_LAYER_TO_ISLAND_GAP + DISCOVERY_ISLAND_HEIGHT;
+const DISCOVERY_NAV_MIN_GAP = 24;
 
 const isFilterLocked = (rowTier: FilterTier, userTier: "free" | "plus" | "gold") => (
   rowTier === "plus" && userTier === "free" || rowTier === "gold" && userTier !== "gold"
@@ -675,41 +693,223 @@ const applyDiscoveryFilters = (
 });
 
 function DiscoveryProfileCard({
+  activeSwipeX,
   busy,
+  chips,
   index,
+  onSwipePhaseChange,
+  onSwipeProgress,
   profile,
   onPass,
   onProfileTap,
   onStar,
   onWave,
 }: {
+  activeSwipeX: number;
   busy: boolean;
+  chips: string[];
   index: number;
+  onSwipePhaseChange: (active: boolean) => void;
+  onSwipeProgress: (x: number) => void;
   profile: NativeChatDiscoveryProfile;
   onPass: (profile: NativeChatDiscoveryProfile) => void;
   onProfileTap: (profile: NativeChatDiscoveryProfile) => void;
   onStar: (profile: NativeChatDiscoveryProfile) => void;
   onWave: (profile: NativeChatDiscoveryProfile) => Promise<boolean>;
 }) {
-  const pan = useRef(new Animated.ValueXY()).current;
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [committedDirection, setCommittedDirection] = useState<"left" | "right" | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
-  const desiredCardWidth = Math.min(viewportWidth - huddleSpacing.x6, 320);
-  const heightBoundCardWidth = Math.max(280, (viewportHeight - 500) / 1.25);
-  const cardWidth = Math.max(280, Math.min(desiredCardWidth, heightBoundCardWidth));
+  const cardWidth = Math.max(300, Math.min(viewportWidth - huddleSpacing.x6, 360));
   const cardHeight = cardWidth * 1.25;
-  const compactActions = viewportHeight < cardHeight + DISCOVERY_STACK_AFTER_CARD + 256;
+  const layerFrontTop = cardHeight + DISCOVERY_CARD_TO_LAYER_GAP;
+  const layerSecondTop = layerFrontTop + DISCOVERY_LAYER_VISIBLE_GAP;
+  const layerThirdTop = layerSecondTop + DISCOVERY_LAYER_VISIBLE_GAP;
+  const layerBackTop = layerThirdTop + DISCOVERY_LAYER_VISIBLE_GAP;
+  const layerStackBottom = layerBackTop + DISCOVERY_LAYER_HEIGHT;
+  const islandTop = layerStackBottom + DISCOVERY_LAYER_TO_ISLAND_GAP;
+  const gluedStackHeight = islandTop + DISCOVERY_ISLAND_HEIGHT;
+  const compactActions = viewportHeight < cardHeight + DISCOVERY_STACK_AFTER_CARD + 256 + DISCOVERY_NAV_MIN_GAP;
   const roleLabel = profile.socialRole ? petLine(profile) : "";
   const tierLabel = discoveryTierLabel(profile.tier);
-  const rotate = pan.x.interpolate({ inputRange: [-180, 0, 180], outputRange: ["-8deg", "0deg", "8deg"] });
+  const queuedProgress = Math.min(1, Math.abs(activeSwipeX) / 150);
+  const queuedScale = index === 1 ? 0.95 + queuedProgress * 0.05 : 0.92 + queuedProgress * 0.03;
+  const queuedTranslateY = index === 1 ? 8 - queuedProgress * 8 : 16 - queuedProgress * 8;
+
+  // UI-thread shared values (Reanimated v4)
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const committedDirSV = useSharedValue<-1 | 0 | 1>(0); // -1=left, 0=none, 1=right
+  const hasCrossed = useSharedValue(false);
+
+  const clearSwipeState = useCallback(() => {
+    translateX.value = 0;
+    translateY.value = 0;
+    committedDirSV.value = 0;
+    setCommittedDirection(null);
+    setIsDragging(false);
+    onSwipeProgress(0);
+    onSwipePhaseChange(false);
+  }, [committedDirSV, onSwipePhaseChange, onSwipeProgress, translateX, translateY]);
+
+  const doPass = useCallback((p: NativeChatDiscoveryProfile) => {
+    onPass(p);
+    clearSwipeState();
+  }, [clearSwipeState, onPass]);
+
+  const doWave = useCallback((p: NativeChatDiscoveryProfile) => {
+    void onWave(p).then((committed) => {
+      if (!committed) {
+        haptic.error();
+        committedDirSV.value = 0;
+        onSwipeProgress(0);
+        onSwipePhaseChange(false);
+        translateX.value = withSpring(0, SPRING_CFG, () => {
+          runOnJS(setCommittedDirection)(null);
+          runOnJS(setIsDragging)(false);
+        });
+        translateY.value = withSpring(0, SPRING_CFG);
+      } else {
+        clearSwipeState();
+      }
+    });
+  }, [clearSwipeState, committedDirSV, onSwipePhaseChange, onSwipeProgress, onWave, translateX, translateY]);
+
+  const panGesture = useMemo(() =>
+    Gesture.Pan()
+      .activeOffsetX([-8, 8])
+      .failOffsetY([-18, 18])
+      .enabled(index === 0)
+      .onBegin(() => {
+        hasCrossed.value = false;
+        runOnJS(setIsDragging)(true);
+        runOnJS(onSwipePhaseChange)(true);
+      })
+      .onUpdate((e) => {
+        if (committedDirSV.value !== 0) return;
+        translateX.value = e.translationX;
+        translateY.value = Math.max(-SWIPE_VERTICAL_BOUND, Math.min(SWIPE_VERTICAL_BOUND, e.translationY));
+        runOnJS(onSwipeProgress)(e.translationX);
+        const aboveThreshold = Math.abs(e.translationX) >= SWIPE_COMMIT_OFFSET;
+        if (aboveThreshold && !hasCrossed.value) {
+          hasCrossed.value = true;
+          runOnJS(haptic.swipeThreshold)();
+        } else if (!aboveThreshold && hasCrossed.value) {
+          hasCrossed.value = false;
+        }
+      })
+      .onEnd((e) => {
+        if (busy) {
+          translateX.value = withSpring(0, SPRING_CFG);
+          translateY.value = withSpring(0, SPRING_CFG);
+          runOnJS(onSwipeProgress)(0);
+          runOnJS(onSwipePhaseChange)(false);
+          runOnJS(setIsDragging)(false);
+          return;
+        }
+        const rightCommit =
+          e.translationX >= SWIPE_COMMIT_OFFSET ||
+          (e.velocityX >= SWIPE_COMMIT_VELOCITY * 1000 && e.translationX > SWIPE_VELOCITY_MIN_OFFSET);
+        const leftCommit =
+          e.translationX <= -SWIPE_COMMIT_OFFSET ||
+          (e.velocityX <= -(SWIPE_COMMIT_VELOCITY * 1000) && e.translationX < -SWIPE_VELOCITY_MIN_OFFSET);
+        if (rightCommit) {
+          committedDirSV.value = 1;
+          runOnJS(setCommittedDirection)("right");
+          runOnJS(haptic.primaryConfirm)();
+          const dur = Math.max(180, Math.min(380, 380 - Math.abs(e.velocityX) * 0.15));
+          translateX.value = withTiming(DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.in(ReanimEasing.cubic) }, () => {
+            runOnJS(doWave)(profile);
+          });
+          return;
+        }
+        if (leftCommit) {
+          committedDirSV.value = -1;
+          runOnJS(setCommittedDirection)("left");
+          runOnJS(haptic.toggleControl)();
+          const dur = Math.max(180, Math.min(380, 380 - Math.abs(e.velocityX) * 0.15));
+          translateX.value = withTiming(-DISCOVERY_FLING_X, { duration: dur, easing: ReanimEasing.in(ReanimEasing.cubic) }, () => {
+            runOnJS(doPass)(profile);
+          });
+          return;
+        }
+        // Spring return with physics
+        runOnJS(haptic.swipeReturn)();
+        translateX.value = withSpring(0, SPRING_CFG, () => {
+          runOnJS(setIsDragging)(false);
+          runOnJS(onSwipeProgress)(0);
+          runOnJS(onSwipePhaseChange)(false);
+        });
+        translateY.value = withSpring(0, SPRING_CFG);
+      }),
+    [busy, committedDirSV, doPass, doWave, hasCrossed, index, onSwipePhaseChange, onSwipeProgress, profile, translateX, translateY]
+  );
+
+  // Animated styles — UI thread
+  const cardAnimatedStyle = useAnimatedStyle(() => {
+    const rot = interpolate(translateX.value, [-180, 0, 180], [-10, 0, 10], Extrapolation.CLAMP);
+    return {
+      transform: [
+        { translateX: translateX.value },
+        { translateY: translateY.value * 0.18 },
+        { rotate: `${rot}deg` },
+      ],
+    };
+  });
+
+  const waveTintStyle = useAnimatedStyle(() => ({
+    opacity: committedDirSV.value === 1
+      ? 0.2
+      : interpolate(translateX.value, [0, 63, 180], [0, 0.1, 0.2], Extrapolation.CLAMP),
+  }));
+
+  const passTintStyle = useAnimatedStyle(() => ({
+    opacity: committedDirSV.value === -1
+      ? 0.24
+      : interpolate(translateX.value, [-180, -99, -45, 0], [0.24, 0.16, 0.08, 0], Extrapolation.CLAMP),
+  }));
+
+  const passStampStyle = useAnimatedStyle(() => {
+    const cd = committedDirSV.value;
+    const tx = translateX.value;
+    const stampRot = interpolate(tx, [-180, 0, 180], [8, 0, -8], Extrapolation.CLAMP);
+    return {
+      opacity: cd === -1
+        ? 1
+        : interpolate(tx, [-180, -81, -14, 0], [1, 0.8, 0.16, 0], Extrapolation.CLAMP),
+      transform: [
+        { translateX: cd === -1 ? 0 : interpolate(tx, [-180, -36, 0], [0, 6, 18], Extrapolation.CLAMP) },
+        { translateY: cd === -1 ? 0 : interpolate(tx, [-180, -36, 0], [0, 4, 12], Extrapolation.CLAMP) },
+        { scale: cd === -1 ? 1 : interpolate(tx, [-180, -50, 0], [1, 0.9, 0.7], Extrapolation.CLAMP) },
+        { rotate: `${stampRot}deg` },
+      ],
+    };
+  });
+
+  const waveStampStyle = useAnimatedStyle(() => {
+    const cd = committedDirSV.value;
+    const tx = translateX.value;
+    const stampRot = interpolate(tx, [-180, 0, 180], [8, 0, -8], Extrapolation.CLAMP);
+    return {
+      opacity: cd === 1
+        ? 1
+        : interpolate(tx, [0, 14, 81, 180], [0, 0.16, 0.8, 1], Extrapolation.CLAMP),
+      transform: [
+        { translateX: cd === 1 ? 0 : interpolate(tx, [0, 36, 180], [-18, -6, 0], Extrapolation.CLAMP) },
+        { translateY: cd === 1 ? 0 : interpolate(tx, [0, 36, 180], [12, 4, 0], Extrapolation.CLAMP) },
+        { scale: cd === 1 ? 1.03 : interpolate(tx, [0, 14, 81, 180], [0.54, 0.7, 0.94, 1.03], Extrapolation.CLAMP) },
+        { rotate: `${stampRot}deg` },
+      ],
+    };
+  });
+
   const mediaSources = useMemo(() => {
-    const album = profile.socialAlbum.length > 0 ? profile.socialAlbum : profile.avatarUrl ? [profile.avatarUrl] : [];
-    return album.length > 0 ? album : [];
-  }, [profile.avatarUrl, profile.socialAlbum]);
+    const album = [profile.coverUrl, ...profile.socialAlbum, profile.avatarUrl].filter((s): s is string => Boolean(s));
+    return Array.from(new Set(album));
+  }, [profile.avatarUrl, profile.coverUrl, profile.socialAlbum]);
   const activeImage = mediaSources[Math.min(activeImageIndex, Math.max(0, mediaSources.length - 1))] || null;
-  useEffect(() => {
-    setActiveImageIndex(0);
-  }, [profile.id]);
+  useEffect(() => { setActiveImageIndex(0); }, [profile.id]);
   const stepAlbum = useCallback((direction: -1 | 1) => {
     if (mediaSources.length <= 1) return;
     setActiveImageIndex((current) => {
@@ -719,118 +919,129 @@ function DiscoveryProfileCard({
       return next;
     });
   }, [mediaSources.length]);
-  const panResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-    onPanResponderMove: (_, gesture) => {
-      pan.setValue({
-        x: gesture.dx,
-        y: Math.max(-SWIPE_VERTICAL_BOUND, Math.min(SWIPE_VERTICAL_BOUND, gesture.dy)),
-      });
-    },
-    onPanResponderRelease: (_, gesture) => {
-      if (busy) {
-        Animated.timing(pan, { toValue: { x: 0, y: 0 }, duration: DISCOVERY_RETURN_DURATION_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-        return;
-      }
-      const boundedY = Math.max(-SWIPE_VERTICAL_BOUND, Math.min(SWIPE_VERTICAL_BOUND, gesture.dy));
-      const rightCommit = gesture.dx >= SWIPE_COMMIT_OFFSET || (gesture.vx >= SWIPE_COMMIT_VELOCITY && gesture.dx > SWIPE_VELOCITY_MIN_OFFSET);
-      const leftCommit = gesture.dx <= -SWIPE_COMMIT_OFFSET || (gesture.vx <= -SWIPE_COMMIT_VELOCITY && gesture.dx < -SWIPE_VELOCITY_MIN_OFFSET);
-      if (rightCommit) {
-        Animated.timing(pan, { toValue: { x: DISCOVERY_FLING_X, y: 0 }, duration: DISCOVERY_FLING_DURATION_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => {
-          void onWave(profile).then((committed) => {
-            if (!committed) Animated.timing(pan, { toValue: { x: 0, y: 0 }, duration: DISCOVERY_RETURN_DURATION_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-          });
-        });
-        return;
-      }
-      if (leftCommit) {
-        Animated.timing(pan, { toValue: { x: -DISCOVERY_FLING_X, y: 0 }, duration: DISCOVERY_FLING_DURATION_MS, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => onPass(profile));
-        return;
-      }
-      Animated.timing(pan, { toValue: { x: 0, y: 0 }, duration: DISCOVERY_RETURN_DURATION_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-    },
-  }), [busy, onPass, onWave, pan, profile]);
+
   const renderDiscoveryActions = (variant: "island" | "traffic") => {
     const traffic = variant === "traffic";
     return (
       <View style={traffic ? styles.discoveryTrafficActions : styles.discoveryActionIsland}>
         <Pressable accessibilityLabel={`Star ${profile.displayName}`} disabled={busy} onPress={() => onStar(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficStar] : styles.discoveryActionStar, styles.discoveryStarButton, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
-          <Feather color={huddleColors.premiumGold} name="star" size={traffic ? 25 : 18} />
+          <FontAwesome5 color={huddleColors.onPrimary} name="star" size={traffic ? 22 : 20} />
         </Pressable>
-        <Pressable accessibilityLabel={`Wave at ${profile.displayName}`} disabled={busy} onPress={() => onWave(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficWave] : styles.discoveryActionPrimary, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
+        <Pressable accessibilityLabel={`Wave at ${profile.displayName}`} disabled={busy} onPress={() => void onWave(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficWave] : styles.discoveryActionPrimary, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
           <MaterialCommunityIcons color={huddleColors.onPrimary} name="hand-wave-outline" size={traffic ? 28 : 32} style={styles.discoveryWaveIcon} />
         </Pressable>
         <Pressable accessibilityLabel={`Pass ${profile.displayName}`} disabled={busy} onPress={() => onPass(profile)} style={({ pressed }) => [traffic ? [styles.discoveryTrafficButton, styles.discoveryTrafficPass] : styles.discoveryActionSecondary, pressed && huddleButtons.pressed, busy && styles.actionDisabled]}>
-          <Feather color={traffic ? "#E94C5C" : huddleColors.text} name="x" size={traffic ? 26 : 18} />
+          <Feather color="#E94C5C" name="x" size={traffic ? 26 : 22} />
         </Pressable>
       </View>
     );
   };
+
   return (
-    <View style={[styles.discoveryCardUnit, index > 0 && styles.discoveryCardQueued, { width: cardWidth, zIndex: index === 0 ? 12 : 4 - index }]}>
-    {index === 0 ? (
-      <>
-        <View pointerEvents="none" style={[styles.discoveryLayer, styles.discoveryLayerBack, { top: cardHeight + DISCOVERY_CARD_TO_LAYER_GAP + DISCOVERY_LAYER_VISIBLE_GAP * 3 }]} />
-        <View pointerEvents="none" style={[styles.discoveryLayer, styles.discoveryLayerThird, { top: cardHeight + DISCOVERY_CARD_TO_LAYER_GAP + DISCOVERY_LAYER_VISIBLE_GAP * 2 }]} />
-        <View pointerEvents="none" style={[styles.discoveryLayer, styles.discoveryLayerSecond, { top: cardHeight + DISCOVERY_CARD_TO_LAYER_GAP + DISCOVERY_LAYER_VISIBLE_GAP }]} />
-        <View pointerEvents="none" style={[styles.discoveryLayer, styles.discoveryLayerFront, { top: cardHeight + DISCOVERY_CARD_TO_LAYER_GAP }]} />
-      </>
-    ) : null}
-    <Animated.View {...(index === 0 ? panResponder.panHandlers : {})} style={[styles.discoveryProfileCard, { height: cardHeight, transform: [{ translateX: pan.x }, { translateY: pan.y }, { rotate }] }]}>
-      <View style={styles.discoveryPhotoWrap}>
-        <Pressable accessibilityLabel={`Open ${profile.displayName} profile`} onPress={() => onProfileTap(profile)} style={styles.discoveryProfileTap}>
-          <ResilientAvatarImage fallback={<View style={styles.discoveryPhotoFallback}><Text style={styles.discoveryPhotoFallbackText}>{initials(profile.displayName)}</Text></View>} style={styles.discoveryPhoto} uri={activeImage} />
-        </Pressable>
-        {index === 0 && mediaSources.length > 1 ? (
-          <>
-            <Pressable accessibilityLabel="Previous photo" onPress={(event) => { event.stopPropagation(); stepAlbum(-1); }} style={styles.discoveryAlbumLeftZone} />
-            <Pressable accessibilityLabel="Next photo" onPress={(event) => { event.stopPropagation(); stepAlbum(1); }} style={styles.discoveryAlbumRightZone} />
-            <View pointerEvents="none" style={styles.discoveryAlbumDots}>
-              {mediaSources.map((source, dotIndex) => <View key={`${source}:${dotIndex}`} style={[styles.discoveryAlbumDot, dotIndex === activeImageIndex && styles.discoveryAlbumDotActive]} />)}
+    <View style={[
+      styles.discoveryCardUnit,
+      index > 0 && styles.discoveryCardQueued,
+      {
+        width: cardWidth,
+        height: compactActions || index > 0 ? layerStackBottom : gluedStackHeight,
+        zIndex: index === 0 ? 20 : 16 - index,
+        elevation: index === 0 ? 20 : 16 - index,
+        ...(index > 0 ? { transform: [{ translateY: queuedTranslateY }, { scale: queuedScale }] } : {}),
+      },
+    ]}>
+      {committedDirection && index === 0 ? (
+        <View pointerEvents="none" style={[styles.discoveryPreloadCard, { height: cardHeight }]}>
+          {activeImage ? <Image accessibilityIgnoresInvertColors blurRadius={18} resizeMode="cover" source={{ uri: activeImage }} style={styles.discoveryPreloadImage} /> : <View style={styles.discoveryPreloadFallback} />}
+          <View style={styles.discoveryPreloadWash} />
+        </View>
+      ) : null}
+      <GestureDetector gesture={panGesture}>
+        <Reanimated.View style={[styles.discoveryProfileCard, { height: cardHeight }, cardAnimatedStyle]}>
+          <View style={styles.discoveryPhotoWrap}>
+            <Pressable accessibilityLabel={`Open ${profile.displayName} profile`} onPress={() => onProfileTap(profile)} style={styles.discoveryProfileTap}>
+              <ResilientAvatarImage fallback={<View style={styles.discoveryPhotoFallback}><Text style={styles.discoveryPhotoFallbackText}>{initials(profile.displayName)}</Text></View>} style={styles.discoveryPhoto} uri={activeImage} />
+            </Pressable>
+            {index === 0 && mediaSources.length > 1 ? (
+              <>
+                <Pressable accessibilityLabel="Previous photo" onPress={(event) => { event.stopPropagation(); stepAlbum(-1); }} style={styles.discoveryAlbumLeftZone} />
+                <Pressable accessibilityLabel="Next photo" onPress={(event) => { event.stopPropagation(); stepAlbum(1); }} style={styles.discoveryAlbumRightZone} />
+                <View pointerEvents="none" style={styles.discoveryAlbumDots}>
+                  {mediaSources.map((source, dotIndex) => <View key={`${source}:${dotIndex}`} style={[styles.discoveryAlbumDot, dotIndex === activeImageIndex && styles.discoveryAlbumDotActive]} />)}
+                </View>
+              </>
+            ) : null}
+            <View style={styles.discoveryPhotoScrim} />
+            <View style={styles.discoveryTopBadgeRow}>
+              <View style={styles.discoveryTopLeftBadges}>
+                {profile.hasCar ? <View style={styles.discoveryCarBadge}><FontAwesome5 color={huddleColors.onPrimary} name="car-side" size={13} /></View> : null}
+              </View>
+              {compactActions && index === 0 && !isDragging && !committedDirection ? renderDiscoveryActions("traffic") : null}
             </View>
-          </>
-        ) : null}
-        <View style={styles.discoveryPhotoScrim} />
-        <View style={styles.discoveryTopBadgeRow}>
-          <View style={styles.discoveryTopLeftBadges}>
-            {profile.hasCar ? <View style={styles.discoveryCarBadge}><FontAwesome5 color={huddleColors.text} name="car-side" size={13} /><Text style={styles.discoveryCarBadgeText}>Car</Text></View> : null}
-          </View>
-          {compactActions && index === 0 ? renderDiscoveryActions("traffic") : null}
-        </View>
-        <Animated.View style={[styles.swipeStamp, styles.passStamp, { opacity: pan.x.interpolate({ inputRange: [-120, -40], outputRange: [1, 0], extrapolate: "clamp" }) }]}><Text style={styles.passStampText}>PASS</Text></Animated.View>
-        <Animated.View style={[styles.swipeStamp, styles.waveStamp, { opacity: pan.x.interpolate({ inputRange: [40, 120], outputRange: [0, 1], extrapolate: "clamp" }) }]}><Text style={styles.waveStampText}>WAVE</Text></Animated.View>
-        <LinearGradient
-          colors={[huddleColors.profileHeroScrimStart, huddleColors.profileHeroScrimMid, huddleColors.profileHeroScrimEnd]}
-          end={{ x: 0, y: 0 }}
-          pointerEvents="none"
-          start={{ x: 0, y: 1 }}
-          style={styles.discoveryHeroScrim}
-        />
-        <View style={styles.discoveryHeroCopy}>
-          <View style={styles.discoveryHeroNameRow}>
-            <Text adjustsFontSizeToFit minimumFontScale={0.58} numberOfLines={1} style={styles.discoveryHeroName}>
-              {(profile.displayName || "User").toUpperCase()}
-            </Text>
-            {profile.isVerified ? <NativeVerifiedBadge compact scale={2} /> : null}
-          </View>
-          <View style={styles.discoveryHeroPills}>
-            {roleLabel ? (
-              <View style={styles.discoveryHeroRolePill}>
-                <View style={styles.discoveryHeroRoleDot} />
-                <Text numberOfLines={1} style={styles.discoveryHeroRoleText}>{roleLabel}</Text>
+            <Reanimated.View pointerEvents="none" style={[styles.discoverySwipeTint, styles.discoveryWaveTint, waveTintStyle]} />
+            <Reanimated.View pointerEvents="none" style={[styles.discoverySwipeTint, styles.discoveryPassTint, passTintStyle]} />
+            <Reanimated.View style={[styles.swipeStamp, styles.passStamp, passStampStyle]}><Text style={styles.passStampText}>SKIP</Text><Feather color="#E94C5C" name="x" size={18} /></Reanimated.View>
+            <Reanimated.View style={[styles.swipeStamp, styles.waveStamp, waveStampStyle]}><MaterialCommunityIcons color={huddleColors.blue} name="hand-wave-outline" size={18} style={styles.discoveryWaveStampIcon} /><Text style={styles.waveStampText}>WAVE</Text></Reanimated.View>
+            <LinearGradient
+              colors={[huddleColors.profileHeroScrimStart, huddleColors.profileHeroScrimMid, huddleColors.profileHeroScrimEnd]}
+              end={{ x: 0, y: 0 }}
+              pointerEvents="none"
+              start={{ x: 0, y: 1 }}
+              style={styles.discoveryHeroScrim}
+            />
+            <View style={styles.discoveryHeroCopy}>
+              {chips.length > 0 ? (
+                <View style={styles.discoveryChipRow}>
+                  {chips.map((chip) => (
+                    <View key={chip} style={styles.discoveryChip}>
+                      <Text style={styles.discoveryChipText}>{chip}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <View style={styles.discoveryHeroNameRow}>
+                <Text adjustsFontSizeToFit minimumFontScale={0.58} numberOfLines={1} style={styles.discoveryHeroName}>
+                  {(profile.displayName || "User").toUpperCase()}
+                </Text>
+                {profile.isVerified ? <NativeVerifiedBadge compact scale={2} /> : null}
               </View>
-            ) : null}
-            {tierLabel ? (
-              <View style={[styles.discoveryHeroTierPill, tierLabel === "Gold" ? styles.discoveryHeroGoldPill : styles.discoveryHeroPlusPill]}>
-                <Feather color={tierLabel === "Gold" ? huddleColors.premiumGold : huddleColors.onPrimary} name="star" size={14} />
-                <Text numberOfLines={1} style={[styles.discoveryHeroTierText, tierLabel === "Gold" ? styles.discoveryHeroGoldText : styles.discoveryHeroPlusText]}>{tierLabel}</Text>
+              <View style={styles.discoveryHeroPills}>
+                {roleLabel ? (
+                  <View style={styles.discoveryHeroRolePill}>
+                    <View style={styles.discoveryHeroRoleDot} />
+                    <Text numberOfLines={1} style={styles.discoveryHeroRoleText}>{roleLabel}</Text>
+                  </View>
+                ) : null}
+                {tierLabel ? (
+                  <View style={[styles.discoveryHeroTierPill, tierLabel === "Gold" ? styles.discoveryHeroGoldPill : styles.discoveryHeroPlusPill]}>
+                    <Feather color={tierLabel === "Gold" ? huddleColors.premiumGold : huddleColors.onPrimary} name="star" size={14} />
+                    <Text numberOfLines={1} style={[styles.discoveryHeroTierText, tierLabel === "Gold" ? styles.discoveryHeroGoldText : styles.discoveryHeroPlusText]}>{tierLabel}</Text>
+                  </View>
+                ) : null}
               </View>
-            ) : null}
+            </View>
           </View>
-        </View>
-      </View>
-    </Animated.View>
-    {!compactActions && index === 0 ? renderDiscoveryActions("island") : null}
+        </Reanimated.View>
+      </GestureDetector>
+      {!compactActions && index === 0 && !isDragging && !committedDirection ? <View style={[styles.discoveryActionIslandSlot, { top: islandTop }]}>{renderDiscoveryActions("island")}</View> : null}
+    </View>
+  );
+}
+
+function DiscoveryDeckBottomLayers() {
+  const { width: viewportWidth } = useWindowDimensions();
+  const cardWidth = Math.max(300, Math.min(viewportWidth - huddleSpacing.x6, 360));
+  const cardHeight = cardWidth * 1.25;
+  const layerFrontTop = cardHeight + DISCOVERY_CARD_TO_LAYER_GAP;
+  const layerSecondTop = layerFrontTop + DISCOVERY_LAYER_VISIBLE_GAP;
+  const layerThirdTop = layerSecondTop + DISCOVERY_LAYER_VISIBLE_GAP;
+  const layerBackTop = layerThirdTop + DISCOVERY_LAYER_VISIBLE_GAP;
+
+  return (
+    <View pointerEvents="none" style={[styles.discoveryLayerSet, { width: cardWidth }]}>
+      <View style={[styles.discoveryLayer, styles.discoveryLayerBack, { top: layerBackTop }]} />
+      <View style={[styles.discoveryLayer, styles.discoveryLayerThird, { top: layerThirdTop }]} />
+      <View style={[styles.discoveryLayer, styles.discoveryLayerSecond, { top: layerSecondTop }]} />
+      <View style={[styles.discoveryLayer, styles.discoveryLayerFront, { top: layerFrontTop }]} />
     </View>
   );
 }
@@ -964,6 +1175,49 @@ function MatchedRail({ rows, onOpen }: { rows: NativeChatInboxRow[]; onOpen: (ro
   );
 }
 
+function DiscoveryEndState({
+  passedCount,
+  quotaReached,
+  onResuface,
+  onExpandSearch,
+}: {
+  passedCount: number;
+  quotaReached: boolean;
+  onResuface: () => void;
+  onExpandSearch: () => void;
+}) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(24)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+  return (
+    <Animated.View style={[styles.discoveryEndWrap, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+      <Text style={styles.discoveryEndHeadline}>You've met everyone nearby.</Text>
+      {passedCount > 0 ? (
+        <Text style={styles.discoveryEndSub}>
+          {passedCount} profile{passedCount === 1 ? "" : "s"} skipped this session
+        </Text>
+      ) : null}
+      <View style={styles.discoveryEndActions}>
+        {passedCount > 0 && !quotaReached ? (
+          <Pressable onPress={onResuface} style={({ pressed }) => [styles.discoveryEndPrimary, pressed && huddleButtons.pressed]}>
+            <MaterialCommunityIcons color={huddleColors.onPrimary} name="refresh" size={18} />
+            <Text style={styles.discoveryEndPrimaryText}>Resurface skipped</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={onExpandSearch} style={({ pressed }) => [styles.discoveryEndSecondary, pressed && huddleButtons.pressed]}>
+          <Feather color={huddleColors.blue} name="sliders" size={16} />
+          <Text style={styles.discoveryEndSecondaryText}>Expand search</Text>
+        </Pressable>
+      </View>
+    </Animated.View>
+  );
+}
+
 function NativeChatsEmptyState({
   body,
   buttonLabel,
@@ -1061,6 +1315,8 @@ export function NativeChatsScreen({ userId, search, onBottomSheetOpenChange, onN
   const [rows, setRows] = useState<NativeChatInboxRow[]>([]);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [discoverProfiles, setDiscoverProfiles] = useState<NativeChatDiscoveryProfile[]>([]);
+  const [discoverySwipeActive, setDiscoverySwipeActive] = useState(false);
+  const [discoverySwipeX, setDiscoverySwipeX] = useState(0);
   const [discoverStatus, setDiscoverStatus] = useState<NativeChatDiscoverStatus>("ready");
   const [discoverLocationPermission, setDiscoverLocationPermission] = useState<NativeLocationPermissionDetail>({ canAskAgain: true, state: "unknown" });
   const [discoverySeenToday, setDiscoverySeenToday] = useState(0);
@@ -2062,6 +2318,10 @@ export function NativeChatsScreen({ userId, search, onBottomSheetOpenChange, onN
   const discoveryQuotaReached = discoveryDailyCap !== null && discoverySeenToday >= discoveryDailyCap;
   const discoveryQuotaLocked = topTab === "discover" && discoverStatus === "ready" && discoveryQuotaReached && normalizeQuotaTier(effectiveTier) !== "gold";
   const discoveryQuotaCopy = quotaConfig.copy.discovery.exhausted[normalizeQuotaTier(effectiveTier)];
+  const discoveryDeckProfiles = discoverProfiles.slice(0, 3);
+  const currentDiscoveryProfile = discoveryDeckProfiles[0] ?? null;
+  const pendingDiscoverEmpty = Boolean(currentDiscoveryProfile && discoveryDeckProfiles.length === 1 && discoverySwipeActive);
+  const renderDiscoverEmpty = discoverStatus === "ready" && !discoveryQuotaLocked && (discoverProfiles.length === 0 || pendingDiscoverEmpty || discoveryQuotaReached);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -2419,11 +2679,21 @@ export function NativeChatsScreen({ userId, search, onBottomSheetOpenChange, onN
             onPress={() => { void handleDiscoverEnableLocation(); }}
           />
         ) : null}
-        {!loading && topTab === "discover" && discoverStatus === "ready" && !discoveryQuotaLocked && (discoverProfiles.length === 0 || discoveryQuotaReached) ? <NativeChatsEmptyState buttonLabel={passedDiscoveryIds.size > 0 && !discoveryQuotaReached ? "Resurface Skipped Profiles" : undefined} onPress={discoveryQuotaReached ? undefined : handleResurfacePassedProfiles} title="All caught up!" /> : null}
+        {!loading && topTab === "discover" && renderDiscoverEmpty ? <DiscoveryEndState passedCount={passedDiscoveryIds.size} quotaReached={discoveryQuotaReached} onResuface={handleResurfacePassedProfiles} onExpandSearch={() => setFilterOpen(true)} /> : null}
         {!loading && topTab === "discover" && discoveryQuotaLocked ? <NativeChatsEmptyState body={discoveryQuotaCopy} buttonLabel={effectiveTier === "free" ? "Upgrade to Huddle+" : "Upgrade to Gold"} onPress={() => onNavigate("/premium")} title="Discover limit reached" /> : null}
-        {!loading && topTab === "discover" && discoverStatus === "ready" && !discoveryQuotaReached && discoverProfiles.length > 0 ? (
+        {!loading && topTab === "discover" && discoverStatus === "ready" && !renderDiscoverEmpty && !discoveryQuotaReached && currentDiscoveryProfile ? (
           <View style={styles.discoveryStack}>
-            {discoverProfiles.slice(0, 3).map((profile, index) => <DiscoveryProfileCard key={profile.id} busy={discoverBusyId === profile.id} index={index} profile={profile} onPass={handlePassDiscovery} onProfileTap={handleDiscoveryProfileTap} onStar={handleStarDiscovery} onWave={handleWaveDiscovery} />)}
+            <DiscoveryDeckBottomLayers />
+            {discoveryDeckProfiles.map((profile, index) => {
+                const profileChips: string[] = [];
+                if (profile.petSpecies?.length === 1) {
+                  const sp = profile.petSpecies[0];
+                  profileChips.push(`${SPECIES_CHIP_EMOJI[sp] ?? "🐾"} ${sp}`);
+                }
+                if (effectiveTier === "gold" && filters.activeOnly) profileChips.push("Active today");
+                if (effectiveTier === "gold" && filters.whoWavedAtMe) profileChips.push("Waved at you");
+                return <DiscoveryProfileCard key={profile.id} activeSwipeX={discoverySwipeX} busy={discoverBusyId === profile.id} chips={profileChips} index={index} profile={profile} onPass={handlePassDiscovery} onProfileTap={handleDiscoveryProfileTap} onStar={handleStarDiscovery} onSwipePhaseChange={setDiscoverySwipeActive} onSwipeProgress={setDiscoverySwipeX} onWave={handleWaveDiscovery} />;
+              })}
           </View>
         ) : null}
 	        {!loading && topTab === "chats" && mainTab === "groups" && groupSubTab === "explore" && invitedExploreGroups.length + exploreGroups.length > 0 ? (
@@ -4338,14 +4608,19 @@ const styles = StyleSheet.create({
   matchRailVerifiedBadge: { position: "absolute", right: -3, bottom: -2 },
   matchRailCarBadge: { position: "absolute", left: -1, bottom: -1, width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGold, borderWidth: 2, borderColor: huddleColors.canvas },
   discoveryStack: { position: "relative", alignItems: "center", paddingBottom: huddleSpacing.x4 },
+  discoveryLayerSet: { position: "absolute", top: 0, zIndex: 0, elevation: 0 },
   discoveryLayer: { position: "absolute", left: 0, right: 0, height: DISCOVERY_LAYER_HEIGHT, borderRadius: huddleRadii.glass },
   discoveryLayerBack: { zIndex: 1, elevation: 1, backgroundColor: "rgba(79,86,119,0.14)", transform: [{ scaleX: 0.76 }] },
   discoveryLayerThird: { zIndex: 2, elevation: 2, backgroundColor: "rgba(33,71,201,0.30)", transform: [{ scaleX: 0.84 }] },
   discoveryLayerSecond: { zIndex: 3, elevation: 3, backgroundColor: "rgba(33,71,201,0.54)", transform: [{ scaleX: 0.92 }] },
   discoveryLayerFront: { zIndex: 4, elevation: 4, backgroundColor: "rgba(17,37,126,0.84)", transform: [{ scaleX: 0.96 }] },
-  discoveryCardUnit: { alignItems: "center", gap: DISCOVERY_CARD_TO_LAYER_GAP + DISCOVERY_LAYER_VISIBLE_GAP * 3 + DISCOVERY_LAYER_HEIGHT + DISCOVERY_LAYER_TO_ISLAND_GAP },
+  discoveryCardUnit: { position: "relative", alignItems: "center" },
   discoveryProfileCard: { position: "relative", zIndex: 20, width: "100%", overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.cardBorderSoft, ...huddleShadows.glassElevation1, elevation: 20 },
-  discoveryCardQueued: { position: "absolute", top: huddleSpacing.x2, opacity: 0.2, transform: [{ scale: 0.96 }] },
+  discoveryCardQueued: { position: "absolute", top: huddleSpacing.x2, opacity: 1 },
+  discoveryPreloadCard: { position: "absolute", left: 0, right: 0, top: 0, zIndex: 18, overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.blueSoft, ...huddleShadows.glassElevation1, elevation: 18 },
+  discoveryPreloadImage: { width: "100%", height: "100%" },
+  discoveryPreloadFallback: { flex: 1, backgroundColor: huddleColors.blue },
+  discoveryPreloadWash: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.36)" },
   discoveryPhotoWrap: { ...StyleSheet.absoluteFillObject, overflow: "hidden", borderRadius: huddleRadii.modal, backgroundColor: huddleColors.blueSoft },
   discoveryProfileTap: { flex: 1 },
   discoveryPhoto: { width: "100%", height: "100%", borderRadius: huddleRadii.modal },
@@ -4359,24 +4634,27 @@ const styles = StyleSheet.create({
   discoveryPhotoScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(9, 21, 95, 0.08)" },
   discoveryTopBadgeRow: { position: "absolute", left: huddleSpacing.x4, right: huddleSpacing.x4, top: huddleSpacing.x4, zIndex: 8, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
   discoveryTopLeftBadges: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
-  discoveryCarBadge: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGoldSoft, borderWidth: 1, borderColor: huddleColors.premiumGold },
-  discoveryCarBadgeText: { fontFamily: "Urbanist-800", fontSize: 12, lineHeight: 16, color: huddleColors.text },
+  discoveryCarBadge: { width: 24, height: 24, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue },
   discoveryShieldBadge: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.photoControl },
   discoveryTrafficActions: { gap: huddleSpacing.x3, alignItems: "center", paddingTop: huddleSpacing.x1 },
   discoveryTrafficButton: { width: 50, height: 50, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, ...huddleShadows.photoControl },
-  discoveryTrafficStar: { backgroundColor: huddleColors.canvas, borderColor: huddleColors.fieldBorderSoft },
+  discoveryTrafficStar: { backgroundColor: huddleColors.premiumGold, borderColor: huddleColors.premiumGold },
   discoveryTrafficWave: { backgroundColor: huddleColors.blue, borderColor: huddleColors.blue },
   discoveryTrafficPass: { backgroundColor: huddleColors.canvas, borderColor: huddleColors.glassBorder },
   discoveryWaveIcon: { transform: [{ rotate: "-60deg" }] },
-  swipeStamp: { position: "absolute", top: huddleSpacing.x5, borderRadius: huddleRadii.card, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, borderWidth: 2 },
-  passStamp: { left: huddleSpacing.x5, borderColor: huddleColors.validationRed, transform: [{ rotate: "-10deg" }] },
-  waveStamp: { right: huddleSpacing.x5, borderColor: huddleColors.success, transform: [{ rotate: "10deg" }] },
-  passStampText: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.validationRed },
-  waveStampText: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.success },
+  discoverySwipeTint: { ...StyleSheet.absoluteFillObject, zIndex: 12 },
+  discoveryWaveTint: { backgroundColor: "rgba(33,71,201,0.96)" },
+  discoveryPassTint: { backgroundColor: "rgba(233,76,92,0.95)" },
+  swipeStamp: { position: "absolute", zIndex: 18, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, borderRadius: huddleRadii.card, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2, borderWidth: 2, backgroundColor: "rgba(255,255,255,0.52)" },
+  passStamp: { right: huddleSpacing.x4, top: huddleSpacing.x4, borderColor: "#E94C5C" },
+  waveStamp: { left: huddleSpacing.x4, bottom: 130, borderColor: huddleColors.blue },
+  passStampText: { fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 18, letterSpacing: 2.3, color: "#E94C5C" },
+  waveStampText: { fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 18, letterSpacing: 2.3, color: huddleColors.blue },
+  discoveryWaveStampIcon: { transform: [{ rotate: "-60deg" }] },
   discoveryHeroScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: "56%" },
   discoveryHeroCopy: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: huddleSpacing.x4, paddingTop: huddleSpacing.x9, paddingBottom: huddleSpacing.x5 },
   discoveryHeroNameRow: { maxWidth: "100%", flexDirection: "row", alignItems: "flex-end", alignSelf: "flex-start", flexWrap: "nowrap", gap: huddleSpacing.x1 },
-  discoveryHeroName: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-800", fontSize: 30, lineHeight: 32, includeFontPadding: false, textTransform: "uppercase", color: huddleColors.onPrimary, textShadowColor: huddleColors.profileNameShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
+  discoveryHeroName: { flexShrink: 1, minWidth: 0, fontFamily: "Urbanist-800", fontSize: 34, lineHeight: 36, includeFontPadding: false, textTransform: "uppercase", color: huddleColors.onPrimary, textShadowColor: huddleColors.profileNameShadow, textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
   discoveryHeroPills: { marginTop: huddleSpacing.x3, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2, minWidth: 0, flexWrap: "nowrap" },
   discoveryHeroRolePill: { minHeight: 34, alignSelf: "flex-start", maxWidth: "72%", flexShrink: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, overflow: "hidden", borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.profileHeroRoleBorder, backgroundColor: huddleColors.blueSoft, paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x1 },
   discoveryHeroRoleDot: { width: 6, height: 6, flexShrink: 0, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue },
@@ -4398,16 +4676,26 @@ const styles = StyleSheet.create({
   discoveryMetaRow: { gap: huddleSpacing.x2 },
   discoveryGlassMeta: { flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2 },
   discoveryGlassMetaText: { flexShrink: 1, fontFamily: "Urbanist-600", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.onPrimary },
-  discoveryChip: { minHeight: 32, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: huddleSpacing.x1, paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blueSoft, borderWidth: 1, borderColor: huddleColors.fieldFocusRing },
-  discoveryChipText: { flexShrink: 1, fontFamily: "Urbanist-700", fontSize: 13, lineHeight: 17, color: huddleColors.text },
+  discoveryChipRow: { flexDirection: "row", flexWrap: "wrap", gap: huddleSpacing.x1, marginBottom: huddleSpacing.x2 },
+  discoveryChip: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: "rgba(255,255,255,0.18)", borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
+  discoveryChipText: { flexShrink: 1, fontFamily: "Urbanist-700", fontSize: 12, lineHeight: 16, color: huddleColors.onPrimary },
+  discoveryEndWrap: { width: "100%", alignItems: "center", paddingTop: huddleSpacing.x10, paddingHorizontal: huddleSpacing.x6, gap: huddleSpacing.x2 },
+  discoveryEndHeadline: { fontFamily: "Urbanist-800", fontSize: huddleType.h4, lineHeight: huddleType.h4Line, color: huddleColors.text, textAlign: "center" },
+  discoveryEndSub: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.subtext, textAlign: "center" },
+  discoveryEndActions: { marginTop: huddleSpacing.x4, gap: huddleSpacing.x3, alignItems: "center", width: "100%" },
+  discoveryEndPrimary: { minHeight: 48, width: "100%", maxWidth: 280, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, paddingHorizontal: huddleSpacing.x5, ...huddleShadows.photoControl },
+  discoveryEndPrimaryText: { fontFamily: "Urbanist-700", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.onPrimary },
+  discoveryEndSecondary: { minHeight: 44, width: "100%", maxWidth: 280, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x2, borderRadius: huddleRadii.pill, borderWidth: 1, borderColor: huddleColors.fieldFocusRing, backgroundColor: huddleColors.canvas, paddingHorizontal: huddleSpacing.x5 },
+  discoveryEndSecondaryText: { fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.blue },
   discoveryRoleBadge: { minHeight: 32, maxWidth: "100%", justifyContent: "center", paddingHorizontal: huddleSpacing.x3, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blueSoft, borderWidth: 1, borderColor: huddleColors.fieldFocusRing },
   discoveryRoleBadgeText: { flexShrink: 1, fontFamily: "Urbanist-800", fontSize: 13, lineHeight: 17, color: huddleColors.blue },
   discoveryPetLine: { fontFamily: "Urbanist-800", fontSize: huddleType.label, lineHeight: huddleType.labelLine, color: huddleColors.text },
   discoveryBio: { fontFamily: "Urbanist-500", fontSize: huddleType.body, lineHeight: 22, color: huddleColors.subtext },
   discoveryActionIsland: { width: 220, height: 72, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: huddleSpacing.x3, padding: huddleSpacing.x2, borderRadius: huddleRadii.pill, backgroundColor: huddleColors.glassChrome, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.glassElevation1 },
-  discoveryActionSecondary: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.mutedCanvas, borderWidth: 0, ...huddleShadows.photoControl },
+  discoveryActionIslandSlot: { position: "absolute", left: 0, right: 0, alignItems: "center", zIndex: 30, elevation: 30 },
+  discoveryActionSecondary: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.glassBorder, ...huddleShadows.photoControl },
   discoveryActionSecondaryText: { ...huddleButtons.label, color: huddleColors.text },
-  discoveryActionStar: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.canvas, borderWidth: 1, borderColor: huddleColors.fieldBorderSoft, ...huddleShadows.photoControl },
+  discoveryActionStar: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.premiumGold, borderWidth: 1, borderColor: huddleColors.premiumGold, ...huddleShadows.photoControl },
   discoveryStarButton: { flexGrow: 0, flexShrink: 0 },
   discoveryActionPrimary: { width: 56, height: 56, minHeight: 56, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, backgroundColor: huddleColors.blue, borderWidth: 1, borderColor: huddleColors.blue, ...huddleShadows.photoControl },
   discoveryActionPrimaryText: { ...huddleButtons.label, color: huddleColors.onPrimary },
