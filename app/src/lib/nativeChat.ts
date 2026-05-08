@@ -1,5 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getNativeCurrentCoordinates } from "./nativeLocation";
+import {
+  normalizeNativeProfilePhotos,
+  resolveNativeProfilePhotos,
+} from "./nativeProfilePhotos";
+import {
+  canonicalizeNativeSocialAlbumEntries,
+  normalizeNativeAvailabilityStatus,
+} from "./nativePublicProfile";
 import { resolveNativeAvatarUrl } from "./nativeStorageUrlCache";
 import { supabase } from "./supabase";
 
@@ -66,7 +74,7 @@ export type NativeChatRead = {
 export type NativeChatAttachment = {
   bucket: typeof NATIVE_CHAT_ATTACHMENTS_BUCKET;
   path: string;
-  url: string;
+  url: string | null;
   name: string;
   mime: string;
   size: number | null;
@@ -135,6 +143,7 @@ export type NativeChatDiscoveryProfile = {
   id: string;
   displayName: string;
   avatarUrl: string | null;
+  coverUrl: string | null;
   isVerified: boolean;
   hasCar: boolean;
   bio: string | null;
@@ -160,6 +169,7 @@ export type NativeChatDiscoveryProfile = {
   petExperienceYears: number | null;
   languages: string[];
   socialAlbum: string[];
+  socialRoles: string[];
   socialRole: string | null;
   lastActiveAt: string | null;
   updatedAt: string | null;
@@ -220,13 +230,36 @@ export type NativeExploreGroup = {
   invitePending: boolean;
   inviterName: string | null;
   requested: boolean;
+  distanceKm?: number | null;
 };
 
 export type NativeGroupManagementSnapshot = {
   members: Array<{ userId: string; name: string | null; avatarUrl: string | null; role: string | null; isVerified: boolean; isMuted?: boolean }>;
   joinRequests: Array<{ id: string; userId: string; name: string | null; avatarUrl: string | null; status: string | null; isVerified: boolean }>;
-  pendingInvites: Array<{ id: string; userId: string; name: string | null; avatarUrl: string | null; status: string | null; isVerified: boolean }>;
+  pendingInvites: Array<{ id: string; userId: string; name: string | null; socialId: string | null; avatarUrl: string | null; status: string | null; isVerified: boolean }>;
   mediaUrls: string[];
+};
+
+const enqueueNativeGroupInviteNotifications = async (options: { chatId: string; chatName: string; inviterUserId: string; inviteeUserIds: string[] }) => {
+  const inviteeUserIds = Array.from(new Set(options.inviteeUserIds.map(cleanId).filter((id): id is string => Boolean(id) && id !== options.inviterUserId)));
+  if (!inviteeUserIds.length) return;
+  const { data } = await supabase
+    .from("profiles" as never)
+    .select("display_name" as never)
+    .eq("id" as never, options.inviterUserId as never)
+    .maybeSingle();
+  const inviterName = cleanString(asRecord(data).display_name) || "Someone";
+  await Promise.all(inviteeUserIds.map((inviteeUserId) => (
+    (supabase.rpc as unknown as (fn: string, params: Record<string, unknown>) => Promise<{ error: { message?: string } | null }>)("enqueue_notification", {
+      p_user_id: inviteeUserId,
+      p_actor_id: options.inviterUserId,
+      p_kind: "group_invite",
+      p_title: "Group invite",
+      p_body: `${inviterName} invited you to join ${options.chatName || "a group"}.`,
+      p_href: "/chats?tab=groups",
+      p_data: { chat_id: options.chatId, chat_name: options.chatName || "Group", inviter_name: inviterName },
+    }).catch(() => ({ error: null }))
+  )));
 };
 
 export async function fetchNativeGroupPreviewMembers(chatId: string): Promise<NativeGroupManagementSnapshot["members"]> {
@@ -465,11 +498,15 @@ const mapDiscoveryProfile = (value: unknown): NativeChatDiscoveryProfile => {
   const normalizeSocialRole = (role: string | null) => (
     /^animal friend\s*\(no pet\)$/i.test(String(role || "").trim()) ? "Animal Friend" : role
   );
-  const socialRole = cleanString(row.social_role) || cleanString(Array.isArray(row.availability_status) ? row.availability_status[0] : null);
+  const socialRoles = normalizeNativeAvailabilityStatus(row)
+    .map(normalizeSocialRole)
+    .filter((role): role is string => Boolean(role));
+  const avatarUrl = resolveNativeAvatarUrl(row.avatar_url);
   return {
     id: String(row.id || ""),
     displayName: cleanString(row.display_name) || "Huddle member",
-    avatarUrl: resolveNativeAvatarUrl(row.avatar_url),
+    avatarUrl,
+    coverUrl: avatarUrl,
     isVerified: verifiedValue(row),
     hasCar: booleanValue(row.has_car),
     bio: cleanString(row.bio),
@@ -495,11 +532,43 @@ const mapDiscoveryProfile = (value: unknown): NativeChatDiscoveryProfile => {
     petExperienceYears: firstFiniteNumber(row.pet_experience_years, row.experience_years),
     languages: stringArray(row.languages),
     socialAlbum: stringArray(row.social_album).map(resolveNativeAvatarUrl).filter((url): url is string => Boolean(url)),
-    socialRole: normalizeSocialRole(socialRole),
+    socialRoles,
+    socialRole: socialRoles[0] ?? null,
     lastActiveAt: cleanString(row.last_active_at),
     updatedAt: cleanString(row.updated_at),
     createdAt: cleanString(row.created_at),
     score: numberValue(row.score),
+  };
+};
+
+const hydrateDiscoveryProfileFromProfileViewSource = async (
+  row: Record<string, unknown>,
+): Promise<NativeChatDiscoveryProfile> => {
+  const profile = mapDiscoveryProfile(row);
+  const socialAlbum = canonicalizeNativeSocialAlbumEntries(stringArray(row.social_album));
+  const photos = normalizeNativeProfilePhotos(row.photos, {
+    avatarUrl: cleanString(row.avatar_url),
+    socialAlbum,
+  });
+  const resolvedPhotoUrls = await resolveNativeProfilePhotos(photos);
+  const profilePhotoAlbum = [
+    resolvedPhotoUrls.cover,
+    resolvedPhotoUrls.establishing,
+    resolvedPhotoUrls.pack,
+    resolvedPhotoUrls.solo,
+    resolvedPhotoUrls.closer,
+  ].filter((url): url is string => Boolean(url));
+  const orderedAlbum = profilePhotoAlbum.length > 0 ? profilePhotoAlbum : [
+    ...profile.socialAlbum,
+    profile.avatarUrl,
+  ].filter((url): url is string => Boolean(url));
+  const uniqueAlbum = Array.from(new Set(orderedAlbum));
+
+  return {
+    ...profile,
+    avatarUrl: uniqueAlbum[0] ?? profile.avatarUrl,
+    coverUrl: resolvedPhotoUrls.cover ?? uniqueAlbum[0] ?? profile.coverUrl,
+    socialAlbum: uniqueAlbum,
   };
 };
 
@@ -698,6 +767,33 @@ export async function fetchNativeExploreGroups(options: { userId: string; joined
   return { invited, groups };
 }
 
+export async function fetchNativePendingGroupInvitePrompts(userId: string) {
+  const inviteeUserId = cleanId(userId);
+  if (!inviteeUserId) return [] as NativeExploreGroup[];
+  const { data, error } = await supabase
+    .from("group_chat_invites" as never)
+    .select("id,chat_id,chat_name,created_at,profiles:profiles!group_chat_invites_inviter_user_id_fkey(display_name)" as never)
+    .eq("invitee_user_id" as never, inviteeUserId as never)
+    .eq("status" as never, "pending" as never)
+    .order("created_at" as never, { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return (((data || []) as unknown) as Record<string, unknown>[])
+    .map((row) => {
+      const inviter = asRecord(Array.isArray(row.profiles) ? row.profiles[0] : row.profiles);
+      const inviterName = cleanString(inviter.display_name);
+      return mapExploreGroup({
+        id: row.chat_id,
+        chat_id: row.chat_id,
+        chat_name: row.chat_name,
+        created_at: row.created_at,
+        invite_pending: true,
+        inviter_name: inviterName,
+      }, { invite: { invite_id: row.id, inviter_name: inviterName }, requested: false });
+    })
+    .filter((group) => group.id && group.inviteId);
+}
+
 export async function acceptNativeGroupInvite(options: { inviteId?: string | null; chatId: string }) {
   const inviteId = cleanId(options.inviteId);
   let chatId = cleanId(options.chatId);
@@ -720,7 +816,15 @@ export async function acceptNativeGroupInvite(options: { inviteId?: string | nul
     ? await nativeChatRpc("accept_group_chat_invite_by_id", { p_invite_id: inviteId })
     : await nativeChatRpc("accept_group_chat_invite", { p_chat_id: chatId });
   if (error) throw error;
-  const joined = Array.isArray(data) ? booleanValue(asRecord(data[0]).joined) : false;
+  let joined = Array.isArray(data) ? booleanValue(asRecord(data[0]).joined) : false;
+  // Fallback: if the invite-by-id lookup returned false (e.g. invite already consumed or status changed),
+  // retry via the chat-id path which accepts any pending invite for this user in this room.
+  if (!joined && inviteId && chatId) {
+    const fallback = await nativeChatRpc("accept_group_chat_invite", { p_chat_id: chatId });
+    if (!fallback.error) {
+      joined = Array.isArray(fallback.data) ? booleanValue(asRecord((fallback.data as unknown[])[0]).joined) : false;
+    }
+  }
   if (!joined) throw new Error("group_invite_unavailable");
 }
 
@@ -782,7 +886,7 @@ export async function joinNativeGroupByCode(options: { userId: string; code: str
   void supabase.from(NATIVE_CHAT_TABLES.messages).insert({
     chat_id: chatId,
     sender_id: options.userId,
-    content: JSON.stringify({ kind: "membership", text: `${displayName} has joined the group!` }),
+    content: JSON.stringify({ kind: "membership", text: `${displayName} just joined the chat.` }),
   });
   return { chatId, name: cleanString(row.chat_name) || "Group" };
 }
@@ -852,6 +956,8 @@ export async function createNativeGroupChat(options: {
       .upsert(inviteRows as never, { onConflict: "chat_id,invitee_user_id", ignoreDuplicates: false });
     if (inviteError) {
       console.warn("[native.chat] group_invite_aux_write_failed", { chatId, message: inviteError.message });
+    } else {
+      void enqueueNativeGroupInviteNotifications({ chatId, chatName: name, inviterUserId: userId, inviteeUserIds: inviteRows.map((row) => row.invitee_user_id) });
     }
   }
   return { chatId, name };
@@ -863,10 +969,38 @@ export async function fetchNativeGroupManagementSnapshot(chatId: string): Promis
   const [membersResult, requestsResult, invitesResult, mediaResult] = await Promise.all([
     nativeChatRpc("get_native_group_members", { p_chat_id: roomId }),
     supabase.from("group_join_requests").select("id,user_id,status,profiles:profiles!group_join_requests_user_id_fkey(display_name,avatar_url,is_verified,verification_status)").eq("chat_id", roomId).eq("status", "pending").limit(50),
-    supabase.from("group_chat_invites" as never).select("id,invitee_user_id,status,profiles:profiles!group_chat_invites_invitee_user_id_fkey(display_name,avatar_url,is_verified,verification_status)" as never).eq("chat_id" as never, roomId as never).eq("status" as never, "pending" as never).limit(50),
+    supabase.from("group_chat_invites" as never).select("id,invitee_user_id,status,profiles:profiles!group_chat_invites_invitee_user_id_fkey(display_name,social_id,avatar_url,is_verified,verification_status)" as never).eq("chat_id" as never, roomId as never).eq("status" as never, "pending" as never).limit(50),
     supabase.from(NATIVE_CHAT_TABLES.messages).select("content,created_at").eq("chat_id", roomId).order("created_at", { ascending: false }).limit(80),
   ]);
   const profileOf = (row: Record<string, unknown>) => asRecord(Array.isArray(row.profiles) ? row.profiles[0] : row.profiles);
+  const mediaAttachments = (((mediaResult.data || []) as unknown) as Record<string, unknown>[]).flatMap((row) => {
+    try {
+      const parsed = JSON.parse(String(row.content || "{}")) as { attachments?: Array<{ url?: string | null; path?: string | null; bucket?: string | null; mime?: string | null }> };
+      return (parsed.attachments || [])
+        .filter((attachment) => String(attachment.mime || "").startsWith("image/"))
+        .map((attachment) => ({
+          url: cleanString(attachment.url),
+          path: cleanString(attachment.path),
+          bucket: cleanString(attachment.bucket),
+        }))
+        .filter((attachment) => attachment.url || attachment.path);
+    } catch {
+      return [];
+    }
+  });
+  const pathAttachments = mediaAttachments.filter((attachment) => attachment.path && (!attachment.bucket || attachment.bucket === NATIVE_CHAT_ATTACHMENTS_BUCKET));
+  const signedByPath = new Map<string, string | null>();
+  if (pathAttachments.length > 0) {
+    const uniquePaths = Array.from(new Set(pathAttachments.map((attachment) => attachment.path).filter((path): path is string => Boolean(path))));
+    const { data: signedRows } = await supabase.storage.from(NATIVE_CHAT_ATTACHMENTS_BUCKET).createSignedUrls(uniquePaths, 60 * 60 * 24 * 30);
+    (signedRows || []).forEach((row, index) => {
+      signedByPath.set(uniquePaths[index], row.signedUrl || null);
+    });
+  }
+  const mediaUrls = Array.from(new Set(mediaAttachments
+    .map((attachment) => (attachment.path ? signedByPath.get(attachment.path) : null) || attachment.url)
+    .filter((url): url is string => Boolean(url))))
+    .slice(0, 12);
   return {
     members: (((membersResult.data || []) as unknown) as Record<string, unknown>[]).map((row) => {
       return { userId: String(row.user_id || ""), role: cleanString(row.role), name: cleanString(row.display_name), avatarUrl: resolveNativeAvatarUrl(row.avatar_url), isVerified: verifiedValue(row), isMuted: row.is_muted === true };
@@ -877,19 +1011,9 @@ export async function fetchNativeGroupManagementSnapshot(chatId: string): Promis
     }).filter((row) => row.id && row.userId),
     pendingInvites: (((invitesResult.data || []) as unknown) as Record<string, unknown>[]).map((row) => {
       const profile = profileOf(row);
-      return { id: String(row.id || ""), userId: String(row.invitee_user_id || ""), status: cleanString(row.status), name: cleanString(profile.display_name), avatarUrl: resolveNativeAvatarUrl(profile.avatar_url), isVerified: verifiedValue(profile) };
+      return { id: String(row.id || ""), userId: String(row.invitee_user_id || ""), status: cleanString(row.status), name: cleanString(profile.display_name), socialId: cleanString(profile.social_id)?.replace(/^@/, "") || null, avatarUrl: resolveNativeAvatarUrl(profile.avatar_url), isVerified: verifiedValue(profile) };
     }).filter((row) => row.id && row.userId),
-    mediaUrls: (((mediaResult.data || []) as unknown) as Record<string, unknown>[]).flatMap((row) => {
-      try {
-        const parsed = JSON.parse(String(row.content || "{}")) as { attachments?: Array<{ url?: string | null; mime?: string | null }> };
-        return (parsed.attachments || [])
-          .filter((attachment) => String(attachment.mime || "").startsWith("image/") || attachment.url)
-          .map((attachment) => String(attachment.url || "").trim())
-          .filter(Boolean);
-      } catch {
-        return [];
-      }
-    }).slice(0, 12),
+    mediaUrls,
   };
 }
 
@@ -938,6 +1062,20 @@ export async function inviteNativeGroupMembers(options: { chatId: string; chatNa
   const { error } = await supabase
     .from("group_chat_invites" as never)
     .upsert(rows as never, { onConflict: "chat_id,invitee_user_id", ignoreDuplicates: false });
+  if (error) throw error;
+  void enqueueNativeGroupInviteNotifications({ chatId, chatName: cleanString(options.chatName) || "Group", inviterUserId, inviteeUserIds: rows.map((row) => row.invitee_user_id) });
+}
+
+export async function cancelNativeGroupInvite(options: { chatId: string; inviteId: string }) {
+  const chatId = cleanId(options.chatId);
+  const inviteId = cleanId(options.inviteId);
+  if (!chatId || !inviteId) throw new Error("missing_group_invite");
+  const { error } = await supabase
+    .from("group_chat_invites" as never)
+    .update({ status: "declined", responded_at: new Date().toISOString() } as never)
+    .eq("id" as never, inviteId as never)
+    .eq("chat_id" as never, chatId as never)
+    .eq("status" as never, "pending" as never);
   if (error) throw error;
 }
 
@@ -1112,23 +1250,24 @@ export async function fetchNativeChatDiscoveryProfiles(
   if (error || isRpcSignatureDrift(error)) {
     const { data: fallbackRows, error: fallbackError } = await supabase
       .from("profiles")
-      .select("id,display_name,avatar_url,bio,dob,relationship_status,orientation,gender_genre,occupation,school,major,degree,height,has_car,verification_status,is_verified,pet_experience,experience_years,languages,effective_tier,tier,availability_status,last_active_at,updated_at,created_at,last_lat,last_lng,location_name,location_country")
+      .select("*")
       .neq("id", viewerId)
       .limit(80);
     if (fallbackError) throw fallbackError;
-	    const fallbackProfiles = guardProfiles((fallbackRows || []).map(mapDiscoveryProfile))
-	      .filter((profile) => {
-	        if (filters?.verifiedOnly && !profile.isVerified) return false;
-	        if (filters?.hasCar && !profile.hasCar) return false;
-	        if (filters?.genders?.length && profile.gender && !filters.genders.includes(profile.gender)) return false;
-	        if (profile.age !== null && (profile.age < (filters?.ageMin ?? 16) || profile.age > (filters?.ageMax ?? 99))) return false;
-	        if (isPremium && profile.height !== null && (profile.height < (filters?.heightMin ?? 100) || profile.height > (filters?.heightMax ?? NATIVE_DISCOVERY_HEIGHT_MAX_CM))) return false;
-	        return true;
-	      })
-	      .sort((left, right) =>
-	        discoveryFallbackRankValue(right) - discoveryFallbackRankValue(left) ||
-	        String(left.displayName || "").localeCompare(String(right.displayName || ""))
-	      );
+    const fallbackMapped = await Promise.all((fallbackRows || []).map((row) => hydrateDiscoveryProfileFromProfileViewSource(asRecord(row))));
+    const fallbackProfiles = guardProfiles(fallbackMapped)
+      .filter((profile) => {
+        if (filters?.verifiedOnly && !profile.isVerified) return false;
+        if (filters?.hasCar && !profile.hasCar) return false;
+        if (filters?.genders?.length && profile.gender && !filters.genders.includes(profile.gender)) return false;
+        if (profile.age !== null && (profile.age < (filters?.ageMin ?? 16) || profile.age > (filters?.ageMax ?? 99))) return false;
+        if (isPremium && profile.height !== null && (profile.height < (filters?.heightMin ?? 100) || profile.height > (filters?.heightMax ?? NATIVE_DISCOVERY_HEIGHT_MAX_CM))) return false;
+        return true;
+      })
+      .sort((left, right) =>
+        discoveryFallbackRankValue(right) - discoveryFallbackRankValue(left) ||
+        String(left.displayName || "").localeCompare(String(right.displayName || ""))
+      );
     return { status: "ready", locationLabel, anchor: { lat, lng }, profiles: fallbackProfiles };
   }
   const rawRows = (Array.isArray(data) ? data : [])
@@ -1139,7 +1278,7 @@ export async function fetchNativeChatDiscoveryProfiles(
   if (profileIds.length > 0) {
     const { data: enrichmentRows } = await supabase
       .from("profiles")
-      .select("id,pet_experience,experience_years,degree,languages,height,has_car,verification_status,is_verified,relationship_status,orientation,gender_genre,availability_status,last_active_at,updated_at,created_at,last_lat,last_lng,location_name,location_district,location_country")
+      .select("*")
       .in("id", profileIds);
     (Array.isArray(enrichmentRows) ? enrichmentRows : []).forEach((row) => {
       const record = asRecord(row);
@@ -1147,10 +1286,11 @@ export async function fetchNativeChatDiscoveryProfiles(
       if (id) enrichmentById.set(id, record);
     });
   }
-  const profiles = guardProfiles(rawRows.map((row) => {
+  const mappedProfiles = await Promise.all(rawRows.map((row) => {
     const id = cleanId(row.id);
-    return mapDiscoveryProfile({ ...row, ...(id ? enrichmentById.get(id) : null) });
+    return hydrateDiscoveryProfileFromProfileViewSource({ ...row, ...(id ? enrichmentById.get(id) : null) });
   }));
+  const profiles = guardProfiles(mappedProfiles);
   return {
     status: "ready",
     locationLabel,
@@ -1188,14 +1328,12 @@ export async function ensureNativeDirectChatRoom(targetUserId: string, targetNam
   const { data: sessionData } = await supabase.auth.getSession();
   const actorId = cleanId(sessionData.session?.user.id);
   if (!actorId) throw new Error("not_authenticated");
-  await assertNativeDirectRelationshipAllowed(actorId, target);
   let lastRpcError: string | null = null;
   for (const payload of payloadVariants) {
     const { data, error } = await nativeChatRpc("ensure_direct_chat_room", payload);
     if (!error && data) {
       const roomId = cleanId(data);
       if (roomId) {
-        await validateNativeDirectRoom(roomId, actorId, target);
         return roomId;
       }
     }
@@ -1236,7 +1374,6 @@ export async function ensureNativeDirectChatRoom(targetUserId: string, targetNam
   });
   const edgeRoomId = cleanId((edgeData as { roomId?: unknown } | null)?.roomId);
   if (!edgeError && edgeRoomId) {
-    await validateNativeDirectRoom(edgeRoomId, actorId, target);
     return edgeRoomId;
   }
 
@@ -1494,12 +1631,10 @@ export async function uploadNativeChatAttachment(options: {
     upsert: false,
   });
   if (error) throw error;
-  const { data, error: signedError } = await supabase.storage.from(NATIVE_CHAT_ATTACHMENTS_BUCKET).createSignedUrl(path, 60 * 60 * 24 * 30);
-  if (signedError) throw signedError;
   return {
     bucket: NATIVE_CHAT_ATTACHMENTS_BUCKET,
     path,
-    url: data.signedUrl,
+    url: null,
     name: options.fileName || "attachment",
     mime: options.mime || "",
     size: options.size ?? null,

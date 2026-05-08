@@ -363,16 +363,6 @@ async function areNativeUsersBlocked(viewerId: string, targetUserId: string) {
   return Array.isArray(data) && data.length > 0;
 }
 
-async function areNativeUsersUnmatched(viewerId: string, targetUserId: string) {
-  const { data, error } = await supabase
-    .from("user_unmatches")
-    .select("id")
-    .or(`and(actor_id.eq.${viewerId},target_id.eq.${targetUserId}),and(actor_id.eq.${targetUserId},target_id.eq.${viewerId})`)
-    .limit(1);
-  if (error) throw error;
-  return Array.isArray(data) && data.length > 0;
-}
-
 async function hasNativeActiveMatch(viewerId: string, targetUserId: string) {
   const [a, b] = await Promise.all([
     supabase.from("matches").select("id").eq("user1_id", viewerId).eq("user2_id", targetUserId).eq("is_active", true).limit(1).maybeSingle(),
@@ -383,8 +373,8 @@ async function hasNativeActiveMatch(viewerId: string, targetUserId: string) {
 
 async function checkNativeReciprocalWave(viewerId: string, targetUserId: string) {
   const attempts: Array<{ fromCol: "from_user_id" | "sender_id"; toCol: "to_user_id" | "receiver_id" }> = [
-    { fromCol: "sender_id", toCol: "receiver_id" },
     { fromCol: "from_user_id", toCol: "to_user_id" },
+    { fromCol: "sender_id", toCol: "receiver_id" },
   ];
   for (const attempt of attempts) {
     const { data, error } = await supabase
@@ -422,19 +412,36 @@ async function finalizeNativeMutualWave(targetUserId: string) {
 
 export async function sendNativePublicProfileWave(viewerId: string, targetUserId: string): Promise<SendNativePublicProfileWaveResult> {
   try {
+    const { data: rpcData, error: rpcError } = await (supabase.rpc as unknown as (
+      fn: string,
+      args?: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: { message?: string } | null }>)("send_discovery_wave", { p_target_user_id: targetUserId });
+    if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+      const row = rpcData[0] as { status?: unknown; mutual?: unknown; match_created?: unknown } | null;
+      const status = String(row?.status || "failed");
+      if (status === "blocked") return { status: "blocked", mutual: false, matchCreated: false };
+      if (status === "duplicate" || status === "sent") {
+        return {
+          status: status as "duplicate" | "sent",
+          mutual: row?.mutual === true,
+          matchCreated: row?.match_created === true,
+        };
+      }
+    } else if (rpcError && !isWaveSchemaFallbackError(rpcError) && !String(rpcError.message || "").toLowerCase().includes("send_discovery_wave")) {
+      throw rpcError;
+    }
+
     if (await hasNativeActiveMatch(viewerId, targetUserId)) {
-      return { status: "duplicate", mutual: false, matchCreated: false };
+      const mutual = await checkNativeReciprocalWave(viewerId, targetUserId);
+      return { status: "duplicate", mutual, matchCreated: false };
     }
     if (await areNativeUsersBlocked(viewerId, targetUserId)) {
       return { status: "blocked", mutual: false, matchCreated: false };
     }
-    if (await areNativeUsersUnmatched(viewerId, targetUserId)) {
-      return { status: "blocked", mutual: false, matchCreated: false };
-    }
 
     const outgoingChecks: Array<{ fromCol: "sender_id" | "from_user_id"; toCol: "receiver_id" | "to_user_id" }> = [
-      { fromCol: "sender_id", toCol: "receiver_id" },
       { fromCol: "from_user_id", toCol: "to_user_id" },
+      { fromCol: "sender_id", toCol: "receiver_id" },
     ];
     for (const check of outgoingChecks) {
       const { data, error } = await supabase
@@ -457,6 +464,8 @@ export async function sendNativePublicProfileWave(viewerId: string, targetUserId
     }
 
     const primary = await supabase.from("waves" as never).insert({
+      from_user_id: viewerId,
+      to_user_id: targetUserId,
       sender_id: viewerId,
       receiver_id: targetUserId,
       status: "pending",
@@ -466,8 +475,8 @@ export async function sendNativePublicProfileWave(viewerId: string, targetUserId
       if (isDuplicateWaveError(primary.error)) throw primary.error;
       if (!isWaveSchemaFallbackError(primary.error)) throw primary.error;
       const fallback = await supabase.from("waves" as never).insert({
-        from_user_id: viewerId,
-        to_user_id: targetUserId,
+        sender_id: viewerId,
+        receiver_id: targetUserId,
         status: "pending",
         wave_type: "standard",
       } as never);
@@ -516,30 +525,6 @@ const buildNativeStarIntroPayload = (senderId: string, recipientId: string) => J
   created_at: new Date().toISOString(),
 });
 
-async function validateNativeStarDirectRoom(roomId: string, actorId: string, targetUserId: string) {
-  const chatId = cleanString(roomId);
-  const actor = cleanString(actorId);
-  const target = cleanString(targetUserId);
-  if (!chatId || !actor || !target) throw new Error("direct_room_invalid");
-  if (actor === target) throw new Error("cannot_chat_with_self");
-  const [blocked, unmatched] = await Promise.all([
-    areNativeUsersBlocked(actor, target),
-    areNativeUsersUnmatched(actor, target),
-  ]);
-  if (blocked) throw new Error("blocked_relationship");
-  if (unmatched) throw new Error("unmatched_relationship");
-  const [roomResult, memberResult] = await Promise.all([
-    supabase.from("chats").select("id,type").eq("id", chatId).limit(1).maybeSingle(),
-    supabase.from("chat_room_members").select("user_id").eq("chat_id", chatId),
-  ]);
-  const room = roomResult.data as { type?: string | null } | null;
-  if (room?.type !== "direct") throw new Error("direct_room_type_mismatch");
-  const memberIds = (memberResult.data || []).map((row: { user_id?: string | null }) => cleanString(row.user_id)).filter(Boolean);
-  if (memberIds.length !== 2 || !memberIds.includes(actor) || !memberIds.includes(target)) {
-    throw new Error("direct_room_member_mismatch");
-  }
-}
-
 export type SendNativePublicProfileStarResult =
   | { status: "sent"; roomId: string }
   | { status: "free_tier"; roomId: null }
@@ -564,11 +549,6 @@ export async function sendNativePublicProfileStarChat(viewerId: string, targetUs
     if (Math.max(0, starLimitForTier(tier) - used) + Math.max(0, extra) <= 0) {
       return { status: "exhausted", roomId: null, upgradeTier: tier === "plus" ? "gold" : null };
     }
-    const [blocked, unmatched] = await Promise.all([
-      areNativeUsersBlocked(viewerId, targetUserId),
-      areNativeUsersUnmatched(viewerId, targetUserId),
-    ]);
-    if (blocked || unmatched) return { status: "blocked", roomId: null };
     const { data: atomicRoomId, error: atomicError } = await (supabase.rpc as unknown as (
       fn: string,
       args?: Record<string, unknown>,
@@ -580,7 +560,6 @@ export async function sendNativePublicProfileStarChat(viewerId: string, targetUs
     if (atomicError) throw atomicError;
     const roomId = String(atomicRoomId || "").trim();
     if (!roomId) return { status: "exhausted", roomId: null, upgradeTier: tier === "plus" ? "gold" : null };
-    await validateNativeStarDirectRoom(roomId, viewerId, targetUserId);
     void (supabase.rpc as unknown as (
       fn: string,
       args?: Record<string, unknown>,
