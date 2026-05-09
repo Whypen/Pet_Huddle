@@ -71,7 +71,7 @@ import { huddleButtons, huddleColors, huddleFieldStates, huddleFormControls, hud
 import discoverAgeGateImage from "../../assets/Notifications/discover-age-gate.png";
 import emptyChatImage from "../../assets/Notifications/empty-chat-native.png";
 import emptyChatImageFallback from "../../assets/Notifications/empty-chat.png";
-import matchedImage from "../../assets/Notifications/MatchedHero.png";
+import matchedImage from "../../assets/Notifications/matched.png";
 import serviceImage from "../../assets/Notifications/Service.jpg";
 import profilePlaceholder from "../../huddle Design System/assets/ProfilePlaceholder.png";
 import { NativePublicProfileModal } from "../components/profile/NativePublicProfileModal";
@@ -1173,6 +1173,35 @@ function DiscoveryProfileCard({
     });
   }, [mediaSources.length]);
 
+  // Tap gesture — composited with Pan to fix RNGH/Pressable conflict on Android.
+  // The Pan gesture's failOffsetY([-40,40]) prevents natural tap tremors from failing
+  // the gesture, so Pressable.onPress never fires. Gesture.Tap() runs on the JS thread
+  // and handles profile open reliably on both platforms.
+  const handleProfileTapGesture = useCallback((tapX: number, tapY: number) => {
+    if (busy) return;
+    // Skip when tapping album navigation zones: left/right 33%, top 70%
+    if (index === 0 && mediaSources.length > 1) {
+      const inLeft = tapX < cardWidth * 0.33;
+      const inRight = tapX > cardWidth * 0.67;
+      if ((inLeft || inRight) && tapY < cardHeight * 0.70) return;
+    }
+    onProfileTap(profile);
+  }, [busy, cardHeight, cardWidth, index, mediaSources.length, onProfileTap, profile]);
+
+  const tapGesture = useMemo(() =>
+    Gesture.Tap()
+      .maxDuration(400)
+      .maxDistance(10)
+      .enabled(index === 0)
+      .onEnd((e) => { runOnJS(handleProfileTapGesture)(e.x, e.y); }),
+    [handleProfileTapGesture, index]
+  );
+
+  const composedGesture = useMemo(() =>
+    Gesture.Simultaneous(panGesture, tapGesture),
+    [panGesture, tapGesture]
+  );
+
   const renderDiscoveryActions = (variant: "island" | "traffic") => {
     const traffic = variant === "traffic";
     return (
@@ -1208,10 +1237,10 @@ function DiscoveryProfileCard({
           <View style={styles.discoveryPreloadWash} />
         </View>
       ) : null}
-      <GestureDetector gesture={panGesture}>
+      <GestureDetector gesture={composedGesture}>
         <Reanimated.View style={[styles.discoveryProfileCard, { height: cardHeight }, cardAnimatedStyle]}>
           <View style={styles.discoveryPhotoWrap}>
-            <Pressable accessibilityLabel={`Open ${profile.displayName} profile`} onPress={() => onProfileTap(profile)} style={styles.discoveryProfileTap}>
+            <Pressable accessibilityLabel={`Open ${profile.displayName} profile`} accessibilityRole="button" style={styles.discoveryProfileTap}>
               <ResilientAvatarImage fallback={<View style={styles.discoveryPhotoFallback}><Text style={styles.discoveryPhotoFallbackText}>{initials(profile.displayName)}</Text></View>} style={styles.discoveryPhoto} uri={activeImage} />
             </Pressable>
             {index === 0 && mediaSources.length > 1 ? (
@@ -1507,15 +1536,16 @@ function NativeChatsEmptyState({
 }
 
 const MATCH_QUICK_REPLIES = ["Hey! Your pet is adorable 🐾", "Would love to meet up!", "Let's chat 😄", "Your profile caught my eye!"];
-// Matched.png native dims: 928 × 1376  →  aspect ratio
+// matched.png native dims: 928 × 1376  →  aspect ratio
 const MATCH_IMG_W = 928;
 const MATCH_IMG_H = 1376;
 const MATCH_IMG_RATIO = MATCH_IMG_W / MATCH_IMG_H;
-// Slot rectangles measured against the artwork (% of image dims).
-// Each slot is the white interior of the egg — sized so an ellipse mask
-// (borderRadius: 9999 on a non-square box) fills the white area exactly.
-const MATCH_SLOT_BLUE = { x: 0.255, y: 0.225, w: 0.265, h: 0.225 } as const; // back / self
-const MATCH_SLOT_ORANGE = { x: 0.448, y: 0.265, w: 0.285, h: 0.230 } as const; // front / peer
+// Avatar frames sit on top of the (frameless) artwork. Two square frames,
+// blue (left/self) behind, gold (right/peer) on top with slight overlap.
+// Sized in image % so they scale with the rendered artwork on every device.
+const MATCH_FRAME_W_PCT = 0.30;          // square frame, 30% of image width
+const MATCH_FRAMES_CENTER_Y_PCT = 0.36;  // vertical center within image
+const MATCH_FRAMES_GAP_PCT = 0.20;       // distance between frame centers (< W → overlap)
 // Y position of the bottom of the "LET'S DROP A HELLO" pill (in image %).
 const MATCH_PILL_BOTTOM = 0.74;
 
@@ -1547,17 +1577,23 @@ function MatchModal({
   const imgLeft = (screenW - imgW) / 2;
   const imgTop = (screenH - imgH) / 2;
 
-  const slotBlue = {
-    left: imgLeft + MATCH_SLOT_BLUE.x * imgW,
-    top: imgTop + MATCH_SLOT_BLUE.y * imgH,
-    width: MATCH_SLOT_BLUE.w * imgW,
-    height: MATCH_SLOT_BLUE.h * imgH,
+  // Two parallel square frames, brand-bordered. Right frame overlaps left
+  // (gap between centers < frame width), and renders above via z-index.
+  const frameSize = MATCH_FRAME_W_PCT * imgW;
+  const centerX = imgLeft + imgW / 2;
+  const centerY = imgTop + MATCH_FRAMES_CENTER_Y_PCT * imgH;
+  const halfGap = (MATCH_FRAMES_GAP_PCT * imgW) / 2;
+  const frameLeft = {
+    left: centerX - halfGap - frameSize / 2,
+    top: centerY - frameSize / 2,
+    width: frameSize,
+    height: frameSize,
   };
-  const slotOrange = {
-    left: imgLeft + MATCH_SLOT_ORANGE.x * imgW,
-    top: imgTop + MATCH_SLOT_ORANGE.y * imgH,
-    width: MATCH_SLOT_ORANGE.w * imgW,
-    height: MATCH_SLOT_ORANGE.h * imgH,
+  const frameRight = {
+    left: centerX + halfGap - frameSize / 2,
+    top: centerY - frameSize / 2,
+    width: frameSize,
+    height: frameSize,
   };
   // Dock pinned just under the pill, with safe-area-aware bottom margin.
   const pillBottomScreenY = imgTop + MATCH_PILL_BOTTOM * imgH;
@@ -1592,20 +1628,24 @@ function MatchModal({
       <Reanimated.View style={[styles.matchFullScreen, screenAnimStyle]}>
         {/* Backdrop — bleed handles aspect-ratio differences */}
         <Image resizeMode="cover" source={matchedImage} style={styles.matchFullImage} />
-        {/* Avatar slots — perfectly inside the egg interiors, no white showing */}
-        <Reanimated.View pointerEvents="none" style={[styles.matchAvatarSlotBase, slotBlue, avatarAnimStyle]}>
-          <ResilientAvatarImage
-            fallback={<View style={styles.matchSlotFallback}><Text style={styles.matchSlotInitials}>{initials(self.name)}</Text></View>}
-            style={styles.matchSlotImage}
-            uri={self.avatarUrl}
-          />
+        {/* Avatar frames — square, brand-bordered. Right frame layers on top. */}
+        <Reanimated.View pointerEvents="none" style={[styles.matchAvatarFrameWrap, frameLeft, styles.matchAvatarFrameZBack, avatarAnimStyle]}>
+          <View style={[styles.matchAvatarFrameInner, styles.matchAvatarFrameInnerBlue]}>
+            <ResilientAvatarImage
+              fallback={<View style={[styles.matchSlotFallback, styles.matchSlotFallbackBlue]}><Text style={styles.matchSlotInitials}>{initials(self.name)}</Text></View>}
+              style={styles.matchSlotImage}
+              uri={self.avatarUrl}
+            />
+          </View>
         </Reanimated.View>
-        <Reanimated.View pointerEvents="none" style={[styles.matchAvatarSlotBase, slotOrange, avatarAnimStyle]}>
-          <ResilientAvatarImage
-            fallback={<View style={styles.matchSlotFallback}><Text style={styles.matchSlotInitials}>{initials(modal.name)}</Text></View>}
-            style={styles.matchSlotImage}
-            uri={modal.avatarUrl}
-          />
+        <Reanimated.View pointerEvents="none" style={[styles.matchAvatarFrameWrap, frameRight, styles.matchAvatarFrameZFront, avatarAnimStyle]}>
+          <View style={[styles.matchAvatarFrameInner, styles.matchAvatarFrameInnerGold]}>
+            <ResilientAvatarImage
+              fallback={<View style={[styles.matchSlotFallback, styles.matchSlotFallbackGold]}><Text style={styles.matchSlotInitials}>{initials(modal.name)}</Text></View>}
+              style={styles.matchSlotImage}
+              uri={modal.avatarUrl}
+            />
+          </View>
         </Reanimated.View>
         {/* Close button */}
         <Pressable accessibilityLabel="Close" onPress={onClose} style={[nativeModalStyles.appMatchCloseButton, { top: Math.max(insets.top + huddleSpacing.x2, huddleSpacing.x4) }]}>
@@ -1631,7 +1671,7 @@ function MatchModal({
               maxLength={500}
               onChangeText={setQuickHello}
               placeholder="Type a message"
-              placeholderTextColor="rgba(255,255,255,0.7)"
+              placeholderTextColor="rgba(40,42,52,0.45)"
               style={styles.matchInputField}
               value={quickHello}
             />
@@ -2123,7 +2163,8 @@ export function NativeChatsScreen({ userId, search, onBottomSheetOpenChange, onN
     }
     setDiscoverySendCue({ kind, id: Date.now() });
     const commitDelay = kind === "star" ? 320 : 220;
-    const completeDelay = kind === "star" ? 1350 : 260;
+    // Animation runway — wave bubble rises ~700ms, star travels bottom→top ~1300ms.
+    const completeDelay = kind === "star" ? 1400 : 760;
     let committed = false;
     discoverySendCueTimerRef.current = setTimeout(() => {
       committed = true;
@@ -5112,13 +5153,147 @@ function ConfirmStarModal({ errorMessage, loading, onCancel, onConfirm, target }
 }
 
 function DiscoverySendCue({ cue }: { cue: { kind: DiscoverySendCueKind; id: number } | null }) {
+  const { height: screenH } = useWindowDimensions();
+  const progress = useSharedValue(0);
+  const ringScale = useSharedValue(0);
+  const ringOpacity = useSharedValue(0);
+  const trail1 = useSharedValue(0);
+  const trail2 = useSharedValue(0);
+  const trail3 = useSharedValue(0);
+  const apexHapticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completeHapticTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (apexHapticTimerRef.current) {
+      clearTimeout(apexHapticTimerRef.current);
+      apexHapticTimerRef.current = null;
+    }
+    if (completeHapticTimerRef.current) {
+      clearTimeout(completeHapticTimerRef.current);
+      completeHapticTimerRef.current = null;
+    }
+    if (!cue) {
+      progress.value = 0;
+      ringScale.value = 0;
+      ringOpacity.value = 0;
+      trail1.value = 0;
+      trail2.value = 0;
+      trail3.value = 0;
+      return;
+    }
+    const isStarKind = cue.kind === "star";
+    // Liftoff haptic
+    haptic.selectTab();
+    // Reset
+    progress.value = 0;
+    ringScale.value = 0;
+    ringOpacity.value = 0;
+    trail1.value = 0;
+    trail2.value = 0;
+    trail3.value = 0;
+    if (isStarKind) {
+      // Bottom → center (rise) → hold → top (exit). Total ~1300ms.
+      progress.value = withTiming(1, { duration: 1300, easing: ReanimEasing.bezier(0.22, 1, 0.36, 1) });
+      // Apex sparkle ring
+      ringOpacity.value = withDelay(420, withTiming(1, { duration: 100 }));
+      ringScale.value = withDelay(420, withTiming(2.6, { duration: 520, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      ringOpacity.value = withDelay(560, withTiming(0, { duration: 380 }));
+      // Particle trails (staggered)
+      trail1.value = withDelay(80, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      trail2.value = withDelay(160, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      trail3.value = withDelay(240, withTiming(1, { duration: 900, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      // Apex confirm haptic, completion success haptic
+      apexHapticTimerRef.current = setTimeout(() => { haptic.primaryConfirm(); }, 460);
+      completeHapticTimerRef.current = setTimeout(() => { haptic.success(); }, 980);
+    } else {
+      // Wave bubble: rise from bottom-center, peak, fade up. ~700ms.
+      progress.value = withTiming(1, { duration: 700, easing: ReanimEasing.out(ReanimEasing.cubic) });
+      ringOpacity.value = withDelay(180, withTiming(1, { duration: 80 }));
+      ringScale.value = withDelay(180, withTiming(1.9, { duration: 380, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      ringOpacity.value = withDelay(280, withTiming(0, { duration: 320 }));
+      trail1.value = withDelay(40, withTiming(1, { duration: 560, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      trail2.value = withDelay(120, withTiming(1, { duration: 560, easing: ReanimEasing.out(ReanimEasing.cubic) }));
+      apexHapticTimerRef.current = setTimeout(() => { haptic.success(); }, 240);
+    }
+    return () => {
+      if (apexHapticTimerRef.current) {
+        clearTimeout(apexHapticTimerRef.current);
+        apexHapticTimerRef.current = null;
+      }
+      if (completeHapticTimerRef.current) {
+        clearTimeout(completeHapticTimerRef.current);
+        completeHapticTimerRef.current = null;
+      }
+    };
+  }, [cue, progress, ringScale, ringOpacity, trail1, trail2, trail3]);
+
+  const isStar = cue?.kind === "star";
+
+  // Star: rise from bottom (+screenH/2 + 80) → center → exit top (-screenH/2 - 80).
+  // Scale grows then mildly recedes on exit.
+  const starStyle = useAnimatedStyle(() => {
+    const p = progress.value;
+    const ty = interpolate(p, [0, 0.36, 0.55, 1], [screenH * 0.55 + 80, 0, 0, -screenH * 0.55 - 120], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.36, 0.55, 1], [0.35, 1.45, 1.45, 0.55], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.06, 0.85, 1], [0, 1, 1, 0], Extrapolation.CLAMP);
+    return { transform: [{ translateY: ty }, { scale: sc }], opacity: op };
+  });
+
+  // Wave: rises from below into center, mild scale pulse, fades upward.
+  const waveStyle = useAnimatedStyle(() => {
+    const p = progress.value;
+    const ty = interpolate(p, [0, 0.5, 1], [220, 0, -56], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.5, 0.85, 1], [0.55, 1.18, 1.0, 0.85], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.15, 0.75, 1], [0, 1, 1, 0], Extrapolation.CLAMP);
+    return { transform: [{ translateY: ty }, { scale: sc }], opacity: op };
+  });
+
+  const ringStyle = useAnimatedStyle(() => ({
+    opacity: ringOpacity.value,
+    transform: [{ scale: 0.6 + ringScale.value * 0.6 }],
+  }));
+
+  // Particle trails — three rising specks, fading outward.
+  const trailStyle1 = useAnimatedStyle(() => {
+    const p = trail1.value;
+    const baseY = isStar ? 80 : 60;
+    const ty = interpolate(p, [0, 1], [baseY, baseY - 200], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.15, 0.85, 1], [0, 0.9, 0.6, 0], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.5, 1], [0.5, 1, 0.4], Extrapolation.CLAMP);
+    return { transform: [{ translateX: -14 }, { translateY: ty }, { scale: sc }], opacity: op };
+  });
+  const trailStyle2 = useAnimatedStyle(() => {
+    const p = trail2.value;
+    const baseY = isStar ? 60 : 40;
+    const ty = interpolate(p, [0, 1], [baseY, baseY - 180], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.15, 0.85, 1], [0, 0.9, 0.6, 0], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.5, 1], [0.5, 1, 0.4], Extrapolation.CLAMP);
+    return { transform: [{ translateX: 18 }, { translateY: ty }, { scale: sc }], opacity: op };
+  });
+  const trailStyle3 = useAnimatedStyle(() => {
+    const p = trail3.value;
+    const ty = interpolate(p, [0, 1], [100, 100 - 225], Extrapolation.CLAMP);
+    const op = interpolate(p, [0, 0.15, 0.85, 1], [0, 0.9, 0.6, 0], Extrapolation.CLAMP);
+    const sc = interpolate(p, [0, 0.5, 1], [0.5, 1, 0.4], Extrapolation.CLAMP);
+    return { transform: [{ translateX: -4 }, { translateY: ty }, { scale: sc }], opacity: op };
+  });
+
   if (!cue) return null;
-  const isStar = cue.kind === "star";
+
   return (
     <View pointerEvents="none" style={styles.sendCueOverlay}>
-      <View style={[styles.sendCueOrb, isStar ? styles.sendCueOrbStar : styles.sendCueOrbWave]}>
+      {/* Apex ring — soft halo expanding outward */}
+      <Reanimated.View style={[styles.sendCueRing, isStar ? styles.sendCueRingStar : styles.sendCueRingWave, ringStyle]} />
+      {/* Trailing particles */}
+      <Reanimated.View style={[styles.sendCueTrailDot, isStar ? styles.sendCueTrailDotStar : styles.sendCueTrailDotWave, trailStyle1]} />
+      <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotSm, isStar ? styles.sendCueTrailDotStar : styles.sendCueTrailDotWave, trailStyle2]} />
+      {isStar ? (
+        <Reanimated.View style={[styles.sendCueTrailDot, styles.sendCueTrailDotXs, styles.sendCueTrailDotStar, trailStyle3]} />
+      ) : null}
+      {/* Hero orb */}
+      <Reanimated.View style={[styles.sendCueOrb, isStar ? styles.sendCueOrbStar : styles.sendCueOrbWave, isStar ? starStyle : waveStyle]}>
         <Feather color={isStar ? huddleColors.text : huddleColors.onPrimary} name={isStar ? "star" : "send"} size={isStar ? 42 : 38} />
-      </View>
+      </Reanimated.View>
     </View>
   );
 }
@@ -5581,14 +5756,30 @@ const styles = StyleSheet.create({
   sendCueOrb: { width: 84, height: 84, alignItems: "center", justifyContent: "center", borderRadius: huddleRadii.pill, ...huddleShadows.glassElevation2 },
   sendCueOrbWave: { backgroundColor: huddleColors.blue },
   sendCueOrbStar: { backgroundColor: huddleColors.premiumGold },
+  // Ring + trail dots are absolute, centered via 50% pin + negative margin offset
+  sendCueRing: { position: "absolute", top: "50%", left: "50%", width: 110, height: 110, marginTop: -55, marginLeft: -55, borderRadius: huddleRadii.pill, borderWidth: 3 },
+  sendCueRingWave: { borderColor: huddleColors.blue },
+  sendCueRingStar: { borderColor: huddleColors.premiumGold },
+  sendCueTrailDot: { position: "absolute", top: "50%", left: "50%", width: 10, height: 10, marginTop: -5, marginLeft: -5, borderRadius: 5 },
+  sendCueTrailDotSm: { width: 7, height: 7, marginTop: -3.5, marginLeft: -3.5, borderRadius: 3.5 },
+  sendCueTrailDotXs: { width: 5, height: 5, marginTop: -2.5, marginLeft: -2.5, borderRadius: 2.5 },
+  sendCueTrailDotWave: { backgroundColor: huddleColors.blue },
+  sendCueTrailDotStar: { backgroundColor: huddleColors.premiumGold },
   matchFullScreen: { flex: 1, backgroundColor: huddleColors.canvas },
   matchFullImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
-  // Avatar slot — sits exactly inside an egg's white interior. The non-square
-  // dims + borderRadius 9999 produce a clean ellipse that hides every pixel
-  // of the underlying white. Image inside is `cover` so the photo fills it.
-  matchAvatarSlotBase: { position: "absolute", overflow: "hidden", borderRadius: 9999, zIndex: 2 },
+  // Avatar frame — square, brand-border, soft elevation. Outer holds the
+  // shadow (no clip), inner holds the border + image clip. Right frame layers
+  // above the left via zIndex so the gold frame visually sits "on top".
+  matchAvatarFrameWrap: { position: "absolute", borderRadius: 22, ...huddleShadows.glassElevation2 },
+  matchAvatarFrameZBack: { zIndex: 2 },
+  matchAvatarFrameZFront: { zIndex: 3 },
+  matchAvatarFrameInner: { flex: 1, borderRadius: 20, overflow: "hidden", borderWidth: 4, backgroundColor: huddleColors.canvas },
+  matchAvatarFrameInnerBlue: { borderColor: huddleColors.blue },
+  matchAvatarFrameInnerGold: { borderColor: huddleColors.premiumGold },
   matchSlotImage: { width: "100%", height: "100%" } as ImageStyle,
-  matchSlotFallback: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: huddleColors.blue },
+  matchSlotFallback: { flex: 1, alignItems: "center", justifyContent: "center" },
+  matchSlotFallbackBlue: { backgroundColor: huddleColors.blue },
+  matchSlotFallbackGold: { backgroundColor: huddleColors.premiumGold },
   matchSlotInitials: { fontFamily: "Urbanist-800", fontSize: 28, lineHeight: 32, color: huddleColors.onPrimary },
   // Dock pinned to bottom band, below the pre-baked "LET'S DROP A HELLO" pill.
   matchDockBelowPill: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: huddleSpacing.x4, zIndex: 20, gap: huddleSpacing.x2 },
@@ -5615,26 +5806,28 @@ const styles = StyleSheet.create({
   matchQuickReplyChip: {
     paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: huddleRadii.pill, borderWidth: 0,
-    backgroundColor: "rgba(255,255,255,0.96)",
+    backgroundColor: "rgba(255,255,255,0.98)",
+    ...huddleShadows.glassElevation1,
   },
   matchQuickReplyText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, lineHeight: huddleType.helperLine, color: huddleColors.blue },
-  // Chromeless input — white text/icon over the cream-blue band, transparent backing
+  // Almost-solid white input row — dark text reads cleanly over the artwork backdrop
   matchInputRow: {
     flexDirection: "row", alignItems: "center", gap: huddleSpacing.x2,
     paddingHorizontal: huddleSpacing.x3, paddingVertical: huddleSpacing.x2,
     borderRadius: huddleRadii.pill,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(0,0,0,0.06)",
+    ...huddleShadows.glassElevation1,
   },
   matchInputField: {
     flex: 1, paddingVertical: 6, paddingHorizontal: 4,
     fontFamily: "Urbanist-600", fontSize: huddleType.label, lineHeight: huddleType.labelLine,
-    color: huddleColors.onPrimary,
+    color: huddleColors.text,
   },
   matchInputSend: {
     width: 36, height: 36, alignItems: "center", justifyContent: "center",
     borderRadius: 18, backgroundColor: huddleColors.blue,
   },
   matchKeepExploring: { alignItems: "center", paddingTop: 8, paddingBottom: 2 },
-  matchKeepExploringText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, color: "rgba(255,255,255,0.92)", textDecorationLine: "underline" },
+  matchKeepExploringText: { fontFamily: "Urbanist-700", fontSize: huddleType.helper, color: "rgba(40,42,52,0.78)", textDecorationLine: "underline" },
 });
