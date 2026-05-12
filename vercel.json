@@ -51,6 +51,22 @@
       "dest": "/api/share?id=$1"
     },
     {
+      "src": "^/\\.well-known/apple-app-site-association$",
+      "headers": {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300, must-revalidate"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/\\.well-known/assetlinks\\.json$",
+      "headers": {
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=300, must-revalidate"
+      },
+      "continue": true
+    },
+    {
       "handle": "filesystem"
     },
     {
