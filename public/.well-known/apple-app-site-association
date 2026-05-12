@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "AN4TY85CTU.pet.huddle"
+        ],
+        "components": [
+          {
+            "/": "/auth/callback*"
+          }
+        ]
+      }
+    ]
+  }
+}

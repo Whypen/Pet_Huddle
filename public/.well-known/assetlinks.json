@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "pet.huddle",
+      "sha256_cert_fingerprints": [
+        "79:DD:CA:AF:8A:94:F4:38:D5:1D:67:20:8F:6C:43:25:BB:8D:1F:D6:5D:F7:22:A3:6E:FD:0C:B2:8F:5E:A5:54"
+      ]
+    }
+  }
+]

@@ -21,15 +21,36 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "associatedDomains": [
+        "applinks:huddle.pet"
+      ],
       "infoPlist": {
         "NSUserNotificationUsageDescription": "Allow Huddle to send you updates and alerts."
       },
-      "bundleIdentifier": "com.whypen.huddleapp"
+      "bundleIdentifier": "pet.huddle",
+      "appleTeamId": "AN4TY85CTU"
     },
     "android": {
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.whypen.huddleapp"
+      "package": "pet.huddle",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "huddle.pet",
+              "pathPrefix": "/auth/callback"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     }
   }
 }
