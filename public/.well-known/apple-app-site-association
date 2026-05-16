@@ -8,6 +8,12 @@
         "components": [
           {
             "/": "/auth/callback*"
+          },
+          {
+            "/": "/carerprofile/stripe-return*"
+          },
+          {
+            "/": "/carerprofile/stripe-refresh*"
           }
         ]
       }
