@@ -778,17 +778,39 @@ const AdminSafety = () => {
     ? disputeQueueById.get(selectedDisputeId)
     : undefined;
 
-  const correspondenceEvidenceCount = useMemo(
-    () => correspondenceRows.reduce((total, row) => total + (row.attachment_items?.length ?? 0), 0),
+  const correspondenceEvidenceItems = useMemo(
+    () => correspondenceRows.flatMap((row) => row.attachment_items ?? []),
     [correspondenceRows],
   );
-  const serviceChatPreviewEvidenceCount = useMemo(
-    () => (serviceChatPreview?.messages ?? []).reduce((total, row) => total + (row.attachment_items?.length ?? 0), 0),
+  const serviceChatPreviewEvidenceItems = useMemo(
+    () => (serviceChatPreview?.messages ?? []).flatMap((row) => row.attachment_items ?? []),
     [serviceChatPreview?.messages],
   );
+  const correspondenceEvidenceCount = useMemo(
+    () => correspondenceEvidenceItems.length,
+    [correspondenceEvidenceItems],
+  );
+  const serviceChatPreviewEvidenceCount = useMemo(
+    () => serviceChatPreviewEvidenceItems.length,
+    [serviceChatPreviewEvidenceItems],
+  );
   const storedDisputeEvidenceUrls = disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [];
+  const storedDisputeEvidenceItems = useMemo(
+    () => storedDisputeEvidenceUrls
+      .map((item, index) => ({ url: resolveStorageOrPublicUrl(item), label: `Dispute Evidence ${index + 1}` }))
+      .filter((item) => item.url.length > 0),
+    [storedDisputeEvidenceUrls],
+  );
+  const allDisputeEvidenceItems = useMemo(
+    () => [
+      ...storedDisputeEvidenceItems,
+      ...correspondenceEvidenceItems,
+      ...serviceChatPreviewEvidenceItems,
+    ],
+    [correspondenceEvidenceItems, serviceChatPreviewEvidenceItems, storedDisputeEvidenceItems],
+  );
   const totalDisputeEvidenceCount =
-    storedDisputeEvidenceUrls.length + correspondenceEvidenceCount + serviceChatPreviewEvidenceCount;
+    allDisputeEvidenceItems.length;
   
   const buildCurrentMessageRecipients = useCallback((): CaseMessageRecipientOption[] => {
     if (caseSelection?.type === "report") {
@@ -1291,7 +1313,7 @@ const AdminSafety = () => {
       return <div className="text-sm text-muted-foreground">No official correspondence yet.</div>;
     }
     return (
-      <div className="space-y-2">
+      <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-2">
         {correspondenceRows.map((message) => {
           const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
           const attachments = message.attachment_items ?? [];
@@ -1322,11 +1344,6 @@ const AdminSafety = () => {
                       <div className="max-w-24 truncate px-2 py-1">Evidence</div>
                     </button>
                   ))}
-                </div>
-              ) : null}
-              {message.case_type ? (
-                <div className="mt-1 text-[11px] text-muted-foreground">
-                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
                 </div>
               ) : null}
             </div>
@@ -1947,6 +1964,15 @@ const AdminSafety = () => {
         label: item.name || item.label || `Evidence ${index + 1}`,
       }))
       .filter((item) => item.url.length > 0);
+    if (normalized.length === 0) return;
+    setMediaViewerTitle(title);
+    setMediaViewerItems(normalized);
+    setMediaViewerIndex(0);
+    setMediaViewerOpen(true);
+  };
+
+  const openEvidenceItemsViewer = (items: MediaViewerItem[], title: string) => {
+    const normalized = items.filter((item) => item.url.length > 0);
     if (normalized.length === 0) return;
     setMediaViewerTitle(title);
     setMediaViewerItems(normalized);
@@ -3123,12 +3149,12 @@ const AdminSafety = () => {
                   <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span>Evidence: {totalDisputeEvidenceCount}</span>
-                    {storedDisputeEvidenceUrls.length > 0 ? (
+                    {allDisputeEvidenceItems.length > 0 ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => openMediaViewer(storedDisputeEvidenceUrls, "Dispute Evidence")}
+                        onClick={() => openEvidenceItemsViewer(allDisputeEvidenceItems, "Dispute Evidence")}
                       >
                         View
                       </Button>
