@@ -587,7 +587,10 @@ const parseCaseMessageBody = (rawValue: string | null | undefined) => {
     text = SERVICE_CHAT_EVENT_LABELS[record.kind] ?? record.kind;
   }
 
-  return { text: text || raw, attachments };
+  return {
+    text: text || (attachments.length > 0 ? "Evidence shared" : raw),
+    attachments,
+  };
 };
 
 const resolveCaseMessageAttachmentItems = async (rawValue: string | null | undefined): Promise<CaseMessageAttachmentItem[]> => {
@@ -774,6 +777,18 @@ const AdminSafety = () => {
   const disputeHeader = selectedDisputeId
     ? disputeQueueById.get(selectedDisputeId)
     : undefined;
+
+  const correspondenceEvidenceCount = useMemo(
+    () => correspondenceRows.reduce((total, row) => total + (row.attachment_items?.length ?? 0), 0),
+    [correspondenceRows],
+  );
+  const serviceChatPreviewEvidenceCount = useMemo(
+    () => (serviceChatPreview?.messages ?? []).reduce((total, row) => total + (row.attachment_items?.length ?? 0), 0),
+    [serviceChatPreview?.messages],
+  );
+  const storedDisputeEvidenceUrls = disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [];
+  const totalDisputeEvidenceCount =
+    storedDisputeEvidenceUrls.length + correspondenceEvidenceCount + serviceChatPreviewEvidenceCount;
   
   const buildCurrentMessageRecipients = useCallback((): CaseMessageRecipientOption[] => {
     if (caseSelection?.type === "report") {
@@ -3048,7 +3063,7 @@ const AdminSafety = () => {
                     <div>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</div>
                     <div>Category: {disputeHeader?.dispute_category ?? "-"}</div>
                     <div>Chat status: {disputeHeader?.chat_status ?? "-"}</div>
-                    <div>Evidence count: {disputeHeader?.evidence_count ?? 0}</div>
+                    <div>Evidence count: {totalDisputeEvidenceCount}</div>
                     <div>Created: {formatDateTime(disputeHeader?.dispute_created_at ?? null)}</div>
                     <div>Updated: {formatDateTime(disputeHeader?.dispute_updated_at ?? null)}</div>
                   </div>
@@ -3106,17 +3121,27 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Dispute Detail</h3>
                         <div className="whitespace-pre-wrap break-words">{stripDemoFixtureMarker(disputeCasefile?.description)}</div>
                   <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
-                  <div className="flex items-center gap-2">
-                    <span>Evidence: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</span>
-                    {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>Evidence: {totalDisputeEvidenceCount}</span>
+                    {storedDisputeEvidenceUrls.length > 0 ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => openMediaViewer(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [], "Dispute Evidence")}
+                        onClick={() => openMediaViewer(storedDisputeEvidenceUrls, "Dispute Evidence")}
                       >
                         View
                       </Button>
+                    ) : null}
+                    {correspondenceEvidenceCount > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {correspondenceEvidenceCount} from official correspondence
+                      </span>
+                    ) : null}
+                    {serviceChatPreviewEvidenceCount > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {serviceChatPreviewEvidenceCount} from service chat preview
+                      </span>
                     ) : null}
                   </div>
                 </section>
