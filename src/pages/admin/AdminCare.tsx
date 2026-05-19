@@ -55,6 +55,14 @@ type CareTransactionRow = {
   stripe_connect_model: string | null;
   db_updated_at: string | null;
   stripe_synced_at: string | null;
+  booked_service_hours: number | null;
+  actual_service_hours: number | null;
+  service_started_at: string | null;
+  service_scheduled_end_at: string | null;
+  checked_in_at: string | null;
+  completed_at: string | null;
+  dispute_raised_at: string | null;
+  service_duration_source: "completed" | "dispute" | "unavailable" | string | null;
 };
 
 type CareDecisionType =
@@ -65,7 +73,17 @@ type CareDecisionType =
   | "split_refund_and_partial_payout"
   | "manual_review";
 
-type CareDecisionStatus = "draft" | "submitted" | "blocked" | "ready_for_execution" | "cancelled";
+type CareDecisionStatus =
+  | "draft"
+  | "submitted"
+  | "blocked"
+  | "ready_for_execution"
+  | "execution_locked"
+  | "execution_cancelled"
+  | "execution_superseded"
+  | "executed_reserved";
+
+type CareQueueFilter = "all" | "needs_sync" | "blocked" | "ready_for_execution" | "locked";
 
 type CareDecisionRow = {
   id: string;
@@ -82,6 +100,35 @@ type CareDecisionRow = {
   currency: string;
   dry_run_result: CareDecisionValidation | null;
   status: CareDecisionStatus;
+  submitted_by_admin_id?: string | null;
+  submitted_at?: string | null;
+  cancellation_reason?: string | null;
+  cancelled_by_admin_id?: string | null;
+  cancelled_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type CareExecutionQueueRow = {
+  service_chat_id: string;
+  decision_id: string;
+  lock_id: string | null;
+  payment_intent_id: string | null;
+  decision_type: CareDecisionType;
+  decision_status: CareDecisionStatus;
+  lock_status: CareDecisionStatus | null;
+  owner_refund_amount: number;
+  carer_payout_amount: number;
+  platform_retained_amount: number;
+  currency: string;
+  stripe_sync_snapshot_id: string | null;
+  stripe_synced_at: string | null;
+  validation_result: CareDecisionValidation | null;
+  decision_admin_id: string;
+  decision_admin_name: string | null;
+  locked_by_admin_id: string | null;
+  locked_by_admin_name: string | null;
+  locked_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -89,6 +136,7 @@ type CareDecisionRow = {
 type CareDecisionValidation = {
   ok?: boolean;
   status?: CareDecisionStatus;
+  manual_review_required?: boolean;
   errors?: string[];
   warnings?: string[];
   preview?: {
@@ -98,6 +146,16 @@ type CareDecisionValidation = {
     carer_payout?: number;
     platform_retained?: number;
     balance_delta?: number;
+  };
+  service_duration?: {
+    booked_service_hours?: number | null;
+    actual_service_hours?: number | null;
+    service_duration_source?: string | null;
+    service_started_at?: string | null;
+    service_scheduled_end_at?: string | null;
+    checked_in_at?: string | null;
+    completed_at?: string | null;
+    dispute_raised_at?: string | null;
   };
   db_state?: Record<string, unknown>;
   stripe_state?: Record<string, unknown>;
@@ -126,6 +184,19 @@ const decisionReasonLabel: Record<string, string> = {
   stripe_dispute: "Stripe dispute",
   admin_adjustment: "Admin adjustment",
   other: "Other",
+};
+
+const lifecycleSteps: CareDecisionStatus[] = ["draft", "submitted", "ready_for_execution", "execution_locked"];
+
+const lifecycleLabel: Record<CareDecisionStatus, string> = {
+  draft: "Draft",
+  submitted: "Submitted",
+  blocked: "Blocked",
+  ready_for_execution: "Ready",
+  execution_locked: "Locked",
+  execution_cancelled: "Cancelled",
+  execution_superseded: "Superseded",
+  executed_reserved: "Reserved",
 };
 
 const statusLabel: Record<CareMoneyFlowStatus, string> = {
@@ -182,6 +253,12 @@ const compactId = (value: string | null | undefined) => {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
 };
 
+const formatHours = (value: number | null | undefined) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "-";
+  return `${parsed.toFixed(1)}h`;
+};
+
 const toMoneyNumber = (value: string | number | null | undefined) => {
   const parsed = typeof value === "number" ? value : Number.parseFloat(String(value || "0"));
   return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
@@ -222,6 +299,12 @@ const AdminCare = () => {
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [decisionSuccess, setDecisionSuccess] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<CareDecisionValidation | null>(null);
+  const [executionQueue, setExecutionQueue] = useState<CareExecutionQueueRow[]>([]);
+  const [queueFilter, setQueueFilter] = useState<CareQueueFilter>("all");
+  const [executionNote, setExecutionNote] = useState("");
+  const [executionBusy, setExecutionBusy] = useState<"submit" | "lock" | "cancel" | null>(null);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
 
   const isAdmin =
     profile?.is_admin === true ||
@@ -232,6 +315,39 @@ const AdminCare = () => {
     () => rows.find((row) => row.service_chat_id === selectedId) ?? null,
     [rows, selectedId],
   );
+
+  const selectedQueueItems = useMemo(
+    () => executionQueue.filter((item) => item.service_chat_id === selectedId),
+    [executionQueue, selectedId],
+  );
+
+  const latestDecision = useMemo(() => {
+    if (decisions.length === 0) return null;
+    return [...decisions].sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())[0];
+  }, [decisions]);
+
+  const latestLock = useMemo(
+    () => selectedQueueItems.find((item) => item.lock_status === "execution_locked") || selectedQueueItems.find((item) => item.lock_id) || null,
+    [selectedQueueItems],
+  );
+
+  const filteredRows = useMemo(() => {
+    if (queueFilter === "all") return rows;
+    return rows.filter((row) => {
+      const queueItems = executionQueue.filter((item) => item.service_chat_id === row.service_chat_id);
+      const hasBlocked = queueItems.some((item) => item.decision_status === "blocked");
+      const hasReady = queueItems.some((item) => item.decision_status === "ready_for_execution");
+      const hasLocked = queueItems.some((item) => item.lock_status === "execution_locked" || item.decision_status === "execution_locked");
+      const needsSync = !row.stripe_synced_at
+        || (row.db_updated_at && row.stripe_synced_at && new Date(row.db_updated_at).getTime() > new Date(row.stripe_synced_at).getTime())
+        || row.normalized_money_flow_status === "stripe_failed";
+      if (queueFilter === "needs_sync") return needsSync;
+      if (queueFilter === "blocked") return hasBlocked;
+      if (queueFilter === "ready_for_execution") return hasReady;
+      if (queueFilter === "locked") return hasLocked;
+      return true;
+    });
+  }, [executionQueue, queueFilter, rows]);
 
   const moneyPreview = useMemo(() => {
     const total = toMoneyNumber(selected?.total_paid);
@@ -294,14 +410,24 @@ const AdminCare = () => {
     setDecisions((Array.isArray(data) ? data : []) as CareDecisionRow[]);
   }, []);
 
+  const loadExecutionQueue = useCallback(async () => {
+    const { data, error: rpcError } = await supabase.rpc("admin_get_care_money_flow_execution_queue" as never);
+    if (rpcError) {
+      setExecutionError(rpcError.message || "Unable to load execution queue.");
+      setExecutionQueue([]);
+      return;
+    }
+    setExecutionQueue((Array.isArray(data) ? data : []) as CareExecutionQueueRow[]);
+  }, []);
+
   useEffect(() => {
     if (authLoading) return;
     if (!isAdmin) {
       setLoading(false);
       return;
     }
-    void loadRows().finally(() => setLoading(false));
-  }, [authLoading, isAdmin, loadRows]);
+    void Promise.all([loadRows(), loadExecutionQueue()]).finally(() => setLoading(false));
+  }, [authLoading, isAdmin, loadExecutionQueue, loadRows]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -322,13 +448,19 @@ const AdminCare = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_admin_decisions" }, () => {
         setLiveTick("Decision draft changed just now");
         void loadRows();
+        void loadExecutionQueue();
+        void loadDecisions(selectedId);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_locks" }, () => {
+        setLiveTick("Execution lock changed just now");
+        void loadExecutionQueue();
         void loadDecisions(selectedId);
       })
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isAdmin, loadDecisions, loadRows, selectedId]);
+  }, [isAdmin, loadDecisions, loadExecutionQueue, loadRows, selectedId]);
 
   useEffect(() => {
     setDecisionError(null);
@@ -339,6 +471,9 @@ const AdminCare = () => {
     setDecisionNote("");
     setOwnerRefundInput("0.00");
     setCarerPayoutInput("0.00");
+    setExecutionNote("");
+    setExecutionError(null);
+    setExecutionSuccess(null);
     void loadDecisions(selectedId);
   }, [loadDecisions, selectedId]);
 
@@ -359,8 +494,9 @@ const AdminCare = () => {
       return false;
     }
     await loadRows();
+    await loadExecutionQueue();
     return true;
-  }, [loadRows]);
+  }, [loadExecutionQueue, loadRows]);
 
   const syncVisible = useCallback(async () => {
     if (syncAll) return;
@@ -466,7 +602,78 @@ const AdminCare = () => {
     setValidationResult(saved?.dry_run_result || null);
     setDecisionSuccess(saved?.status === "blocked" ? "Decision draft saved as blocked." : "Decision draft saved.");
     await loadDecisions(row.service_chat_id);
-  }, [decisionNote, decisionReason, decisionType, loadDecisions, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
+    await loadExecutionQueue();
+  }, [decisionNote, decisionReason, decisionType, loadDecisions, loadExecutionQueue, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
+
+  const submitDecision = useCallback(async (decision: CareDecisionRow) => {
+    setExecutionBusy("submit");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_submit_care_money_flow_decision" as never,
+      { p_decision_id: decision.id } as never,
+    );
+    setExecutionBusy(null);
+    if (rpcError) {
+      setExecutionError(rpcError.message || "Unable to submit decision.");
+      return;
+    }
+    const updated = data as CareDecisionRow | null;
+    setValidationResult(updated?.dry_run_result || null);
+    setExecutionSuccess(updated?.status === "ready_for_execution" ? "Decision is ready for execution review." : "Decision submitted but blocked by validation.");
+    await loadDecisions(decision.service_chat_id);
+    await loadExecutionQueue();
+  }, [loadDecisions, loadExecutionQueue]);
+
+  const lockExecutionPackage = useCallback(async (decision: CareDecisionRow) => {
+    const note = executionNote.trim();
+    if (!note) {
+      setExecutionError("Admin note is required to lock the execution package.");
+      return;
+    }
+    setExecutionBusy("lock");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_lock_care_money_flow_execution" as never,
+      { p_decision_id: decision.id, p_admin_note: note } as never,
+    );
+    setExecutionBusy(null);
+    if (rpcError) {
+      setExecutionError(rpcError.message || "Unable to lock execution package.");
+      return;
+    }
+    const locked = data as { validation_result?: CareDecisionValidation } | null;
+    setValidationResult(locked?.validation_result || null);
+    setExecutionSuccess("Execution package locked. No Stripe money movement has been executed.");
+    setExecutionNote("");
+    await loadDecisions(decision.service_chat_id);
+    await loadExecutionQueue();
+  }, [executionNote, loadDecisions, loadExecutionQueue]);
+
+  const cancelDecision = useCallback(async (decision: CareDecisionRow) => {
+    const note = executionNote.trim();
+    if (!note) {
+      setExecutionError("Cancellation note is required.");
+      return;
+    }
+    setExecutionBusy("cancel");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { error: rpcError } = await supabase.rpc(
+      "admin_cancel_care_money_flow_decision" as never,
+      { p_decision_id: decision.id, p_admin_note: note } as never,
+    );
+    setExecutionBusy(null);
+    if (rpcError) {
+      setExecutionError(rpcError.message || "Unable to cancel decision.");
+      return;
+    }
+    setExecutionSuccess("Decision cancelled.");
+    setExecutionNote("");
+    await loadDecisions(decision.service_chat_id);
+    await loadExecutionQueue();
+  }, [executionNote, loadDecisions, loadExecutionQueue]);
 
   if (authLoading || loading) return <div className="p-4 md:p-6 text-sm text-muted-foreground">Loading CARE console...</div>;
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -498,15 +705,36 @@ const AdminCare = () => {
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>
         ) : null}
 
+        <div className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
+          {([
+            ["all", "All"],
+            ["needs_sync", "Needs sync"],
+            ["blocked", "Blocked"],
+            ["ready_for_execution", "Ready"],
+            ["locked", "Locked"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={queueFilter === value ? "default" : "outline"}
+              onClick={() => setQueueFilter(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+
         <div className="overflow-hidden rounded-xl border bg-card">
           <div className="overflow-x-auto">
-            <table className="min-w-[1180px] w-full text-left text-sm">
+            <table className="min-w-[1280px] w-full text-left text-sm">
               <thead className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2">Care transaction</th>
                   <th className="px-3 py-2">Owner</th>
                   <th className="px-3 py-2">Carer</th>
                   <th className="px-3 py-2">Booking</th>
+                  <th className="px-3 py-2">Hours</th>
                   <th className="px-3 py-2">Money flow</th>
                   <th className="px-3 py-2">Paid</th>
                   <th className="px-3 py-2">Refunded</th>
@@ -516,13 +744,13 @@ const AdminCare = () => {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {filteredRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-8 text-center text-muted-foreground" colSpan={10}>
+                    <td className="px-3 py-8 text-center text-muted-foreground" colSpan={11}>
                       No confirmed paid care sessions found.
                     </td>
                   </tr>
-                ) : rows.map((row) => (
+                ) : filteredRows.map((row) => (
                   <tr
                     key={row.service_chat_id}
                     className="border-b last:border-b-0 hover:bg-muted/30"
@@ -548,6 +776,10 @@ const AdminCare = () => {
                     <td className="px-3 py-2">
                       <div>{row.booking_status || "-"}</div>
                       <div className="text-xs text-muted-foreground">{row.dispute_status ? `Dispute: ${row.dispute_status}` : "No dispute"}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div>{formatHours(row.booked_service_hours)} booked / {formatHours(row.actual_service_hours)} actual</div>
+                      <div className="text-xs text-muted-foreground">{row.service_duration_source || "unavailable"}</div>
                     </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${statusClass[row.normalized_money_flow_status]}`}>
@@ -699,6 +931,9 @@ const AdminCare = () => {
                     validationResult.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"
                   }`}>
                     <div className="font-semibold">Latest validation: {validationResult.status || (validationResult.ok ? "ready_for_execution" : "blocked")}</div>
+                    {validationResult.manual_review_required ? (
+                      <div className="mt-2">Manual review required before payout execution.</div>
+                    ) : null}
                     {(validationResult.errors || []).length > 0 ? (
                       <div className="mt-2">Errors: {(validationResult.errors || []).join(", ")}</div>
                     ) : null}
@@ -728,6 +963,114 @@ const AdminCare = () => {
                     onClick={() => void saveDecisionDraft(selected)}
                   >
                     {decisionBusy === "save" ? "Saving..." : "Save decision draft"}
+                  </Button>
+                </div>
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold">Execution readiness</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      This only locks the admin decision package. No Stripe money movement has been executed.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+                    Approval queue
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  {lifecycleSteps.map((step) => {
+                    const active = latestDecision?.status === step || latestLock?.lock_status === step;
+                    const passed = Boolean(latestDecision && lifecycleSteps.indexOf(latestDecision.status) >= lifecycleSteps.indexOf(step));
+                    return (
+                      <div
+                        key={step}
+                        className={`rounded-lg border p-2 text-xs ${
+                          active
+                            ? "border-blue-200 bg-blue-50 text-blue-900"
+                            : passed
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                              : "border-slate-200 bg-muted/20 text-muted-foreground"
+                        }`}
+                      >
+                        {lifecycleLabel[step]}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {latestDecision ? (
+                  <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-medium">{decisionTypeLabel[latestDecision.decision_type]}</div>
+                      <span className="rounded-full border bg-background px-2 py-1 text-xs">{lifecycleLabel[latestDecision.status]}</span>
+                    </div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      <Field label="Owner refund" value={formatMoney(latestDecision.currency, latestDecision.proposed_owner_refund)} />
+                      <Field label="Carer payout" value={formatMoney(latestDecision.currency, latestDecision.proposed_carer_payout)} />
+                      <Field label="Platform retained" value={formatMoney(latestDecision.currency, latestDecision.proposed_platform_retained)} />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted-foreground">Save a decision draft before submitting it for execution review.</p>
+                )}
+
+                {latestLock ? (
+                  <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                    <div className="font-semibold text-blue-950">Locked package summary</div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <Field label="Lock ID" value={latestLock.lock_id} />
+                      <Field label="Stripe snapshot" value={latestLock.stripe_sync_snapshot_id} />
+                      <Field label="Stripe synced" value={formatDateTime(latestLock.stripe_synced_at)} />
+                      <Field label="Locked by" value={latestLock.locked_by_admin_name || compactId(latestLock.locked_by_admin_id)} />
+                      <Field label="Locked at" value={formatDateTime(latestLock.locked_at)} />
+                      <Field label="Validation" value={latestLock.validation_result?.ok ? "passed" : "blocked"} />
+                    </div>
+                  </div>
+                ) : null}
+
+                <label className="mt-3 block text-xs font-medium text-muted-foreground">
+                  Execution review note / cancellation note
+                  <Textarea
+                    className="mt-1 min-h-20"
+                    value={executionNote}
+                    onChange={(event) => setExecutionNote(event.target.value)}
+                    placeholder="Required to lock or cancel."
+                  />
+                </label>
+
+                {executionError ? <p className="mt-2 text-xs text-red-700">{executionError}</p> : null}
+                {executionSuccess ? <p className="mt-2 text-xs text-emerald-700">{executionSuccess}</p> : null}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!latestDecision || Boolean(executionBusy) || latestDecision.status === "execution_locked"}
+                    onClick={() => latestDecision && void submitDecision(latestDecision)}
+                  >
+                    {executionBusy === "submit" ? "Submitting..." : "Submit for execution review"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!latestDecision || latestDecision.status !== "ready_for_execution" || Boolean(executionBusy)}
+                    onClick={() => latestDecision && void lockExecutionPackage(latestDecision)}
+                  >
+                    {executionBusy === "lock" ? "Locking..." : "Lock execution package"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!latestDecision || Boolean(executionBusy) || latestDecision.status === "execution_cancelled"}
+                    onClick={() => latestDecision && void cancelDecision(latestDecision)}
+                  >
+                    {executionBusy === "cancel" ? "Cancelling..." : "Cancel decision"}
                   </Button>
                 </div>
               </section>
@@ -815,6 +1158,20 @@ const AdminCare = () => {
                   <Field label="Dispute status" value={selected.dispute_status || "No dispute"} />
                   <Field label="Owner" value={`${selected.owner_name || "Owner"} @${selected.owner_social_id || selected.owner_id}`} />
                   <Field label="Carer" value={`${selected.carer_name || "Carer"} @${selected.carer_social_id || selected.carer_id}`} />
+                </div>
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <h3 className="font-semibold">Service duration proof</h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <Field label="Booked hours" value={formatHours(selected.booked_service_hours)} />
+                  <Field label="Actual hours" value={formatHours(selected.actual_service_hours)} />
+                  <Field label="Booked start" value={formatDateTime(selected.service_started_at)} />
+                  <Field label="Booked end" value={formatDateTime(selected.service_scheduled_end_at)} />
+                  <Field label="Check-in" value={formatDateTime(selected.checked_in_at)} />
+                  <Field label="Completion" value={formatDateTime(selected.completed_at)} />
+                  <Field label="Dispute raised" value={formatDateTime(selected.dispute_raised_at)} />
+                  <Field label="Duration source" value={selected.service_duration_source || "unavailable"} />
                 </div>
               </section>
 
