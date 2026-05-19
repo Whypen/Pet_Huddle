@@ -85,6 +85,16 @@ type CareDecisionStatus =
 
 type CareQueueFilter = "all" | "needs_sync" | "blocked" | "ready_for_execution" | "locked";
 
+type CareExecutionAttemptStatus =
+  | "dry_run_passed"
+  | "dry_run_blocked"
+  | "live_disabled"
+  | "blocked"
+  | "failed";
+
+type CareApprovalStatus = "approved" | "rejected" | "revoked";
+type CareApprovalRole = "maker" | "checker" | "finance_admin";
+
 type CareDecisionRow = {
   id: string;
   service_chat_id: string;
@@ -129,8 +139,57 @@ type CareExecutionQueueRow = {
   locked_by_admin_id: string | null;
   locked_by_admin_name: string | null;
   locked_at: string | null;
+  latest_execution_attempt_id: string | null;
+  latest_execution_attempt_status: CareExecutionAttemptStatus | null;
+  latest_execution_mode: "dry_run" | "live_disabled" | string | null;
+  latest_requested_action: string | null;
+  latest_preflight_result: Record<string, unknown> | null;
+  latest_stripe_action_plan: Record<string, unknown> | null;
+  latest_execution_attempt_created_at: string | null;
+  approval_count?: number | null;
+  maker_approved?: boolean | null;
+  checker_approved?: boolean | null;
+  rejected_count?: number | null;
+  approved_for_future_live_execution?: boolean | null;
+  approval_readiness?: CareApprovalReadiness | null;
   created_at: string;
   updated_at: string;
+};
+
+type CareApprovalRow = {
+  id: string;
+  service_chat_id: string;
+  decision_id: string;
+  execution_lock_id: string;
+  execution_attempt_id: string;
+  approver_admin_id: string;
+  approver_admin_name: string | null;
+  approval_role: CareApprovalRole;
+  approval_status: CareApprovalStatus;
+  approval_note: string | null;
+  approved_at: string | null;
+  rejected_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type CareApprovalReadiness = {
+  ok?: boolean;
+  approved_for_future_live_execution?: boolean;
+  errors?: string[];
+  warnings?: string[];
+  approval_count?: number;
+  maker_approved?: boolean;
+  checker_approved?: boolean;
+  distinct_approver_count?: number;
+  rejected_count?: number;
+  latest_execution_attempt_id?: string | null;
+  latest_attempt_status?: string | null;
+  latest_stripe_sync_snapshot_id?: string | null;
+  latest_stripe_synced_at?: string | null;
+  checked_at?: string | null;
+  live_money_movement_enabled?: boolean;
 };
 
 type CareDecisionValidation = {
@@ -197,6 +256,26 @@ const lifecycleLabel: Record<CareDecisionStatus, string> = {
   execution_cancelled: "Cancelled",
   execution_superseded: "Superseded",
   executed_reserved: "Reserved",
+};
+
+const executionAttemptLabel: Record<CareExecutionAttemptStatus, string> = {
+  dry_run_passed: "Dry run passed",
+  dry_run_blocked: "Blocked",
+  live_disabled: "Live execution disabled",
+  blocked: "Blocked",
+  failed: "Failed",
+};
+
+const approvalRoleLabel: Record<CareApprovalRole, string> = {
+  maker: "Maker",
+  checker: "Checker",
+  finance_admin: "Finance admin",
+};
+
+const approvalStatusLabel: Record<CareApprovalStatus, string> = {
+  approved: "Approved",
+  rejected: "Rejected",
+  revoked: "Revoked",
 };
 
 const statusLabel: Record<CareMoneyFlowStatus, string> = {
@@ -302,9 +381,14 @@ const AdminCare = () => {
   const [executionQueue, setExecutionQueue] = useState<CareExecutionQueueRow[]>([]);
   const [queueFilter, setQueueFilter] = useState<CareQueueFilter>("all");
   const [executionNote, setExecutionNote] = useState("");
-  const [executionBusy, setExecutionBusy] = useState<"submit" | "lock" | "cancel" | null>(null);
+  const [executionBusy, setExecutionBusy] = useState<"submit" | "lock" | "cancel" | "prepare" | "dry_check" | null>(null);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
+  const [approvals, setApprovals] = useState<CareApprovalRow[]>([]);
+  const [approvalNote, setApprovalNote] = useState("");
+  const [approvalBusy, setApprovalBusy] = useState<CareApprovalRole | "reject" | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null);
 
   const isAdmin =
     profile?.is_admin === true ||
@@ -330,6 +414,50 @@ const AdminCare = () => {
     () => selectedQueueItems.find((item) => item.lock_status === "execution_locked") || selectedQueueItems.find((item) => item.lock_id) || null,
     [selectedQueueItems],
   );
+
+  const activeApprovals = useMemo(
+    () => approvals.filter((approval) => approval.approval_status === "approved"),
+    [approvals],
+  );
+
+  const currentAdminApprovalRoles = useMemo(
+    () => activeApprovals
+      .filter((approval) => approval.approver_admin_id === user?.id)
+      .map((approval) => approval.approval_role),
+    [activeApprovals, user?.id],
+  );
+
+  const approvalBadge = useMemo(() => {
+    if (!latestLock?.latest_execution_attempt_id) return "Needs approvals";
+    if ((latestLock.rejected_count || approvals.some((approval) => approval.approval_status === "rejected")) && !latestLock.approved_for_future_live_execution) {
+      return "Rejected";
+    }
+    if (latestLock.approved_for_future_live_execution) return "Approved for future live execution";
+    if (latestLock.maker_approved && latestLock.checker_approved) return "Checker approved";
+    if (latestLock.maker_approved) return "Maker approved";
+    return "Needs approvals";
+  }, [approvals, latestLock]);
+
+  const irreversibleChecklist = useMemo(() => {
+    const readiness = latestLock?.approval_readiness;
+    const preflightOk = Boolean(latestLock?.latest_preflight_result && (latestLock.latest_preflight_result as { ok?: boolean }).ok === true);
+    const lockedMoneyFrozen = Boolean(latestLock?.lock_id && latestLock.lock_status === "execution_locked");
+    const stripeFresh = Boolean(
+      latestLock?.stripe_synced_at
+      && selected?.db_updated_at
+      && new Date(latestLock.stripe_synced_at).getTime() >= new Date(selected.db_updated_at).getTime(),
+    );
+    return [
+      { label: "Stripe sync fresh", done: stripeFresh },
+      { label: "DB/Stripe status matched", done: stripeFresh && !(readiness?.errors || []).includes("latest_stripe_sync_stale") },
+      { label: "Locked money preview frozen", done: lockedMoneyFrozen },
+      { label: "Service hours reviewed", done: Boolean(selected?.actual_service_hours || latestLock?.validation_result?.manual_review_required === false || latestLock?.approval_readiness?.warnings?.includes("manual_review_acknowledged_by_execution_lock_note")) },
+      { label: "Owner/carer impact reviewed", done: Boolean(latestLock?.latest_preflight_result || latestLock?.validation_result) },
+      { label: "Maker/checker approvals complete", done: Boolean(latestLock?.maker_approved && latestLock?.checker_approved && (latestLock.approval_count || 0) >= 2) },
+      { label: "Live execution disabled", done: true },
+      { label: "Dry run preflight passed", done: preflightOk },
+    ];
+  }, [latestLock, selected?.actual_service_hours, selected?.db_updated_at]);
 
   const filteredRows = useMemo(() => {
     if (queueFilter === "all") return rows;
@@ -420,6 +548,23 @@ const AdminCare = () => {
     setExecutionQueue((Array.isArray(data) ? data : []) as CareExecutionQueueRow[]);
   }, []);
 
+  const loadApprovals = useCallback(async (executionLockId: string | null | undefined) => {
+    if (!executionLockId) {
+      setApprovals([]);
+      return;
+    }
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_get_care_money_flow_execution_approvals" as never,
+      { p_execution_lock_id: executionLockId } as never,
+    );
+    if (rpcError) {
+      setApprovalError(rpcError.message || "Unable to load execution approvals.");
+      setApprovals([]);
+      return;
+    }
+    setApprovals((Array.isArray(data) ? data : []) as CareApprovalRow[]);
+  }, []);
+
   useEffect(() => {
     if (authLoading) return;
     if (!isAdmin) {
@@ -456,11 +601,20 @@ const AdminCare = () => {
         void loadExecutionQueue();
         void loadDecisions(selectedId);
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_attempts" }, () => {
+        setLiveTick("Execution dry check changed just now");
+        void loadExecutionQueue();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_approvals" }, () => {
+        setLiveTick("Execution approval changed just now");
+        void loadExecutionQueue();
+        void loadApprovals(latestLock?.lock_id);
+      })
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isAdmin, loadDecisions, loadExecutionQueue, loadRows, selectedId]);
+  }, [isAdmin, latestLock?.lock_id, loadApprovals, loadDecisions, loadExecutionQueue, loadRows, selectedId]);
 
   useEffect(() => {
     setDecisionError(null);
@@ -474,8 +628,17 @@ const AdminCare = () => {
     setExecutionNote("");
     setExecutionError(null);
     setExecutionSuccess(null);
+    setApprovalNote("");
+    setApprovalError(null);
+    setApprovalSuccess(null);
+    setApprovals([]);
     void loadDecisions(selectedId);
   }, [loadDecisions, selectedId]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void loadApprovals(latestLock?.lock_id);
+  }, [isAdmin, latestLock?.lock_id, loadApprovals]);
 
   const syncOne = useCallback(async (row: CareTransactionRow) => {
     setSyncing((current) => ({ ...current, [row.service_chat_id]: true }));
@@ -674,6 +837,117 @@ const AdminCare = () => {
     await loadDecisions(decision.service_chat_id);
     await loadExecutionQueue();
   }, [executionNote, loadDecisions, loadExecutionQueue]);
+
+  const prepareExecutionPackage = useCallback(async (lock: CareExecutionQueueRow) => {
+    if (!lock.lock_id) {
+      setExecutionError("Execution lock is required before preparing the package.");
+      return;
+    }
+    setExecutionBusy("prepare");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_prepare_care_money_flow_execution" as never,
+      { p_execution_lock_id: lock.lock_id } as never,
+    );
+    setExecutionBusy(null);
+    if (rpcError) {
+      setExecutionError(rpcError.message || "Unable to prepare execution package.");
+      return;
+    }
+    const attempt = data as { status?: CareExecutionAttemptStatus; preflight_result?: { ok?: boolean } } | null;
+    setExecutionSuccess(attempt?.status === "dry_run_passed" ? "Dry run passed." : "Execution package prepared with blockers.");
+    await loadExecutionQueue();
+    await loadApprovals(lock.lock_id);
+  }, [loadApprovals, loadExecutionQueue]);
+
+  const runExecutionDryCheck = useCallback(async (lock: CareExecutionQueueRow) => {
+    if (!lock.lock_id) {
+      setExecutionError("Execution lock is required before running the dry check.");
+      return;
+    }
+    setExecutionBusy("dry_check");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { data, error: fnError } = await supabase.functions.invoke("admin-execute-care-money-flow", {
+      body: {
+        execution_lock_id: lock.lock_id,
+        execution_mode: "dry_run",
+      },
+    });
+    setExecutionBusy(null);
+    if (fnError) {
+      setExecutionError(fnError.message || "Execution dry check failed.");
+      return;
+    }
+    if (data && typeof data === "object" && "error" in data) {
+      const body = data as Record<string, unknown>;
+      setExecutionError(String(body.detail || body.error || "Execution dry check failed."));
+      await loadExecutionQueue();
+      return;
+    }
+    setExecutionSuccess("Dry run passed. Live money movement is disabled.");
+    await loadExecutionQueue();
+    await loadApprovals(lock.lock_id);
+  }, [loadApprovals, loadExecutionQueue]);
+
+  const approveExecutionPackage = useCallback(async (lock: CareExecutionQueueRow, role: CareApprovalRole) => {
+    if (!lock.latest_execution_attempt_id) {
+      setApprovalError("Run an execution dry check before approving.");
+      return;
+    }
+    setApprovalBusy(role);
+    setApprovalError(null);
+    setApprovalSuccess(null);
+    const { error: rpcError } = await supabase.rpc(
+      "admin_approve_care_money_flow_execution" as never,
+      {
+        p_execution_attempt_id: lock.latest_execution_attempt_id,
+        p_approval_role: role,
+        p_note: approvalNote.trim() || null,
+      } as never,
+    );
+    setApprovalBusy(null);
+    if (rpcError) {
+      setApprovalError(rpcError.message || "Unable to approve execution package.");
+      return;
+    }
+    setApprovalSuccess(`${approvalRoleLabel[role]} approval saved.`);
+    setApprovalNote("");
+    await loadExecutionQueue();
+    await loadApprovals(lock.lock_id);
+  }, [approvalNote, loadApprovals, loadExecutionQueue]);
+
+  const rejectExecutionPackage = useCallback(async (lock: CareExecutionQueueRow) => {
+    if (!lock.latest_execution_attempt_id) {
+      setApprovalError("Run an execution dry check before rejecting.");
+      return;
+    }
+    const note = approvalNote.trim();
+    if (!note) {
+      setApprovalError("Rejection note is required.");
+      return;
+    }
+    setApprovalBusy("reject");
+    setApprovalError(null);
+    setApprovalSuccess(null);
+    const { error: rpcError } = await supabase.rpc(
+      "admin_reject_care_money_flow_execution" as never,
+      {
+        p_execution_attempt_id: lock.latest_execution_attempt_id,
+        p_note: note,
+      } as never,
+    );
+    setApprovalBusy(null);
+    if (rpcError) {
+      setApprovalError(rpcError.message || "Unable to reject execution package.");
+      return;
+    }
+    setApprovalSuccess("Execution package rejected.");
+    setApprovalNote("");
+    await loadExecutionQueue();
+    await loadApprovals(lock.lock_id);
+  }, [approvalNote, loadApprovals, loadExecutionQueue]);
 
   if (authLoading || loading) return <div className="p-4 md:p-6 text-sm text-muted-foreground">Loading CARE console...</div>;
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -1027,7 +1301,161 @@ const AdminCare = () => {
                       <Field label="Locked by" value={latestLock.locked_by_admin_name || compactId(latestLock.locked_by_admin_id)} />
                       <Field label="Locked at" value={formatDateTime(latestLock.locked_at)} />
                       <Field label="Validation" value={latestLock.validation_result?.ok ? "passed" : "blocked"} />
+                      <Field
+                        label="Execution dry check"
+                        value={latestLock.latest_execution_attempt_status ? executionAttemptLabel[latestLock.latest_execution_attempt_status] : "Not prepared"}
+                      />
+                      <Field label="Attempt" value={compactId(latestLock.latest_execution_attempt_id)} />
                     </div>
+                    <div className="mt-3 rounded-lg border border-blue-100 bg-white/70 p-3 text-xs text-blue-950">
+                      Live money movement is disabled. This prepares the execution package only.
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(executionBusy)}
+                        onClick={() => void prepareExecutionPackage(latestLock)}
+                      >
+                        {executionBusy === "prepare" ? "Preparing..." : "Prepare execution package"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(executionBusy)}
+                        onClick={() => void runExecutionDryCheck(latestLock)}
+                      >
+                        {executionBusy === "dry_check" ? "Checking..." : "Run execution dry check"}
+                      </Button>
+                    </div>
+                    <div className="mt-3 rounded-lg border bg-background p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="font-semibold">Maker-checker approvals</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {latestLock.approval_count || 0} approval{(latestLock.approval_count || 0) === 1 ? "" : "s"} recorded.
+                            {currentAdminApprovalRoles.length > 0 ? ` You approved as ${currentAdminApprovalRoles.map((role) => approvalRoleLabel[role]).join(", ")}.` : " You have not approved this package."}
+                          </div>
+                        </div>
+                        <span className={`rounded-full border px-2 py-1 text-xs font-medium ${
+                          latestLock.approved_for_future_live_execution
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : approvalBadge === "Rejected"
+                              ? "border-red-200 bg-red-50 text-red-800"
+                              : "border-amber-200 bg-amber-50 text-amber-900"
+                        }`}>
+                          {approvalBadge}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <Field label="Maker approved" value={latestLock.maker_approved ? "yes" : "no"} />
+                        <Field label="Checker approved" value={latestLock.checker_approved ? "yes" : "no"} />
+                        <Field label="Rejected" value={(latestLock.rejected_count || 0) > 0 ? "yes" : "no"} />
+                        <Field label="Future live readiness" value={latestLock.approved_for_future_live_execution ? "approved" : "not ready"} />
+                      </div>
+
+                      <label className="mt-3 block text-xs font-medium text-muted-foreground">
+                        Approval / rejection note
+                        <Textarea
+                          className="mt-1 min-h-20"
+                          value={approvalNote}
+                          onChange={(event) => setApprovalNote(event.target.value)}
+                          placeholder="Required for rejection. Optional for approval."
+                        />
+                      </label>
+
+                      {approvalError ? <p className="mt-2 text-xs text-red-700">{approvalError}</p> : null}
+                      {approvalSuccess ? <p className="mt-2 text-xs text-emerald-700">{approvalSuccess}</p> : null}
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!latestLock.latest_execution_attempt_id || Boolean(approvalBusy) || currentAdminApprovalRoles.includes("maker")}
+                          onClick={() => void approveExecutionPackage(latestLock, "maker")}
+                        >
+                          {approvalBusy === "maker" ? "Approving..." : "Approve as maker"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!latestLock.latest_execution_attempt_id || Boolean(approvalBusy) || currentAdminApprovalRoles.some((role) => role === "checker" || role === "finance_admin")}
+                          onClick={() => void approveExecutionPackage(latestLock, "checker")}
+                        >
+                          {approvalBusy === "checker" ? "Approving..." : "Approve as checker"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={!latestLock.latest_execution_attempt_id || Boolean(approvalBusy)}
+                          onClick={() => void rejectExecutionPackage(latestLock)}
+                        >
+                          {approvalBusy === "reject" ? "Rejecting..." : "Reject execution package"}
+                        </Button>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Approvals list</div>
+                        {approvals.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No approvals recorded yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {approvals.map((approval) => (
+                              <div key={approval.id} className="rounded-lg border bg-muted/20 p-2 text-xs">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-medium">{approvalRoleLabel[approval.approval_role]} by {approval.approver_admin_name || compactId(approval.approver_admin_id)}</span>
+                                  <span className="rounded-full border bg-background px-2 py-1">{approvalStatusLabel[approval.approval_status]}</span>
+                                </div>
+                                <div className="mt-1 text-muted-foreground">
+                                  {formatDateTime(approval.approved_at || approval.rejected_at || approval.revoked_at || approval.created_at)}
+                                </div>
+                                {approval.approval_note ? <div className="mt-1 text-muted-foreground">{approval.approval_note}</div> : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-lg border bg-background p-3">
+                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Irreversible-action checklist</div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {irreversibleChecklist.map((item) => (
+                          <div
+                            key={item.label}
+                            className={`rounded-lg border px-3 py-2 text-xs ${
+                              item.done
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                                : "border-slate-200 bg-muted/20 text-muted-foreground"
+                            }`}
+                          >
+                            {item.done ? "Checked" : "Pending"}: {item.label}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {latestLock.latest_stripe_action_plan ? (
+                      <div className="mt-3 rounded-lg border bg-background p-3">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">View execution action plan</div>
+                        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
+                          {JSON.stringify(latestLock.latest_stripe_action_plan, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {latestLock.latest_preflight_result ? (
+                      <div className="mt-3 rounded-lg border bg-background p-3">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Preflight result</div>
+                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
+                          {JSON.stringify(latestLock.latest_preflight_result, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
