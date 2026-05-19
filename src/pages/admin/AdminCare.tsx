@@ -174,6 +174,18 @@ type CareApprovalRow = {
   updated_at: string;
 };
 
+type CareAuditTimelineRow = {
+  event_id: string;
+  service_chat_id: string;
+  event_type: string;
+  event_status: string | null;
+  admin_id: string | null;
+  admin_name: string | null;
+  occurred_at: string | null;
+  short_note: string | null;
+  source_table: string;
+};
+
 type CareApprovalReadiness = {
   ok?: boolean;
   approved_for_future_live_execution?: boolean;
@@ -226,6 +238,8 @@ const ADMIN_EMAIL_ALLOWLIST = new Set([
   "hyphen@huddle.pet",
 ]);
 
+const STRIPE_SYNC_STALE_MS = 30 * 60 * 1000;
+
 const decisionTypeLabel: Record<CareDecisionType, string> = {
   no_action_monitor: "No action / monitor",
   full_refund_owner: "Full refund owner",
@@ -276,6 +290,14 @@ const approvalStatusLabel: Record<CareApprovalStatus, string> = {
   approved: "Approved",
   rejected: "Rejected",
   revoked: "Revoked",
+};
+
+const auditEventLabel: Record<string, string> = {
+  stripe_snapshot: "Stripe snapshot",
+  admin_decision: "Admin decision",
+  execution_lock: "Execution lock",
+  execution_attempt: "Execution dry check",
+  execution_approval: "Execution approval",
 };
 
 const statusLabel: Record<CareMoneyFlowStatus, string> = {
@@ -348,6 +370,43 @@ const createIdempotencyKey = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const safeAdminMessage = (fallback: string, raw?: string | null) => {
+  const message = String(raw || "").toLowerCase();
+  if (message.includes("missing_payment_intent") || message.includes("payment_intent")) {
+    return "Missing payment intent. Sync Stripe status or inspect the booking payment record.";
+  }
+  if (message.includes("stale") || message.includes("needs_sync") || message.includes("sync_required")) {
+    return "Stale Stripe sync. Refresh Stripe statuses before continuing.";
+  }
+  if (message.includes("active_stripe_dispute") || message.includes("active dispute")) {
+    return "Active Stripe dispute blocks this action unless the decision is manual review.";
+  }
+  if (message.includes("same_admin_cannot_be_maker_and_checker")) {
+    return "Same admin cannot approve as both maker and checker.";
+  }
+  if (message.includes("live_money_movement_disabled") || message.includes("live_disabled")) {
+    return "Live execution disabled. This package can only be prepared and dry-checked.";
+  }
+  if (message.includes("amount") || message.includes("balance")) {
+    return "Amount mismatch. Owner refund, carer payout, and retained amount must balance total paid.";
+  }
+  if (message.includes("service_duration") || message.includes("actual_service_hours")) {
+    return "Service duration unavailable. Review service hours before payout-related execution.";
+  }
+  if (message.includes("validation") || message.includes("blocked")) {
+    return "Validation blocked. Review the listed blockers before continuing.";
+  }
+  if (message.includes("stripe") || message.includes("sync")) {
+    return "Stripe sync failed. Retry the sync or inspect the payment intent in Stripe.";
+  }
+  if (message.includes("admin_required")) {
+    return "Admin access is required for this CARE action.";
+  }
+  return fallback;
+};
+
+const safeIssueLabel = (value: string) => safeAdminMessage(value.replaceAll("_", " "), value);
+
 const Field = ({ label, value }: { label: string; value: string | number | null | undefined }) => (
   <div className="min-w-0 rounded-lg border bg-muted/20 p-2">
     <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
@@ -362,6 +421,7 @@ const AdminCare = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
   const [syncAll, setSyncAll] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [liveTick, setLiveTick] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
@@ -389,6 +449,8 @@ const AdminCare = () => {
   const [approvalBusy, setApprovalBusy] = useState<CareApprovalRole | "reject" | null>(null);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null);
+  const [auditTimeline, setAuditTimeline] = useState<CareAuditTimelineRow[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   const isAdmin =
     profile?.is_admin === true ||
@@ -438,6 +500,37 @@ const AdminCare = () => {
     return "Needs approvals";
   }, [approvals, latestLock]);
 
+  const freshnessState = useMemo(() => {
+    if (!selected) {
+      return {
+        stripeStale: false,
+        dbNeedsSync: false,
+        lockNeedsRefresh: false,
+        approvalNeedsRefresh: false,
+        warnings: [] as string[],
+      };
+    }
+    const now = Date.now();
+    const stripeTime = selected.stripe_synced_at ? new Date(selected.stripe_synced_at).getTime() : 0;
+    const dbTime = selected.db_updated_at ? new Date(selected.db_updated_at).getTime() : 0;
+    const lockTime = latestLock?.locked_at ? new Date(latestLock.locked_at).getTime() : 0;
+    const latestApprovalTime = approvals.reduce((latest, approval) => {
+      const approvalTime = new Date(approval.updated_at || approval.created_at).getTime();
+      return Number.isFinite(approvalTime) ? Math.max(latest, approvalTime) : latest;
+    }, 0);
+    const stripeStale = !stripeTime || now - stripeTime > STRIPE_SYNC_STALE_MS;
+    const dbNeedsSync = Boolean(dbTime && (!stripeTime || dbTime > stripeTime));
+    const lockNeedsRefresh = Boolean(lockTime && stripeTime && lockTime < stripeTime);
+    const approvalNeedsRefresh = Boolean(lockTime && latestApprovalTime && latestApprovalTime < lockTime);
+    const warnings = [
+      stripeStale ? "Stripe sync is stale. Refresh Stripe statuses before continuing." : null,
+      dbNeedsSync ? "DB changed after the latest Stripe sync. Sync this transaction before review." : null,
+      lockNeedsRefresh ? "Locked package is older than the latest Stripe sync. Re-lock or revalidate before future execution." : null,
+      approvalNeedsRefresh ? "Approval is older than the latest lock. Maker/checker approval must be refreshed." : null,
+    ].filter(Boolean) as string[];
+    return { stripeStale, dbNeedsSync, lockNeedsRefresh, approvalNeedsRefresh, warnings };
+  }, [approvals, latestLock?.locked_at, selected]);
+
   const irreversibleChecklist = useMemo(() => {
     const readiness = latestLock?.approval_readiness;
     const preflightOk = Boolean(latestLock?.latest_preflight_result && (latestLock.latest_preflight_result as { ok?: boolean }).ok === true);
@@ -458,6 +551,22 @@ const AdminCare = () => {
       { label: "Dry run preflight passed", done: preflightOk },
     ];
   }, [latestLock, selected?.actual_service_hours, selected?.db_updated_at]);
+
+  const finalChecklist = useMemo(() => {
+    const decisionValidated = Boolean(latestDecision?.dry_run_result?.ok || validationResult?.ok || latestLock?.validation_result?.ok);
+    const executionLocked = latestLock?.lock_status === "execution_locked";
+    const dryRunPassed = latestLock?.latest_execution_attempt_status === "dry_run_passed";
+    const approvalsComplete = Boolean(latestLock?.maker_approved && latestLock?.checker_approved && (latestLock.approval_count || 0) >= 2);
+    return [
+      { label: "DB synced", done: !freshnessState.dbNeedsSync },
+      { label: "Stripe synced", done: Boolean(selected?.stripe_synced_at) && !freshnessState.stripeStale },
+      { label: "Decision validated", done: decisionValidated },
+      { label: "Execution locked", done: executionLocked },
+      { label: "Dry run passed", done: dryRunPassed },
+      { label: "Maker/checker approved", done: approvalsComplete },
+      { label: "Live money movement disabled", done: true },
+    ];
+  }, [freshnessState.dbNeedsSync, freshnessState.stripeStale, latestDecision?.dry_run_result?.ok, latestLock, selected?.stripe_synced_at, validationResult?.ok]);
 
   const filteredRows = useMemo(() => {
     if (queueFilter === "all") return rows;
@@ -514,7 +623,7 @@ const AdminCare = () => {
     setError(null);
     const { data, error: rpcError } = await supabase.rpc("admin_get_care_transactions" as never);
     if (rpcError) {
-      setError(rpcError.message || "Unable to load CARE transactions.");
+      setError(safeAdminMessage("Unable to load CARE transactions.", rpcError.message));
       setRows([]);
       return;
     }
@@ -531,7 +640,7 @@ const AdminCare = () => {
       { p_service_chat_id: serviceChatId } as never,
     );
     if (rpcError) {
-      setDecisionError(rpcError.message || "Unable to load decision history.");
+      setDecisionError(safeAdminMessage("Unable to load decision history.", rpcError.message));
       setDecisions([]);
       return;
     }
@@ -541,7 +650,7 @@ const AdminCare = () => {
   const loadExecutionQueue = useCallback(async () => {
     const { data, error: rpcError } = await supabase.rpc("admin_get_care_money_flow_execution_queue" as never);
     if (rpcError) {
-      setExecutionError(rpcError.message || "Unable to load execution queue.");
+      setExecutionError(safeAdminMessage("Unable to load execution queue.", rpcError.message));
       setExecutionQueue([]);
       return;
     }
@@ -558,11 +667,30 @@ const AdminCare = () => {
       { p_execution_lock_id: executionLockId } as never,
     );
     if (rpcError) {
-      setApprovalError(rpcError.message || "Unable to load execution approvals.");
+      setApprovalError(safeAdminMessage("Unable to load execution approvals.", rpcError.message));
       setApprovals([]);
       return;
     }
     setApprovals((Array.isArray(data) ? data : []) as CareApprovalRow[]);
+  }, []);
+
+  const loadAuditTimeline = useCallback(async (serviceChatId: string | null) => {
+    if (!serviceChatId) {
+      setAuditTimeline([]);
+      setAuditError(null);
+      return;
+    }
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_get_care_money_flow_audit_timeline" as never,
+      { p_service_chat_id: serviceChatId } as never,
+    );
+    if (rpcError) {
+      setAuditError(safeAdminMessage("Unable to load audit timeline.", rpcError.message));
+      setAuditTimeline([]);
+      return;
+    }
+    setAuditError(null);
+    setAuditTimeline((Array.isArray(data) ? data : []) as CareAuditTimelineRow[]);
   }, []);
 
   useEffect(() => {
@@ -589,32 +717,37 @@ const AdminCare = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_snapshots" }, () => {
         setLiveTick("Stripe snapshot changed just now");
         void loadRows();
+        void loadAuditTimeline(selectedId);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_admin_decisions" }, () => {
         setLiveTick("Decision draft changed just now");
         void loadRows();
         void loadExecutionQueue();
         void loadDecisions(selectedId);
+        void loadAuditTimeline(selectedId);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_locks" }, () => {
         setLiveTick("Execution lock changed just now");
         void loadExecutionQueue();
         void loadDecisions(selectedId);
+        void loadAuditTimeline(selectedId);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_attempts" }, () => {
         setLiveTick("Execution dry check changed just now");
         void loadExecutionQueue();
+        void loadAuditTimeline(selectedId);
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_execution_approvals" }, () => {
         setLiveTick("Execution approval changed just now");
         void loadExecutionQueue();
         void loadApprovals(latestLock?.lock_id);
+        void loadAuditTimeline(selectedId);
       })
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isAdmin, latestLock?.lock_id, loadApprovals, loadDecisions, loadExecutionQueue, loadRows, selectedId]);
+  }, [isAdmin, latestLock?.lock_id, loadApprovals, loadAuditTimeline, loadDecisions, loadExecutionQueue, loadRows, selectedId]);
 
   useEffect(() => {
     setDecisionError(null);
@@ -633,7 +766,8 @@ const AdminCare = () => {
     setApprovalSuccess(null);
     setApprovals([]);
     void loadDecisions(selectedId);
-  }, [loadDecisions, selectedId]);
+    void loadAuditTimeline(selectedId);
+  }, [loadAuditTimeline, loadDecisions, selectedId]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -641,34 +775,41 @@ const AdminCare = () => {
   }, [isAdmin, latestLock?.lock_id, loadApprovals]);
 
   const syncOne = useCallback(async (row: CareTransactionRow) => {
+    if (syncing[row.service_chat_id]) return false;
     setSyncing((current) => ({ ...current, [row.service_chat_id]: true }));
     setError(null);
+    setSyncSummary(null);
     const { data, error: fnError } = await supabase.functions.invoke("admin-sync-care-money-flow", {
       body: { service_chat_id: row.service_chat_id },
     });
     setSyncing((current) => ({ ...current, [row.service_chat_id]: false }));
     if (fnError) {
-      setError(fnError.message || "Stripe sync failed.");
+      setError(safeAdminMessage("Stripe sync failed.", fnError.message));
       return false;
     }
     if (data && typeof data === "object" && "error" in data) {
       const body = data as Record<string, unknown>;
-      setError(String(body.detail || body.error || "Stripe sync failed."));
+      setError(safeAdminMessage("Stripe sync failed.", String(body.detail || body.error || "")));
       return false;
     }
     await loadRows();
     await loadExecutionQueue();
+    await loadAuditTimeline(row.service_chat_id);
     return true;
-  }, [loadExecutionQueue, loadRows]);
+  }, [loadAuditTimeline, loadExecutionQueue, loadRows, syncing]);
 
   const syncVisible = useCallback(async () => {
     if (syncAll) return;
     setSyncAll(true);
-    for (const row of rows) {
-      await syncOne(row);
+    setSyncSummary(null);
+    let failed = 0;
+    for (const row of filteredRows) {
+      const ok = await syncOne(row);
+      if (!ok) failed += 1;
     }
     setSyncAll(false);
-  }, [rows, syncAll, syncOne]);
+    setSyncSummary(failed > 0 ? `${failed} visible Stripe sync${failed === 1 ? "" : "s"} failed. Review row status and retry.` : "Visible Stripe statuses refreshed.");
+  }, [filteredRows, syncAll, syncOne]);
 
   const sendTeamHuddleMessage = useCallback(async (row: CareTransactionRow, target: "owner" | "carer" | "both") => {
     const body = messageDraft.trim();
@@ -731,7 +872,7 @@ const AdminCare = () => {
     );
     setDecisionBusy(null);
     if (rpcError) {
-      setDecisionError(rpcError.message || "Decision validation failed.");
+      setDecisionError(safeAdminMessage("Decision validation failed.", rpcError.message));
       return null;
     }
     const result = (data || null) as CareDecisionValidation | null;
@@ -758,7 +899,7 @@ const AdminCare = () => {
     );
     setDecisionBusy(null);
     if (rpcError) {
-      setDecisionError(rpcError.message || "Unable to save decision draft.");
+      setDecisionError(safeAdminMessage("Unable to save decision draft.", rpcError.message));
       return;
     }
     const saved = data as CareDecisionRow | null;
@@ -766,7 +907,8 @@ const AdminCare = () => {
     setDecisionSuccess(saved?.status === "blocked" ? "Decision draft saved as blocked." : "Decision draft saved.");
     await loadDecisions(row.service_chat_id);
     await loadExecutionQueue();
-  }, [decisionNote, decisionReason, decisionType, loadDecisions, loadExecutionQueue, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
+    await loadAuditTimeline(row.service_chat_id);
+  }, [decisionNote, decisionReason, decisionType, loadAuditTimeline, loadDecisions, loadExecutionQueue, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
 
   const submitDecision = useCallback(async (decision: CareDecisionRow) => {
     setExecutionBusy("submit");
@@ -778,7 +920,7 @@ const AdminCare = () => {
     );
     setExecutionBusy(null);
     if (rpcError) {
-      setExecutionError(rpcError.message || "Unable to submit decision.");
+      setExecutionError(safeAdminMessage("Unable to submit decision.", rpcError.message));
       return;
     }
     const updated = data as CareDecisionRow | null;
@@ -786,7 +928,8 @@ const AdminCare = () => {
     setExecutionSuccess(updated?.status === "ready_for_execution" ? "Decision is ready for execution review." : "Decision submitted but blocked by validation.");
     await loadDecisions(decision.service_chat_id);
     await loadExecutionQueue();
-  }, [loadDecisions, loadExecutionQueue]);
+    await loadAuditTimeline(decision.service_chat_id);
+  }, [loadAuditTimeline, loadDecisions, loadExecutionQueue]);
 
   const lockExecutionPackage = useCallback(async (decision: CareDecisionRow) => {
     const note = executionNote.trim();
@@ -803,7 +946,7 @@ const AdminCare = () => {
     );
     setExecutionBusy(null);
     if (rpcError) {
-      setExecutionError(rpcError.message || "Unable to lock execution package.");
+      setExecutionError(safeAdminMessage("Unable to lock execution package.", rpcError.message));
       return;
     }
     const locked = data as { validation_result?: CareDecisionValidation } | null;
@@ -812,7 +955,8 @@ const AdminCare = () => {
     setExecutionNote("");
     await loadDecisions(decision.service_chat_id);
     await loadExecutionQueue();
-  }, [executionNote, loadDecisions, loadExecutionQueue]);
+    await loadAuditTimeline(decision.service_chat_id);
+  }, [executionNote, loadAuditTimeline, loadDecisions, loadExecutionQueue]);
 
   const cancelDecision = useCallback(async (decision: CareDecisionRow) => {
     const note = executionNote.trim();
@@ -829,14 +973,15 @@ const AdminCare = () => {
     );
     setExecutionBusy(null);
     if (rpcError) {
-      setExecutionError(rpcError.message || "Unable to cancel decision.");
+      setExecutionError(safeAdminMessage("Unable to cancel decision.", rpcError.message));
       return;
     }
     setExecutionSuccess("Decision cancelled.");
     setExecutionNote("");
     await loadDecisions(decision.service_chat_id);
     await loadExecutionQueue();
-  }, [executionNote, loadDecisions, loadExecutionQueue]);
+    await loadAuditTimeline(decision.service_chat_id);
+  }, [executionNote, loadAuditTimeline, loadDecisions, loadExecutionQueue]);
 
   const prepareExecutionPackage = useCallback(async (lock: CareExecutionQueueRow) => {
     if (!lock.lock_id) {
@@ -852,14 +997,15 @@ const AdminCare = () => {
     );
     setExecutionBusy(null);
     if (rpcError) {
-      setExecutionError(rpcError.message || "Unable to prepare execution package.");
+      setExecutionError(safeAdminMessage("Unable to prepare execution package.", rpcError.message));
       return;
     }
     const attempt = data as { status?: CareExecutionAttemptStatus; preflight_result?: { ok?: boolean } } | null;
     setExecutionSuccess(attempt?.status === "dry_run_passed" ? "Dry run passed." : "Execution package prepared with blockers.");
     await loadExecutionQueue();
     await loadApprovals(lock.lock_id);
-  }, [loadApprovals, loadExecutionQueue]);
+    await loadAuditTimeline(lock.service_chat_id);
+  }, [loadApprovals, loadAuditTimeline, loadExecutionQueue]);
 
   const runExecutionDryCheck = useCallback(async (lock: CareExecutionQueueRow) => {
     if (!lock.lock_id) {
@@ -877,19 +1023,20 @@ const AdminCare = () => {
     });
     setExecutionBusy(null);
     if (fnError) {
-      setExecutionError(fnError.message || "Execution dry check failed.");
+      setExecutionError(safeAdminMessage("Execution dry check failed.", fnError.message));
       return;
     }
     if (data && typeof data === "object" && "error" in data) {
       const body = data as Record<string, unknown>;
-      setExecutionError(String(body.detail || body.error || "Execution dry check failed."));
+      setExecutionError(safeAdminMessage("Execution dry check failed.", String(body.detail || body.error || "")));
       await loadExecutionQueue();
       return;
     }
     setExecutionSuccess("Dry run passed. Live money movement is disabled.");
     await loadExecutionQueue();
     await loadApprovals(lock.lock_id);
-  }, [loadApprovals, loadExecutionQueue]);
+    await loadAuditTimeline(lock.service_chat_id);
+  }, [loadApprovals, loadAuditTimeline, loadExecutionQueue]);
 
   const approveExecutionPackage = useCallback(async (lock: CareExecutionQueueRow, role: CareApprovalRole) => {
     if (!lock.latest_execution_attempt_id) {
@@ -909,14 +1056,15 @@ const AdminCare = () => {
     );
     setApprovalBusy(null);
     if (rpcError) {
-      setApprovalError(rpcError.message || "Unable to approve execution package.");
+      setApprovalError(safeAdminMessage("Unable to approve execution package.", rpcError.message));
       return;
     }
     setApprovalSuccess(`${approvalRoleLabel[role]} approval saved.`);
     setApprovalNote("");
     await loadExecutionQueue();
     await loadApprovals(lock.lock_id);
-  }, [approvalNote, loadApprovals, loadExecutionQueue]);
+    await loadAuditTimeline(lock.service_chat_id);
+  }, [approvalNote, loadApprovals, loadAuditTimeline, loadExecutionQueue]);
 
   const rejectExecutionPackage = useCallback(async (lock: CareExecutionQueueRow) => {
     if (!lock.latest_execution_attempt_id) {
@@ -940,14 +1088,15 @@ const AdminCare = () => {
     );
     setApprovalBusy(null);
     if (rpcError) {
-      setApprovalError(rpcError.message || "Unable to reject execution package.");
+      setApprovalError(safeAdminMessage("Unable to reject execution package.", rpcError.message));
       return;
     }
     setApprovalSuccess("Execution package rejected.");
     setApprovalNote("");
     await loadExecutionQueue();
     await loadApprovals(lock.lock_id);
-  }, [approvalNote, loadApprovals, loadExecutionQueue]);
+    await loadAuditTimeline(lock.service_chat_id);
+  }, [approvalNote, loadApprovals, loadAuditTimeline, loadExecutionQueue]);
 
   if (authLoading || loading) return <div className="p-4 md:p-6 text-sm text-muted-foreground">Loading CARE console...</div>;
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -969,7 +1118,11 @@ const AdminCare = () => {
             <Button type="button" variant="outline" onClick={() => void loadRows()}>
               Refresh DB
             </Button>
-            <Button type="button" onClick={() => void syncVisible()} disabled={syncAll || rows.length === 0}>
+            <Button
+              type="button"
+              onClick={() => void syncVisible()}
+              disabled={syncAll || filteredRows.length === 0 || Object.values(syncing).some(Boolean)}
+            >
               {syncAll ? "Syncing..." : "Refresh Stripe statuses"}
             </Button>
           </div>
@@ -977,6 +1130,13 @@ const AdminCare = () => {
 
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>
+        ) : null}
+        {syncSummary ? (
+          <div className={`rounded-xl border p-3 text-sm ${
+            syncSummary.includes("failed") ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
+          }`}>
+            {syncSummary}
+          </div>
         ) : null}
 
         <div className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
@@ -1072,7 +1232,7 @@ const AdminCare = () => {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={Boolean(syncing[row.service_chat_id])}
+                        disabled={syncAll || Boolean(syncing[row.service_chat_id])}
                         onClick={() => void syncOne(row)}
                       >
                         {syncing[row.service_chat_id] ? "Syncing" : "Sync"}
@@ -1100,6 +1260,38 @@ const AdminCare = () => {
                   Status: {statusLabel[selected.normalized_money_flow_status]}. Owner refunded {formatMoney(selected.currency, selected.owner_refunded)}.
                   Carer receives {formatMoney(selected.currency, selected.carer_receives)}. Last Stripe sync: {formatDateTime(selected.stripe_synced_at)}.
                 </p>
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-semibold">Final admin checklist</h3>
+                  <span className="rounded-full border border-slate-200 bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    Live money movement disabled
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {finalChecklist.map((item) => (
+                    <div
+                      key={item.label}
+                      className={`rounded-lg border px-3 py-2 text-xs ${
+                        item.done
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                          : "border-amber-200 bg-amber-50 text-amber-900"
+                      }`}
+                    >
+                      {item.done ? "Ready" : "Needs attention"}: {item.label}
+                    </div>
+                  ))}
+                </div>
+                {freshnessState.warnings.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {freshnessState.warnings.map((warning) => (
+                      <div key={warning} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </section>
 
               <section className="rounded-xl border p-3">
@@ -1209,10 +1401,10 @@ const AdminCare = () => {
                       <div className="mt-2">Manual review required before payout execution.</div>
                     ) : null}
                     {(validationResult.errors || []).length > 0 ? (
-                      <div className="mt-2">Errors: {(validationResult.errors || []).join(", ")}</div>
+                      <div className="mt-2">Errors: {(validationResult.errors || []).map(safeIssueLabel).join(", ")}</div>
                     ) : null}
                     {(validationResult.warnings || []).length > 0 ? (
-                      <div className="mt-2">Warnings: {(validationResult.warnings || []).join(", ")}</div>
+                      <div className="mt-2">Warnings: {(validationResult.warnings || []).map(safeIssueLabel).join(", ")}</div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1451,9 +1643,23 @@ const AdminCare = () => {
                     {latestLock.latest_preflight_result ? (
                       <div className="mt-3 rounded-lg border bg-background p-3">
                         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Preflight result</div>
-                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-                          {JSON.stringify(latestLock.latest_preflight_result, null, 2)}
-                        </pre>
+                        <div className="space-y-2 text-xs">
+                          <div>
+                            Status: {(latestLock.latest_preflight_result as { ok?: boolean }).ok === true ? "Dry run passed" : "Blocked"}
+                          </div>
+                          {Array.isArray((latestLock.latest_preflight_result as { errors?: unknown[] }).errors)
+                            && ((latestLock.latest_preflight_result as { errors?: unknown[] }).errors || []).length > 0 ? (
+                              <div>
+                                Errors: {((latestLock.latest_preflight_result as { errors?: string[] }).errors || []).map(safeIssueLabel).join(", ")}
+                              </div>
+                            ) : null}
+                          {Array.isArray((latestLock.latest_preflight_result as { warnings?: unknown[] }).warnings)
+                            && ((latestLock.latest_preflight_result as { warnings?: unknown[] }).warnings || []).length > 0 ? (
+                              <div>
+                                Warnings: {((latestLock.latest_preflight_result as { warnings?: string[] }).warnings || []).map(safeIssueLabel).join(", ")}
+                              </div>
+                            ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1530,6 +1736,35 @@ const AdminCare = () => {
                           <Field label="Retained" value={formatMoney(decision.currency, decision.proposed_platform_retained)} />
                         </div>
                         <p className="mt-2 text-xs text-muted-foreground">{decision.admin_note}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-semibold">Audit timeline</h3>
+                  <span className="rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {auditTimeline.length} event{auditTimeline.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {auditError ? <p className="mt-2 text-xs text-red-700">{auditError}</p> : null}
+                {auditTimeline.length === 0 && !auditError ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No CARE money-flow audit events yet.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {auditTimeline.map((event) => (
+                      <div key={`${event.source_table}:${event.event_id}`} className="rounded-lg border bg-muted/20 p-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-medium">{auditEventLabel[event.event_type] || event.event_type}</span>
+                          <span className="rounded-full border bg-background px-2 py-1">{event.event_status || "-"}</span>
+                        </div>
+                        <div className="mt-1 text-muted-foreground">
+                          {formatDateTime(event.occurred_at)} by {event.admin_name || compactId(event.admin_id)}
+                        </div>
+                        {event.short_note ? <div className="mt-1 text-muted-foreground">{safeAdminMessage(event.short_note, event.short_note)}</div> : null}
+                        <div className="mt-1 font-mono text-[11px] text-muted-foreground">{event.source_table}</div>
                       </div>
                     ))}
                   </div>
@@ -1645,7 +1880,7 @@ const AdminCare = () => {
                 <Button
                   type="button"
                   className="w-full"
-                  disabled={Boolean(syncing[selected.service_chat_id])}
+                  disabled={syncAll || Boolean(syncing[selected.service_chat_id])}
                   onClick={() => void syncOne(selected)}
                 >
                   {syncing[selected.service_chat_id] ? "Syncing..." : "Sync this transaction"}
