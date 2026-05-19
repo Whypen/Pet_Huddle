@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { resolveCopy } from "@/lib/copy";
@@ -166,6 +167,14 @@ const Admin = () => {
   return (
     <div className="p-4 space-y-4 max-w-md mx-auto">
       <h1 className="text-xl font-bold lowercase">{t("admin.title") || "admin"}</h1>
+      <div className="flex flex-wrap gap-2">
+        <Link className="rounded-lg border px-3 py-2 text-sm font-medium" to="/admin/care">
+          CARE
+        </Link>
+        <Link className="rounded-lg border px-3 py-2 text-sm font-medium" to="/admin/safety">
+          Safety
+        </Link>
+      </div>
       {rows.length === 0 && <p className="text-muted-foreground">{t("No pending verifications")}</p>}
       {rows.map((row) => (
         <div key={row.id} className="border rounded-xl p-3 space-y-2">

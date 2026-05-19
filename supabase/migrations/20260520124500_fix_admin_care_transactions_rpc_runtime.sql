@@ -1,0 +1,246 @@
+begin;
+
+create or replace function public.admin_get_care_transactions()
+returns table (
+  service_chat_id uuid,
+  chat_id uuid,
+  owner_id uuid,
+  owner_name text,
+  owner_social_id text,
+  carer_id uuid,
+  carer_name text,
+  carer_social_id text,
+  booking_status text,
+  dispute_status text,
+  normalized_money_flow_status text,
+  total_paid numeric,
+  service_rate numeric,
+  owner_refunded numeric,
+  carer_receives numeric,
+  platform_fee_gross numeric,
+  stripe_fee numeric,
+  platform_net_retained numeric,
+  currency text,
+  payment_intent_id text,
+  charge_id text,
+  refund_ids text[],
+  transfer_id text,
+  transfer_reversal_id text,
+  application_fee_id text,
+  dispute_id uuid,
+  connected_account_id text,
+  stripe_connect_model text,
+  db_updated_at timestamptz,
+  stripe_synced_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $function$
+declare
+  v_is_admin boolean := false;
+begin
+  select (coalesce(p.is_admin, false) = true or lower(coalesce(p.user_role, '')) = 'admin')
+  into v_is_admin
+  from public.profiles p
+  where p.id = auth.uid();
+
+  if coalesce(v_is_admin, false) is not true then
+    raise exception 'admin_required';
+  end if;
+
+  return query
+  with latest_dispute as (
+    select distinct on (sd.service_chat_id)
+      sd.*
+    from public.service_disputes sd
+    order by sd.service_chat_id, sd.updated_at desc nulls last, sd.created_at desc nulls last
+  ),
+  latest_snapshot as (
+    select distinct on (s.service_chat_id)
+      s.*
+    from public.care_money_flow_snapshots s
+    order by s.service_chat_id, s.synced_at desc
+  ),
+  base as (
+    select
+      sc.id as service_chat_id,
+      sc.chat_id,
+      sc.requester_id,
+      sc.provider_id,
+      sc.status as booking_status,
+      sc.care_status,
+      sc.payout_released_at,
+      sc.updated_at as service_chat_updated_at,
+      sc.stripe_payment_intent_id,
+      sc.quote_card,
+      sc.request_card,
+      owner.display_name as owner_display_name,
+      owner.social_id as owner_social_id,
+      carer.display_name as carer_display_name,
+      carer.social_id as carer_social_id,
+      ld.id as dispute_id,
+      ld.status as dispute_status,
+      ld.stripe_charge_id as dispute_charge_id,
+      ld.stripe_refund_id as dispute_refund_id,
+      ld.stripe_transfer_id as dispute_transfer_id,
+      ld.stripe_connected_account_id as dispute_connected_account_id,
+      ld.final_customer_refund_amount,
+      ld.final_provider_receives_amount,
+      ld.final_huddle_retained_amount,
+      ld.decision_payload,
+      ls.charge_id as snapshot_charge_id,
+      ls.refunds,
+      ls.transfers,
+      ls.application_fee,
+      ls.balance_transactions,
+      ls.normalized_money_flow_status as snapshot_status,
+      ls.error_code as snapshot_error_code,
+      ls.error_message as snapshot_error_message,
+      ls.synced_at
+    from public.service_chats sc
+    join public.profiles owner on owner.id = sc.requester_id
+    join public.profiles carer on carer.id = sc.provider_id
+    left join latest_dispute ld on ld.service_chat_id = sc.id
+    left join latest_snapshot ls on ls.service_chat_id = sc.id
+    where sc.stripe_payment_intent_id is not null
+      and lower(coalesce(sc.status, '')) <> 'pending'
+  ),
+  money as (
+    select
+      b.*,
+      coalesce(
+        nullif(b.decision_payload #>> '{money,currency}', ''),
+        nullif(b.quote_card #>> '{currency}', ''),
+        nullif(b.request_card #>> '{suggestedCurrency}', ''),
+        'HKD'
+      ) as money_currency,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,total_paid_amount}'),
+        public.try_parse_numeric(b.quote_card #>> '{finalPrice}'),
+        public.try_parse_numeric(b.quote_card #>> '{total_paid}'),
+        public.try_parse_numeric(b.quote_card #>> '{totalPaid}'),
+        public.try_parse_numeric(b.quote_card #>> '{amount_total}'),
+        public.try_parse_numeric(b.quote_card #>> '{amountTotal}'),
+        public.try_parse_numeric(b.request_card #>> '{suggestedPrice}'),
+        0
+      ) as total_paid_amount,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,service_rate_amount}'),
+        public.try_parse_numeric(b.quote_card #>> '{service_rate_amount}'),
+        greatest(
+          coalesce(public.try_parse_numeric(b.quote_card #>> '{finalPrice}'), 0)
+          - coalesce(public.try_parse_numeric(b.quote_card #>> '{platformFeeAmount}'), 0),
+          0
+        )
+      ) as service_rate_amount,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,customer_refund_amount}'),
+        b.final_customer_refund_amount,
+        0
+      ) as owner_refunded_amount,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,provider_receives_amount}'),
+        b.final_provider_receives_amount,
+        0
+      ) as carer_receives_amount,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,platform_fee_amount}'),
+        public.try_parse_numeric(b.decision_payload #>> '{money,customer_platform_fee_amount}'),
+        public.try_parse_numeric(b.quote_card #>> '{customer_platform_fee_amount}'),
+        public.try_parse_numeric(b.quote_card #>> '{platform_fee_amount}'),
+        public.try_parse_numeric(b.quote_card #>> '{platformFeeAmount}'),
+        public.try_parse_numeric(b.quote_card #>> '{platform_fee}'),
+        public.try_parse_numeric(b.quote_card #>> '{platformFee}'),
+        0
+      ) as platform_fee_amount,
+      coalesce(
+        (
+          select sum(coalesce(public.try_parse_numeric(bt.value ->> 'fee'), 0) / 100.0)
+          from jsonb_array_elements(coalesce(b.balance_transactions, '[]'::jsonb)) bt(value)
+        ),
+        0
+      ) as stripe_fee_amount,
+      coalesce(
+        public.try_parse_numeric(b.decision_payload #>> '{money,huddle_retained_amount}'),
+        b.final_huddle_retained_amount,
+        0
+      ) as huddle_retained_amount
+    from base b
+  )
+  select
+    m.service_chat_id,
+    m.chat_id,
+    m.requester_id as owner_id,
+    coalesce(nullif(m.owner_display_name, ''), 'Owner') as owner_name,
+    coalesce(nullif(m.owner_social_id, ''), '') as owner_social_id,
+    m.provider_id as carer_id,
+    coalesce(nullif(m.carer_display_name, ''), 'Carer') as carer_name,
+    coalesce(nullif(m.carer_social_id, ''), '') as carer_social_id,
+    m.booking_status,
+    m.dispute_status,
+    public.admin_care_money_flow_status(
+      m.booking_status,
+      m.care_status,
+      m.dispute_status,
+      m.payout_released_at,
+      m.snapshot_status,
+      coalesce(m.snapshot_error_code, m.snapshot_error_message),
+      m.owner_refunded_amount,
+      m.total_paid_amount,
+      m.carer_receives_amount
+    ) as normalized_money_flow_status,
+    m.total_paid_amount as total_paid,
+    m.service_rate_amount as service_rate,
+    m.owner_refunded_amount as owner_refunded,
+    m.carer_receives_amount as carer_receives,
+    m.platform_fee_amount as platform_fee_gross,
+    m.stripe_fee_amount as stripe_fee,
+    greatest(m.huddle_retained_amount - m.stripe_fee_amount, 0) as platform_net_retained,
+    upper(m.money_currency) as currency,
+    m.stripe_payment_intent_id as payment_intent_id,
+    coalesce(m.snapshot_charge_id, m.dispute_charge_id, m.decision_payload #>> '{stripe_context,stripe_charge_id}') as charge_id,
+    coalesce(
+      (
+        select array_agg(refund.value ->> 'id')
+        from jsonb_array_elements(coalesce(m.refunds, '[]'::jsonb)) refund(value)
+        where nullif(refund.value ->> 'id', '') is not null
+      ),
+      case when nullif(m.dispute_refund_id, '') is not null then array[m.dispute_refund_id] else array[]::text[] end
+    ) as refund_ids,
+    coalesce(
+      (
+        select transfer.value ->> 'id'
+        from jsonb_array_elements(coalesce(m.transfers, '[]'::jsonb)) transfer(value)
+        where nullif(transfer.value ->> 'id', '') is not null
+        order by transfer.value ->> 'created' desc nulls last
+        limit 1
+      ),
+      m.dispute_transfer_id,
+      m.decision_payload #>> '{stripe_context,stripe_transfer_id}'
+    ) as transfer_id,
+    (
+      select reversal.value ->> 'id'
+      from jsonb_array_elements(coalesce(m.transfers, '[]'::jsonb)) transfer(value)
+      cross join lateral jsonb_array_elements(coalesce(transfer.value -> 'reversals', '[]'::jsonb)) reversal(value)
+      where nullif(reversal.value ->> 'id', '') is not null
+      limit 1
+    ) as transfer_reversal_id,
+    coalesce(m.application_fee ->> 'id', m.decision_payload #>> '{stripe_context,application_fee_id}') as application_fee_id,
+    m.dispute_id,
+    coalesce(m.dispute_connected_account_id, m.decision_payload #>> '{stripe_context,stripe_connected_account_id}') as connected_account_id,
+    case
+      when coalesce(m.dispute_connected_account_id, m.decision_payload #>> '{stripe_context,stripe_connected_account_id}') is not null then 'destination_charge_or_separate_transfer'
+      else 'platform_charge'
+    end as stripe_connect_model,
+    m.service_chat_updated_at as db_updated_at,
+    m.synced_at as stripe_synced_at
+  from money m
+  order by greatest(coalesce(m.service_chat_updated_at, '-infinity'::timestamptz), coalesce(m.synced_at, '-infinity'::timestamptz)) desc;
+end;
+$function$;
+
+revoke all on function public.admin_get_care_transactions() from public, anon;
+grant execute on function public.admin_get_care_transactions() to authenticated, service_role;
+
+commit;

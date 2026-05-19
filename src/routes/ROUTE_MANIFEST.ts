@@ -52,6 +52,7 @@ export const ROUTE_MANIFEST: ReadonlyArray<string> = [
 
   // ── Admin ───────────────────────────────────────────────────
   "/admin",
+  "/admin/care",
   "/admin/safety",
   "/admin/control-center",
 
