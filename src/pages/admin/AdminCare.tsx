@@ -57,11 +57,76 @@ type CareTransactionRow = {
   stripe_synced_at: string | null;
 };
 
+type CareDecisionType =
+  | "no_action_monitor"
+  | "full_refund_owner"
+  | "partial_refund_owner"
+  | "release_payout_to_carer"
+  | "split_refund_and_partial_payout"
+  | "manual_review";
+
+type CareDecisionStatus = "draft" | "submitted" | "blocked" | "ready_for_execution" | "cancelled";
+
+type CareDecisionRow = {
+  id: string;
+  service_chat_id: string;
+  payment_intent_id: string | null;
+  admin_id: string;
+  admin_name: string | null;
+  decision_type: CareDecisionType;
+  decision_reason: string;
+  admin_note: string;
+  proposed_owner_refund: number;
+  proposed_carer_payout: number;
+  proposed_platform_retained: number;
+  currency: string;
+  dry_run_result: CareDecisionValidation | null;
+  status: CareDecisionStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+type CareDecisionValidation = {
+  ok?: boolean;
+  status?: CareDecisionStatus;
+  errors?: string[];
+  warnings?: string[];
+  preview?: {
+    currency?: string;
+    total_paid?: number;
+    owner_refund?: number;
+    carer_payout?: number;
+    platform_retained?: number;
+    balance_delta?: number;
+  };
+  db_state?: Record<string, unknown>;
+  stripe_state?: Record<string, unknown>;
+};
+
 const ADMIN_EMAIL_ALLOWLIST = new Set([
   "hello@huddle.pet",
   "support@huddle.pet",
   "hyphen@huddle.pet",
 ]);
+
+const decisionTypeLabel: Record<CareDecisionType, string> = {
+  no_action_monitor: "No action / monitor",
+  full_refund_owner: "Full refund owner",
+  partial_refund_owner: "Partial refund owner",
+  release_payout_to_carer: "Release payout to carer",
+  split_refund_and_partial_payout: "Split refund and partial payout",
+  manual_review: "Manual review",
+};
+
+const decisionReasonLabel: Record<string, string> = {
+  care_quality: "Care quality",
+  owner_cancelled: "Owner cancellation",
+  carer_no_show: "Carer no-show",
+  unsafe_or_policy: "Safety or policy",
+  stripe_dispute: "Stripe dispute",
+  admin_adjustment: "Admin adjustment",
+  other: "Other",
+};
 
 const statusLabel: Record<CareMoneyFlowStatus, string> = {
   paid_pending_care: "Paid, pending care",
@@ -117,6 +182,11 @@ const compactId = (value: string | null | undefined) => {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
 };
 
+const toMoneyNumber = (value: string | number | null | undefined) => {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value || "0"));
+  return Number.isFinite(parsed) ? Math.max(parsed, 0) : 0;
+};
+
 const createIdempotencyKey = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -142,6 +212,16 @@ const AdminCare = () => {
   const [messageSending, setMessageSending] = useState<"owner" | "carer" | "both" | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [messageSuccess, setMessageSuccess] = useState<string | null>(null);
+  const [decisions, setDecisions] = useState<CareDecisionRow[]>([]);
+  const [decisionType, setDecisionType] = useState<CareDecisionType>("no_action_monitor");
+  const [decisionReason, setDecisionReason] = useState("");
+  const [decisionNote, setDecisionNote] = useState("");
+  const [ownerRefundInput, setOwnerRefundInput] = useState("0.00");
+  const [carerPayoutInput, setCarerPayoutInput] = useState("0.00");
+  const [decisionBusy, setDecisionBusy] = useState<"validate" | "save" | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [decisionSuccess, setDecisionSuccess] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<CareDecisionValidation | null>(null);
 
   const isAdmin =
     profile?.is_admin === true ||
@@ -153,6 +233,39 @@ const AdminCare = () => {
     [rows, selectedId],
   );
 
+  const moneyPreview = useMemo(() => {
+    const total = toMoneyNumber(selected?.total_paid);
+    const serviceRate = toMoneyNumber(selected?.service_rate || selected?.carer_receives);
+    const ownerRefund = decisionType === "full_refund_owner"
+      ? total
+      : decisionType === "partial_refund_owner" || decisionType === "split_refund_and_partial_payout"
+        ? toMoneyNumber(ownerRefundInput)
+        : 0;
+    const carerPayout = decisionType === "release_payout_to_carer"
+      ? serviceRate
+      : decisionType === "split_refund_and_partial_payout"
+        ? toMoneyNumber(carerPayoutInput)
+        : 0;
+    const platformRetained = Math.max(total - ownerRefund - carerPayout, 0);
+    return {
+      total,
+      ownerRefund,
+      carerPayout,
+      platformRetained,
+      balanceDelta: Number((ownerRefund + carerPayout + platformRetained - total).toFixed(2)),
+    };
+  }, [carerPayoutInput, decisionType, ownerRefundInput, selected?.carer_receives, selected?.service_rate, selected?.total_paid]);
+
+  const dbStripeMismatchWarning = useMemo(() => {
+    if (!selected) return null;
+    if (!selected.stripe_synced_at) return "No Stripe snapshot is available yet. Sync before validating a decision.";
+    const dbTime = selected.db_updated_at ? new Date(selected.db_updated_at).getTime() : 0;
+    const stripeTime = selected.stripe_synced_at ? new Date(selected.stripe_synced_at).getTime() : 0;
+    if (dbTime > stripeTime) return "DB changed after the latest Stripe sync. Sync this transaction before validating.";
+    if (selected.normalized_money_flow_status === "stripe_failed") return "Latest Stripe sync failed. Resolve or resync before validating.";
+    return null;
+  }, [selected]);
+
   const loadRows = useCallback(async () => {
     setError(null);
     const { data, error: rpcError } = await supabase.rpc("admin_get_care_transactions" as never);
@@ -162,6 +275,23 @@ const AdminCare = () => {
       return;
     }
     setRows((Array.isArray(data) ? data : []) as CareTransactionRow[]);
+  }, []);
+
+  const loadDecisions = useCallback(async (serviceChatId: string | null) => {
+    if (!serviceChatId) {
+      setDecisions([]);
+      return;
+    }
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_get_care_money_flow_decisions" as never,
+      { p_service_chat_id: serviceChatId } as never,
+    );
+    if (rpcError) {
+      setDecisionError(rpcError.message || "Unable to load decision history.");
+      setDecisions([]);
+      return;
+    }
+    setDecisions((Array.isArray(data) ? data : []) as CareDecisionRow[]);
   }, []);
 
   useEffect(() => {
@@ -189,11 +319,28 @@ const AdminCare = () => {
         setLiveTick("Stripe snapshot changed just now");
         void loadRows();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "care_money_flow_admin_decisions" }, () => {
+        setLiveTick("Decision draft changed just now");
+        void loadRows();
+        void loadDecisions(selectedId);
+      })
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isAdmin, loadRows]);
+  }, [isAdmin, loadDecisions, loadRows, selectedId]);
+
+  useEffect(() => {
+    setDecisionError(null);
+    setDecisionSuccess(null);
+    setValidationResult(null);
+    setDecisionType("no_action_monitor");
+    setDecisionReason("");
+    setDecisionNote("");
+    setOwnerRefundInput("0.00");
+    setCarerPayoutInput("0.00");
+    void loadDecisions(selectedId);
+  }, [loadDecisions, selectedId]);
 
   const syncOne = useCallback(async (row: CareTransactionRow) => {
     setSyncing((current) => ({ ...current, [row.service_chat_id]: true }));
@@ -265,6 +412,61 @@ const AdminCare = () => {
     setMessageDraft("");
     setMessageSuccess(target === "both" ? "Message sent to owner and carer as Team Huddle." : `Message sent to ${target} as Team Huddle.`);
   }, [messageDraft]);
+
+  const validateDecision = useCallback(async (row: CareTransactionRow) => {
+    setDecisionBusy("validate");
+    setDecisionError(null);
+    setDecisionSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_validate_care_money_flow_decision" as never,
+      {
+        p_service_chat_id: row.service_chat_id,
+        p_decision_type: decisionType,
+        p_decision_reason: decisionReason,
+        p_admin_note: decisionNote,
+        p_proposed_owner_refund: moneyPreview.ownerRefund,
+        p_proposed_carer_payout: moneyPreview.carerPayout,
+        p_proposed_platform_retained: moneyPreview.platformRetained,
+        p_existing_decision_id: null,
+      } as never,
+    );
+    setDecisionBusy(null);
+    if (rpcError) {
+      setDecisionError(rpcError.message || "Decision validation failed.");
+      return null;
+    }
+    const result = (data || null) as CareDecisionValidation | null;
+    setValidationResult(result);
+    setDecisionSuccess(result?.ok ? "Decision validates as ready for a future execution step." : "Decision validation is blocked.");
+    return result;
+  }, [decisionNote, decisionReason, decisionType, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
+
+  const saveDecisionDraft = useCallback(async (row: CareTransactionRow) => {
+    setDecisionBusy("save");
+    setDecisionError(null);
+    setDecisionSuccess(null);
+    const { data, error: rpcError } = await supabase.rpc(
+      "admin_create_care_money_flow_decision" as never,
+      {
+        p_service_chat_id: row.service_chat_id,
+        p_decision_type: decisionType,
+        p_decision_reason: decisionReason,
+        p_admin_note: decisionNote,
+        p_proposed_owner_refund: moneyPreview.ownerRefund,
+        p_proposed_carer_payout: moneyPreview.carerPayout,
+        p_proposed_platform_retained: moneyPreview.platformRetained,
+      } as never,
+    );
+    setDecisionBusy(null);
+    if (rpcError) {
+      setDecisionError(rpcError.message || "Unable to save decision draft.");
+      return;
+    }
+    const saved = data as CareDecisionRow | null;
+    setValidationResult(saved?.dry_run_result || null);
+    setDecisionSuccess(saved?.status === "blocked" ? "Decision draft saved as blocked." : "Decision draft saved.");
+    await loadDecisions(row.service_chat_id);
+  }, [decisionNote, decisionReason, decisionType, loadDecisions, moneyPreview.carerPayout, moneyPreview.ownerRefund, moneyPreview.platformRetained]);
 
   if (authLoading || loading) return <div className="p-4 md:p-6 text-sm text-muted-foreground">Loading CARE console...</div>;
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -392,6 +594,175 @@ const AdminCare = () => {
                   Status: {statusLabel[selected.normalized_money_flow_status]}. Owner refunded {formatMoney(selected.currency, selected.owner_refunded)}.
                   Carer receives {formatMoney(selected.currency, selected.carer_receives)}. Last Stripe sync: {formatDateTime(selected.stripe_synced_at)}.
                 </p>
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold">Resolution workflow</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Draft and validate only. This does not refund, pay out, reverse, or move money.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900">
+                    Dry-run only
+                  </span>
+                </div>
+
+                {dbStripeMismatchWarning ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                    {dbStripeMismatchWarning}
+                  </div>
+                ) : null}
+
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Outcome
+                    <select
+                      className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                      value={decisionType}
+                      onChange={(event) => setDecisionType(event.target.value as CareDecisionType)}
+                    >
+                      {Object.entries(decisionTypeLabel).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Reason / category
+                    <select
+                      className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                      value={decisionReason}
+                      onChange={(event) => setDecisionReason(event.target.value)}
+                    >
+                      <option value="">Select reason</option>
+                      {Object.entries(decisionReasonLabel).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {(decisionType === "partial_refund_owner" || decisionType === "split_refund_and_partial_payout") ? (
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Proposed owner refund
+                      <input
+                        className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        value={ownerRefundInput}
+                        onChange={(event) => setOwnerRefundInput(event.target.value)}
+                      />
+                    </label>
+                  ) : null}
+
+                  {decisionType === "split_refund_and_partial_payout" ? (
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Proposed carer payout
+                      <input
+                        className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground"
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        value={carerPayoutInput}
+                        onChange={(event) => setCarerPayoutInput(event.target.value)}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <label className="mt-3 block text-xs font-medium text-muted-foreground">
+                  Admin note
+                  <Textarea
+                    className="mt-1 min-h-24"
+                    value={decisionNote}
+                    onChange={(event) => setDecisionNote(event.target.value)}
+                    placeholder="Internal note required before this can be validated."
+                  />
+                </label>
+
+                <div className="mt-3 rounded-lg border bg-muted/20 p-3">
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Money preview</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Field label="Total paid" value={formatMoney(selected.currency, moneyPreview.total)} />
+                    <Field label="Owner refund" value={formatMoney(selected.currency, moneyPreview.ownerRefund)} />
+                    <Field label="Carer payout" value={formatMoney(selected.currency, moneyPreview.carerPayout)} />
+                    <Field label="Platform retained" value={formatMoney(selected.currency, moneyPreview.platformRetained)} />
+                    <Field label="Balance delta" value={formatMoney(selected.currency, moneyPreview.balanceDelta)} />
+                    <Field label="Stripe mode" value="Read-only dry run" />
+                  </div>
+                </div>
+
+                {validationResult ? (
+                  <div className={`mt-3 rounded-lg border p-3 text-xs ${
+                    validationResult.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"
+                  }`}>
+                    <div className="font-semibold">Latest validation: {validationResult.status || (validationResult.ok ? "ready_for_execution" : "blocked")}</div>
+                    {(validationResult.errors || []).length > 0 ? (
+                      <div className="mt-2">Errors: {(validationResult.errors || []).join(", ")}</div>
+                    ) : null}
+                    {(validationResult.warnings || []).length > 0 ? (
+                      <div className="mt-2">Warnings: {(validationResult.warnings || []).join(", ")}</div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {decisionError ? <p className="mt-2 text-xs text-red-700">{decisionError}</p> : null}
+                {decisionSuccess ? <p className="mt-2 text-xs text-emerald-700">{decisionSuccess}</p> : null}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={Boolean(decisionBusy)}
+                    onClick={() => void validateDecision(selected)}
+                  >
+                    {decisionBusy === "validate" ? "Validating..." : "Validate decision"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={Boolean(decisionBusy)}
+                    onClick={() => void saveDecisionDraft(selected)}
+                  >
+                    {decisionBusy === "save" ? "Saving..." : "Save decision draft"}
+                  </Button>
+                </div>
+              </section>
+
+              <section className="rounded-xl border p-3">
+                <h3 className="font-semibold">Decision history</h3>
+                {decisions.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">No CARE money-flow decisions yet.</p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {decisions.map((decision) => (
+                      <div key={decision.id} className="rounded-lg border bg-muted/20 p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-medium">{decisionTypeLabel[decision.decision_type]}</div>
+                          <span className={`rounded-full border px-2 py-1 text-xs ${
+                            decision.status === "blocked"
+                              ? "border-red-200 bg-red-50 text-red-800"
+                              : "border-slate-200 bg-background text-slate-700"
+                          }`}>
+                            {decision.status}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {decisionReasonLabel[decision.decision_reason] || decision.decision_reason} by {decision.admin_name || compactId(decision.admin_id)} at {formatDateTime(decision.created_at)}
+                        </div>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <Field label="Owner refund" value={formatMoney(decision.currency, decision.proposed_owner_refund)} />
+                          <Field label="Carer payout" value={formatMoney(decision.currency, decision.proposed_carer_payout)} />
+                          <Field label="Retained" value={formatMoney(decision.currency, decision.proposed_platform_retained)} />
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{decision.admin_note}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
 
               <section className="rounded-xl border p-3">
