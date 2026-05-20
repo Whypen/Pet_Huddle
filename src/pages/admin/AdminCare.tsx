@@ -90,7 +90,13 @@ type CareExecutionAttemptStatus =
   | "dry_run_blocked"
   | "live_disabled"
   | "blocked"
-  | "failed";
+  | "failed"
+  | "execution_started"
+  | "execution_succeeded"
+  | "execution_partial"
+  | "execution_failed"
+  | "no_action_confirmed"
+  | "manual_review_required";
 
 type CareApprovalStatus = "approved" | "rejected" | "revoked";
 type CareApprovalRole = "maker" | "checker" | "finance_admin";
@@ -278,6 +284,12 @@ const executionAttemptLabel: Record<CareExecutionAttemptStatus, string> = {
   live_disabled: "Live execution disabled",
   blocked: "Blocked",
   failed: "Failed",
+  execution_started: "Execution started",
+  execution_succeeded: "Execution succeeded",
+  execution_partial: "Execution partial",
+  execution_failed: "Execution failed",
+  no_action_confirmed: "No action confirmed",
+  manual_review_required: "Manual review required",
 };
 
 const approvalRoleLabel: Record<CareApprovalRole, string> = {
@@ -441,7 +453,7 @@ const AdminCare = () => {
   const [executionQueue, setExecutionQueue] = useState<CareExecutionQueueRow[]>([]);
   const [queueFilter, setQueueFilter] = useState<CareQueueFilter>("all");
   const [executionNote, setExecutionNote] = useState("");
-  const [executionBusy, setExecutionBusy] = useState<"submit" | "lock" | "cancel" | "prepare" | "dry_check" | null>(null);
+  const [executionBusy, setExecutionBusy] = useState<"submit" | "lock" | "cancel" | "prepare" | "dry_check" | "final_check" | null>(null);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionSuccess, setExecutionSuccess] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<CareApprovalRow[]>([]);
@@ -1038,6 +1050,43 @@ const AdminCare = () => {
     await loadAuditTimeline(lock.service_chat_id);
   }, [loadApprovals, loadAuditTimeline, loadExecutionQueue]);
 
+  const runFinalExecutionCheck = useCallback(async (lock: CareExecutionQueueRow) => {
+    if (!lock.lock_id) {
+      setExecutionError("Execution lock is required before running the final execution check.");
+      return;
+    }
+    setExecutionBusy("final_check");
+    setExecutionError(null);
+    setExecutionSuccess(null);
+    const { data, error: fnError } = await supabase.functions.invoke("admin-execute-care-money-flow", {
+      body: {
+        execution_lock_id: lock.lock_id,
+        execution_mode: "live",
+      },
+    });
+    setExecutionBusy(null);
+    if (fnError) {
+      setExecutionError(safeAdminMessage("Final execution check failed.", fnError.message));
+      return;
+    }
+    if (data && typeof data === "object" && "error" in data) {
+      const body = data as Record<string, unknown>;
+      const status = String(body.status || "");
+      if (status === "live_disabled") {
+        setExecutionSuccess("Live execution disabled. Final execution requires live flag.");
+      } else {
+        setExecutionError(safeAdminMessage("Final execution check failed.", String(body.detail || body.error || status)));
+      }
+      await loadExecutionQueue();
+      await loadAuditTimeline(lock.service_chat_id);
+      return;
+    }
+    setExecutionSuccess("Final execution check completed. Live money movement remains disabled unless backend enables it.");
+    await loadExecutionQueue();
+    await loadApprovals(lock.lock_id);
+    await loadAuditTimeline(lock.service_chat_id);
+  }, [loadApprovals, loadAuditTimeline, loadExecutionQueue]);
+
   const approveExecutionPackage = useCallback(async (lock: CareExecutionQueueRow, role: CareApprovalRole) => {
     if (!lock.latest_execution_attempt_id) {
       setApprovalError("Run an execution dry check before approving.");
@@ -1520,6 +1569,18 @@ const AdminCare = () => {
                         onClick={() => void runExecutionDryCheck(latestLock)}
                       >
                         {executionBusy === "dry_check" ? "Checking..." : "Run execution dry check"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={Boolean(executionBusy) || !latestLock.approved_for_future_live_execution}
+                        onClick={() => void runFinalExecutionCheck(latestLock)}
+                      >
+                        {executionBusy === "final_check" ? "Checking..." : "Run final execution check"}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" disabled>
+                        Final execution requires live flag
                       </Button>
                     </div>
                     <div className="mt-3 rounded-lg border bg-background p-3">
