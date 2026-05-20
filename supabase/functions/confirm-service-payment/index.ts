@@ -101,8 +101,8 @@ serve(async (req) => {
     if (serviceChat.requester_id !== user.id) return json({ error: "Forbidden" }, 403);
 
     if (serviceChat.status !== "pending" && serviceChat.stripe_checkout_session_id) {
-      await insertServiceBookedMessage(supabase, serviceChatId, user.id);
-      await notifyServiceBookingConfirmed(supabase, serviceChatId);
+      const inserted = await insertServiceBookedMessage(supabase, serviceChatId, user.id);
+      if (inserted) await notifyServiceBookingConfirmed(supabase, serviceChatId);
       return json({
         ok: true,
         alreadyConfirmed: true,
@@ -146,8 +146,8 @@ serve(async (req) => {
         })
         .eq("chat_id", serviceChatId);
       if (backfillErr) return json({ error: "Booking payment could not be refreshed" }, 500);
-      await insertServiceBookedMessage(supabase, serviceChatId, user.id);
-      await notifyServiceBookingConfirmed(supabase, serviceChatId);
+      const inserted = await insertServiceBookedMessage(supabase, serviceChatId, user.id);
+      if (inserted) await notifyServiceBookingConfirmed(supabase, serviceChatId);
       return json({
         ok: true,
         alreadyConfirmed: true,
@@ -172,8 +172,8 @@ serve(async (req) => {
       .eq("chat_id", serviceChatId)
       .eq("status", "pending");
     if (updateErr) return json({ error: "Booking payment could not be recorded" }, 500);
-    await insertServiceBookedMessage(supabase, serviceChatId, user.id);
-    await notifyServiceBookingConfirmed(supabase, serviceChatId);
+    const inserted = await insertServiceBookedMessage(supabase, serviceChatId, user.id);
+    if (inserted) await notifyServiceBookingConfirmed(supabase, serviceChatId);
 
     return json({
       ok: true,

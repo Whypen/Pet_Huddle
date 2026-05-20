@@ -56,6 +56,7 @@ const ServiceChat = () => {
   const [searchParams] = useSearchParams();
   const roomId = String(searchParams.get("room") || searchParams.get("roomId") || "").trim();
   const paidFlag = String(searchParams.get("paid") || searchParams.get("payment") || "").trim();
+  const checkoutSessionId = String(searchParams.get("checkout_session_id") || searchParams.get("session_id") || "").trim();
   const { user, profile, loading: authLoading } = useAuth();
   const { isActive } = useSafetyRestrictions();
   const userId = String(user?.id || profile?.id || "");
@@ -119,6 +120,7 @@ const ServiceChat = () => {
   const loadingOlderAnchorRef = useRef<{ top: number; height: number } | null>(null);
   const invalidRoomHandledRef = useRef(false);
   const initialSnapSettleTimerRef = useRef<number | null>(null);
+  const paymentConfirmationRef = useRef<Set<string>>(new Set());
   const composerPreviewUrls = useMemo(
     () =>
       composerUploads.map((file) => ({
@@ -232,13 +234,37 @@ const ServiceChat = () => {
   useEffect(() => {
     if (!roomId) return;
     if (paidFlag === "1" || paidFlag === "success") {
-      toast.success("Payment completed. Waiting for booking confirmation…");
-      void reload(true);
+      if (!checkoutSessionId) {
+        toast.info("Payment completed. Refreshing booking status.");
+        void reload(true);
+        return;
+      }
+      const confirmationKey = `${roomId}:${checkoutSessionId}`;
+      if (paymentConfirmationRef.current.has(confirmationKey)) return;
+      paymentConfirmationRef.current.add(confirmationKey);
+      void (async () => {
+        const { error } = await supabase.functions.invoke("confirm-service-payment", {
+          body: {
+            service_chat_id: roomId,
+            checkout_session_id: checkoutSessionId,
+          },
+        });
+        if (error) {
+          paymentConfirmationRef.current.delete(confirmationKey);
+          toast.error("Payment was received, but booking confirmation needs a refresh.");
+          void reload(true);
+          return;
+        }
+        toast.success("Booking confirmed.");
+        setShowBookedOverlay(true);
+        void reload(true);
+      })();
     }
     if (paidFlag === "0") {
       toast.info("Payment was canceled.");
+      void reload(true);
     }
-  }, [paidFlag, reload, roomId]);
+  }, [checkoutSessionId, paidFlag, reload, roomId]);
 
   useEffect(() => {
     pendingInitialScrollRef.current = true;
@@ -805,6 +831,7 @@ const ServiceChat = () => {
         open={activeSheet === "payment"}
         onClose={() => setActiveSheet(null)}
         quoteCard={serviceChat?.quote_card || null}
+        requestCard={serviceChat?.request_card || null}
         requestServiceType={String(serviceChat?.request_card?.serviceType || "")}
         roomId={roomId}
       />

@@ -2,13 +2,15 @@ import { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NeuButton } from "@/components/ui/NeuButton";
 import { supabase } from "@/integrations/supabase/client";
-import type { ServiceQuoteCard } from "./types";
+import type { ServiceQuoteCard, ServiceRequestCard } from "./types";
 import { LegalContent } from "@/components/legal/LegalContent";
+import { toast } from "sonner";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   quoteCard: ServiceQuoteCard | null;
+  requestCard?: ServiceRequestCard | null;
   requestServiceType?: string;
   roomId: string;
   onStarted?: () => void;
@@ -20,7 +22,48 @@ const toAmountCents = (value: string): number => {
   return Math.round(parsed * 100);
 };
 
-export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceType, roomId, onStarted }: Props) => {
+const clean = (value: unknown) => String(value || "").trim();
+
+const firstDate = (requestCard?: ServiceRequestCard | null) => {
+  const dates = Array.isArray(requestCard?.requestedDates)
+    ? requestCard.requestedDates.map(clean).filter(Boolean).sort()
+    : [];
+  return dates[0] || clean(requestCard?.requestedDate);
+};
+
+const toDateTime = (date: string, time: string) => {
+  if (!date) return "";
+  return time ? `${date}T${time}:00` : date;
+};
+
+const buildBookingSnapshot = (
+  quoteCard: ServiceQuoteCard,
+  requestCard: ServiceRequestCard | null | undefined,
+  requestServiceType?: string,
+) => {
+  const startDate = firstDate(requestCard);
+  const startTime = clean(quoteCard.startTime) || clean(requestCard?.startTime);
+  const endTime = clean(quoteCard.endTime) || clean(requestCard?.endTime);
+  const handoffParts = [
+    ...(Array.isArray(requestCard?.locationStyles) ? requestCard.locationStyles.map(clean).filter(Boolean) : []),
+    clean(quoteCard.locationArea) || clean(requestCard?.locationArea),
+  ].filter(Boolean);
+
+  return {
+    serviceType: clean(quoteCard.serviceType) || clean(requestCard?.serviceType) || clean(requestServiceType),
+    petId: clean(quoteCard.petId) || clean(requestCard?.petId),
+    startAt: toDateTime(startDate, startTime),
+    endAt: toDateTime(startDate, endTime),
+    handoffMethod: handoffParts.join(" · ") || "Confirmed in service chat",
+    emergencyContact: "Confirmed in service chat",
+    careInstructions: clean(requestCard?.additionalNotes) || "Confirmed in service chat",
+    medicationAllergyNotes: "",
+    behaviorEscapeRisk: "",
+    emergencyVetPermission: false,
+  };
+};
+
+export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestCard, requestServiceType, roomId, onStarted }: Props) => {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [termsViewed, setTermsViewed] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
@@ -47,7 +90,8 @@ export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceT
           service_chat_id: roomId,
           amount_cents: amountCents,
           currency,
-          success_url: `${window.location.origin}/service-chat?room=${encodeURIComponent(roomId)}&paid=1`,
+          booking_snapshot: buildBookingSnapshot(quoteCard, requestCard, requestServiceType),
+          success_url: `${window.location.origin}/service-chat?room=${encodeURIComponent(roomId)}&paid=1&checkout_session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${window.location.origin}/service-chat?room=${encodeURIComponent(roomId)}&paid=0`,
         },
       });
@@ -56,6 +100,8 @@ export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceT
       if (!checkoutUrl) throw new Error("checkout_url_missing");
       onStarted?.();
       window.location.href = checkoutUrl;
+    } catch {
+      toast.error("Unable to open payment. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -145,4 +191,3 @@ export const BookingConfirmScreen = ({ open, onClose, quoteCard, requestServiceT
     </>
   );
 };
-
