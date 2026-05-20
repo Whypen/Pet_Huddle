@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -116,17 +116,11 @@ type ServiceChatPreviewData = {
     sender_social_id: string | null;
     content: string | null;
     created_at: string | null;
-    display_content?: string | null;
-    attachment_items?: CaseMessageAttachmentItem[];
   }>;
 };
 type MediaViewerItem = {
   url: string;
   label: string;
-};
-type CaseMessageAttachmentItem = MediaViewerItem & {
-  mime: string | null;
-  name: string | null;
 };
 type SafetyUserRow = {
   user_id: string | null;
@@ -186,8 +180,6 @@ type TeamHuddleCorrespondenceRow = {
   case_type: string | null;
   case_id: string | null;
   recipient_role: string | null;
-  display_body?: string | null;
-  attachment_items?: CaseMessageAttachmentItem[];
 };
 
 type ActiveTab = "reports" | "disputes" | "users" | "audit";
@@ -526,98 +518,6 @@ const resolveStorageOrPublicUrl = (rawValue: string | null | undefined) => {
   return supabase.storage.from("notices").getPublicUrl(normalized).data.publicUrl;
 };
 
-const SERVICE_CHAT_EVENT_LABELS: Record<string, string> = {
-  service_request_sent: "Request sent",
-  service_request_updated: "Request updated",
-  service_request_withdrawn: "Request withdrawn",
-  service_quote_sent: "Quote received",
-  service_booked: "Booking confirmed",
-  service_in_progress: "Care started",
-  service_completed: "Care completed",
-  service_disputed: "Dispute opened",
-};
-
-const parseMaybeJson = (value: unknown): unknown => {
-  let current = value;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (typeof current !== "string") return current;
-    const trimmed = current.trim();
-    if (!trimmed) return "";
-    if (!trimmed.startsWith("{") && !trimmed.startsWith("[") && !trimmed.startsWith("\"")) {
-      return current;
-    }
-    try {
-      current = JSON.parse(trimmed);
-    } catch {
-      return current;
-    }
-  }
-  return current;
-};
-
-const normalizeCaseMessageAttachments = (value: unknown): Array<Record<string, unknown>> => {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is Record<string, unknown> => (
-    Boolean(item) && typeof item === "object" && !Array.isArray(item)
-  ));
-};
-
-const parseCaseMessageBody = (rawValue: string | null | undefined) => {
-  const raw = (rawValue ?? "").trim();
-  if (!raw) return { text: "", attachments: [] as Array<Record<string, unknown>> };
-  const parsed = parseMaybeJson(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { text: typeof parsed === "string" ? parsed : raw, attachments: [] as Array<Record<string, unknown>> };
-  }
-  const record = parsed as Record<string, unknown>;
-  let text = typeof record.text === "string" ? record.text.trim() : "";
-  let attachments = normalizeCaseMessageAttachments(record.attachments);
-
-  const nested = parseMaybeJson(text);
-  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    const nestedRecord = nested as Record<string, unknown>;
-    if (!attachments.length) attachments = normalizeCaseMessageAttachments(nestedRecord.attachments);
-    if (typeof nestedRecord.text === "string") text = nestedRecord.text.trim();
-    if (!text && typeof nestedRecord.kind === "string") {
-      text = SERVICE_CHAT_EVENT_LABELS[nestedRecord.kind] ?? nestedRecord.kind;
-    }
-  }
-
-  if (!text && typeof record.kind === "string") {
-    text = SERVICE_CHAT_EVENT_LABELS[record.kind] ?? record.kind;
-  }
-
-  return {
-    text: text || (attachments.length > 0 ? "Evidence shared" : raw),
-    attachments,
-  };
-};
-
-const resolveCaseMessageAttachmentItems = async (rawValue: string | null | undefined): Promise<CaseMessageAttachmentItem[]> => {
-  const { attachments } = parseCaseMessageBody(rawValue);
-  const resolved = await Promise.all(attachments.map(async (attachment, index) => {
-    const url = typeof attachment.url === "string" ? attachment.url.trim() : "";
-    const path = typeof attachment.path === "string" ? attachment.path.trim().replace(/^\/+/, "") : "";
-    const bucket = typeof attachment.bucket === "string" && attachment.bucket.trim()
-      ? attachment.bucket.trim()
-      : "chat_attachments";
-    const name = typeof attachment.name === "string" && attachment.name.trim() ? attachment.name.trim() : `Attachment ${index + 1}`;
-    const mime = typeof attachment.mime === "string" && attachment.mime.trim() ? attachment.mime.trim() : null;
-    if (url) return { url, label: name, name, mime };
-    if (!path) return null;
-    if (bucket === "chat_attachments") {
-      const { data } = await supabase.storage.from("chat_attachments").createSignedUrl(path, 60 * 15);
-      if (data?.signedUrl) return { url: data.signedUrl, label: name, name, mime };
-    }
-    return { url: resolveStorageOrPublicUrl(path), label: name, name, mime };
-  }));
-  return resolved.filter((item): item is CaseMessageAttachmentItem => Boolean(item?.url));
-};
-
-const isCaseMessageImageAttachment = (item: CaseMessageAttachmentItem) => (
-  Boolean(item.mime?.startsWith("image/")) || /\.(png|jpg|jpeg|gif|webp|bmp|svg)(\?.*)?$/i.test(item.url)
-);
-
 const formatEventGroupLabel = (group: string) => {
   if (group === "reports_received") return "Reports Received";
   if (group === "reports_filed") return "Reports Filed";
@@ -649,6 +549,7 @@ const ADMIN_EMAIL_ALLOWLIST = new Set([
 const AdminSafety = () => {
   const { profile, user, session, loading: authLoading, hydrating } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<ActiveTab>("reports");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -777,40 +678,6 @@ const AdminSafety = () => {
   const disputeHeader = selectedDisputeId
     ? disputeQueueById.get(selectedDisputeId)
     : undefined;
-
-  const correspondenceEvidenceItems = useMemo(
-    () => correspondenceRows.flatMap((row) => row.attachment_items ?? []),
-    [correspondenceRows],
-  );
-  const serviceChatPreviewEvidenceItems = useMemo(
-    () => (serviceChatPreview?.messages ?? []).flatMap((row) => row.attachment_items ?? []),
-    [serviceChatPreview?.messages],
-  );
-  const correspondenceEvidenceCount = useMemo(
-    () => correspondenceEvidenceItems.length,
-    [correspondenceEvidenceItems],
-  );
-  const serviceChatPreviewEvidenceCount = useMemo(
-    () => serviceChatPreviewEvidenceItems.length,
-    [serviceChatPreviewEvidenceItems],
-  );
-  const storedDisputeEvidenceUrls = disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [];
-  const storedDisputeEvidenceItems = useMemo(
-    () => storedDisputeEvidenceUrls
-      .map((item, index) => ({ url: resolveStorageOrPublicUrl(item), label: `Dispute Evidence ${index + 1}` }))
-      .filter((item) => item.url.length > 0),
-    [storedDisputeEvidenceUrls],
-  );
-  const allDisputeEvidenceItems = useMemo(
-    () => [
-      ...storedDisputeEvidenceItems,
-      ...correspondenceEvidenceItems,
-      ...serviceChatPreviewEvidenceItems,
-    ],
-    [correspondenceEvidenceItems, serviceChatPreviewEvidenceItems, storedDisputeEvidenceItems],
-  );
-  const totalDisputeEvidenceCount =
-    allDisputeEvidenceItems.length;
   
   const buildCurrentMessageRecipients = useCallback((): CaseMessageRecipientOption[] => {
     if (caseSelection?.type === "report") {
@@ -1294,63 +1161,7 @@ const AdminSafety = () => {
       setCorrespondenceError(error.message || "Unable to load official correspondence.");
       return;
     }
-    const rows = await Promise.all(((data ?? []) as unknown as TeamHuddleCorrespondenceRow[]).map(async (row) => ({
-      ...row,
-      display_body: parseCaseMessageBody(row.message_body).text,
-      attachment_items: await resolveCaseMessageAttachmentItems(row.message_body),
-    })));
-    setCorrespondenceRows(rows);
-  };
-
-  const renderOfficialCorrespondenceRows = () => {
-    if (correspondenceLoading) {
-      return <div className="text-sm text-muted-foreground">Loading correspondence...</div>;
-    }
-    if (correspondenceError) {
-      return <div className="text-sm text-red-600">{correspondenceError}</div>;
-    }
-    if (correspondenceRows.length === 0) {
-      return <div className="text-sm text-muted-foreground">No official correspondence yet.</div>;
-    }
-    return (
-      <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-2">
-        {correspondenceRows.map((message) => {
-          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
-          const attachments = message.attachment_items ?? [];
-          return (
-            <div
-              key={message.message_id}
-              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
-            >
-              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
-                <span>{formatDateTime(message.created_at)}</span>
-              </div>
-              <div className="whitespace-pre-wrap break-words text-sm">{message.display_body || "-"}</div>
-              {attachments.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {attachments.map((item, index) => (
-                    <button
-                      key={`${message.message_id}-${item.url}-${index}`}
-                      type="button"
-                      className="overflow-hidden rounded-md border bg-background text-left text-xs hover:bg-muted/40"
-                      onClick={() => openCaseMessageEvidenceViewer(attachments, "Official Correspondence Evidence")}
-                    >
-                      {isCaseMessageImageAttachment(item) ? (
-                        <img src={item.url} alt={item.label} className="h-20 w-24 object-cover" />
-                      ) : (
-                        <div className="flex h-20 w-24 items-center justify-center px-2 text-muted-foreground">Attachment</div>
-                      )}
-                      <div className="max-w-24 truncate px-2 py-1">Evidence</div>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    );
+    setCorrespondenceRows((data ?? []) as unknown as TeamHuddleCorrespondenceRow[]);
   };
 
   useEffect(() => {
@@ -1925,17 +1736,7 @@ const AdminSafety = () => {
       setDisputeActionError(error.message || "Unable to load service chat preview.");
       return;
     }
-    const rawPreview = (data as ServiceChatPreviewData | null) ?? null;
-    const preview = rawPreview
-      ? {
-          ...rawPreview,
-          messages: await Promise.all((rawPreview.messages ?? []).map(async (message) => ({
-            ...message,
-            display_content: parseCaseMessageBody(message.content).text,
-            attachment_items: await resolveCaseMessageAttachmentItems(message.content),
-          }))),
-        }
-      : null;
+    const preview = (data as ServiceChatPreviewData | null) ?? null;
     setServiceChatPreview(preview);
     setServiceChatPreviewOpen(Boolean(preview));
   };
@@ -1950,29 +1751,6 @@ const AdminSafety = () => {
     const normalized = items
       .map((item, index) => ({ url: resolveStorageOrPublicUrl(item), label: `Item ${index + 1}` }))
       .filter((item) => item.url.length > 0);
-    if (normalized.length === 0) return;
-    setMediaViewerTitle(title);
-    setMediaViewerItems(normalized);
-    setMediaViewerIndex(0);
-    setMediaViewerOpen(true);
-  };
-
-  const openCaseMessageEvidenceViewer = (items: CaseMessageAttachmentItem[], title: string) => {
-    const normalized = items
-      .map((item, index) => ({
-        url: item.url,
-        label: item.name || item.label || `Evidence ${index + 1}`,
-      }))
-      .filter((item) => item.url.length > 0);
-    if (normalized.length === 0) return;
-    setMediaViewerTitle(title);
-    setMediaViewerItems(normalized);
-    setMediaViewerIndex(0);
-    setMediaViewerOpen(true);
-  };
-
-  const openEvidenceItemsViewer = (items: MediaViewerItem[], title: string) => {
-    const normalized = items.filter((item) => item.url.length > 0);
     if (normalized.length === 0) return;
     setMediaViewerTitle(title);
     setMediaViewerItems(normalized);
@@ -2299,10 +2077,20 @@ const AdminSafety = () => {
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading safety queues...</div>
       ) : (
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => {
+            if (value === "care") {
+              navigate("/admin/care");
+              return;
+            }
+            setActiveTab(value as ActiveTab);
+          }}
+        >
           <TabsList>
             <TabsTrigger value="reports">Reports</TabsTrigger>
             <TabsTrigger value="disputes">Disputes</TabsTrigger>
+            <TabsTrigger value="care">CARE</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="audit">Audit Log</TabsTrigger>
           </TabsList>
@@ -2957,7 +2745,36 @@ const AdminSafety = () => {
                         Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
                       </div>
                     ) : null}
-                    {renderOfficialCorrespondenceRows()}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -3089,7 +2906,7 @@ const AdminSafety = () => {
                     <div>Status: {formatDisputeStatusLabel(disputeHeader?.dispute_status)}</div>
                     <div>Category: {disputeHeader?.dispute_category ?? "-"}</div>
                     <div>Chat status: {disputeHeader?.chat_status ?? "-"}</div>
-                    <div>Evidence count: {totalDisputeEvidenceCount}</div>
+                    <div>Evidence count: {disputeHeader?.evidence_count ?? 0}</div>
                     <div>Created: {formatDateTime(disputeHeader?.dispute_created_at ?? null)}</div>
                     <div>Updated: {formatDateTime(disputeHeader?.dispute_updated_at ?? null)}</div>
                   </div>
@@ -3147,27 +2964,17 @@ const AdminSafety = () => {
                   <h3 className="font-semibold">Dispute Detail</h3>
                         <div className="whitespace-pre-wrap break-words">{stripDemoFixtureMarker(disputeCasefile?.description)}</div>
                   <div>Admin notes: {stripDemoFixtureMarker(disputeCasefile?.admin_notes)}</div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span>Evidence: {totalDisputeEvidenceCount}</span>
-                    {allDisputeEvidenceItems.length > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <span>Evidence: {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length}</span>
+                    {(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? []).length > 0 ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => openEvidenceItemsViewer(allDisputeEvidenceItems, "Dispute Evidence")}
+                        onClick={() => openMediaViewer(disputeCasefile?.evidence_urls ?? disputeHeader?.evidence_urls ?? [], "Dispute Evidence")}
                       >
                         View
                       </Button>
-                    ) : null}
-                    {correspondenceEvidenceCount > 0 ? (
-                      <span className="text-xs text-muted-foreground">
-                        {correspondenceEvidenceCount} from official correspondence
-                      </span>
-                    ) : null}
-                    {serviceChatPreviewEvidenceCount > 0 ? (
-                      <span className="text-xs text-muted-foreground">
-                        {serviceChatPreviewEvidenceCount} from service chat preview
-                      </span>
                     ) : null}
                   </div>
                 </section>
@@ -3200,7 +3007,36 @@ const AdminSafety = () => {
                         Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
                       </div>
                     ) : null}
-                    {renderOfficialCorrespondenceRows()}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -3457,7 +3293,36 @@ const AdminSafety = () => {
                         Thread: Team Huddle ↔ {correspondenceRecipient.displayName} ({correspondenceRecipient.socialId})
                       </div>
                     ) : null}
-                    {renderOfficialCorrespondenceRows()}
+                    {correspondenceLoading ? (
+                      <div className="text-sm text-muted-foreground">Loading correspondence...</div>
+                    ) : correspondenceError ? (
+                      <div className="text-sm text-red-600">{correspondenceError}</div>
+                    ) : correspondenceRows.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No official correspondence yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {correspondenceRows.map((message) => {
+                          const isTeam = message.sender_user_id === TEAM_HUDDLE_USER_ID || message.is_team_huddle === true;
+                          return (
+                            <div
+                              key={message.message_id}
+                              className={`max-w-[88%] rounded-md border px-3 py-2 ${isTeam ? "ml-auto border-sky-200 bg-sky-50" : "mr-auto bg-muted/20"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                <span>{isTeam ? "Team Huddle" : (message.sender_display_name ?? "User")}</span>
+                                <span>{formatDateTime(message.created_at)}</span>
+                              </div>
+                              <div className="whitespace-pre-wrap break-words text-sm">{message.message_body ?? "-"}</div>
+                              {message.case_type ? (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {message.case_type}:{message.case_id ?? "-"} ({message.recipient_role ?? "-"})
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -3559,40 +3424,18 @@ const AdminSafety = () => {
                   <div className="text-muted-foreground">No messages found for this service chat.</div>
                 ) : (
                   <div className="space-y-2">
-                    {serviceChatPreview.messages.map((message) => {
-                      const attachments = message.attachment_items ?? [];
-                      return (
-                        <div key={message.id} className="rounded-md border p-2">
-                          <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                            <span>
-                              {resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).name}{" "}
-                              ({resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).social})
-                            </span>
-                            <span>{formatDateTime(message.created_at)}</span>
-                          </div>
-                          <div className="whitespace-pre-wrap break-words">{message.display_content || "-"}</div>
-                          {attachments.length > 0 ? (
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {attachments.map((item, index) => (
-                                <button
-                                  key={`${message.id}-${item.url}-${index}`}
-                                  type="button"
-                                  className="overflow-hidden rounded-md border bg-background text-left text-xs hover:bg-muted/40"
-                                  onClick={() => openCaseMessageEvidenceViewer(attachments, "Service Chat Evidence")}
-                                >
-                                  {isCaseMessageImageAttachment(item) ? (
-                                    <img src={item.url} alt={item.label} className="h-20 w-24 object-cover" />
-                                  ) : (
-                                    <div className="flex h-20 w-24 items-center justify-center px-2 text-muted-foreground">Evidence</div>
-                                  )}
-                                  <div className="max-w-24 truncate px-2 py-1">Evidence</div>
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
+                    {serviceChatPreview.messages.map((message) => (
+                      <div key={message.id} className="rounded-md border p-2">
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).name}{" "}
+                            ({resolveIdentityLabel(message.sender_display_name, message.sender_social_id, message.sender_id).social})
+                          </span>
+                          <span>{formatDateTime(message.created_at)}</span>
                         </div>
-                      );
-                    })}
+                        <div className="whitespace-pre-wrap break-words">{message.content ?? "-"}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
