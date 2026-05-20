@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -245,6 +245,11 @@ const ADMIN_EMAIL_ALLOWLIST = new Set([
 ]);
 
 const STRIPE_SYNC_STALE_MS = 30 * 60 * 1000;
+const STRIPE_STANDARD_PAYOUT_WORKING_DAYS = 7;
+const HUDDLE_CONFIRMATION_BUFFER_WORKING_DAYS = 2;
+const SUPPORT_BUFFER_WORKING_DAYS = 2;
+const TARGET_PAYOUT_WORKING_DAYS =
+  STRIPE_STANDARD_PAYOUT_WORKING_DAYS + HUDDLE_CONFIRMATION_BUFFER_WORKING_DAYS + SUPPORT_BUFFER_WORKING_DAYS;
 
 const decisionTypeLabel: Record<CareDecisionType, string> = {
   no_action_monitor: "No action / monitor",
@@ -381,6 +386,35 @@ const formatShortDateTime = (value: string | null | undefined) => {
   });
 };
 
+const isWeekend = (date: Date) => {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+};
+
+const addWorkingDays = (value: string | null | undefined, days: number) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const result = new Date(date);
+  let added = 0;
+  while (added < days) {
+    result.setDate(result.getDate() + 1);
+    if (!isWeekend(result)) added += 1;
+  }
+  return result;
+};
+
+const formatDateOnly = (value: Date | string | null | undefined) => {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 const formatMoney = (currency: string | null | undefined, value: number | null | undefined) => {
   const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
   const code = (currency || "HKD").toUpperCase();
@@ -432,6 +466,30 @@ const durationSourceLabel = (value: string | null | undefined) => {
   if (value === "completed") return "Actual: check-in to completion";
   if (value === "dispute") return "Actual: check-in to dispute";
   return "Actual duration needs review";
+};
+
+const estimatedPayoutLabel = (row: CareTransactionRow) => {
+  if (row.normalized_money_flow_status === "payout_released") return "Paid out";
+  if (row.normalized_money_flow_status === "refund_full_succeeded") return "No payout - full refund";
+  if (row.normalized_money_flow_status === "disputed_hold") return "On hold until dispute is resolved";
+  if (row.normalized_money_flow_status === "stripe_failed") return "Check Stripe first";
+  const baseDate = row.completed_at || row.db_updated_at;
+  const target = addWorkingDays(baseDate, TARGET_PAYOUT_WORKING_DAYS);
+  if (!target) return "Waiting for completion";
+  return `Target ${formatDateOnly(target)}`;
+};
+
+const estimatedPayoutDetail = (row: CareTransactionRow) => {
+  if (row.normalized_money_flow_status === "refund_full_succeeded") {
+    return "Owner refund equals the paid amount, so no carer payout is expected.";
+  }
+  if (row.normalized_money_flow_status === "disputed_hold") {
+    return "Payout date is paused until the dispute is resolved.";
+  }
+  const baseDate = row.completed_at || row.db_updated_at;
+  const target = addWorkingDays(baseDate, TARGET_PAYOUT_WORKING_DAYS);
+  if (!target) return "A target date will appear after Huddle confirmation or completion is recorded.";
+  return `Estimated as ${STRIPE_STANDARD_PAYOUT_WORKING_DAYS} Stripe working days + ${HUDDLE_CONFIRMATION_BUFFER_WORKING_DAYS} Huddle confirmation days + ${SUPPORT_BUFFER_WORKING_DAYS} buffer days after ${formatDateOnly(baseDate)}.`;
 };
 
 const formatBookingStatus = (value: string | null | undefined) => {
@@ -527,6 +585,7 @@ const Field = ({ label, value }: { label: string; value: string | number | null 
 
 const AdminCare = () => {
   const { user, profile, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
   const [rows, setRows] = useState<CareTransactionRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1260,6 +1319,20 @@ const AdminCare = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg bg-muted p-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 px-3"
+                onClick={() => navigate("/admin/safety")}
+              >
+                Trust & Safety
+              </Button>
+              <Button type="button" size="sm" className="h-8 px-3">
+                CARE
+              </Button>
+            </div>
             <span className="rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground">
               {liveTick || "Live local updates active"}
             </span>
@@ -1329,6 +1402,7 @@ const AdminCare = () => {
                   <th className="px-3 py-2">Paid</th>
                   <th className="px-3 py-2">Refunded</th>
                   <th className="px-3 py-2">Carer receives</th>
+                  <th className="px-3 py-2">Estimated payout</th>
                   <th className="px-3 py-2">Stripe checked</th>
                   <th className="px-3 py-2">Action</th>
                 </tr>
@@ -1336,7 +1410,7 @@ const AdminCare = () => {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-8 text-center text-muted-foreground" colSpan={11}>
+                    <td className="px-3 py-8 text-center text-muted-foreground" colSpan={12}>
                       No confirmed paid care sessions found.
                     </td>
                   </tr>
@@ -1380,6 +1454,10 @@ const AdminCare = () => {
                     <td className="px-3 py-2">{formatMoney(row.currency, row.total_paid)}</td>
                     <td className="px-3 py-2">{formatMoney(row.currency, row.owner_refunded)}</td>
                     <td className="px-3 py-2">{formatMoney(row.currency, row.carer_receives)}</td>
+                    <td className="px-3 py-2">
+                      <div>{estimatedPayoutLabel(row)}</div>
+                      <div className="text-xs text-muted-foreground">Target, not guaranteed</div>
+                    </td>
                     <td className="px-3 py-2">
                       <div>{formatDateTime(row.stripe_synced_at)}</div>
                       <div className="text-xs text-muted-foreground">Local update {formatDateTime(row.db_updated_at)}</div>
@@ -1429,6 +1507,11 @@ const AdminCare = () => {
                   <div className="rounded-lg border bg-muted/20 p-3">
                     <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Carer receives</div>
                     <div className="mt-1 font-medium">{formatMoney(selected.currency, selected.carer_receives)}</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3 sm:col-span-2">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Estimated carer payout date</div>
+                    <div className="mt-1 font-medium">{estimatedPayoutLabel(selected)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{estimatedPayoutDetail(selected)}</div>
                   </div>
                 </div>
               </section>
