@@ -271,11 +271,34 @@ const lifecycleLabel: Record<CareDecisionStatus, string> = {
   draft: "Draft",
   submitted: "Submitted",
   blocked: "Blocked",
-  ready_for_execution: "Ready",
-  execution_locked: "Locked",
+  ready_for_execution: "Ready for finance review",
+  execution_locked: "Locked for approval",
   execution_cancelled: "Cancelled",
   execution_superseded: "Superseded",
   executed_reserved: "Reserved",
+};
+
+const queueFilterCopy: Record<CareQueueFilter, { label: string; helper: string }> = {
+  all: {
+    label: "All paid CARE sessions",
+    helper: "Every confirmed paid booking.",
+  },
+  needs_sync: {
+    label: "Needs Stripe refresh",
+    helper: "Local booking changed or Stripe has not been checked yet.",
+  },
+  blocked: {
+    label: "Review blocked",
+    helper: "A saved resolution failed validation.",
+  },
+  ready_for_execution: {
+    label: "Ready for finance review",
+    helper: "Validated and waiting for a locked approval package.",
+  },
+  locked: {
+    label: "Locked approval package",
+    helper: "Money amounts are frozen for maker/checker review.",
+  },
 };
 
 const executionAttemptLabel: Record<CareExecutionAttemptStatus, string> = {
@@ -345,6 +368,19 @@ const formatDateTime = (value: string | null | undefined) => {
   return date.toLocaleString("en-GB", { hour12: false });
 };
 
+const formatShortDateTime = (value: string | null | undefined) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+};
+
 const formatMoney = (currency: string | null | undefined, value: number | null | undefined) => {
   const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
   const code = (currency || "HKD").toUpperCase();
@@ -368,8 +404,53 @@ const compactId = (value: string | null | undefined) => {
 
 const formatHours = (value: number | null | undefined) => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "-";
+  if (!Number.isFinite(parsed) || parsed <= 0) return "-";
   return `${parsed.toFixed(1)}h`;
+};
+
+const hasUsefulHours = (value: number | null | undefined) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
+const formatBookedHours = (row: Pick<CareTransactionRow, "booked_service_hours" | "service_started_at" | "service_scheduled_end_at">) => {
+  if (hasUsefulHours(row.booked_service_hours)) return `${formatHours(row.booked_service_hours)} booked`;
+  if (row.service_started_at || row.service_scheduled_end_at) return "Booked time needs review";
+  return "Booked time unavailable";
+};
+
+const formatActualHours = (row: Pick<CareTransactionRow, "actual_service_hours">) => (
+  hasUsefulHours(row.actual_service_hours) ? `${formatHours(row.actual_service_hours)} actual` : "Actual time unavailable"
+);
+
+const formatServiceWindow = (row: Pick<CareTransactionRow, "service_started_at" | "service_scheduled_end_at">) => {
+  if (!row.service_started_at && !row.service_scheduled_end_at) return "Booked dates unavailable";
+  return `${formatShortDateTime(row.service_started_at)} - ${formatShortDateTime(row.service_scheduled_end_at)}`;
+};
+
+const durationSourceLabel = (value: string | null | undefined) => {
+  if (value === "completed") return "Actual: check-in to completion";
+  if (value === "dispute") return "Actual: check-in to dispute";
+  return "Actual duration needs review";
+};
+
+const formatBookingStatus = (value: string | null | undefined) => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "completed") return "Completed";
+  if (normalized === "confirmed" || normalized === "booked") return "Booked";
+  if (normalized === "in_progress") return "In progress";
+  if (normalized === "disputed") return "Disputed";
+  return value ? value.replaceAll("_", " ") : "-";
+};
+
+const formatDisputeStatus = (value: string | null | undefined) => {
+  const normalized = String(value || "").toLowerCase();
+  if (!normalized) return "No dispute";
+  if (normalized === "resolved_refund_full") return "Dispute resolved: full refund";
+  if (normalized === "resolved_refund_partial") return "Dispute resolved: partial refund";
+  if (normalized === "resolved_release_provider") return "Dispute resolved: payout released";
+  if (normalized === "open") return "Dispute open";
+  return `Dispute: ${normalized.replaceAll("_", " ")}`;
 };
 
 const toMoneyNumber = (value: string | number | null | undefined) => {
@@ -385,10 +466,10 @@ const createIdempotencyKey = () => {
 const safeAdminMessage = (fallback: string, raw?: string | null) => {
   const message = String(raw || "").toLowerCase();
   if (message.includes("missing_payment_intent") || message.includes("payment_intent")) {
-    return "Missing payment intent. Sync Stripe status or inspect the booking payment record.";
+    return "Missing payment intent. Check Stripe payments or inspect the booking payment record.";
   }
   if (message.includes("stale") || message.includes("needs_sync") || message.includes("sync_required")) {
-    return "Stale Stripe sync. Refresh Stripe statuses before continuing.";
+    return "Stripe payment data is stale. Check Stripe payments before continuing.";
   }
   if (message.includes("active_stripe_dispute") || message.includes("active dispute")) {
     return "Active Stripe dispute blocks this action unless the decision is manual review.";
@@ -409,7 +490,7 @@ const safeAdminMessage = (fallback: string, raw?: string | null) => {
     return "Validation blocked. Review the listed blockers before continuing.";
   }
   if (message.includes("stripe") || message.includes("sync")) {
-    return "Stripe sync failed. Retry the sync or inspect the payment intent in Stripe.";
+    return "Stripe payment check failed. Retry the check or inspect the payment intent in Stripe.";
   }
   if (message.includes("admin_required")) {
     return "Admin access is required for this CARE action.";
@@ -419,10 +500,28 @@ const safeAdminMessage = (fallback: string, raw?: string | null) => {
 
 const safeIssueLabel = (value: string) => safeAdminMessage(value.replaceAll("_", " "), value);
 
+const formatActionPlanLines = (plan: Record<string, unknown> | null | undefined, currency: string | null | undefined) => {
+  if (!plan) return [];
+  const actions = Array.isArray(plan.actions) ? plan.actions : [];
+  if (actions.length > 0) {
+    return actions.map((action, index) => {
+      if (!action || typeof action !== "object") return `Step ${index + 1}: Review prepared Stripe action`;
+      const item = action as Record<string, unknown>;
+      const type = String(item.type || item.action || "stripe_action").replaceAll("_", " ");
+      const amount = Number(item.amount ?? item.amount_decimal ?? item.owner_refund_amount ?? item.carer_payout_amount);
+      const money = Number.isFinite(amount) ? ` for ${formatMoney(currency, amount)}` : "";
+      return `Step ${index + 1}: ${type}${money}`;
+    });
+  }
+  const requestedAction = String(plan.requested_action || plan.decision_type || "").replaceAll("_", " ");
+  if (requestedAction) return [`Prepared action: ${requestedAction}`];
+  return ["Stripe action plan prepared."];
+};
+
 const Field = ({ label, value }: { label: string; value: string | number | null | undefined }) => (
   <div className="min-w-0 rounded-lg border bg-muted/20 p-2">
     <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
-    <div className="mt-1 break-words font-mono text-xs text-foreground">{value ?? "-"}</div>
+    <div className="mt-1 break-words text-xs text-foreground">{value ?? "-"}</div>
   </div>
 );
 
@@ -535,10 +634,10 @@ const AdminCare = () => {
     const lockNeedsRefresh = Boolean(lockTime && stripeTime && lockTime < stripeTime);
     const approvalNeedsRefresh = Boolean(lockTime && latestApprovalTime && latestApprovalTime < lockTime);
     const warnings = [
-      stripeStale ? "Stripe sync is stale. Refresh Stripe statuses before continuing." : null,
-      dbNeedsSync ? "DB changed after the latest Stripe sync. Sync this transaction before review." : null,
-      lockNeedsRefresh ? "Locked package is older than the latest Stripe sync. Re-lock or revalidate before future execution." : null,
-      approvalNeedsRefresh ? "Approval is older than the latest lock. Maker/checker approval must be refreshed." : null,
+      stripeStale ? "Stripe payment data is older than 30 minutes or has never been checked." : null,
+      dbNeedsSync ? "The booking changed after the last Stripe check. Refresh Stripe payment data before deciding money flow." : null,
+      lockNeedsRefresh ? "The locked approval package is older than the latest Stripe check. Re-lock before any future finance action." : null,
+      approvalNeedsRefresh ? "Approvals were made before the latest lock. Maker/checker approval must be refreshed." : null,
     ].filter(Boolean) as string[];
     return { stripeStale, dbNeedsSync, lockNeedsRefresh, approvalNeedsRefresh, warnings };
   }, [approvals, latestLock?.locked_at, selected]);
@@ -553,14 +652,14 @@ const AdminCare = () => {
       && new Date(latestLock.stripe_synced_at).getTime() >= new Date(selected.db_updated_at).getTime(),
     );
     return [
-      { label: "Stripe sync fresh", done: stripeFresh },
-      { label: "DB/Stripe status matched", done: stripeFresh && !(readiness?.errors || []).includes("latest_stripe_sync_stale") },
-      { label: "Locked money preview frozen", done: lockedMoneyFrozen },
-      { label: "Service hours reviewed", done: Boolean(selected?.actual_service_hours || latestLock?.validation_result?.manual_review_required === false || latestLock?.approval_readiness?.warnings?.includes("manual_review_acknowledged_by_execution_lock_note")) },
-      { label: "Owner/carer impact reviewed", done: Boolean(latestLock?.latest_preflight_result || latestLock?.validation_result) },
-      { label: "Maker/checker approvals complete", done: Boolean(latestLock?.maker_approved && latestLock?.checker_approved && (latestLock.approval_count || 0) >= 2) },
-      { label: "Live execution disabled", done: true },
-      { label: "Dry run preflight passed", done: preflightOk },
+      { label: "Stripe payment data checked recently", done: stripeFresh },
+      { label: "Booking and Stripe amounts match", done: stripeFresh && !(readiness?.errors || []).includes("latest_stripe_sync_stale") },
+      { label: "Refund / payout amounts are frozen", done: lockedMoneyFrozen },
+      { label: "Booked and actual hours reviewed", done: Boolean(hasUsefulHours(selected?.actual_service_hours) || latestLock?.validation_result?.manual_review_required === false || latestLock?.approval_readiness?.warnings?.includes("manual_review_acknowledged_by_execution_lock_note")) },
+      { label: "Owner and carer impact reviewed", done: Boolean(latestLock?.latest_preflight_result || latestLock?.validation_result) },
+      { label: "Two-admin approval complete", done: Boolean(latestLock?.maker_approved && latestLock?.checker_approved && (latestLock.approval_count || 0) >= 2) },
+      { label: "Live money movement is still disabled", done: true },
+      { label: "Dry check passed", done: preflightOk },
     ];
   }, [latestLock, selected?.actual_service_hours, selected?.db_updated_at]);
 
@@ -570,13 +669,13 @@ const AdminCare = () => {
     const dryRunPassed = latestLock?.latest_execution_attempt_status === "dry_run_passed";
     const approvalsComplete = Boolean(latestLock?.maker_approved && latestLock?.checker_approved && (latestLock.approval_count || 0) >= 2);
     return [
-      { label: "DB synced", done: !freshnessState.dbNeedsSync },
-      { label: "Stripe synced", done: Boolean(selected?.stripe_synced_at) && !freshnessState.stripeStale },
-      { label: "Decision validated", done: decisionValidated },
-      { label: "Execution locked", done: executionLocked },
-      { label: "Dry run passed", done: dryRunPassed },
-      { label: "Maker/checker approved", done: approvalsComplete },
-      { label: "Live money movement disabled", done: true },
+      { label: "Local booking is current", done: !freshnessState.dbNeedsSync },
+      { label: "Stripe payment data checked recently", done: Boolean(selected?.stripe_synced_at) && !freshnessState.stripeStale },
+      { label: "Resolution decision validated", done: decisionValidated },
+      { label: "Approval package locked", done: executionLocked },
+      { label: "Dry check passed", done: dryRunPassed },
+      { label: "Two-admin approval complete", done: approvalsComplete },
+      { label: "Live money movement is disabled", done: true },
     ];
   }, [freshnessState.dbNeedsSync, freshnessState.stripeStale, latestDecision?.dry_run_result?.ok, latestLock, selected?.stripe_synced_at, validationResult?.ok]);
 
@@ -623,11 +722,11 @@ const AdminCare = () => {
 
   const dbStripeMismatchWarning = useMemo(() => {
     if (!selected) return null;
-    if (!selected.stripe_synced_at) return "No Stripe snapshot is available yet. Sync before validating a decision.";
+    if (!selected.stripe_synced_at) return "No Stripe payment check is available yet. Check Stripe payments before validating a decision.";
     const dbTime = selected.db_updated_at ? new Date(selected.db_updated_at).getTime() : 0;
     const stripeTime = selected.stripe_synced_at ? new Date(selected.stripe_synced_at).getTime() : 0;
-    if (dbTime > stripeTime) return "DB changed after the latest Stripe sync. Sync this transaction before validating.";
-    if (selected.normalized_money_flow_status === "stripe_failed") return "Latest Stripe sync failed. Resolve or resync before validating.";
+    if (dbTime > stripeTime) return "The booking changed after the latest Stripe payment check. Check Stripe payments before validating.";
+    if (selected.normalized_money_flow_status === "stripe_failed") return "Latest Stripe payment check failed. Resolve or retry before validating.";
     return null;
   }, [selected]);
 
@@ -796,12 +895,12 @@ const AdminCare = () => {
     });
     setSyncing((current) => ({ ...current, [row.service_chat_id]: false }));
     if (fnError) {
-      setError(safeAdminMessage("Stripe sync failed.", fnError.message));
+      setError(safeAdminMessage("Stripe payment check failed.", fnError.message));
       return false;
     }
     if (data && typeof data === "object" && "error" in data) {
       const body = data as Record<string, unknown>;
-      setError(safeAdminMessage("Stripe sync failed.", String(body.detail || body.error || "")));
+      setError(safeAdminMessage("Stripe payment check failed.", String(body.detail || body.error || "")));
       return false;
     }
     await loadRows();
@@ -820,7 +919,7 @@ const AdminCare = () => {
       if (!ok) failed += 1;
     }
     setSyncAll(false);
-    setSyncSummary(failed > 0 ? `${failed} visible Stripe sync${failed === 1 ? "" : "s"} failed. Review row status and retry.` : "Visible Stripe statuses refreshed.");
+    setSyncSummary(failed > 0 ? `${failed} visible Stripe payment check${failed === 1 ? "" : "s"} failed. Review row status and retry.` : "Visible Stripe payment data refreshed.");
   }, [filteredRows, syncAll, syncOne]);
 
   const sendTeamHuddleMessage = useCallback(async (row: CareTransactionRow, target: "owner" | "carer" | "both") => {
@@ -937,7 +1036,7 @@ const AdminCare = () => {
     }
     const updated = data as CareDecisionRow | null;
     setValidationResult(updated?.dry_run_result || null);
-    setExecutionSuccess(updated?.status === "ready_for_execution" ? "Decision is ready for execution review." : "Decision submitted but blocked by validation.");
+    setExecutionSuccess(updated?.status === "ready_for_execution" ? "Decision is ready for finance review." : "Decision submitted but blocked by validation.");
     await loadDecisions(decision.service_chat_id);
     await loadExecutionQueue();
     await loadAuditTimeline(decision.service_chat_id);
@@ -1157,24 +1256,28 @@ const AdminCare = () => {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">CARE Money Flow</h1>
             <p className="text-sm text-muted-foreground">
-              Confirmed paid care sessions only. Stripe sync is read-only and writes local snapshots.
+              Confirmed paid care sessions only. Use this to answer payment, refund, payout, and dispute questions.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border bg-muted px-2 py-1 text-xs text-muted-foreground">
-              {liveTick || "Live local DB watch active"}
+              {liveTick || "Live local updates active"}
             </span>
             <Button type="button" variant="outline" onClick={() => void loadRows()}>
-              Refresh DB
+              Refresh list
             </Button>
             <Button
               type="button"
               onClick={() => void syncVisible()}
               disabled={syncAll || filteredRows.length === 0 || Object.values(syncing).some(Boolean)}
             >
-              {syncAll ? "Syncing..." : "Refresh Stripe statuses"}
+              {syncAll ? "Checking Stripe..." : "Check Stripe payments"}
             </Button>
           </div>
+        </div>
+        <div className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Refresh list</span> reloads Huddle's local booking records.
+          <span className="ml-1 font-medium text-foreground">Check Stripe payments</span> safely reads Stripe and saves a snapshot here. It does not refund, pay out, reverse, or move money.
         </div>
 
         {error ? (
@@ -1188,22 +1291,26 @@ const AdminCare = () => {
           </div>
         ) : null}
 
-        <div className="flex flex-wrap gap-2 rounded-xl border bg-card p-3">
+        <div className="grid gap-2 rounded-xl border bg-card p-3 md:grid-cols-5">
           {([
-            ["all", "All"],
-            ["needs_sync", "Needs sync"],
-            ["blocked", "Blocked"],
-            ["ready_for_execution", "Ready"],
-            ["locked", "Locked"],
-          ] as const).map(([value, label]) => (
+            "all",
+            "needs_sync",
+            "blocked",
+            "ready_for_execution",
+            "locked",
+          ] as const).map((value) => (
             <Button
               key={value}
               type="button"
               size="sm"
               variant={queueFilter === value ? "default" : "outline"}
+              className="h-auto justify-start whitespace-normal px-3 py-2 text-left"
               onClick={() => setQueueFilter(value)}
             >
-              {label}
+              <span>
+                <span className="block text-sm">{queueFilterCopy[value].label}</span>
+                <span className="block text-[11px] font-normal opacity-80">{queueFilterCopy[value].helper}</span>
+              </span>
             </Button>
           ))}
         </div>
@@ -1222,7 +1329,7 @@ const AdminCare = () => {
                   <th className="px-3 py-2">Paid</th>
                   <th className="px-3 py-2">Refunded</th>
                   <th className="px-3 py-2">Carer receives</th>
-                  <th className="px-3 py-2">Stripe synced</th>
+                  <th className="px-3 py-2">Stripe checked</th>
                   <th className="px-3 py-2">Action</th>
                 </tr>
               </thead>
@@ -1257,12 +1364,13 @@ const AdminCare = () => {
                       <div className="text-xs text-muted-foreground">@{row.carer_social_id || compactId(row.carer_id)}</div>
                     </td>
                     <td className="px-3 py-2">
-                      <div>{row.booking_status || "-"}</div>
-                      <div className="text-xs text-muted-foreground">{row.dispute_status ? `Dispute: ${row.dispute_status}` : "No dispute"}</div>
+                      <div>{formatBookingStatus(row.booking_status)}</div>
+                      <div className="text-xs text-muted-foreground">{formatDisputeStatus(row.dispute_status)}</div>
                     </td>
                     <td className="px-3 py-2">
-                      <div>{formatHours(row.booked_service_hours)} booked / {formatHours(row.actual_service_hours)} actual</div>
-                      <div className="text-xs text-muted-foreground">{row.service_duration_source || "unavailable"}</div>
+                      <div>{formatBookedHours(row)}</div>
+                      <div>{formatActualHours(row)}</div>
+                      <div className="text-xs text-muted-foreground">{formatServiceWindow(row)}</div>
                     </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${statusClass[row.normalized_money_flow_status]}`}>
@@ -1274,7 +1382,7 @@ const AdminCare = () => {
                     <td className="px-3 py-2">{formatMoney(row.currency, row.carer_receives)}</td>
                     <td className="px-3 py-2">
                       <div>{formatDateTime(row.stripe_synced_at)}</div>
-                      <div className="text-xs text-muted-foreground">DB {formatDateTime(row.db_updated_at)}</div>
+                      <div className="text-xs text-muted-foreground">Local update {formatDateTime(row.db_updated_at)}</div>
                     </td>
                     <td className="px-3 py-2">
                       <Button
@@ -1284,7 +1392,7 @@ const AdminCare = () => {
                         disabled={syncAll || Boolean(syncing[row.service_chat_id])}
                         onClick={() => void syncOne(row)}
                       >
-                        {syncing[row.service_chat_id] ? "Syncing" : "Sync"}
+                        {syncing[row.service_chat_id] ? "Checking" : "Check Stripe"}
                       </Button>
                     </td>
                   </tr>
@@ -1305,30 +1413,50 @@ const AdminCare = () => {
             <div className="mt-4 space-y-4 text-sm">
               <section className="rounded-xl border p-3">
                 <h3 className="font-semibold">Support summary</h3>
-                <p className="mt-2 text-muted-foreground">
-                  Status: {statusLabel[selected.normalized_money_flow_status]}. Owner refunded {formatMoney(selected.currency, selected.owner_refunded)}.
-                  Carer receives {formatMoney(selected.currency, selected.carer_receives)}. Last Stripe sync: {formatDateTime(selected.stripe_synced_at)}.
-                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Money status</div>
+                    <div className="mt-1 font-medium">{statusLabel[selected.normalized_money_flow_status]}</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Last Stripe check</div>
+                    <div className="mt-1 font-medium">{formatDateTime(selected.stripe_synced_at)}</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Owner refunded</div>
+                    <div className="mt-1 font-medium">{formatMoney(selected.currency, selected.owner_refunded)}</div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Carer receives</div>
+                    <div className="mt-1 font-medium">{formatMoney(selected.currency, selected.carer_receives)}</div>
+                  </div>
+                </div>
               </section>
 
               <section className="rounded-xl border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-semibold">Final admin checklist</h3>
+                  <div>
+                    <h3 className="font-semibold">Payment review readiness</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      These checks matter when you are preparing a refund or payout package. Normal completed bookings do not need every item.
+                    </p>
+                  </div>
                   <span className="rounded-full border border-slate-200 bg-muted px-2 py-1 text-xs text-muted-foreground">
-                    Live money movement disabled
+                    Live money movement is off
                   </span>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {finalChecklist.map((item) => (
                     <div
                       key={item.label}
-                      className={`rounded-lg border px-3 py-2 text-xs ${
+                      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
                         item.done
                           ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                          : "border-amber-200 bg-amber-50 text-amber-900"
+                          : "border-slate-200 bg-muted/20 text-muted-foreground"
                       }`}
                     >
-                      {item.done ? "Ready" : "Needs attention"}: {item.label}
+                      <span>{item.label}</span>
+                      <span className="font-medium">{item.done ? "Done" : "Not yet"}</span>
                     </div>
                   ))}
                 </div>
@@ -1445,7 +1573,9 @@ const AdminCare = () => {
                   <div className={`mt-3 rounded-lg border p-3 text-xs ${
                     validationResult.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"
                   }`}>
-                    <div className="font-semibold">Latest validation: {validationResult.status || (validationResult.ok ? "ready_for_execution" : "blocked")}</div>
+                    <div className="font-semibold">
+                      Latest validation: {validationResult.status ? lifecycleLabel[validationResult.status] : validationResult.ok ? "Ready for finance review" : "Blocked"}
+                    </div>
                     {validationResult.manual_review_required ? (
                       <div className="mt-2">Manual review required before payout execution.</div>
                     ) : null}
@@ -1538,7 +1668,7 @@ const AdminCare = () => {
                     <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <Field label="Lock ID" value={latestLock.lock_id} />
                       <Field label="Stripe snapshot" value={latestLock.stripe_sync_snapshot_id} />
-                      <Field label="Stripe synced" value={formatDateTime(latestLock.stripe_synced_at)} />
+                      <Field label="Last Stripe check" value={formatDateTime(latestLock.stripe_synced_at)} />
                       <Field label="Locked by" value={latestLock.locked_by_admin_name || compactId(latestLock.locked_by_admin_id)} />
                       <Field label="Locked at" value={formatDateTime(latestLock.locked_at)} />
                       <Field label="Validation" value={latestLock.validation_result?.ok ? "passed" : "blocked"} />
@@ -1677,7 +1807,7 @@ const AdminCare = () => {
                     </div>
 
                     <div className="mt-3 rounded-lg border bg-background p-3">
-                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Irreversible-action checklist</div>
+                      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Final execution safety checks</div>
                       <div className="grid gap-2 sm:grid-cols-2">
                         {irreversibleChecklist.map((item) => (
                           <div
@@ -1695,10 +1825,12 @@ const AdminCare = () => {
                     </div>
                     {latestLock.latest_stripe_action_plan ? (
                       <div className="mt-3 rounded-lg border bg-background p-3">
-                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">View execution action plan</div>
-                        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words text-xs text-foreground">
-                          {JSON.stringify(latestLock.latest_stripe_action_plan, null, 2)}
-                        </pre>
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Prepared Stripe plan</div>
+                        <div className="space-y-1 text-xs text-foreground">
+                          {formatActionPlanLines(latestLock.latest_stripe_action_plan, latestLock.currency).map((line) => (
+                            <div key={line}>{line}</div>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                     {latestLock.latest_preflight_result ? (
@@ -1785,7 +1917,7 @@ const AdminCare = () => {
                               ? "border-red-200 bg-red-50 text-red-800"
                               : "border-slate-200 bg-background text-slate-700"
                           }`}>
-                            {decision.status}
+                            {lifecycleLabel[decision.status]}
                           </span>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
@@ -1819,13 +1951,13 @@ const AdminCare = () => {
                       <div key={`${event.source_table}:${event.event_id}`} className="rounded-lg border bg-muted/20 p-2 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-medium">{auditEventLabel[event.event_type] || event.event_type}</span>
-                          <span className="rounded-full border bg-background px-2 py-1">{event.event_status || "-"}</span>
+                          <span className="rounded-full border bg-background px-2 py-1">{event.event_status ? event.event_status.replaceAll("_", " ") : "-"}</span>
                         </div>
                         <div className="mt-1 text-muted-foreground">
                           {formatDateTime(event.occurred_at)} by {event.admin_name || compactId(event.admin_id)}
                         </div>
                         {event.short_note ? <div className="mt-1 text-muted-foreground">{safeAdminMessage(event.short_note, event.short_note)}</div> : null}
-                        <div className="mt-1 font-mono text-[11px] text-muted-foreground">{event.source_table}</div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">{(auditEventLabel[event.event_type] || event.source_table).replaceAll("_", " ")}</div>
                       </div>
                     ))}
                   </div>
@@ -1876,26 +2008,29 @@ const AdminCare = () => {
               <section className="rounded-xl border p-3">
                 <h3 className="font-semibold">Booking summary</h3>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <Field label="Service chat ID" value={selected.service_chat_id} />
-                  <Field label="Chat ID" value={selected.chat_id} />
-                  <Field label="Booking status" value={selected.booking_status} />
-                  <Field label="Dispute status" value={selected.dispute_status || "No dispute"} />
+                  <Field label="Care transaction" value={compactId(selected.service_chat_id)} />
+                  <Field label="Chat" value={compactId(selected.chat_id)} />
+                  <Field label="Booking status" value={formatBookingStatus(selected.booking_status)} />
+                  <Field label="Dispute status" value={formatDisputeStatus(selected.dispute_status)} />
                   <Field label="Owner" value={`${selected.owner_name || "Owner"} @${selected.owner_social_id || selected.owner_id}`} />
                   <Field label="Carer" value={`${selected.carer_name || "Carer"} @${selected.carer_social_id || selected.carer_id}`} />
                 </div>
               </section>
 
               <section className="rounded-xl border p-3">
-                <h3 className="font-semibold">Service duration proof</h3>
+                <h3 className="font-semibold">Care hours</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Booked hours come from the confirmed booking dates and times. Actual hours come from check-in to completion, or check-in to dispute if the booking was disputed before completion.
+                </p>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <Field label="Booked hours" value={formatHours(selected.booked_service_hours)} />
-                  <Field label="Actual hours" value={formatHours(selected.actual_service_hours)} />
+                  <Field label="Booked hours" value={formatBookedHours(selected)} />
+                  <Field label="Actual hours" value={formatActualHours(selected)} />
                   <Field label="Booked start" value={formatDateTime(selected.service_started_at)} />
                   <Field label="Booked end" value={formatDateTime(selected.service_scheduled_end_at)} />
                   <Field label="Check-in" value={formatDateTime(selected.checked_in_at)} />
                   <Field label="Completion" value={formatDateTime(selected.completed_at)} />
                   <Field label="Dispute raised" value={formatDateTime(selected.dispute_raised_at)} />
-                  <Field label="Duration source" value={selected.service_duration_source || "unavailable"} />
+                  <Field label="Actual-hours source" value={durationSourceLabel(selected.service_duration_source)} />
                 </div>
               </section>
 
@@ -1903,28 +2038,28 @@ const AdminCare = () => {
                 <h3 className="font-semibold">Payment timeline</h3>
                 <div className="mt-2 space-y-2 text-sm">
                   <div>Payment intent: {selected.payment_intent_id ? "present" : "missing"}</div>
-                  <div>Refund: {(selected.refund_ids || []).length > 0 ? selected.refund_ids?.join(", ") : "none recorded"}</div>
-                  <div>Transfer: {selected.transfer_id || "none recorded"}</div>
-                  <div>Transfer reversal: {selected.transfer_reversal_id || "none recorded"}</div>
+                  <div>Refund: {(selected.refund_ids || []).length > 0 ? "recorded in Stripe snapshot" : "none recorded"}</div>
+                  <div>Carer payout transfer: {selected.transfer_id ? "recorded in Stripe snapshot" : "none recorded"}</div>
+                  <div>Transfer reversal: {selected.transfer_reversal_id ? "recorded in Stripe snapshot" : "none recorded"}</div>
                 </div>
               </section>
 
               <section className="rounded-xl border p-3">
-                <h3 className="font-semibold">Stripe status block</h3>
+                <h3 className="font-semibold">Stripe payment record</h3>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <Field label="PaymentIntent" value={selected.payment_intent_id} />
-                  <Field label="Charge" value={selected.charge_id} />
-                  <Field label="Refund IDs" value={(selected.refund_ids || []).join(", ") || "-"} />
-                  <Field label="Transfer" value={selected.transfer_id} />
-                  <Field label="Application fee" value={selected.application_fee_id} />
-                  <Field label="Connected account" value={selected.connected_account_id} />
-                  <Field label="Connect model" value={selected.stripe_connect_model} />
-                  <Field label="Stripe synced" value={formatDateTime(selected.stripe_synced_at)} />
+                  <Field label="Payment intent" value={compactId(selected.payment_intent_id)} />
+                  <Field label="Charge" value={compactId(selected.charge_id)} />
+                  <Field label="Refunds" value={(selected.refund_ids || []).length > 0 ? `${selected.refund_ids?.length} recorded` : "None recorded"} />
+                  <Field label="Carer payout transfer" value={selected.transfer_id ? compactId(selected.transfer_id) : "None recorded"} />
+                  <Field label="Application fee" value={compactId(selected.application_fee_id)} />
+                  <Field label="Connected account" value={compactId(selected.connected_account_id)} />
+                  <Field label="Connect model" value={selected.stripe_connect_model === "platform_charge" ? "Platform charge" : "Connected account transfer"} />
+                  <Field label="Last Stripe check" value={formatDateTime(selected.stripe_synced_at)} />
                 </div>
               </section>
 
               <section className="rounded-xl border p-3">
-                <h3 className="font-semibold">Internal DB status block</h3>
+                <h3 className="font-semibold">Huddle payment record</h3>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   <Field label="Money flow" value={statusLabel[selected.normalized_money_flow_status]} />
                   <Field label="Total paid" value={formatMoney(selected.currency, selected.total_paid)} />
@@ -1944,7 +2079,7 @@ const AdminCare = () => {
                   disabled={syncAll || Boolean(syncing[selected.service_chat_id])}
                   onClick={() => void syncOne(selected)}
                 >
-                  {syncing[selected.service_chat_id] ? "Syncing..." : "Sync this transaction"}
+                  {syncing[selected.service_chat_id] ? "Checking Stripe..." : "Check this Stripe payment"}
                 </Button>
               </div>
             </div>
